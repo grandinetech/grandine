@@ -115,6 +115,17 @@ We currently do not provide builds for older CPUs.
 Let us know if you get an "Illegal instruction" error.
 This will help us decide whether we should provide separate builds that support older CPUs.
 
+## Credits
+
+We would like to thank all developers and organizations that delivered the amazing software Grandine uses. Only a small part of [the full](Cargo.lock) [list](yarn.lock) are mentioned below:
+
+* Async - Tokio by many developers and organizations;
+* Cryptography - BLST by Supranational and others;
+* Database - RocksDB, SQLite by Facebook, SQLite Consortium, and others;
+* GUI - AntD, Electron.js, React.js by many contributors;
+* Language - Rust by Mozilla, Rust Foundation, and others;
+* Networking - Eth2 Libp2p, Rust Libp2p by Protocol Labs, Sigma Prime, Web3, and others.
+
 ## Use at Your Own Risk
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
