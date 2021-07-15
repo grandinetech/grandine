@@ -2203,28 +2203,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6503fe142514ca4799d4c26297c4248239fe8838d827db6bd6065c6ed29a6ce"
 
 [[package]]
-name = "git-version"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94918e83f1e01dedc2e361d00ce9487b14c58c7f40bab148026fa39d42cb41e2"
-dependencies = [
- "git-version-macro",
- "proc-macro-hack",
-]
-
-[[package]]
-name = "git-version-macro"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34a97a52fdee1870a34fa6e4b77570cba531b27d1838874fef4429a791a3d657"
-dependencies = [
- "proc-macro-hack",
- "proc-macro2 1.0.26",
- "quote 1.0.9",
- "syn 1.0.72",
-]
-
-[[package]]
 name = "glob"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2232,7 +2210,7 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "grandine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc_ext",
@@ -2247,6 +2225,7 @@ dependencies = [
  "futures 0.3.13",
  "genesis",
  "glob",
+ "grandine_version",
  "hex-literal",
  "http_api",
  "interop",
@@ -2255,13 +2234,13 @@ dependencies = [
  "nonzero_ext",
  "p2p",
  "parse-display",
+ "portpicker",
  "rayon",
  "semver 1.0.3",
  "serde",
  "serde_json",
  "serde_yaml",
  "slasher",
- "slasher_service",
  "smart-default",
  "ssz",
  "structopt",
@@ -2271,6 +2250,10 @@ dependencies = [
  "validator",
  "zeroize",
 ]
+
+[[package]]
+name = "grandine_version"
+version = "0.1.1"
 
 [[package]]
 name = "group"
@@ -2546,6 +2529,7 @@ dependencies = [
  "log",
  "p2p",
  "serde",
+ "serde_qs",
  "ssz",
  "sysinfo",
  "tokio 1.3.0",
@@ -3242,10 +3226,8 @@ dependencies = [
 [[package]]
 name = "lighthouse_version"
 version = "0.1.0"
-source = "git+https://github.com/sifraitech/lighthouse?rev=3b600acdc5bf9726367c18277a22486573b8b457#3b600acdc5bf9726367c18277a22486573b8b457"
 dependencies = [
- "git-version",
- "target_info",
+ "grandine_version",
 ]
 
 [[package]]
@@ -3737,7 +3719,6 @@ dependencies = [
  "log",
  "rand 0.8.3",
  "rayon",
- "slasher",
  "slog",
  "slog-stdlog",
  "ssz",
@@ -4031,6 +4012,15 @@ dependencies = [
  "cpuid-bool 0.2.0",
  "opaque-debug 0.3.0",
  "universal-hash",
+]
+
+[[package]]
+name = "portpicker"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
+dependencies = [
+ "rand 0.8.3",
 ]
 
 [[package]]
@@ -4782,6 +4772,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_qs"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b22063cd705114614293767c69aa992531f72b0cc8a6b9145801920730fe25e4"
+dependencies = [
+ "futures 0.3.13",
+ "percent-encoding",
+ "serde",
+ "thiserror",
+ "tracing",
+ "warp",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4955,30 +4959,19 @@ name = "slasher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc_ext",
+ "beacon_fork_choice_sifrai_array",
  "bincode",
  "bls 0.1.0",
  "futures 0.3.13",
  "helper_functions",
  "hex-literal",
+ "log",
+ "p2p",
  "serde",
  "ssz",
  "storage",
  "tempfile",
- "types 0.1.0",
-]
-
-[[package]]
-name = "slasher_service"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arc_ext",
- "beacon_fork_choice_sifrai_array",
- "helper_functions",
- "log",
- "p2p",
- "slasher",
- "tokio 1.3.0",
  "types 0.1.0",
 ]
 
@@ -5313,12 +5306,6 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
-
-[[package]]
-name = "target_info"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c63f48baada5c52e65a29eef93ab4f8982681b67f9e8d29c7b05abcfec2b9ffe"
 
 [[package]]
 name = "task_executor"
