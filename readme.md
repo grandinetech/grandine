@@ -104,10 +104,9 @@ We also involve academia in the early stages of new developments, however, the o
 Our core interest is the performance problems of proof-of-stake and sharding protocols.
 Feel free to reach us if you are interested in collaborating on scientific research and peer-reviewed papers on modern scaling methods - zk-SNARKS, executable shards, cross-chains, and other techniques.
 
-## Feedback
+## Discord
 
-Feature requests and votes for them are welcome.
-This will help figure out which upcoming features are the most important.
+It's best to reach us via [Grandine Discord](https://discord.gg/H9XCdUSyZd). Feel free to join!
 
 ## Old CPUs
 
