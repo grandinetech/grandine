@@ -3,36 +3,35 @@
 ## Beacon Node
 
 The Beacon Node is the main component of Grandine.
-Let's try it out by syncing the Prater network.
-You may use the [GUI](#gui) if you find that more comfortable.
+Let's try it out by syncing the Prater network on Linux:
 
-Download [Grandine binary release](https://github.com/sifraitech/grandine/releases) for your platform and make it executable, then run one of the following commands in a terminal:
-```shell
-# Linux
-./grandine-linux-0.1.0 --network prater
+`docker run -p 9000:9000/tcp -p 9000:9000/udp -v $HOME/.grandine:/root/.grandine sifrai/grandine:latest grandine --network prater`
 
-# macOS
-./grandine-macos-0.1.0 --network prater
+For ARM64 (Raspberry Pi) simply use a different docker image:
 
-# Windows
-./grandine-windows-0.1.0.exe --network prater
-```
+`docker run -p 9000:9000/tcp -p 9000:9000/udp -v $HOME/.grandine:/root/.grandine sifrai/grandine:latest-arm64 grandine --network prater`
 
 ## Validator
 
 The Validator is a built-in component that is activated if validator keys are passed to Grandine.
-Let's try running Grandine with a new validator enabled on the Prater network:
-- Setup Ethereum 1.0 node or use 3rd party service such as [Infura](https://infura.io/).
-  Correctly choose the corresponding Ethereum 1.0 network.
-  Görli is the right one for Prater.
-- Acquire validator keys using [Launchpad](https://prater.launchpad.ethereum.org/en/) and extract to a local directory.
-- Run the following command:
-  ```shell
-  ./grandine-0.1.0 --eth1-rpc-url ETH1-RPC-URL                               \
-                   --network prater                                          \
-                   --keystore-dir PATH-TO-VALIDATOR-KEYS-DIR                 \
-                   --keystore-password-file PATH-TO-VALIDATORS-PASSWORD-FILE
-  ```
+Let's try running Grandine with a new validator enabled on the Prater network (assuming you already have keys, secrets etc.):
+
+```
+docker run                                                          \ 
+  -p 9000:9000/tcp                                                  \
+  -p 9000:9000/udp                                                  \
+  -v $HOME/.grandine:/root/.grandine                                \
+  -v $HOME/.grandine/validator_keys:/root/.grandine/validator_keys  \
+  -v $HOME/.grandine/secrets:/root/.grandine/secrets                \
+  sifrai/grandine:latest grandine                                   \
+  --eth1-rpc-urls ETH1-RPC-URL                                      \
+  --network prater                                                  \
+  --keystore-dir /root/.grandine/validator_keys                     \
+  --keystore-password-file /root/.grandine/secrets
+```
+
+The secret should be placed in `$HOME/.grandine/secrets` file if the same secret is used for all the keys.
+Otherwise, for every keystore file in `$HOME/.grandine/validator_keys` there should be a corresponding file in the `$HOME/.grandine/secrets` directory with the secret named the same as the corresponding keystore file except the extension should be `.txt` instead of `.json`.
 
 ## Slasher
 
