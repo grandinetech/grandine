@@ -5,11 +5,25 @@
 The Beacon Node is the main component of Grandine.
 Let's try it out by syncing the Prater network on Linux:
 
-`docker run -p 9000:9000/tcp -p 9000:9000/udp -v $HOME/.grandine:/root/.grandine sifrai/grandine:latest grandine --network prater`
+```
+docker run                              \
+  -p 9000:9000/tcp                      \
+  -p 9000:9000/udp                      \
+  -v $HOME/.grandine:/root/.grandine    \
+  sifrai/grandine:latest grandine       \
+  --network prater
+```
 
-For ARM64 (Raspberry Pi) simply use a different docker image:
+For ARM64 (Raspberry Pi) simply use dedicated docker image:
 
-`docker run -p 9000:9000/tcp -p 9000:9000/udp -v $HOME/.grandine:/root/.grandine sifrai/grandine:latest-arm64 grandine --network prater`
+```
+docker run                              \
+  -p 9000:9000/tcp                      \
+  -p 9000:9000/udp                      \
+  -v $HOME/.grandine:/root/.grandine    \
+  sifrai/grandine:latest-arm64 grandine \
+  --network prater
+```
 
 ## Validator
 
@@ -31,7 +45,13 @@ docker run                                                          \
 ```
 
 The secret should be placed in `$HOME/.grandine/secrets` file if the same secret is used for all the keys.
-Otherwise, for every keystore file in `$HOME/.grandine/validator_keys` there should be a corresponding file in the `$HOME/.grandine/secrets` directory with the secret named the same as the corresponding keystore file except the extension should be `.txt` instead of `.json`.
+Otherwise, for every keystore file in `$HOME/.grandine/validator_keys` there should be a corresponding file in the `$HOME/.grandine/secrets` directory with the secret file named the same as the corresponding keystore file except the extension should be `.txt` instead of `.json`.
+
+For any sensitive keys it's a must to use a [remote signer](#remote-signer).
+
+## Remote Signer
+
+Grandine supports [Web3Signer](https://github.com/ConsenSys/web3signer) remote signer. Multiple remote signer URLs can be passed via `--web3signer-api-urls` parameter. Grandine first loads keys it finds in the directory specified by `--keystore-dir` parameter and then from the remote signers specified via the `--web3signer-api-urls` parameter. Only the first unique validator key will be loaded so the order is important if the same key appears in multiple sources. Keys from the remote signers are refreshed every epoch. Grandine runs internal slashing protection for validators specified via `--web3signer-api-urls` too.
 
 ## Slasher
 
