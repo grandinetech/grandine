@@ -1,4 +1,14 @@
-# Grandine: Parallelized Cross-Platform Proof-Of-Stake Consensus Implementation For Ethereum Networks
+# Grandine: The Fastest Ethereum Consensus Layer Implementation
+
+The goal of Grandine is to be the fastest Ethereum consensus layer implementation. The state transition function is already multiple times faster than any other client on a modern multicore CPU. The sync speed comparison:
+
+![Sync speed on fat instance](benchmarks/miga_labs_sync_speed_on_fat_instance.png)
+
+Grandine is an extremely light client that consumes only ~1GB of memory on the mainnet. The memory consumption comparison on ARM64 Raspberry Pi 4:
+
+![Memory on raspberry pi](benchmarks/miga_labs_memory_on_raspberry_pi.png)
+
+The tests above were conducted by independent [Miga Labs](https://migalabs.es/eth2-client-plots).
 
 ## Beacon Node
 
@@ -132,6 +142,14 @@ It's best to reach us via [Grandine Discord](https://discord.gg/H9XCdUSyZd). Fee
 We currently do not provide builds for older CPUs.
 Let us know if you get an "Illegal instruction" error.
 This will help us decide whether we should provide separate builds that support older CPUs.
+
+## Memory Usage
+
+Grandine is extremely lightweight and needs only ~1GB of memory on the mainnet. In order to measure the amount of memory that Grandine actually needs one should stress the operating system to release the shared memory. `stress-ng` is an easy way to do it:
+
+```
+stress-ng --vm-bytes $(awk '/MemAvailable/{printf "%d\n", $2 * 0.9;}' < /proc/meminfo)k --vm-keep -m 1
+```
 
 ## Credits
 
