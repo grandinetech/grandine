@@ -84,8 +84,8 @@ We are planning to extend the functionality significantly if the community will 
 
 ## HTTP API
 
-HTTP API is partially implemented.
-We expect to finalize it and release API documentation in the upcoming months.
+Beacon Node API is fully implemented.
+The API is tested against different services such as [Vouch](https://github.com/attestantio/vouch) that heavily uses Beacon Node API.
 
 ## Cross Platform
 
