@@ -84,8 +84,12 @@ We are planning to extend the functionality significantly if the community will 
 
 ## HTTP API
 
-Beacon Node API is fully implemented.
+Beacon Node API is fully implemented in the latest release. We are working further on optimising it.
 The API is tested against different services such as [Vouch](https://github.com/attestantio/vouch) that heavily uses Beacon Node API.
+
+## Builder API
+
+MEV-Boost and other Builder API compatible services are supported. Simply pass relay URL with `--builder-api-url` parameter.
 
 ## Cross Platform
 
