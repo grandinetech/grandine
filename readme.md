@@ -13,7 +13,7 @@ The tests above were conducted by independent [Miga Labs](https://migalabs.es/et
 ## Beacon Node
 
 The Beacon Node is the main component of Grandine.
-Let's try it out by syncing the Prater network on Linux:
+Let's try it out by syncing the Goerli network on Linux:
 
 ```
 docker run                              \
@@ -21,7 +21,7 @@ docker run                              \
   -p 9000:9000/udp                      \
   -v $HOME/.grandine:/root/.grandine    \
   sifrai/grandine:latest grandine       \
-  --network prater
+  --network goerli
 ```
 
 For ARM64 (Raspberry Pi) simply use dedicated docker image:
@@ -32,13 +32,13 @@ docker run                              \
   -p 9000:9000/udp                      \
   -v $HOME/.grandine:/root/.grandine    \
   sifrai/grandine:latest-arm64 grandine \
-  --network prater
+  --network goerli
 ```
 
 ## Validator
 
 The Validator is a built-in component that is activated if validator keys are passed to Grandine.
-Let's try running Grandine with a new validator enabled on the Prater network (assuming you already have keys, secrets etc.):
+Let's try running Grandine with a new validator enabled on the Goerli network (assuming you already have keys, secrets etc.):
 
 ```
 docker run                                                          \ 
@@ -49,7 +49,7 @@ docker run                                                          \
   -v $HOME/.grandine/secrets:/root/.grandine/secrets                \
   sifrai/grandine:latest grandine                                   \
   --eth1-rpc-urls ETH1-RPC-URL                                      \
-  --network prater                                                  \
+  --network goerli                                                  \
   --keystore-dir /root/.grandine/validator_keys                     \
   --keystore-password-file /root/.grandine/secrets
 ```
@@ -58,6 +58,27 @@ The secret should be placed in `$HOME/.grandine/secrets` file if the same secret
 Otherwise, for every keystore file in `$HOME/.grandine/validator_keys` there should be a corresponding file in the `$HOME/.grandine/secrets` directory with the secret file named the same as the corresponding keystore file except the extension should be `.txt` instead of `.json`.
 
 For any sensitive keys it's a must to use a [remote signer](#remote-signer).
+
+## Capella
+
+Capella support is shipped via the [unstable](https://hub.docker.com/r/sifrai/grandine/tags) docker images. The easiest way to test Cappela hardfork is to join one of the devnets by providing `custom_config_data` configs.
+
+```
+docker run                                                                 \
+  -p 9000:9000/tcp                                                         \
+  -p 9000:9000/udp                                                         \
+  -v $HOME/.grandine:/root/.grandine                                       \
+  -v $HOME/.grandine/validator_keys:/root/.grandine/validator_keys         \
+  -v $HOME/.grandine/secrets:/root/.grandine/secrets                       \
+  -v $HOME/.grandine/jwt:/root/.grandine/jwt                               \
+  -v $HOME/.grandine/custom_config_data:/root/.grandine/custom_config_data \
+  sifrai/grandine:unstable grandine                                        \
+  --configuration-directory /root/.grandine/custom_config_data             \
+  --eth1-rpc-urls ETH1-RPC-URL                                             \
+  --jwt-secret /root/.grandine/jwt                                         \
+  --keystore-dir /root/.grandine/validator_keys                            \
+  --keystore-password-file /root/.grandine/secrets
+```
 
 ## Remote Signer
 
