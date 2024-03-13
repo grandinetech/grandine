@@ -1,0 +1,22 @@
+[package]
+name = 'liveness_tracker'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bitvec = { workspace = true }
+eth1_api = { workspace = true }
+fork_choice_control = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+operation_pools = { workspace = true }
+prometheus_metrics = { workspace = true }
+tynm = { workspace = true }
+types = { workspace = true }
+validator = { workspace = true }

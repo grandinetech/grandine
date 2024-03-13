@@ -1,0 +1,19 @@
+[package]
+name = 'interop'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bls = { workspace = true }
+deposit_tree = { workspace = true }
+genesis = { workspace = true }
+hashing = { workspace = true }
+helper_functions = { workspace = true }
+hex-literal = { workspace = true }
+num-bigint = { workspace = true }
+ssz = { workspace = true }
+types = { workspace = true }

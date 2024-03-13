@@ -1,0 +1,107 @@
+[package]
+name = 'grandine'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+allocator = { workspace = true }
+anyhow = { workspace = true }
+binary_utils = { workspace = true }
+bls = { workspace = true }
+builder_api = { workspace = true }
+bytesize = { workspace = true }
+clap = { workspace = true }
+database = { workspace = true }
+deposit_tree = { workspace = true }
+derive_more = { workspace = true }
+directories = { workspace = true }
+educe = { workspace = true }
+eip_2335 = { workspace = true }
+enum-iterator = { workspace = true }
+eth1 = { workspace = true }
+eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
+features = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+glob = { workspace = true }
+grandine_version = { workspace = true }
+hex-literal = { workspace = true }
+http_api = { workspace = true }
+itertools = { workspace = true }
+keymanager = { workspace = true }
+log = { workspace = true }
+metrics = { workspace = true }
+p2p = { workspace = true }
+panics = { workspace = true }
+predefined_chains = { workspace = true }
+prometheus_metrics = { workspace = true }
+rayon = { workspace = true }
+reqwest = { workspace = true }
+runtime = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+signer = { workspace = true }
+slasher = { workspace = true }
+slashing_protection = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+strum = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+types = { workspace = true }
+validator = { workspace = true }
+validator_key_cache = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+dirs = { workspace = true }
+tempfile = { workspace = true }
+test-case = { workspace = true }
+
+[features]
+logger-always-write-style = []
+logger-parse-env = []
+
+# `preset-any` and `network-any` should not be passed to Cargo.
+# They only exist to avoid duplicating lists of features.
+preset-any = []
+
+preset-mainnet = ['preset-any']
+preset-medalla = ['preset-any']
+preset-minimal = ['preset-any']
+
+network-any = []
+
+network-goerli      = ['network-any', 'preset-mainnet']
+network-kiln        = ['network-any', 'preset-mainnet']
+network-kintsugi    = ['network-any', 'preset-mainnet']
+network-mainnet     = ['network-any', 'preset-mainnet']
+network-pyrmont     = ['network-any', 'preset-mainnet']
+network-ropsten     = ['network-any', 'preset-mainnet']
+network-sepolia     = ['network-any', 'preset-mainnet']
+network-shadow      = ['network-any', 'preset-mainnet']
+network-withdrawals = ['network-any', 'preset-mainnet']
+network-holesky     = ['network-any', 'preset-mainnet']
+
+network-medalla  = ['network-any', 'preset-medalla']
+
+default-networks = [
+    'network-goerli',
+    'network-kiln',
+    'network-mainnet',
+    'network-ropsten',
+    'network-sepolia',
+    'network-shadow',
+    'network-withdrawals',
+    'network-holesky',
+]

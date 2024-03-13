@@ -1,0 +1,7 @@
+[package]
+name = 'try_from_iterator'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true

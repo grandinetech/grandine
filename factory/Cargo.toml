@@ -1,0 +1,20 @@
+[package]
+name = 'factory'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bls = { workspace = true }
+deposit_tree = { workspace = true }
+helper_functions = { workspace = true }
+interop = { workspace = true }
+itertools = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+transition_functions = { workspace = true }
+try_from_iterator = { workspace = true }
+types = { workspace = true }

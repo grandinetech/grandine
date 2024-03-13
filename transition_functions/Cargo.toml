@@ -1,0 +1,36 @@
+[package]
+name = 'transition_functions'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+bit_field = { workspace = true }
+bls = { workspace = true }
+derive_more = { workspace = true }
+enum-iterator = { workspace = true }
+execution_engine = { workspace = true }
+hashing = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+num-integer = { workspace = true }
+once_cell = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+unwrap_none = { workspace = true }
+
+[dev-dependencies]
+duplicate = { workspace = true }
+spec_test_utils = { workspace = true }
+test-generator = { workspace = true }

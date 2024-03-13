@@ -1,0 +1,15 @@
+edition = '2021'
+newline_style = 'Unix'
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# The options listed below are not stable.
+# However, they may be set on stable Rust by passing `--config` to `rustfmt`.
+
+# format_code_in_doc_comments = true
+# group_imports = 'StdExternalCrate'
+# hex_literal_case = 'Lower'
+# imports_granularity = 'Crate'
+# imports_layout = 'HorizontalVertical'
+# normalize_comments = true
+# normalize_doc_attributes = true

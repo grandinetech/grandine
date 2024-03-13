@@ -1,0 +1,510 @@
+[workspace]
+members = [
+    'ad_hoc_bench',
+    'allocator',
+    'arithmetic',
+    'benches',
+    'binary_utils',
+    'bls',
+    'builder_api',
+    'clock',
+    'database',
+    'deposit_tree',
+    'directories',
+    'eip_2335',
+    'eth1',
+    'eth1_api',
+    'eth2_cache_utils',
+    'execution_engine',
+    'factory',
+    'features',
+    'fork_choice_control',
+    'fork_choice_store',
+    'genesis',
+    'grandine',
+    'grandine_version',
+    'hashing',
+    'helper_functions',
+    'http_api',
+    'http_api_utils',
+    'interop',
+    'keymanager',
+    'kzg_utils',
+    'liveness_tracker',
+    'metrics',
+    'operation_pools',
+    'p2p',
+    'panics',
+    'predefined_chains',
+    'prometheus_metrics',
+    'runtime',
+    'serde_utils',
+    'shuffling',
+    'signer',
+    'slasher',
+    'slashing_protection',
+    'snapshot_test_utils',
+    'spec_test_utils',
+    'ssz',
+    'ssz_derive',
+    'std_ext',
+    'transition_functions',
+    'try_from_iterator',
+    'types',
+    'validator',
+    'validator_key_cache',
+]
+# Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
+# virtual workspaces. Starting with Rust 1.72.0, Cargo warns if a Rust 2021 virtual workspace does
+# not explicitly specify a feature resolver. See <https://github.com/rust-lang/cargo/pull/10910>.
+resolver = '2'
+
+[workspace.package]
+edition = '2021'
+
+[workspace.lints.rust]
+unsafe_code = 'forbid'
+
+# A subset of `rustc` lints that are allowed by default.
+# A few notable ones that we do not enable:
+#
+# - `variant_size_differences`
+#   `clippy::large_enum_variant` does nearly the same thing and is enabled by default.
+#
+# - `missing_copy_implementations`
+#   This would be more useful if it only triggered for types that are `Clone` but not `Copy`.
+#
+# - `elided_lifetimes_in_paths`
+#   It hurts readability and doesn't provide a clear benefit.
+#
+# See the output of `rustc --warn help` for a full list of lints available in the current version.
+# They are documented at <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>.
+absolute_paths_not_starting_with_crate = 'warn'
+anonymous_parameters                   = 'warn'
+deprecated_in_future                   = 'warn'
+indirect_structural_match              = 'warn'
+keyword_idents                         = 'warn'
+let_underscore_drop                    = 'warn'
+macro_use_extern_crate                 = 'warn'
+meta_variable_misuse                   = 'warn'
+non_ascii_idents                       = 'warn'
+trivial_casts                          = 'warn'
+trivial_numeric_casts                  = 'warn'
+unit_bindings                          = 'warn'
+unused_crate_dependencies              = 'warn'
+unused_extern_crates                   = 'warn'
+unused_import_braces                   = 'warn'
+unused_lifetimes                       = 'warn'
+unused_macro_rules                     = 'warn'
+unused_qualifications                  = 'warn'
+
+[workspace.lints.clippy]
+# Additional Clippy lint groups.
+nursery  = 'warn'
+pedantic = 'warn'
+
+# A subset of the `clippy::cargo` group.
+negative_feature_names  = 'warn'
+redundant_feature_names = 'warn'
+wildcard_dependencies   = 'warn'
+
+# A subset of the `clippy::restriction` group.
+# Some notable lints from it that we do not enable:
+#
+# - `clippy::absolute_paths`
+#   It is triggered by functions, which contradicts the Rust convention of qualifying them.
+#
+# - `clippy::arithmetic_side_effects`
+#   It's the static equivalent of `overflow-checks` in `Cargo.toml`, but it hurts readability.
+#
+# - `clippy::error_impl_error`
+#   It's unidiomatic.
+#
+# - `clippy::infinite_loop`
+#   It is triggered by functions that return `core::convert::Infallible` or
+#   types parameterized with it like `anyhow::Result<core::convert::Infallible>`.
+#
+# - `clippy::iter_over_hash_type`
+#   Iteration order often does not matter.
+#   `HashMap`s and `HashSet`s tend to be faster than their ordered counterparts.
+#   On the other hand, enabling this produces surprisingly few warnings.
+#   We could easily rewrite the offending code to pass.
+#
+# - `clippy::min_ident_chars`
+#   It's unidiomatic.
+#   It's even triggered by identifiers imported from other crates.
+#
+# - `clippy::mem_forget`
+#   Setting it to deny (as opposed to forbid) makes no sense.
+#   `core::mem::forget` is impossible to use by mistake.
+#
+# - `clippy::std_instead_of_alloc`
+#   It would require adding `extern crate alloc;` everywhere.
+#
+# - `clippy::tests_outside_test_module`
+#   It is triggered by integration tests.
+#
+# - `clippy::unimplemented`
+#   It's useful to leave some trait methods unimplemented.
+alloc_instead_of_core           = 'warn'
+allow_attributes                = 'warn'
+allow_attributes_without_reason = 'warn'
+assertions_on_result_states     = 'warn'
+clone_on_ref_ptr                = 'warn'
+dbg_macro                       = 'warn'
+decimal_literal_representation  = 'warn'
+empty_drop                      = 'warn'
+empty_structs_with_brackets     = 'warn'
+filetype_is_file                = 'warn'
+float_arithmetic                = 'warn'
+float_cmp_const                 = 'warn'
+format_push_string              = 'warn'
+get_unwrap                      = 'warn'
+host_endian_bytes               = 'warn'
+if_then_some_else_none          = 'warn'
+lossy_float_literal             = 'warn'
+missing_asserts_for_indexing    = 'warn'
+mixed_read_write_in_expression  = 'warn'
+multiple_inherent_impl          = 'warn'
+mutex_atomic                    = 'warn'
+needless_raw_strings            = 'warn'
+partial_pub_fields              = 'warn'
+print_stderr                    = 'warn'
+print_stdout                    = 'warn'
+pub_without_shorthand           = 'warn'
+rc_buffer                       = 'warn'
+rc_mutex                        = 'warn'
+redundant_type_annotations      = 'warn'
+rest_pat_in_fully_bound_structs = 'warn'
+same_name_method                = 'warn'
+semicolon_inside_block          = 'warn'
+std_instead_of_core             = 'warn'
+str_to_string                   = 'warn'
+string_add                      = 'warn'
+string_lit_chars_any            = 'warn'
+string_slice                    = 'warn'
+string_to_string                = 'warn'
+todo                            = 'warn'
+# Enable `clippy::undocumented_unsafe_blocks` in case we ever change our stance on unsafe code.
+undocumented_unsafe_blocks      = 'warn'
+unnecessary_self_imports        = 'warn'
+unwrap_used                     = 'warn'
+verbose_file_reads              = 'warn'
+
+# These are almost never helpful.
+assertions_on_constants = { level = 'allow', priority = 1 }
+map_unwrap_or           = { level = 'allow', priority = 1 }
+option_if_let_else      = { level = 'allow', priority = 1 }
+single_match_else       = { level = 'allow', priority = 1 }
+struct_field_names      = { level = 'allow', priority = 1 }
+
+# These are almost never helpful and require boilerplate.
+into_iter_without_iter = { level = 'allow', priority = 1 }
+len_without_is_empty   = { level = 'allow', priority = 1 }
+
+# `educe::Educe` and `fixed_hash::construct_fixed_hash!` generate code that triggers these.
+# It is not just a bug in the macros.
+# `clippy::expl_impl_clone_on_copy` produces false positives for types with type parameters.
+# See <https://github.com/rust-lang/rust-clippy/issues/1254>.
+# <https://github.com/rust-lang/rust-clippy/pull/6993> did not fix the issue.
+# `clippy::incorrect_clone_impl_on_copy_type` does not have the same problem.
+expl_impl_clone_on_copy        = { level = 'allow', priority = 1 }
+non_canonical_clone_impl       = { level = 'allow', priority = 1 }
+non_canonical_partial_ord_impl = { level = 'allow', priority = 1 }
+
+# `clippy::implicit_hasher` has next to no benefit and sometimes requires nonlocal changes to code.
+implicit_hasher = { level = 'allow', priority = 1 }
+
+# `clippy::semicolon_if_nothing_returned` can lead to return values accidentally being left unused.
+semicolon_if_nothing_returned = { level = 'allow', priority = 1 }
+
+# `clippy::significant_drop_in_scrutinee` produces mostly false positives. See:
+# - <https://github.com/rust-lang/rust-clippy/issues/8963>
+# - <https://github.com/rust-lang/rust-clippy/issues/8987>
+# - <https://github.com/rust-lang/rust-clippy/issues/9072>
+significant_drop_in_scrutinee = { level = 'allow', priority = 1 }
+
+# `clippy::significant_drop_tightening` produces only false positives.
+# See <https://github.com/rust-lang/rust-clippy/issues/10413>.
+significant_drop_tightening = { level = 'allow', priority = 1 }
+
+# Some functions in the codebase trigger `clippy::large_stack_frames`, but the lint does not
+# report which ones, making it nearly useless. The lint does report which crates they are in,
+# but only after checking other crates, which suggests it is triggered by generic functions.
+large_stack_frames = { level = 'allow', priority = 1 }
+
+# This does not improve performance in any of our benchmarks. See discussions at:
+# - <https://github.com/rust-lang/rust/issues/52274>
+# - <https://github.com/rust-lang/rust-clippy/issues/4499>
+large_types_passed_by_value = { level = 'allow', priority = 1 }
+
+missing_errors_doc = { level = 'allow', priority = 1 }
+missing_panics_doc = { level = 'allow', priority = 1 }
+
+[workspace.lints.rustdoc]
+private_intra_doc_links = 'allow'
+
+[workspace.dependencies]
+aes = { version = '0.8.4', features = ['zeroize'] }
+anyhow = { version = '1.0.79', features = ['backtrace'] }
+arc-swap = '1.6.0'
+assert-json-diff = '2.0.2'
+async-channel = '1.9.0'
+async-trait = '0.1.77'
+asynchronous-codec = '0.7.0'
+axum = { version = '0.6.20', features = ['headers'] }
+axum-extra = { version = '0.7.4', features = ['query'] }
+base64 = '0.21.5'
+bincode = '1.3.3'
+bit_field = '0.10.2'
+bitvec = '1.0.1'
+blst = { version = '0.3.11', features = ['portable'] }
+bstr = '1.3.0'
+build-time = '0.1.2'
+byteorder = '1.5.0'
+bytes = '1.5.0'
+bytesize = { version = '1.3.0', features = ['serde'] }
+cached = '0.48.1'
+chrono = '0.4.33'
+clap = { version = '4.4.18', features = ['derive'] }
+criterion = '0.5.1'
+crossbeam-skiplist = '0.1.1'
+crossbeam-utils = '0.8.19'
+ctr = { version = '0.9.2', features = ['zeroize'] }
+darling = '0.20.5'
+dedicated_executor = { path = 'dedicated_executor' }
+delay_map = '0.3.0'
+derive_more = '0.99.17'
+dirs = '5.0.1'
+discv5 = { version = '0.4.1', features = ['libp2p'] }
+drain_filter_polyfill = '0.1.3'
+duplicate = '1.0.0'
+easy-ext = '1.0.1'
+educe = '0.4.23'
+either = '1.9.0'
+enum-iterator = '1.5.0'
+enum-map = '2.7.3'
+enumset = '1.1.3'
+env_logger = '0.11.2'
+ethereum-types = '0.14.1'
+fixed-hash = '0.8.0'
+fnv = '1.0.7'
+fs-err = { version = '2.11.0', features = ['tokio'] }
+fs_extra = '1.3.0'
+futures = '0.3.30'
+futures-ticker = '0.0.3'
+futures-timer = '3.0.3'
+generic-array = { version = '0.14.6', features = ['serde'] }
+getrandom = '0.2.11'
+glob = '0.3.1'
+good_lp = { version = "1.7.0", features = ['highs'], default-features = false}
+hash_hasher = '2.0.3'
+hex = { version = '0.4.3', features = ['serde'] }
+hex-literal = '0.4.1'
+hex_fmt = '0.3.0'
+hmac = '0.12.1'
+http = '1.0.0'
+httparse = '1.8.0'
+httpmock = '0.7.0'
+hyper = '0.14.24'
+if-addrs = '0.11.0'
+igd = '0.12.1'
+# Possible optimization: fork `im` and make it use `triomphe`.
+# It's easy to do, but the amount of memory it saves is negligible.
+im = '15.1.0'
+impl-serde = '0.4.0'
+integer-sqrt = '0.1.5'
+instant = '0.1.12'
+itertools = '0.12.1'
+jemalloc-ctl = '0.5.4'
+jemallocator = '0.5.4'
+jwt-simple = { version = '0.12.6', default-features = false, features = ['pure-rust'] }
+kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw' }
+lazy_static = '1.4.0'
+libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '2d01f3608697eed05357fb847e25ad33ab59d702' }
+# libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'gossipsub', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic'] }
+libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic'] }
+libp2p-mplex = '0.41.0'
+log = '0.4.20'
+lru = '0.12.2'
+memoffset = '0.9.0'
+mime = '0.3.17'
+nonzero_ext = '0.3.0'
+num-bigint = '0.4.4'
+num-integer = '0.1.45'
+num-traits = '0.2.17'
+num_cpus = '1.16.0'
+once_cell = '1.19.0'
+openssl = '0.10.63'
+parking_lot = '0.12.1'
+parse-display = '0.9.0'
+pathdiff = '0.2.1'
+pbkdf2 = '0.12.2'
+primitive-types = '0.12.2'
+proc-macro-crate = '3.1.0'
+proc-macro2 = '1.0.78'
+prometheus = '0.13.3'
+prometheus-client = '0.22.1'
+psutil = '3.3.0'
+quick-protobuf = '0.8.1'
+quick-protobuf-codec = '0.3.1'
+quickcheck = '1.0.3'
+quickcheck_macros = '1.0.0'
+quote = '1.0.35'
+rand = '0.8.5'
+rayon = '1.8.1'
+rc-box = '1.2.0'
+refinery = { version = '0.8.12', features = ['rusqlite']}
+regex = '1.10.3'
+replace_with = '0.1.7'
+reqwest = { version = '0.11.24', features = ['blocking', 'json', 'native-tls-vendored'] }
+rusqlite = { version = '0.30.0', features = ['bundled'] }
+rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw' }
+scrypt = '0.11.0'
+semver = '1.0.21'
+serde = { version = '1.0.196', features = ['derive', 'rc'] }
+serde-aux = '4.4.0'
+serde_json = { version = '1.0.113', features = ['preserve_order'] }
+serde_qs = { version = '0.12.0', features = ['axum'] }
+serde_repr = '0.1.18'
+serde_with = '3.6.0'
+serde_yaml = '0.9.31'
+# The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
+# because `sha2` defaults to using CPU intrinsics.
+sha2 = { version = '0.10.8', features = ['compress'] }
+slog = { version = '2.7.0', features = ['max_level_trace'] }
+slog-async = '2.8.0'
+slog-stdlog = '4.1.1'
+slog-term = '2.9.0'
+smallvec = { version = '1.13.1', features = ['serde', 'union'] }
+snap = '1.1.1'
+static_assertions = '1.1.0'
+strum = { version = '0.26.1', features = ['derive'] }
+syn = { version = '2.0.48', features = ['full'] }
+sysinfo = '0.30.5'
+tap = '1.0.1'
+tempfile = '3.9.0'
+test-case = '3.3.1'
+test-generator = '0.3.1'
+testing_logger = '0.1.1'
+thiserror = '1.0.56'
+tiny-keccak = '2.0.2'
+tokio = { version = '1.36.0', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
+tokio-io-timeout = '1.2.0'
+tokio-stream = { version = '0.1.14', features = ['sync'] }
+tokio-util = { version = '0.6.10', features = ['codec', 'compat', 'time'] }
+tower = { version = '0.4.13', features = ['timeout'] }
+tower-http = { version = '0.4.4', features = ['cors', 'trace'] }
+tracing = '0.1.40'
+triomphe = '0.1.11'
+tynm = '0.1.9'
+typenum = '1.17.0'
+unicode-normalization = '0.1.22'
+# 0.7.2 breaks `eth2_libp2p`. Update this is no longer the case.
+unsigned-varint = { version = '= 0.7.1', features = ['codec'] }
+unwrap_none = '0.1.2'
+url = '2.5.0'
+uuid = { version = '1.7.0', features = ['serde', 'v4'] }
+variant_count = '1.1.0'
+void = '1.0.2'
+web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
+zeroize = { version = '1.7.0', features = ['derive', 'serde'] }
+
+allocator = { path = 'allocator' }
+arithmetic = { path = 'arithmetic' }
+binary_utils = { path = 'binary_utils' }
+bls = { path = 'bls' }
+builder_api = { path = 'builder_api' }
+clock = { path = 'clock' }
+database = { path = 'database' }
+deposit_tree = { path = 'deposit_tree' }
+directories = { path = 'directories' }
+eip_2335 = { path = 'eip_2335' }
+eth1 = { path = 'eth1' }
+eth1_api = { path = 'eth1_api' }
+eth2_cache_utils = { path = 'eth2_cache_utils' }
+eth2_libp2p = { path = 'eth2_libp2p' }
+execution_engine = { path = 'execution_engine' }
+factory = { path = 'factory' }
+features = { path = 'features' }
+fork_choice_control = { path = 'fork_choice_control' }
+fork_choice_store = { path = 'fork_choice_store' }
+genesis = { path = 'genesis' }
+grandine_version = { path = 'grandine_version' }
+hashing = { path = 'hashing' }
+helper_functions = { path = 'helper_functions' }
+http_api = { path = 'http_api' }
+http_api_utils = { path = 'http_api_utils' }
+interop = { path = 'interop' }
+keymanager = { path = 'keymanager' }
+kzg_utils = { path = 'kzg_utils' }
+liveness_tracker = { path = 'liveness_tracker' }
+metrics = { path = 'metrics' }
+operation_pools = { path = 'operation_pools' }
+p2p = { path = 'p2p' }
+panics = { path = 'panics' }
+predefined_chains = { path = 'predefined_chains' }
+prometheus_metrics = { path = 'prometheus_metrics' }
+runtime = { path = 'runtime' }
+serde_utils = { path = 'serde_utils' }
+shuffling = { path = 'shuffling' }
+signer = { path = 'signer' }
+slasher = { path = 'slasher' }
+slashing_protection = { path = 'slashing_protection' }
+snapshot_test_utils = { path = 'snapshot_test_utils' }
+spec_test_utils = { path = 'spec_test_utils' }
+ssz = { path = 'ssz' }
+ssz_derive = { path = 'ssz_derive' }
+std_ext = { path = 'std_ext' }
+transition_functions = { path = 'transition_functions' }
+try_from_iterator = { path = 'try_from_iterator' }
+types = { path = 'types' }
+validator = { path = 'validator' }
+validator_key_cache = { path = 'validator_key_cache' }
+
+# Banned crates
+#
+# `owning_ref` is unsound and unmaintained:
+# - <https://github.com/Kimundi/owning-ref-rs/issues/61>
+# - <https://github.com/Kimundi/owning-ref-rs/issues/71>
+# - <https://github.com/Kimundi/owning-ref-rs/issues/77>
+# - <https://github.com/Kimundi/owning-ref-rs/issues/81>
+# Use one of the following crates instead:
+# - `reffers`
+# - `rental`
+owning_ref = '<0.0.0'
+# `serde-hex` is prone to failing at runtime due to its reliance on zero-copy deserialization.
+# It's also unsound:
+# <https://github.com/fspmarshall/serde-hex/blob/4e2d830d39ebda7655dc2d7b34dfe81105df05d8/src/lib.rs#L113-L116>
+# Use one of the following crates instead:
+# - `serde_utils`
+# - `hex`
+# - `hex_fmt`
+serde-hex = '<0.0.0'
+
+[profile.release]
+debug = 'full'
+overflow-checks = true
+
+[profile.bench]
+overflow-checks = true
+
+[profile.compact]
+inherits = 'release'
+# 708 MiB -> 105 MiB at the time of writing.
+# This makes file names and line numbers unavailable in backtraces.
+# Some stack frames disappear, but the ones that remain should still have identifiers.
+debug = 'none'
+# 105 MiB -> 90 MiB
+lto = true
+# 90 MiB -> 86 MiB
+codegen-units = 1
+# 86 MiB -> 88 MiB
+# Optimizing for size previously caused a significant decrease in performance (and might still do).
+# It actually makes the executable bigger now.
+# opt-level = 's'
+
+[patch.crates-io]
+# `geth` responds to invalid payloads with objects containing `method` and `params`.
+# We had to fork `jsonrpc` because it does not allow nonstandard members.
+jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }

@@ -1,0 +1,41 @@
+[package]
+name = 'helper_functions'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+bit_field = { workspace = true }
+bls = { workspace = true }
+derive_more = { workspace = true }
+enum-map = { workspace = true }
+enumset = { workspace = true }
+hashing = { workspace = true }
+im = { workspace = true }
+itertools = { workspace = true }
+num-integer = { workspace = true }
+parse-display = { workspace = true }
+rayon = { workspace = true }
+rc-box = { workspace = true }
+serde = { workspace = true }
+shuffling = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+try_from_iterator = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+unwrap_none = { workspace = true }
+
+[dev-dependencies]
+duplicate = { workspace = true }
+hex-literal = { workspace = true }
+nonzero_ext = { workspace = true }
+spec_test_utils = { workspace = true }
+test-generator = { workspace = true }

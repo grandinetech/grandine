@@ -1,0 +1,15 @@
+[package]
+name = 'prometheus_metrics'
+version = '0.1.0'
+edition = '2021'
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = { workspace = true }
+features = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+prometheus = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+types = { workspace = true }

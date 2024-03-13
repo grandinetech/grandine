@@ -1,0 +1,17 @@
+[package]
+name = 'features'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+enum-iterator = { workspace = true }
+log = { workspace = true }
+parse-display = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+itertools = { workspace = true }
+testing_logger = { workspace = true }

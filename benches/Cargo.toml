@@ -1,0 +1,87 @@
+[package]
+name = 'benches'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+allocator = { workspace = true }
+anyhow = { workspace = true }
+binary_utils = { workspace = true }
+bls = { workspace = true }
+clock = { workspace = true }
+criterion = { workspace = true }
+easy-ext = { workspace = true }
+eth2_cache_utils = { workspace = true }
+eth2_libp2p = { workspace = true }
+execution_engine = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+genesis = { workspace = true }
+hashing = { workspace = true }
+helper_functions = { workspace = true }
+im = { workspace = true }
+integer-sqrt = { workspace = true }
+interop = { workspace = true }
+itertools = { workspace = true }
+num-integer = { workspace = true }
+once_cell = { workspace = true }
+openssl = { workspace = true }
+operation_pools = { workspace = true }
+serde_json = { workspace = true }
+serde_utils = { workspace = true }
+sha2 = { workspace = true }
+shuffling = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+transition_functions = { workspace = true }
+tynm = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[[bench]]
+name = 'fork_choice_control'
+harness = false
+
+[[bench]]
+name = 'fork_choice_store'
+harness = false
+
+[[bench]]
+name = 'genesis'
+harness = false
+
+[[bench]]
+name = 'hashing'
+harness = false
+
+[[bench]]
+name = 'helper_functions'
+harness = false
+
+[[bench]]
+name = 'integer_square_root'
+harness = false
+
+[[bench]]
+name = 'lookup_in_collection'
+harness = false
+
+[[bench]]
+name = 'operation_pools'
+harness = false
+
+[[bench]]
+name = 'shuffling'
+harness = false
+
+[[bench]]
+name = 'transition_functions'
+harness = false
+
+[[bench]]
+name = 'types'
+harness = false

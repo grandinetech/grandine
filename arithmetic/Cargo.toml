@@ -1,0 +1,11 @@
+[package]
+name = 'arithmetic'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+easy-ext = { workspace = true }
+typenum = { workspace = true }

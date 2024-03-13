@@ -1,0 +1,32 @@
+[package]
+name = 'signer'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bls = { workspace = true }
+builder_api = { workspace = true }
+derive_more = { workspace = true }
+futures = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+prometheus_metrics = { workspace = true }
+rayon = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+helper_functions = { workspace = true }
+hex-literal = { workspace = true }
+httpmock = { workspace = true }
+serde-aux = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

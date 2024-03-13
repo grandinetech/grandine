@@ -1,0 +1,25 @@
+[package]
+name = 'ad_hoc_bench'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+allocator = { workspace = true }
+anyhow = { workspace = true }
+binary_utils = { workspace = true }
+bytesize = { workspace = true }
+clap = { workspace = true }
+eth2_cache_utils = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+jemalloc-ctl = { workspace = true }
+log = { workspace = true }
+p2p = { workspace = true }
+rand = { workspace = true }
+std_ext = { workspace = true }
+types = { workspace = true }

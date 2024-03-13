@@ -1,0 +1,64 @@
+avoid-breaking-exported-api = false
+doc-valid-idents = [
+    'Eth1Data',
+    'PoS',
+    'PoW',
+    'RocksDB',
+]
+# There appears to be no way to disallow an entire module.
+# There is an issue for it at <https://github.com/rust-lang/rust-clippy/issues/9489>.
+disallowed-methods = [
+    { path = 'std::fs::canonicalize',       reason = 'use fs_err::canonicalize for more helpful error messages'            },
+    { path = 'std::fs::copy',               reason = 'use fs_err::copy for more helpful error messages'                    },
+    { path = 'std::fs::create_dir',         reason = 'use fs_err::create_dir for more helpful error messages'              },
+    { path = 'std::fs::create_dir_all',     reason = 'use fs_err::create_dir_all for more helpful error messages'          },
+    { path = 'std::fs::hard_link',          reason = 'use fs_err::hard_link for more helpful error messages'               },
+    { path = 'std::fs::metadata',           reason = 'use fs_err::metadata for more helpful error messages'                },
+    { path = 'std::fs::read',               reason = 'use fs_err::read for more helpful error messages'                    },
+    { path = 'std::fs::read_dir',           reason = 'use fs_err::read_dir for more helpful error messages'                },
+    { path = 'std::fs::read_link',          reason = 'use fs_err::read_link for more helpful error messages'               },
+    { path = 'std::fs::read_to_string',     reason = 'use fs_err::read_to_string for more helpful error messages'          },
+    { path = 'std::fs::remove_dir',         reason = 'use fs_err::remove_dir for more helpful error messages'              },
+    { path = 'std::fs::remove_dir_all',     reason = 'use fs_err::remove_dir_all for more helpful error messages'          },
+    { path = 'std::fs::remove_file',        reason = 'use fs_err::remove_file for more helpful error messages'             },
+    { path = 'std::fs::rename',             reason = 'use fs_err::rename for more helpful error messages'                  },
+    { path = 'std::fs::set_permissions',    reason = 'use fs_err::set_permissions for more helpful error messages'         },
+    { path = 'std::fs::soft_link',          reason = 'use fs_err::soft_link for more helpful error messages'               },
+    { path = 'std::fs::symlink_metadata',   reason = 'use fs_err::symlink_metadata for more helpful error messages'        },
+    { path = 'std::fs::write',              reason = 'use fs_err::write for more helpful error messages'                   },
+    { path = 'tokio::fs::canonicalize',     reason = 'use fs_err::tokio::canonicalize for more helpful error messages'     },
+    { path = 'tokio::fs::copy',             reason = 'use fs_err::tokio::copy for more helpful error messages'             },
+    { path = 'tokio::fs::create_dir',       reason = 'use fs_err::tokio::create_dir for more helpful error messages'       },
+    { path = 'tokio::fs::create_dir_all',   reason = 'use fs_err::tokio::create_dir_all for more helpful error messages'   },
+    { path = 'tokio::fs::hard_link',        reason = 'use fs_err::tokio::hard_link for more helpful error messages'        },
+    { path = 'tokio::fs::metadata',         reason = 'use fs_err::tokio::metadata for more helpful error messages'         },
+    { path = 'tokio::fs::read',             reason = 'use fs_err::tokio::read for more helpful error messages'             },
+    { path = 'tokio::fs::read_dir',         reason = 'use fs_err::tokio::read_dir for more helpful error messages'         },
+    { path = 'tokio::fs::read_link',        reason = 'use fs_err::tokio::read_link for more helpful error messages'        },
+    { path = 'tokio::fs::read_to_string',   reason = 'use fs_err::tokio::read_to_string for more helpful error messages'   },
+    { path = 'tokio::fs::remove_dir',       reason = 'use fs_err::tokio::remove_dir for more helpful error messages'       },
+    { path = 'tokio::fs::remove_dir_all',   reason = 'use fs_err::tokio::remove_dir_all for more helpful error messages'   },
+    { path = 'tokio::fs::remove_file',      reason = 'use fs_err::tokio::remove_file for more helpful error messages'      },
+    { path = 'tokio::fs::rename',           reason = 'use fs_err::tokio::rename for more helpful error messages'           },
+    { path = 'tokio::fs::set_permissions',  reason = 'use fs_err::tokio::set_permissions for more helpful error messages'  },
+    { path = 'tokio::fs::symlink',          reason = 'use fs_err::tokio::symlink for more helpful error messages'          },
+    { path = 'tokio::fs::symlink_metadata', reason = 'use fs_err::tokio::symlink_metadata for more helpful error messages' },
+    { path = 'tokio::fs::write',            reason = 'use fs_err::tokio::write for more helpful error messages'            },
+
+    { path = 'axum::Router::nest', reason = 'specify full resource paths for searchability' },
+]
+disallowed-types = [
+    { path = 'std::fs::DirEntry',      reason = 'use fs_err::DirEntry for more helpful error messages'           },
+    { path = 'std::fs::File',          reason = 'use fs_err::File for more helpful error messages'               },
+    { path = 'std::fs::OpenOptions',   reason = 'use fs_err::OpenOptions for more helpful error messages'        },
+    { path = 'std::fs::ReadDir',       reason = 'use fs_err::ReadDir for more helpful error messages'            },
+    { path = 'tokio::fs::DirBuilder',  reason = 'use fs_err::tokio::DirBuilder for more helpful error messages'  },
+    { path = 'tokio::fs::DirEntry',    reason = 'use fs_err::tokio::DirEntry for more helpful error messages'    },
+    { path = 'tokio::fs::File',        reason = 'use fs_err::tokio::File for more helpful error messages'        },
+    { path = 'tokio::fs::OpenOptions', reason = 'use fs_err::tokio::OpenOptions for more helpful error messages' },
+    { path = 'tokio::fs::ReadDir',     reason = 'use fs_err::tokio::ReadDir for more helpful error messages'     },
+]
+enforced-import-renames = [
+    { path = 'core::fmt::Result', rename = 'FmtResult' },
+    { path = 'std::io::Result', rename = 'IoResult' },
+]

@@ -1,0 +1,23 @@
+[package]
+name = 'snapshot_test_utils'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+assert-json-diff = { workspace = true }
+bstr = { workspace = true }
+derive_more = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+glob = { workspace = true }
+http = { workspace = true }
+httparse = { workspace = true }
+itertools = { workspace = true }
+pathdiff = { workspace = true }
+serde_json = { workspace = true }
+tap = { workspace = true }
+tokio = { workspace = true }

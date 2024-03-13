@@ -1,0 +1,16 @@
+[package]
+name = 'hashing'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+ethereum-types = { workspace = true }
+generic-array = { workspace = true }
+hex-literal = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+itertools = { workspace = true }

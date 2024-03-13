@@ -1,0 +1,43 @@
+[package]
+name = 'types'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+bit_field = { workspace = true }
+bls = { workspace = true }
+derive_more = { workspace = true }
+duplicate = { workspace = true }
+educe = { workspace = true }
+enum-iterator = { workspace = true }
+enum-map = { workspace = true }
+ethereum-types = { workspace = true }
+hex-literal = { workspace = true }
+im = { workspace = true }
+nonzero_ext = { workspace = true }
+once_cell = { workspace = true }
+primitive-types = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+smallvec = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+std_ext = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+typenum = { workspace = true }
+variant_count = { workspace = true }
+
+[dev-dependencies]
+bincode = { workspace = true }
+itertools = { workspace = true }
+serde_json = { workspace = true }
+spec_test_utils = { workspace = true }
+test-case = { workspace = true }
+test-generator = { workspace = true }

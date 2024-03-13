@@ -1,0 +1,26 @@
+[package]
+name = 'genesis'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+deposit_tree = { workspace = true }
+helper_functions = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+thiserror = { workspace = true }
+transition_functions = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+bls = { workspace = true }
+duplicate = { workspace = true }
+serde = { workspace = true }
+spec_test_utils = { workspace = true }
+tap = { workspace = true }
+test-generator = { workspace = true }

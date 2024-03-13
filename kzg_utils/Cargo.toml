@@ -1,0 +1,22 @@
+[package]
+name = 'kzg_utils'
+version = '0.1.0'
+edition.workspace = true
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = { workspace = true }
+kzg = { workspace = true }
+rust-kzg-blst = { workspace = true }
+thiserror = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+spec_test_utils = { workspace = true }
+test-generator = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = 'directories'
+version = '0.1.0'
+edition = '2021'
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = { workspace = true }
+dirs = { workspace = true }
+fs_extra = { workspace = true }
+types = { workspace = true }

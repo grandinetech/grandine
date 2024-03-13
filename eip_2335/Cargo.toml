@@ -1,0 +1,33 @@
+[package]
+name = 'eip_2335'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+aes = { workspace = true }
+anyhow = { workspace = true }
+bls = { workspace = true }
+ctr = { workspace = true }
+derive_more = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+pbkdf2 = { workspace = true }
+rand = { workspace = true }
+scrypt = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = { workspace = true }
+uuid = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+hex-literal = { workspace = true }
+serde_json = { workspace = true }
+tap = { workspace = true }
+test-case = { workspace = true }

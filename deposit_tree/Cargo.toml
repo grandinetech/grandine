@@ -1,0 +1,23 @@
+[package]
+name = 'deposit_tree'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+features = { workspace = true }
+itertools = { workspace = true }
+ssz = { workspace = true }
+thiserror = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+factory = { workspace = true }
+interop = { workspace = true }
+spec_test_utils = { workspace = true }
+std_ext = { workspace = true }
+test-generator = { workspace = true }

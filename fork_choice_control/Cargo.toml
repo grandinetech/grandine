@@ -1,0 +1,58 @@
+[package]
+name = 'fork_choice_control'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+arithmetic = { workspace = true }
+clock = { workspace = true }
+crossbeam-utils = { workspace = true }
+database = { workspace = true }
+derive_more = { workspace = true }
+drain_filter_polyfill = { workspace = true }
+educe = { workspace = true }
+eth2_libp2p = { workspace = true }
+execution_engine = { workspace = true }
+features = { workspace = true }
+fork_choice_store = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+helper_functions = { workspace = true }
+http_api_utils = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+mime = { workspace = true }
+nonzero_ext = { workspace = true }
+num_cpus = { workspace = true }
+panics = { workspace = true }
+parking_lot = { workspace = true }
+prometheus_metrics = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+strum = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+transition_functions = { workspace = true }
+tynm = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+duplicate = { workspace = true }
+eth2_cache_utils = { workspace = true }
+factory = { workspace = true }
+fs-err = { workspace = true }
+serde-aux = { workspace = true }
+serde_json = { workspace = true }
+spec_test_utils = { workspace = true }
+tap = { workspace = true }
+test-generator = { workspace = true }
+unwrap_none = { workspace = true }

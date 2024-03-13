@@ -1,0 +1,40 @@
+[package]
+name = 'keymanager'
+version = '0.1.0'
+edition.workspace = true
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = { workspace = true }
+bls = { workspace = true }
+builder_api = { workspace = true }
+bytesize = { workspace = true }
+database = { workspace = true }
+derive_more = { workspace = true }
+eip_2335 = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+signer = { workspace = true }
+slashing_protection = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+types = { workspace = true }
+uuid = { workspace = true }
+validator_key_cache = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+fs-err = { workspace = true }
+hex-literal = { workspace = true }
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

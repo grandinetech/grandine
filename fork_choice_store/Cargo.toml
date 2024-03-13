@@ -1,0 +1,38 @@
+[package]
+name = 'fork_choice_store'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+clock = { workspace = true }
+crossbeam-skiplist = { workspace = true }
+derive_more = { workspace = true }
+educe = { workspace = true }
+execution_engine = { workspace = true }
+eth2_libp2p = { workspace = true }
+features = { workspace = true }
+futures = { workspace = true }
+hash_hasher = { workspace = true }
+helper_functions = { workspace = true }
+im = { workspace = true }
+itertools = { workspace = true }
+kzg_utils = { workspace = true }
+log = { workspace = true }
+prometheus_metrics = { workspace = true }
+serde = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+std_ext = { workspace = true }
+strum = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+transition_functions = { workspace = true }
+tynm = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+unwrap_none = { workspace = true }

@@ -1,0 +1,26 @@
+[package]
+name = 'clock'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+enum-iterator = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+itertools = { workspace = true }
+nonzero_ext = { workspace = true }
+test-case = { workspace = true }
+tokio = { workspace = true, features = ['test-util'] }

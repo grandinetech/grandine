@@ -1,0 +1,18 @@
+[package]
+name = 'spec_test_utils'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+derive_more = { workspace = true }
+fs-err = { workspace = true }
+glob = { workspace = true }
+pathdiff = { workspace = true }
+serde = { workspace = true }
+serde_repr = { workspace = true }
+serde_yaml = { workspace = true }
+snap = { workspace = true }
+ssz = { workspace = true }

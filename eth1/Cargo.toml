@@ -1,0 +1,30 @@
+[package]
+name = 'eth1'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+database = { workspace = true }
+deposit_tree = { workspace = true }
+eth1_api = { workspace = true }
+features = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+prometheus_metrics = { workspace = true }
+reqwest = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tynm = { workspace = true }
+types = { workspace = true }
+url = { workspace = true }

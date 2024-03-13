@@ -1,0 +1,11 @@
+[package]
+name = 'std_ext'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+easy-ext = { workspace = true }
+triomphe = { workspace = true }

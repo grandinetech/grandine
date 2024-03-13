@@ -1,0 +1,56 @@
+[package]
+name = 'validator'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+bls = { workspace = true }
+builder_api = { workspace = true }
+cached = { workspace = true }
+clock = { workspace = true }
+deposit_tree = { workspace = true }
+derive_more = { workspace = true }
+educe = { workspace = true }
+eth1 = { workspace = true }
+eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
+execution_engine = { workspace = true }
+features = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+keymanager = { workspace = true }
+log = { workspace = true }
+once_cell = { workspace = true }
+operation_pools = { workspace = true }
+p2p = { workspace = true }
+prometheus_metrics = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+signer = { workspace = true }
+slasher = { workspace = true }
+slashing_protection = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+transition_functions = { workspace = true }
+try_from_iterator = { workspace = true }
+tynm = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+factory = { workspace = true }
+interop = { workspace = true }

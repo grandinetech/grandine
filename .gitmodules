@@ -1,0 +1,15 @@
+[submodule "dedicated_executor"]
+	path = dedicated_executor
+	url = https://github.com/grandinetech/dedicated_executor.git
+[submodule "eth2_libp2p"]
+	path = eth2_libp2p
+	url = https://github.com/grandinetech/eth2_libp2p.git
+[submodule "grandine-snapshot-tests"]
+	path = grandine-snapshot-tests
+	url = https://github.com/grandinetech/grandine-snapshot-tests.git
+[submodule "slashing-protection-interchange-tests"]
+	path = slashing-protection-interchange-tests
+	url = https://github.com/eth2-clients/slashing-protection-interchange-tests.git
+[submodule "consensus-spec-tests"]
+	path = consensus-spec-tests
+	url = https://github.com/ethereum/consensus-spec-tests.git

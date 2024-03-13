@@ -1,0 +1,20 @@
+[package]
+name = 'shuffling'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bit_field = { workspace = true }
+hashing = { workspace = true }
+itertools = { workspace = true }
+tap = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+spec_test_utils = { workspace = true }
+test-generator = { workspace = true }

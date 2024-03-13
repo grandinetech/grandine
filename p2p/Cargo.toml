@@ -1,0 +1,53 @@
+[package]
+name = 'p2p'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+bls = { workspace = true }
+cached = { workspace = true }
+database = { workspace = true }
+dedicated_executor = { workspace = true }
+derive_more = { workspace = true }
+enum-iterator = { workspace = true }
+eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
+execution_engine = { workspace = true }
+features = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+helper_functions = { workspace = true }
+if-addrs = { workspace = true }
+igd = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+num_cpus = { workspace = true }
+operation_pools = { workspace = true }
+prometheus_metrics = { workspace = true }
+prometheus-client = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+slog = { workspace = true }
+slog-stdlog = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+transition_functions = { workspace = true }
+tynm = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+test-case = { workspace = true }

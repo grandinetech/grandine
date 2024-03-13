@@ -1,0 +1,80 @@
+[package]
+name = 'http_api'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }
+bls = { workspace = true }
+builder_api = { workspace = true }
+byteorder = { workspace = true }
+educe = { workspace = true }
+enum-iterator = { workspace = true }
+eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
+features = { workspace = true }
+fork_choice_control = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+helper_functions = { workspace = true }
+http_api_utils = { workspace = true }
+hyper = { workspace = true }
+itertools = { workspace = true }
+keymanager = { workspace = true }
+liveness_tracker = { workspace = true }
+log = { workspace = true }
+metrics = { workspace = true }
+mime = { workspace = true }
+operation_pools = { workspace = true }
+p2p = { workspace = true }
+parse-display = { workspace = true }
+prometheus_metrics = { workspace = true }
+serde = { workspace = true }
+serde-aux = { workspace = true }
+serde_json = { workspace = true }
+serde_qs = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+std_ext = { workspace = true }
+strum = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tower-http = { workspace = true }
+transition_functions = { workspace = true }
+try_from_iterator = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+unwrap_none = { workspace = true }
+validator = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+clock = { workspace = true }
+crossbeam-utils = { workspace = true }
+database = { workspace = true }
+dedicated_executor = { workspace = true }
+deposit_tree = { workspace = true }
+eth1 = { workspace = true }
+eth2_cache_utils = { workspace = true }
+factory = { workspace = true }
+fork_choice_store = { workspace = true }
+hex-literal = { workspace = true }
+interop = { workspace = true }
+num_cpus = { workspace = true }
+predefined_chains = { workspace = true }
+reqwest = { workspace = true }
+signer = { workspace = true }
+slashing_protection = { workspace = true }
+snapshot_test_utils = { workspace = true }
+test-case = { workspace = true }
+test-generator = { workspace = true }

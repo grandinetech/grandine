@@ -1,0 +1,15 @@
+[package]
+name = 'binary_utils'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+panics = { workspace = true }
+rayon = { workspace = true }

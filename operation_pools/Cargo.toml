@@ -1,0 +1,38 @@
+[package]
+name = 'operation_pools'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bit_field = { workspace = true }
+bls = { workspace = true }
+clock = { workspace = true }
+dedicated_executor = { workspace = true }
+eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
+features = { workspace = true }
+fork_choice_control = { workspace = true }
+futures = { workspace = true }
+good_lp = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+prometheus_metrics = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+strum = { workspace = true }
+tap = { workspace = true }
+tokio = { workspace = true }
+transition_functions = { workspace = true }
+try_from_iterator = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+eth2_cache_utils = { workspace = true }

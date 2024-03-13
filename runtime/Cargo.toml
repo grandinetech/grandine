@@ -1,0 +1,46 @@
+[package]
+name = 'runtime'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+builder_api = { workspace = true }
+bytesize = { workspace = true }
+clock = { workspace = true }
+database = { workspace = true }
+dedicated_executor = { workspace = true }
+directories = { workspace = true }
+eth1 = { workspace = true }
+eth1_api = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+grandine_version = { workspace = true }
+http_api = { workspace = true }
+keymanager = { workspace = true }
+liveness_tracker = { workspace = true }
+log = { workspace = true }
+metrics = { workspace = true }
+nonzero_ext = { workspace = true }
+num_cpus = { workspace = true }
+operation_pools = { workspace = true }
+p2p = { workspace = true }
+prometheus_metrics = { workspace = true }
+prometheus-client = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+signer = { workspace = true }
+slasher = { workspace = true }
+slashing_protection = { workspace = true }
+std_ext = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+types = { workspace = true }
+validator = { workspace = true }

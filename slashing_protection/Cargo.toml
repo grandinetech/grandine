@@ -1,0 +1,33 @@
+[package]
+name = 'slashing_protection'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bls = { workspace = true }
+chrono = { workspace = true }
+educe = { workspace = true }
+fs-err = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+refinery = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_utils = { workspace = true }
+ssz = { workspace = true }
+thiserror = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+duplicate = { workspace = true }
+factory = { workspace = true }
+hex-literal = { workspace = true }
+tempfile = { workspace = true }
+test-case = { workspace = true }
+test-generator = { workspace = true }

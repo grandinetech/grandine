@@ -1,0 +1,22 @@
+pub use ethereum_types::{H160, H256, H32};
+pub use ssz::Uint256;
+
+pub type ChainId = u64;
+pub type CommitteeIndex = u64;
+pub type DepositIndex = u64;
+pub type Domain = H256;
+pub type DomainType = H32;
+pub type Epoch = u64;
+pub type ExecutionAddress = H160;
+pub type ExecutionBlockHash = H256;
+pub type ExecutionBlockNumber = u64;
+pub type ExecutionTransactionHash = H256;
+pub type ForkDigest = H32;
+pub type Gwei = u64;
+pub type NetworkId = u64;
+pub type NodeId = Uint256;
+pub type Slot = u64;
+pub type SubnetId = u64;
+pub type UnixSeconds = u64;
+pub type ValidatorIndex = u64;
+pub type Version = H32;
