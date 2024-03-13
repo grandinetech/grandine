@@ -78,3 +78,6 @@ slashing_protection = { workspace = true }
 snapshot_test_utils = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }
+
+[features]
+eth2-cache = []

@@ -77,6 +77,7 @@ struct Context {
     store_config: StoreConfig,
     deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     genesis_state_file: Option<PathBuf>,
+    genesis_state_download_url: Option<Url>,
     validator_config: Arc<ValidatorConfig>,
     checkpoint_sync_url: Option<Url>,
     force_checkpoint_sync: bool,
@@ -129,6 +130,7 @@ impl Context {
             store_config,
             mut deposit_contract_starting_block,
             genesis_state_file,
+            genesis_state_download_url,
             validator_config,
             checkpoint_sync_url,
             force_checkpoint_sync,
@@ -209,6 +211,7 @@ impl Context {
                 .clone()
                 .unwrap_or_default(),
             checkpoint_sync_url.clone(),
+            genesis_state_download_url,
             &eth1_chain,
         )
         .await?;
@@ -312,6 +315,7 @@ fn try_main() -> Result<()> {
         chain_config,
         deposit_contract_starting_block,
         genesis_state_file,
+        genesis_state_download_url,
         checkpoint_sync_url,
         force_checkpoint_sync,
         back_sync,
@@ -437,6 +441,7 @@ fn try_main() -> Result<()> {
         store_config,
         deposit_contract_starting_block,
         genesis_state_file,
+        genesis_state_download_url,
         validator_config,
         checkpoint_sync_url,
         force_checkpoint_sync,
@@ -659,6 +664,7 @@ async fn genesis_provider<P: Preset>(
     client: &Client,
     store_directory: PathBuf,
     checkpoint_sync_url: Option<Url>,
+    genesis_state_download_url: Option<Url>,
     eth1_chain: &Eth1Chain,
 ) -> Result<GenesisProvider<P>> {
     if let Some(file_path) = genesis_state_file {
@@ -669,7 +675,12 @@ async fn genesis_provider<P: Preset>(
 
     if let Some(predefined_network) = predefined_network {
         return predefined_network
-            .genesis_provider::<P>(client, store_directory.as_path(), checkpoint_sync_url)
+            .genesis_provider::<P>(
+                client,
+                store_directory.as_path(),
+                checkpoint_sync_url,
+                genesis_state_download_url,
+            )
             .await;
     }
 

@@ -38,6 +38,7 @@ use crate::{
 // <https://github.com/ethereum/consensus-specs/issues/1887>.
 // The bug would only manifest starting with the first slot of the next epoch.
 #[test]
+#[cfg(feature = "eth2-cache")]
 fn processes_old_attestations_from_medalla_in_a_future_slot() {
     let config = Arc::new(Config::medalla());
     let genesis_state = medalla::GENESIS_BEACON_STATE.force().clone_arc();
@@ -64,6 +65,7 @@ fn processes_old_attestations_from_medalla_in_a_future_slot() {
 }
 
 #[test]
+#[cfg(feature = "eth2-cache")]
 fn processes_blocks_from_medalla_in_their_slots() {
     let config = Arc::new(Config::medalla());
     let genesis_state = medalla::GENESIS_BEACON_STATE.force().clone_arc();
@@ -88,6 +90,7 @@ fn processes_blocks_from_medalla_in_their_slots() {
 // The blocks were not actually invalid.
 // We had missed the change to the type of `WithdrawalV1.amount` in `execution-apis`.
 #[test]
+#[cfg(feature = "eth2-cache")]
 fn handles_invalid_blocks_from_withdrawal_devnet_3() -> Result<()> {
     let config = Arc::new(Config::withdrawal_devnet_3());
 
@@ -175,6 +178,7 @@ fn handles_invalid_blocks_from_withdrawal_devnet_3() -> Result<()> {
 // `Store::head` was being called while the `Store` was in an inconsistent state.
 // That made `assert!(no_viable_segments)` fail, though the end result may have been unaffected.
 #[test]
+#[cfg(feature = "eth2-cache")]
 fn handles_blocks_after_non_genesis_anchor_in_their_slots() {
     let config = Arc::new(Config::mainnet());
     let anchor_state = mainnet::ALTAIR_BEACON_STATE.force().clone_arc();
@@ -211,6 +215,7 @@ fn handles_blocks_after_non_genesis_anchor_in_their_slots() {
 }
 
 #[test]
+#[cfg(feature = "eth2-cache")]
 fn handles_blocks_after_non_genesis_anchor_in_a_future_slot() {
     let config = Arc::new(Config::mainnet());
     let anchor_state = mainnet::ALTAIR_BEACON_STATE.force().clone_arc();

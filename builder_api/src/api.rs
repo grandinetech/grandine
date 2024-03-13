@@ -320,6 +320,7 @@ mod tests {
         43, [42, 21, 0] => Err(BuilderApiError::RollingEpochMissingBlocks { missing_blocks: 30 });
         "more missing blocks than allowed in first gap alone"
     )]
+    #[cfg(feature = "eth2-cache")]
     fn circuit_breaker_conditions(
         slot: Slot,
         nonempty_slots: impl IntoIterator<Item = Slot>,

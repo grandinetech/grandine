@@ -116,6 +116,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "eth2-cache")]
     fn test_archive_back_sync_states() -> Result<()> {
         let genesis_state = mainnet::GENESIS_BEACON_STATE.force().clone_arc();
         let blocks = mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force();

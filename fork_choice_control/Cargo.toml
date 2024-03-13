@@ -56,3 +56,6 @@ spec_test_utils = { workspace = true }
 tap = { workspace = true }
 test-generator = { workspace = true }
 unwrap_none = { workspace = true }
+
+[features]
+eth2-cache = []

@@ -77,31 +77,20 @@ logger-parse-env = []
 preset-any = []
 
 preset-mainnet = ['preset-any']
-preset-medalla = ['preset-any']
 preset-minimal = ['preset-any']
 
 network-any = []
 
 network-goerli      = ['network-any', 'preset-mainnet']
-network-kiln        = ['network-any', 'preset-mainnet']
-network-kintsugi    = ['network-any', 'preset-mainnet']
 network-mainnet     = ['network-any', 'preset-mainnet']
-network-pyrmont     = ['network-any', 'preset-mainnet']
-network-ropsten     = ['network-any', 'preset-mainnet']
 network-sepolia     = ['network-any', 'preset-mainnet']
 network-shadow      = ['network-any', 'preset-mainnet']
-network-withdrawals = ['network-any', 'preset-mainnet']
 network-holesky     = ['network-any', 'preset-mainnet']
-
-network-medalla  = ['network-any', 'preset-medalla']
 
 default-networks = [
     'network-goerli',
-    'network-kiln',
     'network-mainnet',
-    'network-ropsten',
     'network-sepolia',
     'network-shadow',
-    'network-withdrawals',
     'network-holesky',
 ]

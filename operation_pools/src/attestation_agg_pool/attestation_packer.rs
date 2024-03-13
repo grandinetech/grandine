@@ -908,6 +908,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "eth2-cache")]
     fn test_goerli_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::goerli());
         let slot = 547_813;
@@ -951,6 +952,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "eth2-cache")]
     fn test_goerli_aggregate_attestation_packing_dynamically() -> Result<()> {
         let config = Arc::new(Config::goerli());
         let slot = 547_813;
@@ -993,6 +995,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "eth2-cache")]
     fn test_holesky_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::holesky());
         let slot = 50_015;
@@ -1045,6 +1048,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "eth2-cache")]
     fn test_holesky_dynamic_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::holesky());
         let slot = 50_015;

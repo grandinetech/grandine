@@ -505,7 +505,7 @@ mod tests {
         // The block seems to be from the Kintsugi testnet. There's no block explorer still serving
         // Kintsugi blocks to confirm it, but the block number and timestamp suggest that execution
         // layer genesis happened around 2021-12-15, just before the `MIN_GENESIS_TIME` of Kintsugi.
-        let config = Arc::new(Config::kintsugi());
+        let config = Arc::new(Config::mainnet());
         let auth = Arc::default();
         let server_url = server.url("/").parse()?;
 

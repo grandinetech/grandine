@@ -163,6 +163,10 @@ struct ChainOptions {
     /// Load genesis state from SSZ_FILE
     #[clap(long, value_name = "SSZ_FILE")]
     genesis_state_file: Option<PathBuf>,
+
+    /// Download genesis state from specified URL
+    #[clap(long, value_name = "URL")]
+    genesis_state_download_url: Option<Url>,
 }
 
 #[derive(Args)]
@@ -710,23 +714,11 @@ struct ValidatorOptions {
 enum Network {
     #[cfg(any(feature = "network-mainnet", test))]
     Mainnet,
-    #[cfg(any(feature = "network-medalla", test))]
-    Medalla,
-    #[cfg(any(feature = "network-pyrmont", test))]
-    Pyrmont,
     #[cfg(any(feature = "network-goerli", test))]
     #[clap(alias = "prater")]
     Goerli,
-    #[cfg(any(feature = "network-kintsugi", test))]
-    Kintsugi,
-    #[cfg(any(feature = "network-kiln", test))]
-    Kiln,
-    #[cfg(any(feature = "network-ropsten", test))]
-    Ropsten,
     #[cfg(any(feature = "network-sepolia", test))]
     Sepolia,
-    #[cfg(any(feature = "network-withdrawals", test))]
-    Withdrawals,
     #[cfg(any(feature = "network-holesky", test))]
     Holesky,
     Custom,
@@ -743,22 +735,10 @@ impl Network {
         match self {
             #[cfg(any(feature = "network-mainnet", test))]
             Self::Mainnet => Some(PredefinedNetwork::Mainnet),
-            #[cfg(any(feature = "network-medalla", test))]
-            Self::Medalla => Some(PredefinedNetwork::Medalla),
-            #[cfg(any(feature = "network-pyrmont", test))]
-            Self::Pyrmont => Some(PredefinedNetwork::Pyrmont),
             #[cfg(any(feature = "network-goerli", test))]
             Self::Goerli => Some(PredefinedNetwork::Goerli),
-            #[cfg(any(feature = "network-kintsugi", test))]
-            Self::Kintsugi => Some(PredefinedNetwork::Kintsugi),
-            #[cfg(any(feature = "network-kiln", test))]
-            Self::Kiln => Some(PredefinedNetwork::Kiln),
-            #[cfg(any(feature = "network-ropsten", test))]
-            Self::Ropsten => Some(PredefinedNetwork::Ropsten),
             #[cfg(any(feature = "network-sepolia", test))]
             Self::Sepolia => Some(PredefinedNetwork::Sepolia),
-            #[cfg(any(feature = "network-withdrawals", test))]
-            Self::Withdrawals => Some(PredefinedNetwork::Withdrawals),
             #[cfg(any(feature = "network-holesky", test))]
             Self::Holesky => Some(PredefinedNetwork::Holesky),
             Self::Custom => None,
@@ -797,6 +777,7 @@ impl GrandineArgs {
             terminal_block_hash_activation_epoch_override,
             mut deposit_contract_starting_block,
             mut genesis_state_file,
+            genesis_state_download_url,
         } = chain_options;
 
         let BeaconNodeOptions {
@@ -1131,6 +1112,7 @@ impl GrandineArgs {
             chain_config: Arc::new(chain_config),
             deposit_contract_starting_block,
             genesis_state_file,
+            genesis_state_download_url,
             checkpoint_sync_url,
             force_checkpoint_sync,
             back_sync,
@@ -1569,14 +1551,14 @@ mod tests {
     fn predefined_network_with_customizations() {
         let config = config_from_args([
             "--network",
-            "pyrmont",
+            "sepolia",
             "--deposit-contract-starting-block",
             "0",
             "--genesis-state-file",
             "custom.ssz",
         ]);
 
-        assert_eq!(config.predefined_network, Some(PredefinedNetwork::Pyrmont));
+        assert_eq!(config.predefined_network, Some(PredefinedNetwork::Sepolia));
         assert_eq!(config.deposit_contract_starting_block, Some(0));
         assert_eq!(config.genesis_state_file, Some(PathBuf::from("custom.ssz")));
     }

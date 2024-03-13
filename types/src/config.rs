@@ -325,31 +325,6 @@ impl Config {
         }
     }
 
-    /// [Pyrmont configuration](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/pyrmont/config.yaml).
-    #[must_use]
-    pub fn pyrmont() -> Self {
-        Self {
-            // Meta
-            config_name: Cow::Borrowed("pyrmont"),
-
-            // Genesis
-            genesis_delay: 432_000,
-            genesis_fork_version: H32(hex!("00002009")),
-            min_genesis_time: 1_605_700_800,
-
-            // Forking
-            altair_fork_epoch: 61650,
-            altair_fork_version: H32(hex!("01002009")),
-
-            // Deposit contract
-            deposit_chain_id: 5,
-            deposit_contract_address: H160(hex!("8c5fecdC472E27Bc447696F431E425D02dd46a8c")),
-            deposit_network_id: 5,
-
-            ..Self::default()
-        }
-    }
-
     /// [Goerli configuration](https://github.com/eth-clients/goerli/blob/6522ac6684693740cd4ddcc2a0662e03702aa4a1/prater/config.yaml)
     ///
     /// Formerly known as Prater.
@@ -384,104 +359,6 @@ impl Config {
 
             // Networking
             max_request_blocks: 1024,
-
-            ..Self::default()
-        }
-    }
-
-    /// [Kintsugi configuration](https://github.com/eth-clients/merge-testnets/blob/302fe27afdc7a9d15b1766a0c0a9d64319140255/kintsugi/config.yaml).
-    #[must_use]
-    pub fn kintsugi() -> Self {
-        Self {
-            // Meta
-            config_name: Cow::Borrowed("kintsugi"),
-
-            // Genesis
-            genesis_delay: 300,
-            genesis_fork_version: H32(hex!("60000069")),
-            min_genesis_active_validator_count: nonzero!(72100_u64),
-            min_genesis_time: 1_639_659_600,
-
-            // Forking
-            altair_fork_epoch: 10,
-            altair_fork_version: H32(hex!("61000070")),
-            bellatrix_fork_epoch: 20,
-            bellatrix_fork_version: H32(hex!("62000071")),
-
-            // Time parameters
-            eth1_follow_distance: 16,
-
-            // Deposit contract
-            deposit_chain_id: 1_337_702,
-            deposit_contract_address: ExecutionAddress::repeat_byte(0x42),
-            deposit_network_id: 1_337_702,
-
-            // Transition
-            terminal_total_difficulty: Difficulty::from_u64(5_000_000_000),
-
-            ..Self::default()
-        }
-    }
-
-    /// [Kiln configuration](https://github.com/eth-clients/merge-testnets/blob/302fe27afdc7a9d15b1766a0c0a9d64319140255/kiln/config.yaml).
-    #[must_use]
-    pub fn kiln() -> Self {
-        Self {
-            // Meta
-            config_name: Cow::Borrowed("kiln"),
-
-            // Genesis
-            genesis_delay: 300,
-            genesis_fork_version: H32(hex!("70000069")),
-            min_genesis_active_validator_count: nonzero!(95000_u64),
-            min_genesis_time: 1_647_007_200,
-
-            // Forking
-            altair_fork_epoch: 50,
-            altair_fork_version: H32(hex!("70000070")),
-            bellatrix_fork_epoch: 150,
-            bellatrix_fork_version: H32(hex!("70000071")),
-
-            // Time parameters
-            eth1_follow_distance: 16,
-
-            // Deposit contract
-            deposit_chain_id: 1_337_802,
-            deposit_contract_address: ExecutionAddress::repeat_byte(0x42),
-            deposit_network_id: 1_337_802,
-
-            // Transition
-            terminal_total_difficulty: Difficulty::from_u64(20_000_000_000_000),
-
-            ..Self::default()
-        }
-    }
-
-    /// [Ropsten configuration](https://github.com/eth-clients/merge-testnets/blob/302fe27afdc7a9d15b1766a0c0a9d64319140255/ropsten-beacon-chain/config.yaml).
-    #[must_use]
-    pub fn ropsten() -> Self {
-        Self {
-            // Meta
-            config_name: Cow::Borrowed("ropsten"),
-
-            // Genesis
-            genesis_fork_version: H32(hex!("80000069")),
-            min_genesis_active_validator_count: nonzero!(100_000_u64),
-            min_genesis_time: 1_653_318_000,
-
-            // Forking
-            altair_fork_epoch: 500,
-            altair_fork_version: H32(hex!("80000070")),
-            bellatrix_fork_epoch: 750,
-            bellatrix_fork_version: H32(hex!("80000071")),
-
-            // Deposit contract
-            deposit_chain_id: 3,
-            deposit_contract_address: H160(hex!("6f22fFbC56eFF051aECF839396DD1eD9aD6BBA9D")),
-            deposit_network_id: 3,
-
-            // Transition
-            terminal_total_difficulty: Difficulty::from_u128(50_000_000_000_000_000),
 
             ..Self::default()
         }
@@ -817,11 +694,7 @@ mod tests {
     #[test_case(Config::mainnet())]
     #[test_case(Config::minimal())]
     #[test_case(Config::medalla())]
-    #[test_case(Config::pyrmont())]
     #[test_case(Config::goerli())]
-    #[test_case(Config::kintsugi())]
-    #[test_case(Config::kiln())]
-    #[test_case(Config::ropsten())]
     #[test_case(Config::sepolia())]
     #[test_case(Config::withdrawal_devnet_3())]
     #[test_case(Config::withdrawal_devnet_4())]

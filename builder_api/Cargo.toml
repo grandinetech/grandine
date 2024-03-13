@@ -28,3 +28,6 @@ types = { workspace = true }
 eth2_cache_utils = { workspace = true }
 serde_json = { workspace = true }
 test-case = { workspace = true }
+
+[features]
+eth2-cache = []

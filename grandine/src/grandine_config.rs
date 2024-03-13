@@ -28,6 +28,7 @@ pub struct GrandineConfig {
     pub chain_config: Arc<ChainConfig>,
     pub deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     pub genesis_state_file: Option<PathBuf>,
+    pub genesis_state_download_url: Option<Url>,
     pub checkpoint_sync_url: Option<Url>,
     pub force_checkpoint_sync: bool,
     pub back_sync: bool,

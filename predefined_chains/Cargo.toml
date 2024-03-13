@@ -7,7 +7,6 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
-duplicate = { workspace = true }
 genesis = { workspace = true }
 hex-literal = { workspace = true }
 ssz = { workspace = true }

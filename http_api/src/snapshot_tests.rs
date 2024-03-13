@@ -19,16 +19,19 @@ fn mainnet_genesis_none(case: Case) {
 }
 
 #[test_resources("grandine-snapshot-tests/mainnet/mainnet/genesis/128-slots/*")]
+#[cfg(feature = "eth2-cache")]
 fn mainnet_genesis_128_slots(case: Case) {
     Context::mainnet_genesis_128_slots().run_case(case, UPDATE_RESPONSES)
 }
 
 #[test_resources("grandine-snapshot-tests/mainnet/mainnet/epoch-96214/128-slots/*")]
+#[cfg(feature = "eth2-cache")]
 fn mainnet_epoch_96214_128_slots(case: Case) {
     Context::mainnet_epoch_96214_128_slots().run_case(case, UPDATE_RESPONSES)
 }
 
 #[test_resources("grandine-snapshot-tests/mainnet/mainnet/epoch-244816/128-slots/*")]
+#[cfg(feature = "eth2-cache")]
 fn mainnet_epoch_244816_128_slots(case: Case) {
     Context::mainnet_epoch_244816_128_slots().run_case(case, UPDATE_RESPONSES)
 }

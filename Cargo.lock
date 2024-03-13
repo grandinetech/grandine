@@ -5704,7 +5704,6 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 name = "predefined_chains"
 version = "0.0.0"
 dependencies = [
- "duplicate",
  "genesis",
  "hex-literal",
  "ssz",
