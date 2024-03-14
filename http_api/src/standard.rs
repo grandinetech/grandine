@@ -31,7 +31,6 @@ use genesis::GenesisProvider;
 use helper_functions::{accessors, misc, slot_report::SyncAggregateRewards};
 use http_api_utils::BlockId;
 use itertools::{izip, Either, Itertools as _};
-use keymanager::{KeyManager, KeymanagerOperationStatus, RemoteKey, ValidatingPubkey};
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
 use operation_pools::{
@@ -56,7 +55,7 @@ use types::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    bellatrix::primitives::{Gas, Wei},
+    bellatrix::primitives::Wei,
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{BeaconBlock, BeaconState, SignedBeaconBlock, SignedBlindedBeaconBlock},
     config::Config as ChainConfig,
@@ -82,7 +81,6 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{ApiToValidator, ValidatorBlindedBlock, ValidatorConfig, ValidatorProposerData};
-use zeroize::Zeroizing;
 
 use crate::{
     block_id,
@@ -373,55 +371,6 @@ pub struct ValidatorLivenessResponse {
     #[serde(with = "serde_utils::string_or_native")]
     index: ValidatorIndex,
     is_live: bool,
-}
-
-#[derive(Serialize)]
-pub struct ProposerConfigResponse {
-    pub pubkey: PublicKeyBytes,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ethaddress: Option<ExecutionAddress>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gas_limit: Option<Gas>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub graffiti: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct SetFeeRecipientQuery {
-    pub ethaddress: ExecutionAddress,
-}
-
-#[derive(Deserialize)]
-pub struct SetGasLimitQuery {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub gas_limit: Gas,
-}
-
-#[derive(Deserialize)]
-pub struct SetGraffitiQuery {
-    pub graffiti: String,
-}
-
-#[derive(Deserialize)]
-pub struct KeystoreImportQuery {
-    pub keystores: Vec<String>,
-    pub passwords: Vec<Zeroizing<String>>,
-    pub slashing_protection: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct KeystoreDeleteQuery {
-    pub pubkeys: Vec<PublicKeyBytes>,
-}
-
-#[derive(Deserialize)]
-pub struct RemoteKeysImportQuery {
-    pub remote_keys: Vec<RemoteKey>,
-}
-
-#[derive(Deserialize)]
-pub struct RemoteKeysDeleteQuery {
-    pub pubkeys: Vec<PublicKeyBytes>,
 }
 
 /// `GET /eth/v1/beacon/genesis`
@@ -2282,205 +2231,6 @@ pub async fn validator_beacon_committee_selections() -> Error {
 /// `POST /eth/v1/validator/sync_committee_selections`
 pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
-}
-
-/// `GET /eth/v1/validator/{pubkey}/feerecipient`
-pub async fn keymanager_list_fee_recipient(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let fee_recipient = keymanager.proposer_configs().fee_recipient(pubkey)?;
-
-    let response = ProposerConfigResponse {
-        pubkey,
-        ethaddress: Some(fee_recipient),
-        gas_limit: None,
-        graffiti: None,
-    };
-
-    Ok(EthResponse::json(response))
-}
-
-/// `POST /eth/v1/validator/{pubkey}/feerecipient`
-pub async fn keymanager_set_fee_recipient(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-    EthJson(query): EthJson<SetFeeRecipientQuery>,
-) -> Result<StatusCode, Error> {
-    let SetFeeRecipientQuery { ethaddress } = query;
-
-    keymanager
-        .proposer_configs()
-        .set_fee_recipient(pubkey, ethaddress)?;
-
-    Ok(StatusCode::ACCEPTED)
-}
-
-/// `DELETE /eth/v1/validator/{pubkey}/feerecipient`
-pub async fn keymanager_delete_fee_recipient(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-) -> Result<StatusCode, Error> {
-    keymanager.proposer_configs().delete_fee_recipient(pubkey)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `GET /eth/v1/validator/{pubkey}/gas_limit`
-pub async fn keymanager_get_gas_limit(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let gas_limit = keymanager.proposer_configs().gas_limit(pubkey)?;
-
-    let response = ProposerConfigResponse {
-        pubkey,
-        ethaddress: None,
-        gas_limit: Some(gas_limit),
-        graffiti: None,
-    };
-
-    Ok(EthResponse::json(response))
-}
-
-/// `POST /eth/v1/validator/{pubkey}/gas_limit`
-pub async fn keymanager_set_gas_limit(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-    EthJson(query): EthJson<SetGasLimitQuery>,
-) -> Result<StatusCode, Error> {
-    let SetGasLimitQuery { gas_limit } = query;
-
-    keymanager
-        .proposer_configs()
-        .set_gas_limit(pubkey, gas_limit)?;
-
-    Ok(StatusCode::ACCEPTED)
-}
-
-/// `DELETE /eth/v1/validator/{pubkey}/gas_limit`
-pub async fn keymanager_delete_gas_limit(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-) -> Result<StatusCode, Error> {
-    keymanager.proposer_configs().delete_gas_limit(pubkey)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `GET /eth/v1/validator/{pubkey}/graffiti`
-pub async fn keymanager_get_graffiti(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let graffiti = keymanager.proposer_configs().graffiti(pubkey)?;
-
-    let response = ProposerConfigResponse {
-        pubkey,
-        ethaddress: None,
-        gas_limit: None,
-        graffiti: Some(graffiti),
-    };
-
-    Ok(EthResponse::json(response))
-}
-
-/// `POST /eth/v1/validator/{pubkey}/graffiti`
-pub async fn keymanager_set_graffiti(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-    EthJson(query): EthJson<SetGraffitiQuery>,
-) -> Result<StatusCode, Error> {
-    let SetGraffitiQuery { graffiti } = query;
-
-    keymanager
-        .proposer_configs()
-        .set_graffiti(pubkey, &graffiti)?;
-
-    Ok(StatusCode::ACCEPTED)
-}
-
-/// `DELETE /eth/v1/validator/{pubkey}/graffiti`
-pub async fn keymanager_delete_graffiti(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthPath(pubkey): EthPath<PublicKeyBytes>,
-) -> Result<StatusCode, Error> {
-    keymanager.proposer_configs().delete_graffiti(pubkey)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `GET /eth/v1/keystores`
-pub async fn keymanager_list_validating_pubkeys(
-    State(keymanager): State<Arc<KeyManager>>,
-) -> Result<EthResponse<Vec<ValidatingPubkey>>, Error> {
-    let pubkeys = keymanager.keystores().list_validating_pubkeys().await;
-
-    Ok(EthResponse::json(pubkeys))
-}
-
-/// `POST /eth/v1/keystores`
-pub async fn keymanager_import_keystores(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthJson(query): EthJson<KeystoreImportQuery>,
-) -> Result<EthResponse<Vec<KeymanagerOperationStatus>>, Error> {
-    let KeystoreImportQuery {
-        keystores,
-        passwords,
-        slashing_protection,
-    } = query;
-
-    let import_statuses = keymanager
-        .keystores()
-        .import(keystores, passwords, slashing_protection)
-        .await?;
-
-    Ok(EthResponse::json(import_statuses))
-}
-
-/// `DELETE /eth/v1/keystores`
-pub async fn keymanager_delete_keystores(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthJson(query): EthJson<KeystoreDeleteQuery>,
-) -> Result<EthResponse<Vec<KeymanagerOperationStatus>>, Error> {
-    let KeystoreDeleteQuery { pubkeys } = query;
-
-    let (delete_statuses, slashing_protection) = keymanager.keystores().delete(pubkeys).await?;
-
-    Ok(EthResponse::json(delete_statuses).slashing_protection(slashing_protection))
-}
-
-/// `GET /eth/v1/remotekeys`
-pub async fn keymanager_list_remote_keys(
-    State(keymanager): State<Arc<KeyManager>>,
-) -> Result<EthResponse<Vec<ValidatingPubkey>>, Error> {
-    let remote_keys = keymanager.remote_keys().list().await;
-
-    Ok(EthResponse::json(remote_keys))
-}
-
-/// `POST /eth/v1/remotekeys`
-pub async fn keymanager_import_remote_keys(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthJson(query): EthJson<RemoteKeysImportQuery>,
-) -> Result<EthResponse<Vec<KeymanagerOperationStatus>>, Error> {
-    let RemoteKeysImportQuery { remote_keys } = query;
-
-    let import_statuses = keymanager.remote_keys().import(remote_keys).await?;
-
-    Ok(EthResponse::json(import_statuses))
-}
-
-/// `DELETE /eth/v1/remotekeys`
-pub async fn keymanager_delete_remote_keys(
-    State(keymanager): State<Arc<KeyManager>>,
-    EthJson(query): EthJson<RemoteKeysDeleteQuery>,
-) -> Result<EthResponse<Vec<KeymanagerOperationStatus>>, Error> {
-    let RemoteKeysDeleteQuery { pubkeys } = query;
-
-    let delete_statuses = keymanager.remote_keys().delete(pubkeys).await;
-
-    Ok(EthResponse::json(delete_statuses))
 }
 
 pub fn calculate_block_rewards<P: Preset, W: Wait>(

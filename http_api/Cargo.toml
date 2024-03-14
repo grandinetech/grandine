@@ -26,7 +26,6 @@ helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 hyper = { workspace = true }
 itertools = { workspace = true }
-keymanager = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }
 metrics = { workspace = true }
@@ -56,7 +55,6 @@ typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
 validator = { workspace = true }
-zeroize = { workspace = true }
 
 [dev-dependencies]
 clock = { workspace = true }
@@ -70,6 +68,7 @@ factory = { workspace = true }
 fork_choice_store = { workspace = true }
 hex-literal = { workspace = true }
 interop = { workspace = true }
+keymanager = { workspace = true }
 num_cpus = { workspace = true }
 predefined_chains = { workspace = true }
 reqwest = { workspace = true }

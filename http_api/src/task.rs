@@ -13,7 +13,6 @@ use futures::{
 };
 use genesis::GenesisProvider;
 use hyper::server::conn::AddrIncoming;
-use keymanager::KeyManager;
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info};
 use metrics::ApiToMetrics;
@@ -49,7 +48,6 @@ pub struct Channels<P: Preset> {
 pub struct HttpApi<P: Preset, W: Wait> {
     pub controller: ApiController<P, W>,
     pub genesis_provider: GenesisProvider<P>,
-    pub keymanager: Arc<KeyManager>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub network_config: Arc<NetworkConfig>,
@@ -80,7 +78,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         let Self {
             controller,
             genesis_provider,
-            keymanager,
             validator_keys,
             validator_config,
             network_config,
@@ -119,7 +116,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             chain_config: controller.chain_config().clone_arc(),
             controller,
             genesis_provider,
-            keymanager,
             validator_keys,
             validator_config,
             metrics: metrics.clone(),

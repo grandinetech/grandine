@@ -15,6 +15,7 @@ use types::{
     config::Config as ChainConfig,
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Slot, H256},
 };
+use validator::ValidatorApiConfig;
 
 use crate::{
     commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
@@ -57,6 +58,7 @@ pub struct GrandineConfig {
     pub use_validator_key_cache: bool,
     pub slashing_protection_history_limit: u64,
     pub in_memory: bool,
+    pub validator_api_config: Option<ValidatorApiConfig>,
 }
 
 impl GrandineConfig {
@@ -81,6 +83,7 @@ impl GrandineConfig {
             metrics_config,
             checkpoint_sync_url,
             use_validator_key_cache,
+            validator_api_config,
             ..
         } = self;
 
@@ -115,6 +118,12 @@ impl GrandineConfig {
                 "Metrics server address: {}",
                 SocketAddr::from(metrics_server_config),
             );
+        }
+
+        if let Some(validator_api_config) = validator_api_config.as_ref() {
+            info!("validator API address: {}", validator_api_config.address);
+        } else {
+            info!("validator API disabled");
         }
 
         info!("archival interval: {archival_epoch_interval} epochs");

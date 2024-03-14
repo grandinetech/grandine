@@ -36,7 +36,7 @@ use types::{
     preset::{Preset, PresetName},
     traits::BeaconState as _,
 };
-use validator::ValidatorConfig;
+use validator::{ValidatorApiConfig, ValidatorConfig};
 use validator_key_cache::ValidatorKeyCache;
 
 use crate::{
@@ -78,6 +78,7 @@ struct Context {
     deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     genesis_state_file: Option<PathBuf>,
     genesis_state_download_url: Option<Url>,
+    validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
     checkpoint_sync_url: Option<Url>,
     force_checkpoint_sync: bool,
@@ -131,6 +132,7 @@ impl Context {
             mut deposit_contract_starting_block,
             genesis_state_file,
             genesis_state_download_url,
+            validator_api_config,
             validator_config,
             checkpoint_sync_url,
             force_checkpoint_sync,
@@ -244,6 +246,7 @@ impl Context {
         runtime::run_after_genesis(
             chain_config,
             store_config,
+            validator_api_config,
             validator_config,
             network_config,
             genesis_provider,
@@ -344,6 +347,7 @@ fn try_main() -> Result<()> {
         use_validator_key_cache,
         slashing_protection_history_limit,
         in_memory,
+        validator_api_config,
     } = config;
 
     features.into_iter().for_each(Feature::enable);
@@ -362,6 +366,7 @@ fn try_main() -> Result<()> {
             http_api_config.address,
             &network_config,
             metrics_server_config.as_ref(),
+            validator_api_config.as_ref(),
         )
         .map_err(GrandineArgs::clap_error)?;
     }
@@ -442,6 +447,7 @@ fn try_main() -> Result<()> {
         deposit_contract_starting_block,
         genesis_state_file,
         genesis_state_download_url,
+        validator_api_config,
         validator_config,
         checkpoint_sync_url,
         force_checkpoint_sync,
@@ -479,6 +485,7 @@ fn ensure_ports_not_in_use(
     http_address: SocketAddr,
     network_config: &NetworkConfig,
     metrics_server_config: Option<&MetricsServerConfig>,
+    validator_api_config: Option<&ValidatorApiConfig>,
 ) -> Result<()> {
     TcpListener::bind(http_address).context(Error::PortInUse {
         port: http_address.port(),
@@ -557,6 +564,14 @@ fn ensure_ports_not_in_use(
             port: metrics_port,
             service: "Metrics",
             option: "--metrics-port",
+        })?;
+    }
+
+    if let Some(config) = validator_api_config {
+        TcpListener::bind(config.address).context(Error::PortInUse {
+            port: config.address.port(),
+            service: "Validator",
+            option: "--validator-api-port",
         })?;
     }
 

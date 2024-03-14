@@ -3457,7 +3457,6 @@ dependencies = [
  "types",
  "unwrap_none",
  "validator",
- "zeroize",
 ]
 
 [[package]]
@@ -8157,12 +8156,14 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arithmetic",
+ "axum",
  "bls",
  "builder_api",
  "cached",
  "clock",
  "deposit_tree",
  "derive_more",
+ "directories",
  "educe",
  "eth1",
  "eth1_api",
@@ -8172,10 +8173,13 @@ dependencies = [
  "features",
  "fork_choice_control",
  "fork_choice_store",
+ "fs-err",
  "futures",
  "helper_functions",
+ "hex",
  "interop",
  "itertools 0.12.1",
+ "jwt-simple",
  "keymanager",
  "log",
  "once_cell",
@@ -8195,11 +8199,13 @@ dependencies = [
  "tap",
  "thiserror",
  "tokio",
+ "tower-http",
  "transition_functions",
  "try_from_iterator",
  "tynm",
  "typenum",
  "types",
+ "zeroize",
 ]
 
 [[package]]

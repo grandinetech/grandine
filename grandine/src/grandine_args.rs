@@ -5,7 +5,7 @@ use core::{
     time::Duration,
 };
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::Arc,
 };
@@ -57,7 +57,7 @@ use types::{
     },
     preset::PresetName,
 };
-use validator::ValidatorConfig;
+use validator::{ValidatorApiConfig, ValidatorConfig};
 
 use crate::{
     commands::GrandineCommand,
@@ -94,6 +94,9 @@ pub struct GrandineArgs {
 
     #[clap(flatten)]
     validator_options: ValidatorOptions,
+
+    #[clap(flatten)]
+    validator_api_options: ValidatorApiOptions,
 
     #[clap(long, value_parser = parse_graffiti)]
     graffiti: Vec<H256>,
@@ -203,29 +206,18 @@ impl From<HttpApiOptions> for HttpApiConfig {
             timeout,
         } = http_api_options;
 
-        let mut http_api_config = Self {
+        let Self {
+            address,
+            allow_origin,
+            ..
+        } = Self::with_address(http_address, http_port);
+
+        Self {
+            address,
+            allow_origin: headers_to_allow_origin(http_allowed_origins).unwrap_or(allow_origin),
             max_events,
             timeout: Some(Duration::from_millis(timeout)),
-            ..Self::with_address(http_address, http_port)
-        };
-
-        if !http_allowed_origins.is_empty() {
-            // `tower_http::cors::AllowOrigin::list` panics if a wildcard is passed to it.
-            if http_allowed_origins.contains(&HeaderValue::from_static("*")) {
-                if http_allowed_origins.len() > 1 {
-                    warn!(
-                        "extra values of Access-Control-Allow-Origin specified along with a wildcard; \
-                        only the wildcard will be used",
-                    );
-                }
-
-                http_api_config.allow_origin = AllowOrigin::any();
-            } else {
-                http_api_config.allow_origin = AllowOrigin::list(http_allowed_origins);
-            }
         }
-
-        http_api_config
     }
 }
 
@@ -710,6 +702,55 @@ struct ValidatorOptions {
     slashing_protection_history_limit: u64,
 }
 
+#[derive(Args)]
+struct ValidatorApiOptions {
+    /// Enable validator API
+    #[clap(long)]
+    enable_validator_api: bool,
+
+    /// Validator API address
+    #[clap(long, default_value_t = ValidatorApiConfig::default().address.ip())]
+    validator_api_address: IpAddr,
+
+    /// Listen port for validator API
+    #[clap(long, default_value_t = ValidatorApiConfig::default().address.port())]
+    validator_api_port: u16,
+
+    /// List of Access-Control-Allow-Origin header values for the validator API server.
+    /// Defaults to the listening URL of the validator API server.
+    #[clap(long)]
+    validator_api_allowed_origins: Vec<HeaderValue>,
+
+    /// Validator API timeout in milliseconds
+    #[clap(long, default_value_t = ValidatorApiConfig::default().timeout.as_millis().try_into().expect("ValidatorApiConfig default timeout is valid u64"))]
+    validator_api_timeout: u64,
+}
+
+impl From<ValidatorApiOptions> for ValidatorApiConfig {
+    fn from(validator_api_options: ValidatorApiOptions) -> Self {
+        let ValidatorApiOptions {
+            validator_api_address,
+            validator_api_port,
+            validator_api_allowed_origins,
+            validator_api_timeout,
+            ..
+        } = validator_api_options;
+
+        let Self {
+            address,
+            allow_origin,
+            ..
+        } = Self::with_address(validator_api_address, validator_api_port);
+
+        Self {
+            address,
+            timeout: Duration::from_millis(validator_api_timeout),
+            allow_origin: headers_to_allow_origin(validator_api_allowed_origins)
+                .unwrap_or(allow_origin),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Sequence, ValueEnum)]
 enum Network {
     #[cfg(any(feature = "network-mainnet", test))]
@@ -757,6 +798,7 @@ impl GrandineArgs {
             http_api_options,
             mut network_config_options,
             validator_options,
+            validator_api_options,
             graffiti,
             mut features,
             command,
@@ -1019,10 +1061,26 @@ impl GrandineArgs {
         });
 
         let http_api_config = HttpApiConfig::from(http_api_options);
+        let validator_api_config = validator_api_options
+            .enable_validator_api
+            .then(|| ValidatorApiConfig::from(validator_api_options));
+
+        let mut services = vec![(http_api_config.address, "HTTP API")];
+
         if let Some(metrics_server_config) = metrics_server_config.as_ref() {
+            services.push((SocketAddr::from(metrics_server_config), "Metrics API"));
+        }
+
+        if let Some(validator_api_config) = validator_api_config.as_ref() {
+            services.push((validator_api_config.address, "Validator API"));
+        }
+
+        for ((address1, service1), (address2, service2)) in
+            services.into_iter().tuple_combinations()
+        {
             ensure!(
-                http_api_config.address != metrics_server_config.into(),
-                Error::IdenticalHttpApiAndMetricsUrl,
+                address1 != address2,
+                Error::IdenticalAddresses { service1, service2 },
             );
         }
 
@@ -1147,6 +1205,7 @@ impl GrandineArgs {
             use_validator_key_cache,
             slashing_protection_history_limit,
             in_memory,
+            validator_api_config,
         })
     }
 
@@ -1192,8 +1251,11 @@ enum Error {
     ConfigMismatch { differences: Vec<Difference> },
     #[error("--unfinalized-states-in-memory must be at least {minimum}")]
     UnfinalizedStatesInMemoryTooLow { minimum: u64 },
-    #[error("identical addresses specified for metrics server and HTTP API server")]
-    IdenticalHttpApiAndMetricsUrl,
+    #[error("identical addresses specified for {service1} and {service2}")]
+    IdenticalAddresses {
+        service1: &'static str,
+        service2: &'static str,
+    },
 }
 
 fn parse_graffiti(string: &str) -> Result<H256> {
@@ -1300,6 +1362,26 @@ fn compare_with_file<T: DeserializeOwned + Serialize>(
     .collect();
 
     Ok(differences)
+}
+
+fn headers_to_allow_origin(allowed_origins: Vec<HeaderValue>) -> Option<AllowOrigin> {
+    if !allowed_origins.is_empty() {
+        // `tower_http::cors::AllowOrigin::list` panics if a wildcard is passed to it.
+        if allowed_origins.contains(&HeaderValue::from_static("*")) {
+            if allowed_origins.len() > 1 {
+                warn!(
+                    "extra values of Access-Control-Allow-Origin specified along with a wildcard; \
+                    only the wildcard will be used",
+                );
+            }
+
+            return Some(AllowOrigin::any());
+        }
+
+        return Some(AllowOrigin::list(allowed_origins));
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -1494,6 +1576,50 @@ mod tests {
         assert_eq!(
             format!("{:?}", config.http_api_config.allow_origin),
             "Const(\"*\")",
+        );
+    }
+
+    #[test]
+    fn validator_api_port_option() {
+        let config = config_from_args(["--validator-api-port", "1234"]);
+
+        assert_eq!(
+            config
+                .validator_api_config
+                .as_ref()
+                .map(|config| config.address),
+            None,
+        );
+    }
+
+    #[test]
+    fn validator_api_address_option() {
+        let config = config_from_args(["--validator-api-address", "0.0.0.0"]);
+
+        assert_eq!(
+            config
+                .validator_api_config
+                .as_ref()
+                .map(|config| config.address),
+            None,
+        );
+    }
+
+    #[test]
+    fn validator_api_address_and_port_option() {
+        let config = config_from_args([
+            "--validator-api-address",
+            "0.0.0.0",
+            "--validator-api-port",
+            "1234",
+        ]);
+
+        assert_eq!(
+            config
+                .validator_api_config
+                .as_ref()
+                .map(|config| config.address),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234)),
         );
     }
 

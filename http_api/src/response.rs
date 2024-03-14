@@ -47,8 +47,6 @@ pub struct EthResponse<T, M = (), F = AlwaysJson> {
     execution_optimistic: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     finalized: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    slashing_protection: Option<String>,
 
     #[serde(skip)]
     format: F,
@@ -95,7 +93,6 @@ impl<T, M, F> EthResponse<T, M, F> {
             dependent_root: None,
             execution_optimistic: None,
             finalized: None,
-            slashing_protection: None,
             format,
         }
     }
@@ -132,11 +129,6 @@ impl<T, M, F> EthResponse<T, M, F> {
 
     pub const fn finalized(mut self, finalized: bool) -> Self {
         self.finalized = Some(finalized);
-        self
-    }
-
-    pub fn slashing_protection(mut self, slashing_protection_json: String) -> Self {
-        self.slashing_protection = Some(slashing_protection_json);
         self
     }
 
@@ -177,7 +169,6 @@ impl<T, M, F> EthResponse<T, M, F> {
             dependent_root,
             execution_optimistic,
             finalized,
-            slashing_protection,
             format: _,
         } = self;
 
@@ -191,7 +182,6 @@ impl<T, M, F> EthResponse<T, M, F> {
             dependent_root,
             execution_optimistic,
             finalized,
-            slashing_protection,
             format: AlwaysJson,
         };
 
@@ -211,7 +201,6 @@ impl<T, F> EthResponse<T, (), F> {
             dependent_root,
             execution_optimistic,
             finalized,
-            slashing_protection,
             format,
         } = self;
 
@@ -225,7 +214,6 @@ impl<T, F> EthResponse<T, (), F> {
             dependent_root,
             execution_optimistic,
             finalized,
-            slashing_protection,
             format,
         }
     }

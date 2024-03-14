@@ -83,8 +83,6 @@ pub enum Error {
     InvalidValidatorId(#[source] AnyhowError),
     #[error("invalid proposer slashing, it will never pass validation so it's rejected")]
     InvalidProposerSlashing(#[source] AnyhowError),
-    #[error("invalid public key")]
-    InvalidPublicKey(#[source] AnyhowError),
     #[error("invalid query string")]
     InvalidQuery(#[source] AnyhowError),
     #[error("invalid voluntary exit, it will never pass validation so it's rejected")]
@@ -195,7 +193,6 @@ impl Error {
             | Self::InvalidQuery(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidProposerSlashing(_)
-            | Self::InvalidPublicKey(_)
             | Self::InvalidSignedVoluntaryExit(_)
             | Self::InvalidStateId(_)
             | Self::InvalidSignedBlsToExecutionChanges(_)

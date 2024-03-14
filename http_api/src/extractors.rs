@@ -17,7 +17,6 @@ use axum::{
     Json, RequestExt as _, RequestPartsExt as _, TypedHeader,
 };
 use axum_extra::extract::Query;
-use bls::PublicKeyBytes;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
 use http_api_utils::BlockId;
@@ -40,15 +39,7 @@ use types::{
 };
 use validator::ValidatorProposerData;
 
-use crate::{
-    error::Error,
-    standard::{
-        KeystoreDeleteQuery, KeystoreImportQuery, RemoteKeysDeleteQuery, RemoteKeysImportQuery,
-        SetFeeRecipientQuery, SetGasLimitQuery, SetGraffitiQuery,
-    },
-    state_id::StateId,
-    validator_status::ValidatorId,
-};
+use crate::{error::Error, state_id::StateId, validator_status::ValidatorId};
 
 // This has multiple `FromRequest` impls to make error messages more specific.
 // They all use `FromStr`, whereas the one for `Path` uses `DeserializeOwned`.
@@ -155,22 +146,6 @@ impl<S> FromRequestParts<S> for EthPath<(StateId, ValidatorId)> {
             .map_err(Error::InvalidValidatorId)?;
 
         Ok(Self((state_id, validator_id)))
-    }
-}
-
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<PublicKeyBytes> {
-    type Rejection = Error;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        parts
-            .extract::<Path<String>>()
-            .await
-            .map_err(AnyhowError::new)?
-            .parse()
-            .map(Self)
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidPublicKey)
     }
 }
 
@@ -373,104 +348,6 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<SignedValidatorRegistrationV1>> {
             .extract()
             .await
             .map(|Json(registrations)| Self(registrations))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<SetFeeRecipientQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<SetGasLimitQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<SetGraffitiQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<KeystoreImportQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<KeystoreDeleteQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<RemoteKeysImportQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidJsonBody)
-    }
-}
-
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<RemoteKeysDeleteQuery> {
-    type Rejection = Error;
-
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(query)| Self(query))
             .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }

@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use axum::{
     extract::{FromRef, State},
-    routing::{delete, get, patch, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use bls::PublicKeyBytes;
@@ -11,7 +11,6 @@ use features::Feature;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
 use genesis::GenesisProvider;
-use keymanager::KeyManager;
 use liveness_tracker::ApiToLiveness;
 use metrics::ApiToMetrics;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
@@ -31,23 +30,18 @@ use crate::{
     standard::{
         beacon_events, beacon_heads, beacon_state, blob_sidecars, block, block_attestations,
         block_headers, block_id_headers, block_rewards, block_root, config_spec, debug_fork_choice,
-        deposit_contract, expected_withdrawals, fork_schedule, genesis,
-        keymanager_delete_fee_recipient, keymanager_delete_gas_limit, keymanager_delete_graffiti,
-        keymanager_delete_keystores, keymanager_delete_remote_keys, keymanager_get_gas_limit,
-        keymanager_get_graffiti, keymanager_import_keystores, keymanager_import_remote_keys,
-        keymanager_list_fee_recipient, keymanager_list_remote_keys,
-        keymanager_list_validating_pubkeys, keymanager_set_fee_recipient, keymanager_set_gas_limit,
-        keymanager_set_graffiti, node_health, node_identity, node_peer, node_peer_count,
-        node_peers, node_syncing_status, node_version, pool_attestations, pool_attester_slashings,
-        pool_bls_to_execution_changes, pool_proposer_slashings, pool_voluntary_exits,
-        publish_blinded_block, publish_block, state_committees, state_finality_checkpoints,
-        state_fork, state_randao, state_root, state_sync_committees, state_validator,
-        state_validator_balances, state_validators, submit_pool_attestations,
-        submit_pool_attester_slashing, submit_pool_bls_to_execution_change,
-        submit_pool_proposer_slashing, submit_pool_sync_committees, submit_pool_voluntary_exit,
-        sync_committee_rewards, validator_aggregate_attestation, validator_attestation_data,
-        validator_attester_duties, validator_beacon_committee_selections, validator_blinded_block,
-        validator_block, validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
+        deposit_contract, expected_withdrawals, fork_schedule, genesis, node_health, node_identity,
+        node_peer, node_peer_count, node_peers, node_syncing_status, node_version,
+        pool_attestations, pool_attester_slashings, pool_bls_to_execution_changes,
+        pool_proposer_slashings, pool_voluntary_exits, publish_blinded_block, publish_block,
+        state_committees, state_finality_checkpoints, state_fork, state_randao, state_root,
+        state_sync_committees, state_validator, state_validator_balances, state_validators,
+        submit_pool_attestations, submit_pool_attester_slashing,
+        submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
+        submit_pool_sync_committees, submit_pool_voluntary_exit, sync_committee_rewards,
+        validator_aggregate_attestation, validator_attestation_data, validator_attester_duties,
+        validator_beacon_committee_selections, validator_blinded_block, validator_block,
+        validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_publish_aggregate_and_proofs,
         validator_publish_contributions_and_proofs, validator_register_validator,
         validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
@@ -72,7 +66,6 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub chain_config: Arc<ChainConfig>,
     pub controller: ApiController<P, W>,
     pub genesis_provider: GenesisProvider<P>,
-    pub keymanager: Arc<KeyManager>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub metrics: Option<Arc<Metrics>>,
@@ -107,12 +100,6 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for ApiController<P, W> {
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for GenesisProvider<P> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.genesis_provider.clone()
-    }
-}
-
-impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<KeyManager> {
-    fn from_ref(state: &NormalState<P, W>) -> Self {
-        state.keymanager.clone_arc()
     }
 }
 
@@ -231,7 +218,6 @@ pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
         .merge(eth_v1_validator_routes(state.clone()))
         .merge(eth_v2_validator_routes(state.clone()))
         .merge(eth_v3_validator_routes(state.clone()))
-        .merge(eth_v1_keymanager_routes())
         .with_state(state)
 }
 
@@ -550,52 +536,6 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             state,
             middleware::is_synced,
         ))
-}
-
-fn eth_v1_keymanager_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
-    Router::new()
-        .route(
-            "/eth/v1/validator/:pubkey/feerecipient",
-            get(keymanager_list_fee_recipient),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/feerecipient",
-            post(keymanager_set_fee_recipient),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/feerecipient",
-            delete(keymanager_delete_fee_recipient),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/gas_limit",
-            get(keymanager_get_gas_limit),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/gas_limit",
-            post(keymanager_set_gas_limit),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/gas_limit",
-            delete(keymanager_delete_gas_limit),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/graffiti",
-            get(keymanager_get_graffiti),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/graffiti",
-            post(keymanager_set_graffiti),
-        )
-        .route(
-            "/eth/v1/validator/:pubkey/graffiti",
-            delete(keymanager_delete_graffiti),
-        )
-        .route("/eth/v1/keystores", get(keymanager_list_validating_pubkeys))
-        .route("/eth/v1/keystores", post(keymanager_import_keystores))
-        .route("/eth/v1/keystores", delete(keymanager_delete_keystores))
-        .route("/eth/v1/remotekeys", get(keymanager_list_remote_keys))
-        .route("/eth/v1/remotekeys", post(keymanager_import_remote_keys))
-        .route("/eth/v1/remotekeys", delete(keymanager_delete_remote_keys))
 }
 
 fn eth_v2_validator_routes<P: Preset, W: Wait>(

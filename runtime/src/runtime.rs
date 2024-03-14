@@ -37,7 +37,9 @@ use slashing_protection::SlashingProtector;
 use std_ext::ArcExt as _;
 use tokio::{select, sync::RwLock};
 use types::{config::Config as ChainConfig, preset::Preset, traits::BeaconState as _};
-use validator::{Validator, ValidatorChannels, ValidatorConfig};
+use validator::{
+    run_validator_api, Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig,
+};
 
 use crate::misc::{MetricsConfig, StorageConfig};
 
@@ -49,6 +51,7 @@ use tokio::signal::unix::SignalKind;
 pub async fn run_after_genesis<P: Preset>(
     chain_config: Arc<ChainConfig>,
     store_config: StoreConfig,
+    validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
     network_config: NetworkConfig,
     genesis_provider: GenesisProvider<P>,
@@ -533,7 +536,6 @@ pub async fn run_after_genesis<P: Preset>(
     let http_api = HttpApi {
         controller: controller.clone_arc(),
         genesis_provider,
-        keymanager,
         validator_keys,
         validator_config,
         network_config: Arc::new(network_config),
@@ -575,6 +577,15 @@ pub async fn run_after_genesis<P: Preset>(
         None => Either::Right(core::future::pending()),
     };
 
+    let run_validator_api = match validator_api_config {
+        Some(validator_api_config) => Either::Left(run_validator_api(
+            validator_api_config,
+            keymanager,
+            directories,
+        )),
+        None => Either::Right(core::future::pending()),
+    };
+
     select! {
         result = join_mutator => result,
         result = spawn_fallible(execution_service.run()) => result,
@@ -589,6 +600,7 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(run_metrics_server) => result,
         result = spawn_fallible(run_metrics_service) => result,
         result = spawn_fallible(run_liveness_tracker) => result,
+        result = spawn_fallible(run_validator_api) => result,
         result = spawn_fallible(subnet_service.run()) => result,
         result = wait_for_signal() => result,
     }?;

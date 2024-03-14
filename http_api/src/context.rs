@@ -328,7 +328,6 @@ impl<P: Preset> Context<P> {
         let http_api = HttpApi {
             controller,
             genesis_provider,
-            keymanager,
             validator_keys,
             validator_config,
             network_config,
