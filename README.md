@@ -1,4 +1,4 @@
-Grandine: A fast and lightweight Ethereum consensus client
+# Grandine: A fast and lightweight Ethereum consensus client
 
 ## Documentation
 
@@ -27,14 +27,70 @@ apt-get install ca-certificates libssl-dev clang cmake unzip protobuf-compiler l
 
 Then the build may take a few minutes:
 
-```
+```shell
 git clone https://github.com/grandinetech/grandine
 cd grandine
-git submodule update --init
-cargo build --release --features network-mainnet --features network-holesky --bin grandine
+git submodule update --init dedicated_executor eth2_libp2p
+cargo build --compact --features default-networks
 ```
 
-The compiled binary is available at `./target/release/grandine`
+The compiled binary is available at `./target/compact/grandine`.
+
+For faster building (larger binary size) use `--release` instead of `--compact`.
+
+### Docker builds
+
+Docker image can build with a simple command:
+
+```shell
+docker build .
+```
+
+### Cross-compilation
+
+[Cross](https://github.com/cross-rs/cross) can be used for Grandine cross-compilation.
+
+Cross-compilation command for `amd64` architecture:
+
+```shell
+cross build \
+    --bin grandine \
+    --target x86_64-unknown-linux-gnu \
+    --features default-networks \
+    --profile compact
+```
+
+Cross-compilation command for `arm64` architecture:
+
+```shell
+cross build \
+    --bin grandine \
+    --target aarch64-unknown-linux-gnu \
+    --features default-networks \
+    --profile compact
+```
+
+### Docker Cross builds
+
+Cross-compilated binaries can be used for Docker images.
+
+Docker build command for `amd64` architecture:
+
+```shell
+docker buildx build \
+    --file Dockerfile.cross \
+    --platform linux/amd64 \
+    target/x86_64-unknown-linux-gnu/compact/
+```
+
+Docker build command for `arm64` architecture:
+
+```shell
+docker buildx build \
+    --file Dockerfile.cross \
+    --platform linux/arm64 \
+    target/aarch64-unknown-linux-gnu/compact/
+```
 
 ## Team
 
