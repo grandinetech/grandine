@@ -31,7 +31,7 @@ Then the build may take a few minutes:
 git clone https://github.com/grandinetech/grandine
 cd grandine
 git submodule update --init dedicated_executor eth2_libp2p
-cargo build --compact --features default-networks
+cargo build --profile compact --features default-networks
 ```
 
 The compiled binary is available at `./target/compact/grandine`.
