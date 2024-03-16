@@ -15,7 +15,7 @@ pub fn initialize_logger(
 
     builder
         .filter_level(LevelFilter::Off)
-        .filter_module("builder_api", LevelFilter::Debug)
+        .filter_module("builder_api", LevelFilter::Info)
         .filter_module("dedicated_executor", LevelFilter::Info)
         .filter_module("eth1", LevelFilter::Info)
         .filter_module("eth1_api", LevelFilter::Info)
@@ -39,7 +39,7 @@ pub fn initialize_logger(
         .filter_module("storage", LevelFilter::Info)
         .filter_module("validator", LevelFilter::Info)
         .filter_module("validator_key_cache", LevelFilter::Info)
-        .filter_module("web3", LevelFilter::Debug)
+        .filter_module("web3", LevelFilter::Info)
         .filter_module(module_path!(), LevelFilter::Info)
         .filter_module(module_path, LevelFilter::Info)
         .format(|formatter, record| {
