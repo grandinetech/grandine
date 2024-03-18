@@ -7,6 +7,8 @@ options=(
 
     --profile test
 
+    --features eth2-cache
+
     # TODO(Grandine Team): Clean up `dedicated_executor` and `eth2_libp2p`.
     #                      Go back to linting all packages implicitly.
     #                      Enable `clippy::mod_module_files`.

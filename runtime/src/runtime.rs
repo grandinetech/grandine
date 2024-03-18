@@ -304,7 +304,6 @@ pub async fn run_after_genesis<P: Preset>(
         block_sync_database,
         genesis_provider.clone(),
         controller.clone_arc(),
-        current_tick.slot,
         metrics.clone(),
         block_sync_service_channels,
         back_sync_enabled,

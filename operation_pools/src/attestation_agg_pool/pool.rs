@@ -1,7 +1,6 @@
 use core::ops::RangeBounds;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    ops::DerefMut,
     sync::Arc,
 };
 
@@ -22,10 +21,7 @@ use types::{
     traits::BeaconState,
 };
 
-use crate::attestation_agg_pool::{
-    max_clique::MaxClique,
-    types::{Aggregate, AggregateMap, AttestationMap, AttestationSet},
-};
+use crate::attestation_agg_pool::types::{Aggregate, AggregateMap, AttestationMap, AttestationSet};
 
 #[allow(type_alias_bounds)]
 type AttestationsWithSlot<P: Preset> = (ContiguousList<Attestation<P>, P::MaxAttestations>, Slot);
@@ -94,34 +90,6 @@ impl<P: Preset> Pool<P> {
             .entry(data)
             .or_default()
             .clone_arc()
-    }
-
-    pub async fn get_maximally_aggregated_attestations_by_epoch(
-        &self,
-        epoch: Epoch,
-    ) -> Vec<Attestation<P>> {
-        let mut aggregates = self.aggregate_attestations_by_epoch(epoch).await;
-
-        let mut singular_arc = self.singular_attestations_by_epoch(epoch).await;
-
-        let mut singular = Vec::new();
-        for arc_attestation in singular_arc {
-            let aggregation_bits = arc_attestation.aggregation_bits.clone();
-            let data = arc_attestation.data;
-            let signature = arc_attestation.signature;
-            singular.push(Attestation {
-                aggregation_bits,
-                data,
-                signature,
-            });
-        }
-
-        aggregates.append(&mut singular);
-
-        let max_clique = MaxClique::new();
-
-        let maximal_cliques = max_clique.find_maximal_attestation_cliques(aggregates.clone());
-        aggregates.clone()
     }
 
     pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<Attestation<P>> {

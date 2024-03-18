@@ -45,14 +45,13 @@ impl<P: Preset> AggregateAndProofSets<P> {
         is_superset
     }
 
-    // fn check() -> bool {}
-
     pub fn prune(&self, finalized_epoch: Epoch) {
         for entry in self.supersets.range(..=finalized_epoch) {
             entry.remove();
         }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.supersets.len()
     }

@@ -84,7 +84,7 @@ use types::{
     },
     combined::{
         BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload, ExecutionPayloadHeader,
-        ExecutionPayloadParams, SignedBeaconBlock, SignedBlindedBeaconBlock,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{

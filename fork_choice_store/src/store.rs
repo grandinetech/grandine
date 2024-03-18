@@ -19,11 +19,7 @@ use helper_functions::{
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier},
 };
-use im::{
-    hashmap,
-    hashmap::{Entry, HashMap},
-    ordmap, vector, HashSet, OrdMap, Vector,
-};
+use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use log::{error, warn};
 use prometheus_metrics::Metrics;
@@ -1188,6 +1184,7 @@ impl<P: Preset> Store<P> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
         aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
@@ -2083,7 +2080,7 @@ impl<P: Preset> Store<P> {
                 block_header.proposer_index,
                 blob_sidecar.index,
             ))
-            .or_insert_with(HashMap::new);
+            .or_default();
 
         commitments.insert(block_root, blob_sidecar.kzg_commitment);
 

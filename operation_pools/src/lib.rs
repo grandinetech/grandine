@@ -14,7 +14,6 @@ mod attestation_agg_pool {
 
     mod attestation_packer;
     mod manager;
-    mod max_clique;
     mod pool;
     mod tasks;
     mod types;

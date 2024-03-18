@@ -33,14 +33,14 @@ fn main() {
         .benchmark_greedy_attestation_packing(
             "greedy attestation packing in Holesky at slot 50015",
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
-            Lazy::new(|| holesky::attestations("aggregate_attestations", 1562 - 1)),
-            Lazy::new(|| holesky::attestations("aggregate_attestations", 1562)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562 - 1)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562)),
         )
         .benchmark_dynamical_attestation_packing(
             "dynamical attestation packing in Holesky at slot 50015",
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
-            Lazy::new(|| holesky::attestations("aggregate_attestations", 1562 - 1)),
-            Lazy::new(|| holesky::attestations("aggregate_attestations", 1562)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562 - 1)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562)),
         )
         .final_summary();
 }

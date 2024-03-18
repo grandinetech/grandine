@@ -1,35 +1,33 @@
-use core::marker::PhantomData;
+use core::{cmp::min, marker::PhantomData};
 use std::{
-    cmp::min,
     collections::{btree_map::BTreeMap, HashMap},
     sync::Arc,
     time::Instant,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Result};
 use bit_field::BitField as _;
 use clock::Tick;
 use good_lp::{
-    default_solver, solvers::highs::highs, solvers::highs::HighsParallelType, variable, variables,
-    Expression, Solution, SolverModel,
+    solvers::highs::highs, solvers::highs::HighsParallelType, variable, variables, Expression,
+    Solution, SolverModel,
 };
 use helper_functions::{
     accessors::{self, get_base_reward, get_base_reward_per_increment},
     misc,
 };
-use itertools::{izip, Itertools as _};
+use itertools::Itertools as _;
 use log::info;
 use rayon::prelude::*;
 use ssz::ContiguousList;
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
-// use types::nonstandard::RelativeEpoch
 use types::{
     altair::{consts::PARTICIPATION_FLAG_WEIGHTS, primitives::ParticipationFlags},
     combined::BeaconState,
     config::Config,
-    nonstandard::{AttestationEpoch, RelativeEpoch},
+    nonstandard::AttestationEpoch,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         containers::{Attestation, PendingAttestation},
@@ -215,6 +213,7 @@ impl<P: Preset> AttestationPacker<P> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn pack_proposable_attestations_dynamically<'a>(
         &self,
         previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
@@ -222,8 +221,8 @@ impl<P: Preset> AttestationPacker<P> {
     ) -> PackOutcome<P> {
         let start_time = Instant::now();
 
-        let mut previous_epoch_participation = self.previous_epoch_participation.clone();
-        let mut current_epoch_participation = self.current_epoch_participation.clone();
+        let previous_epoch_participation = self.previous_epoch_participation.clone();
+        let current_epoch_participation = self.current_epoch_participation.clone();
 
         let mut candidates: Vec<_> = current_epoch_aggregates
             .into_iter()
@@ -246,7 +245,7 @@ impl<P: Preset> AttestationPacker<P> {
 
         // let mut result: Vec<Vec<_>> = Vec::<Vec<_>>::new();
 
-        let mut candidate_data_aggregate: Vec<_> = candidates
+        let candidate_data_aggregate: Vec<_> = candidates
             .into_iter()
             .map(|(aggregate, _)| (aggregate.data, aggregate.clone()))
             .collect();
@@ -255,12 +254,11 @@ impl<P: Preset> AttestationPacker<P> {
 
         // it seems that this sort helps with speed (somehow it increases performance by 30%), So I am not going to delete it
         // as it might have something to do with integer programming solver, I am going to leave it for the future
-        let mut ind = 0;
-        for (key, group) in &candidate_data_aggregate
+        for (_, group) in &candidate_data_aggregate
             .into_iter()
-            .group_by(|(data, _)| data.clone())
+            .group_by(|(data, _)| *data)
         {
-            grouped_aggregates.push(group.map(|(data, aggregate)| aggregate).collect::<Vec<_>>());
+            grouped_aggregates.push(group.map(|(_, aggregate)| aggregate).collect::<Vec<_>>());
         }
 
         let different_data_count = grouped_aggregates.len();
@@ -290,7 +288,7 @@ impl<P: Preset> AttestationPacker<P> {
                         &grouped_aggregates[index],
                         sz,
                     ) {
-                        Err(e) => {} // should only happen when there is an time-out
+                        Err(_) => {} // should only happen when there is an time-out
                         Ok((choices, weight)) => {
                             if weight > best_weight {
                                 assert!(choices.len() == sz);
@@ -354,12 +352,6 @@ impl<P: Preset> AttestationPacker<P> {
 
         let end_time = Instant::now();
         let elapsed_time = end_time.duration_since(start_time);
-        //println!(
-        //    "Dynamic algorithm packing took: {}.{:03} seconds and deadline_reached() value is: {}",
-        //    elapsed_time.as_secs(),
-        //    elapsed_time.subsec_millis(),
-        //    self.deadline_reached()
-        //);
         info!(
             "Dynamic algorithm packing took: {}.{:03} seconds and deadline_reached() value is: {}",
             elapsed_time.as_secs(),
@@ -379,9 +371,10 @@ impl<P: Preset> AttestationPacker<P> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn select_max_cover_attestation_integer_programming(
         &self,
-        attestations: &Vec<Attestation<P>>,
+        attestations: &[Attestation<P>],
         max_count: usize,
     ) -> Result<(Vec<Attestation<P>>, u64)> {
         variables! {
@@ -389,15 +382,15 @@ impl<P: Preset> AttestationPacker<P> {
         }
 
         let attestation_count = attestations.len();
-        let useless_var = vars.add(variable().integer().min(0).max(0));
+        let _unused = vars.add(variable().integer().min(0).max(0));
 
         let x: Vec<_> = (0..attestation_count)
             .map(|_| vars.add(variable().binary()))
             .collect();
 
-        let mut x_sum = useless_var - useless_var;
-        for i in 0..attestation_count {
-            x_sum = x_sum + x[i];
+        let mut x_sum = Expression::with_capacity(0);
+        for xi in x.iter().take(attestation_count) {
+            x_sum += xi;
         }
 
         let mut y = Vec::new();
@@ -417,7 +410,7 @@ impl<P: Preset> AttestationPacker<P> {
             }
             let participation_flags = self.participation_flags(attestation)?;
             let base_reward_per_increment = get_base_reward_per_increment(&self.state);
-            for validator_index in self.attesting_indices(&attestation)?.into_iter() {
+            for validator_index in self.attesting_indices(attestation)? {
                 let index = usize::try_from(validator_index)?;
 
                 let epoch_participation = match attestation_epoch {
@@ -426,7 +419,9 @@ impl<P: Preset> AttestationPacker<P> {
                 };
 
                 let mut useless_validator = false;
-                if !val_ind_and_epoch_to_y_ind.contains_key(&(attestation_epoch, validator_index)) {
+                if let std::collections::hash_map::Entry::Vacant(_) =
+                    val_ind_and_epoch_to_y_ind.entry((attestation_epoch, validator_index))
+                {
                     let combined_weight_for_validator = PARTICIPATION_FLAG_WEIGHTS
                         .iter()
                         .filter(|(flag_index, _)| {
@@ -456,16 +451,18 @@ impl<P: Preset> AttestationPacker<P> {
                     }
                 }
                 if !useless_validator {
-                    attestations_containing_validator[*val_ind_and_epoch_to_y_ind
-                        .get(&(attestation_epoch, validator_index))
-                        .unwrap()]
-                    .push(i);
+                    attestations_containing_validator
+                        [val_ind_and_epoch_to_y_ind[&(attestation_epoch, validator_index)]]
+                        .push(i);
                 }
             }
         }
+        assert!(validator_epochs.len() == y.len());
+        assert!(weights.len() == y.len());
+
         let mut validator_in_every_attestation = Vec::new();
-        for i in 0..y.len() {
-            let in_all = match validator_epochs[i] {
+        for (i, val_epoch) in validator_epochs.iter().enumerate() {
+            let in_all = match val_epoch {
                 AttestationEpoch::Previous => {
                     attestations_containing_validator[i].len() == attestations_in_previous_epoch
                 }
@@ -476,30 +473,28 @@ impl<P: Preset> AttestationPacker<P> {
             validator_in_every_attestation.push(in_all);
         }
 
-        assert!(weights.len() == y.len());
-
-        let mut objective = useless_var - useless_var;
+        let mut objective = Expression::with_capacity(0);
 
         let mut answer_value = 0;
         for i in 0..y.len() {
-            if !validator_in_every_attestation[i] {
-                objective += y[i] * (weights[i] as i32);
-            } else {
+            if validator_in_every_attestation[i] {
                 answer_value += weights[i];
+            } else {
+                objective += y[i] * i32::try_from(weights[i])?;
             }
         }
 
         let mut problem = vars.maximise(objective).using(highs);
-        problem = problem.with(x_sum.eq(max_count as i32));
+        problem = problem.with(x_sum.eq(i32::try_from(max_count)?));
 
         for (i, yi) in y.iter().enumerate() {
             if !validator_in_every_attestation[i] {
-                let mut validator_expression = useless_var - useless_var;
+                let mut validator_expression = Expression::with_capacity(0);
                 for ind in &attestations_containing_validator[i] {
-                    validator_expression = validator_expression + x[*ind];
+                    validator_expression += x[*ind];
                 }
-                validator_expression = validator_expression - yi;
-                problem = problem.with(validator_expression.geq(0 as i32));
+                validator_expression -= yi;
+                problem = problem.with(validator_expression.geq(0));
             }
         }
 
@@ -509,8 +504,6 @@ impl<P: Preset> AttestationPacker<P> {
         problem = problem.set_time_limit(1.0); // currently set to 1 second, later on it should be dynamical based on remaining time
         let solution = problem.solve()?;
 
-        let mut previous_epoch_participation = self.previous_epoch_participation.clone();
-        let mut current_epoch_participation = self.current_epoch_participation.clone();
         for i in 0..attestation_count {
             if solution.value(x[i]).abs() > 0.5 {
                 selected_attestations.push(attestations[i].clone());
@@ -535,9 +528,9 @@ impl<P: Preset> AttestationPacker<P> {
         attestations: &Vec<Attestation<P>>,
     ) -> Result<(Vec<Attestation<P>>, u64)> {
         let mut weights = Vec::new();
-        for i in 0..attestations.len() {
+        for attestation in attestations {
             let weight = self.better_added_weight(
-                &attestations[i],
+                attestation,
                 &self.previous_epoch_participation,
                 &self.current_epoch_participation,
             )?;
@@ -545,64 +538,14 @@ impl<P: Preset> AttestationPacker<P> {
         }
         let mut best_id = 0;
         let mut best_weight = 0;
-        for i in 0..attestations.len() {
-            if weights[i] > best_weight {
-                best_weight = weights[i];
+        for (i, weight) in weights.iter().enumerate().take(attestations.len()) {
+            if *weight > best_weight {
+                best_weight = *weight;
                 best_id = i;
             }
         }
 
         Ok((vec![attestations[best_id].clone()], best_weight))
-    }
-
-    fn select_max_cover_attestations(
-        &self,
-        mut attestations: Vec<Attestation<P>>,
-        max_count: usize,
-    ) -> Result<(Vec<Attestation<P>>, u64)> {
-        let mut value = 0;
-        let mut selected_attestations = Vec::new();
-
-        let mut previous_epoch_participation = self.previous_epoch_participation.clone();
-        let mut current_epoch_participation = self.current_epoch_participation.clone();
-
-        for _ in 0..max_count {
-            attestations.sort_by_cached_key(|attestation| {
-                self.added_weight(
-                    attestation,
-                    &previous_epoch_participation,
-                    &current_epoch_participation,
-                )
-                .ok()
-            });
-
-            let attestation = match attestations.pop() {
-                None => bail!("I don't know what to do"),
-                Some(att) => att,
-            };
-
-            let added_value = self.added_weight(
-                &attestation,
-                &previous_epoch_participation,
-                &current_epoch_participation,
-            )?;
-
-            if added_value == 0 {
-                return Err(anyhow!("Failed to increase cover"))
-                    .context("Can not add more attestations without duplication");
-            }
-
-            let _unused = self.add_attestation(
-                &attestation,
-                &mut previous_epoch_participation,
-                &mut current_epoch_participation,
-            );
-
-            selected_attestations.push(attestation);
-            value += added_value;
-        }
-
-        Ok((selected_attestations, value))
     }
 
     #[must_use]
@@ -642,6 +585,7 @@ impl<P: Preset> AttestationPacker<P> {
     }
 
     // this seems to cause 30 % increase in runtime, so it is not used in greedy and may be removed from optimal solution (depending on comparison)
+    // it includes balance into weight calculation
     fn better_added_weight(
         &self,
         attestation: &Attestation<P>,
@@ -653,7 +597,6 @@ impl<P: Preset> AttestationPacker<P> {
 
         let base_reward_per_increment = get_base_reward_per_increment(&self.state);
 
-        let mut proposer_reward_numerator = 0;
         self.attesting_indices(attestation)?
             .map(|validator_index| {
                 let index = usize::try_from(validator_index)?;
@@ -853,60 +796,6 @@ mod tests {
     type BitListMap<P> =
         HashMap<AttestationData, BitList<<P as Preset>::MaxValidatorsPerCommittee>>;
 
-    fn compute_total_reward<P: Preset>(
-        packer: &AttestationPacker<P>,
-        pack_outcome: &PackOutcome<P>,
-    ) -> Result<u64> {
-        let mut previous_epoch_participation =
-            compute_epoch_participation(&packer.state, AttestationEpoch::Previous)?;
-        let mut current_epoch_participation =
-            compute_epoch_participation(&packer.state, AttestationEpoch::Current)?;
-
-        let mut ans = 0;
-
-        for attestation in pack_outcome.attestations.clone().into_iter() {
-            let weight = packer.better_added_weight(
-                &attestation,
-                &previous_epoch_participation,
-                &current_epoch_participation,
-            )?;
-            ans += weight;
-            let _unused = packer.add_attestation(
-                &attestation,
-                &mut previous_epoch_participation,
-                &mut current_epoch_participation,
-            );
-        }
-        Ok(ans)
-    }
-
-    fn print_out_attestations<P: Preset>(
-        packer: &AttestationPacker<P>,
-        pack_outcome: &PackOutcome<P>,
-    ) -> Result<()> {
-        let mut previous_epoch_participation =
-            compute_epoch_participation(&packer.state, AttestationEpoch::Previous)?;
-        let mut current_epoch_participation =
-            compute_epoch_participation(&packer.state, AttestationEpoch::Current)?;
-
-        let mut attestation_vec = Vec::new();
-        for attestation in &pack_outcome.attestations {
-            attestation_vec.push(attestation.clone());
-        }
-
-        attestation_vec.sort_by_cached_key(|attestation| attestation.data);
-
-        for attestation in attestation_vec {
-            let weight = packer.added_weight(
-                &attestation,
-                &previous_epoch_participation,
-                &current_epoch_participation,
-            )?;
-            //println!("{:?} with weight {}", attestation.data, weight);
-        }
-        Ok(())
-    }
-
     #[test]
     #[cfg(feature = "eth2-cache")]
     fn test_goerli_aggregate_attestation_packing() -> Result<()> {
@@ -932,10 +821,6 @@ mod tests {
             &previous_epoch_aggregates,
             &current_epoch_aggregates,
         );
-        //println!(
-        //    "Greedy algorithm goerli reward: {}",
-        //    compute_total_reward(&packer, &pack_outcome)?
-        //);
 
         let proposable_attestations = pack_outcome.attestations;
 
@@ -976,10 +861,6 @@ mod tests {
             &previous_epoch_aggregates,
             &current_epoch_aggregates,
         );
-        //println!(
-        //    "Dynamic algorithm goerli reward: {}",
-        //    compute_total_reward(&packer, &pack_outcome)?
-        //);
 
         let proposable_attestations = pack_outcome.attestations;
         assert_eq!(
@@ -1009,7 +890,6 @@ mod tests {
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
 
-        let start_time = Instant::now();
         let packer = AttestationPacker::new(
             config.clone_arc(),
             latest_block_root,
@@ -1021,18 +901,6 @@ mod tests {
             &previous_epoch_aggregates,
             &current_epoch_aggregates,
         );
-        let end_time = Instant::now();
-        let elapsed_time = end_time.duration_since(start_time);
-        //println!(
-        //    "Greedy algorithm holesky runtime: {}.{:03} seconds",
-        //    elapsed_time.as_secs(),
-        //    elapsed_time.subsec_millis()
-        //);
-        // print_out_attestations(&packer, &pack_outcome);
-        //println!(
-        //    "Greedy algorithm holesky reward: {}",
-        //    compute_total_reward(&packer, &pack_outcome)?
-        //);
 
         let proposable_attestations = pack_outcome.attestations;
         assert_eq!(
@@ -1062,7 +930,6 @@ mod tests {
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
 
-        let start_time = Instant::now();
         let packer = AttestationPacker::new(
             config.clone_arc(),
             latest_block_root,
@@ -1074,18 +941,6 @@ mod tests {
             &previous_epoch_aggregates,
             &current_epoch_aggregates,
         );
-        let end_time = Instant::now();
-        let elapsed_time = end_time.duration_since(start_time);
-        //println!(
-        //    "Dynamic algorithm holesky runtime: {}.{:03} seconds",
-        //    elapsed_time.as_secs(),
-        //    elapsed_time.subsec_millis()
-        //);
-        // print_out_attestations(&packer, &pack_outcome);
-        //println!(
-        //    "Dynamic algorithm holesky reward: {}",
-        //    compute_total_reward(&packer, &pack_outcome)?
-        //);
 
         let proposable_attestations = pack_outcome.attestations;
         assert_eq!(

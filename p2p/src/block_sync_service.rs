@@ -1,5 +1,5 @@
 use core::{convert::Infallible as Never, fmt::Debug, time::Duration};
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 use database::Database;
@@ -85,7 +85,6 @@ impl<P: Preset> BlockSyncService<P> {
         db: Database,
         genesis_provider: GenesisProvider<P>,
         controller: RealController<P>,
-        slot: Slot,
         metrics: Option<Arc<Metrics>>,
         channels: Channels<P>,
         back_sync_enabled: bool,

@@ -657,6 +657,7 @@ fn handle_command<P: Preset>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn genesis_provider<P: Preset>(
     chain_config: &ChainConfig,
     genesis_state_file: Option<PathBuf>,
