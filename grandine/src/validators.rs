@@ -8,7 +8,7 @@ use anyhow::{Error, Result};
 use bls::{PublicKeyBytes, SecretKey};
 use educe::Educe;
 use eip_2335::Keystore;
-use log::warn;
+use log::{info, warn};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::KeyOrigin;
 use std_ext::ArcExt;
@@ -30,6 +30,11 @@ pub enum Validators {
     },
 }
 
+enum KeystoreExtension {
+    Json,
+    None,
+}
+
 impl Validators {
     fn keymap_from_paths(
         keystore_dir: impl AsRef<Path>,
@@ -38,7 +43,7 @@ impl Validators {
         let keystore_dir = keystore_dir.as_ref();
         let keystore_password_file = keystore_password_file.as_ref();
         let individual_passwords = keystore_password_file.is_dir();
-        let keystore_glob = "*.json";
+        let keystore_glob = "*";
 
         let old_working_directory = std::env::current_dir()?;
 
@@ -47,20 +52,35 @@ impl Validators {
         let keystores = glob::glob(keystore_glob)
             .expect("glob pattern should be valid")
             .flatten()
-            .map(|path| {
-                let keystore_file = keystore_dir.join(path.as_path());
-
-                let password_file = if individual_passwords {
-                    let file_stem = path
-                        .file_stem()
-                        .expect("glob patterns above only match paths that have file names");
-
-                    keystore_password_file.join(file_stem).with_extension("txt")
-                } else {
-                    keystore_password_file.to_path_buf()
+            .filter_map(|path| {
+                // None is a supported extension
+                let supported_extension = match path.extension() {
+                    None => Some(KeystoreExtension::None),
+                    Some(extension) => (extension == "json").then_some(KeystoreExtension::Json),
                 };
 
-                (keystore_file, password_file)
+                if let Some(extension) = supported_extension {
+                    let keystore_file = keystore_dir.join(path.as_path());
+
+                    let password_file = if individual_passwords {
+                        let file_stem = path
+                            .file_stem()
+                            .expect("glob patterns above only match paths that have file names");
+
+                        let password_file = keystore_password_file.join(file_stem);
+
+                        match extension {
+                            KeystoreExtension::Json => password_file.with_extension("txt"),
+                            KeystoreExtension::None => password_file,
+                        }
+                    } else {
+                        keystore_password_file.to_path_buf()
+                    };
+
+                    Some((keystore_file, password_file))
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -74,6 +94,8 @@ impl Validators {
         mut validator_key_cache: Option<&mut ValidatorKeyCache>,
         keystore_storage: &ValidatorKeyCache,
     ) -> Result<Vec<(PublicKeyBytes, Arc<SecretKey>, KeyOrigin)>> {
+        info!("started loading keystore and password files");
+
         // Collect all passwords and keystores first.
         // They may be used to load secret keys from the cache.
         // Secret keys are decrypted later.
@@ -128,6 +150,8 @@ impl Validators {
                                 .pipe(Arc::new);
 
                             let public_key = secret_key.to_public_key().into();
+
+                            info!("decrypted validator key {public_key:?}");
 
                             Ok((public_key, secret_key))
                         })?;

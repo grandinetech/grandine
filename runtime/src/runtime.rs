@@ -24,7 +24,7 @@ use genesis::GenesisProvider;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
-use log::info;
+use log::{info, warn};
 use metrics::{run_metrics_server, MetricsChannels, MetricsService};
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{
@@ -82,12 +82,10 @@ pub async fn run_after_genesis<P: Preset>(
         ..
     } = storage_config;
 
-    for pubkey in signer.keys() {
-        info!("loaded validator key {pubkey:?}");
-    }
-
     if !signer.is_empty() {
         info!("loaded {} validator key(s)", signer.keys().len());
+    } else if validator_config.keystore_storage_password_file.is_some() {
+        warn!("failed to load validator keys");
     }
 
     let (execution_service_tx, execution_service_rx) = mpsc::unbounded();
