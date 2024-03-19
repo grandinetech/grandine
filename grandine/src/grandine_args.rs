@@ -99,7 +99,7 @@ pub struct GrandineArgs {
     graffiti: Vec<H256>,
 
     /// List of optional runtime features to enable
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     features: Vec<Feature>,
 
     #[clap(subcommand)]
@@ -181,7 +181,7 @@ struct HttpApiOptions {
 
     /// List of Access-Control-Allow-Origin header values for the HTTP API server.
     /// Defaults to the listening URL of the HTTP API server.
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     http_allowed_origins: Vec<HeaderValue>,
 
     /// Max number of events stored in a single channel for HTTP API /events api call
@@ -458,11 +458,11 @@ struct NetworkConfigOptions {
     enr_quic_port_ipv6: Option<NonZeroU16>,
 
     /// List of ENR boot node addresses
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     boot_nodes: Vec<Enr>,
 
     /// List of Multiaddr node addresses
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     libp2p_nodes: Vec<Multiaddr>,
 
     /// Target number of network peers
@@ -470,7 +470,7 @@ struct NetworkConfigOptions {
     target_peers: usize,
 
     /// List of trusted peers
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     trusted_peers: Vec<PeerIdSerialized>,
 }
 
@@ -690,7 +690,7 @@ struct ValidatorOptions {
     builder_max_skipped_slots_per_epoch: u64,
 
     /// List of public keys to use from Web3Signer
-    #[clap(long, num_args = 1..)]
+    #[clap(long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
 
     /// [DEPRECATED] List of Web3Signer API URLs

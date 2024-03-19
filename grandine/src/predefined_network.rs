@@ -129,6 +129,13 @@ impl PredefinedNetwork {
         genesis_download_url: Option<Url>,
     ) -> Result<GenesisProvider<P>> {
         let config = &self.chain_config();
+
+        #[cfg(any(
+            feature = "network-goerli",
+            feature = "network-sepolia",
+            feature = "network-holesky",
+            test
+        ))]
         let load_genesis_state = |default_download_url: &str| {
             load_or_download_genesis_state(
                 config,
