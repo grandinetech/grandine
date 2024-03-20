@@ -426,6 +426,7 @@ pub struct RemoteKeysDeleteQuery {
 
 /// `GET /eth/v1/beacon/genesis`
 pub async fn genesis<P: Preset>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(genesis_provider): State<GenesisProvider<P>>,
 ) -> Result<EthResponse<GetGenesisResponse>, Error> {
     let genesis_state = genesis_provider.state();
@@ -433,7 +434,7 @@ pub async fn genesis<P: Preset>(
     let response = GetGenesisResponse {
         genesis_time: genesis_state.genesis_time(),
         genesis_validators_root: genesis_state.genesis_validators_root(),
-        genesis_fork_version: genesis_state.fork().current_version,
+        genesis_fork_version: chain_config.genesis_fork_version,
     };
 
     Ok(EthResponse::json(response))
