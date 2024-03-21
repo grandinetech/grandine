@@ -36,7 +36,7 @@ cargo build --profile compact --features default-networks
 
 The compiled binary is available at `./target/compact/grandine`.
 
-For faster building (larger binary size) use `--release` instead of `--compact`.
+For faster building (larger binary size) use `--release` instead of `--profile compact`.
 
 ### Docker builds
 
