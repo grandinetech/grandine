@@ -1580,34 +1580,9 @@ mod tests {
     }
 
     #[test]
-    fn validator_api_port_option() {
-        let config = config_from_args(["--validator-api-port", "1234"]);
-
-        assert_eq!(
-            config
-                .validator_api_config
-                .as_ref()
-                .map(|config| config.address),
-            None,
-        );
-    }
-
-    #[test]
-    fn validator_api_address_option() {
-        let config = config_from_args(["--validator-api-address", "0.0.0.0"]);
-
-        assert_eq!(
-            config
-                .validator_api_config
-                .as_ref()
-                .map(|config| config.address),
-            None,
-        );
-    }
-
-    #[test]
-    fn validator_api_address_and_port_option() {
+    fn validator_api_address_and_port_option_api_enabled() {
         let config = config_from_args([
+            "--enable-validator-api",
             "--validator-api-address",
             "0.0.0.0",
             "--validator-api-port",
@@ -1620,6 +1595,24 @@ mod tests {
                 .as_ref()
                 .map(|config| config.address),
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234)),
+        );
+    }
+
+    #[test]
+    fn validator_api_address_and_port_option_api_disabled() {
+        let config = config_from_args([
+            "--validator-api-address",
+            "0.0.0.0",
+            "--validator-api-port",
+            "1234",
+        ]);
+
+        assert_eq!(
+            config
+                .validator_api_config
+                .as_ref()
+                .map(|config| config.address),
+            None,
         );
     }
 
