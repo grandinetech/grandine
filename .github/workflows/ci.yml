@@ -8,8 +8,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Install packages
-      run: sudo scripts/ci/install.sh
-    - name: Build
-      run: scripts/ci/ci.sh
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        lfs: true
+          #    - name: Git lfs pull
+          #      working-directory: consensus-spec-tests
+          #      run: git lfs pull
+    - name: Install Rust
+      run: rustup toolchain install stable --profile minimal
+    - uses: Swatinem/rust-cache@v2
+    - name: Run formatter
+      run: cargo fmt --check
+    - name: Run clippy
+      run: bash scripts/ci/clippy.bash
+    - name: Run tests
+      run: cargo test --release
