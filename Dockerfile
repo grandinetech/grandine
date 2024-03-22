@@ -6,4 +6,4 @@ RUN scripts/build/release.sh
 FROM ubuntu:latest
 COPY --from=builder /target/compact/grandine /usr/local/bin/grandine
 
-ENTRYPOINT ["/usr/local/bin/grandine"]
+ENTRYPOINT ["grandine"]

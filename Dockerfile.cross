@@ -1,3 +1,5 @@
 FROM --platform=$TARGETPLATFORM ubuntu:22.04
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl-dev && apt-get clean
 COPY grandine /usr/local/bin/grandine
+
+ENTRYPOINT ["grandine"]
