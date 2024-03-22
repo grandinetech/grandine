@@ -245,17 +245,6 @@ impl SlashingProtector {
 
                 report.validators.succeeded.push(interchange_record.pubkey);
 
-                // delete older existing entries to avoid "gap" issues
-                let min_slot = interchange_record
-                    .signed_blocks
-                    .iter()
-                    .map(|block| block.slot)
-                    .min();
-
-                if let Some(min_slot) = min_slot {
-                    Self::delete_older_proposals(&transaction, validator_id, min_slot)?;
-                }
-
                 for signed_block in interchange_record.signed_blocks {
                     let proposal = BlockProposal {
                         slot: signed_block.slot,
@@ -272,22 +261,6 @@ impl SlashingProtector {
                             report.blocks.failed.push(proposal);
                         }
                     }
-                }
-
-                // delete older existing entries to avoid "gap" issues
-                let min_epochs = interchange_record
-                    .signed_attestations
-                    .iter()
-                    .map(|attestation| (attestation.source_epoch, attestation.target_epoch))
-                    .min();
-
-                if let Some((source_epoch, target_epoch)) = min_epochs {
-                    Self::delete_older_attestations(
-                        &transaction,
-                        validator_id,
-                        source_epoch,
-                        target_epoch,
-                    )?;
                 }
 
                 for signed_attestation in interchange_record.signed_attestations {
@@ -482,19 +455,6 @@ impl SlashingProtector {
         Ok(())
     }
 
-    fn delete_older_proposals(
-        transaction: &Transaction,
-        validator_id: ValidatorId,
-        slot: Slot,
-    ) -> Result<()> {
-        transaction.execute(
-            "DELETE FROM block_proposals WHERE validator_id = ?1 AND slot < ?2",
-            (validator_id, slot),
-        )?;
-
-        Ok(())
-    }
-
     fn store_proposal(
         transaction: &Transaction,
         validator_id: ValidatorId,
@@ -543,20 +503,6 @@ impl SlashingProtector {
                 |row| row.get(0),
             )
             .map_err(Into::into)
-    }
-
-    fn delete_older_attestations(
-        transaction: &Transaction,
-        validator_id: ValidatorId,
-        source_epoch: Epoch,
-        target_epoch: Epoch,
-    ) -> Result<()> {
-        transaction.execute(
-            "DELETE FROM attestation_proposals WHERE validator_id = ?1 AND source_epoch < ?2 AND target_epoch < ?3",
-            (validator_id, source_epoch, target_epoch),
-        )?;
-
-        Ok(())
     }
 
     pub fn validate_and_store_proposal(
@@ -1040,11 +986,13 @@ mod tests {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct TestBlock {
-        should_succeed: bool,
         #[serde(with = "serde_utils::string_or_native")]
         slot: Slot,
         signing_root: H256,
         pubkey: PublicKeyBytes,
+        #[allow(dead_code)]
+        should_succeed: bool,
+        should_succeed_complete: bool,
     }
 
     #[derive(Deserialize)]
@@ -1056,7 +1004,9 @@ mod tests {
         target_epoch: Epoch,
         signing_root: H256,
         pubkey: PublicKeyBytes,
+        #[allow(dead_code)]
         should_succeed: bool,
+        should_succeed_complete: bool,
     }
 
     fn build_own_attestation<P: Preset>(source: Epoch, target: Epoch) -> OwnAttestation<P> {
@@ -1362,12 +1312,12 @@ mod tests {
                     )?;
 
                     assert_ne!(
-                        test_block.should_succeed,
+                        test_block.should_succeed_complete,
                         validation_outcome.is_slashing_violation(),
                     );
 
                     // Test that valid block proposals are persisted in DB
-                    if test_block.should_succeed {
+                    if test_block.should_succeed_complete {
                         let count: usize = slashing_protector.transaction()?.query_row(
                             "SELECT count(*) FROM block_proposals \
                              WHERE slot = ?1 \
@@ -1394,12 +1344,12 @@ mod tests {
 
                 for (test_attestation, outcome) in step.attestations.iter().zip(outcomes) {
                     assert_ne!(
-                        test_attestation.should_succeed,
+                        test_attestation.should_succeed_complete,
                         outcome?.is_slashing_violation(),
                     );
 
                     // Test that valid attestation proposals are persisted in DB
-                    if test_attestation.should_succeed {
+                    if test_attestation.should_succeed_complete {
                         let count: usize = slashing_protector.transaction()?.query_row(
                             "SELECT count(*) FROM attestation_proposals \
                              WHERE source_epoch = ?1 \

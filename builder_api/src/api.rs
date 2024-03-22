@@ -283,6 +283,7 @@ fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "eth2-cache")]
 mod tests {
     use eth2_cache_utils::mainnet;
     use reqwest::{Client, Url};
@@ -320,7 +321,6 @@ mod tests {
         43, [42, 21, 0] => Err(BuilderApiError::RollingEpochMissingBlocks { missing_blocks: 30 });
         "more missing blocks than allowed in first gap alone"
     )]
-    #[cfg(feature = "eth2-cache")]
     fn circuit_breaker_conditions(
         slot: Slot,
         nonempty_slots: impl IntoIterator<Item = Slot>,

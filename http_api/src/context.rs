@@ -10,6 +10,7 @@ use deposit_tree::DepositTree;
 use enum_iterator::Sequence as _;
 use eth1::{Eth1Chain, Eth1Config};
 use eth1_api::{Eth1Api, Eth1ExecutionEngine, ExecutionService};
+#[cfg(feature = "eth2-cache")]
 use eth2_cache_utils::mainnet;
 use features::Feature;
 use fork_choice_control::{
@@ -410,6 +411,7 @@ impl Context<Mainnet> {
         }
     }
 
+    #[cfg(feature = "eth2-cache")]
     pub fn mainnet_genesis_128_slots() -> Self {
         let genesis_provider = predefined_chains::mainnet();
 
@@ -425,6 +427,7 @@ impl Context<Mainnet> {
         }
     }
 
+    #[cfg(feature = "eth2-cache")]
     pub fn mainnet_epoch_96214_128_slots() -> Self {
         let extra_blocks = mainnet::ALTAIR_BEACON_BLOCKS_FROM_128_SLOTS
             .force()
@@ -442,6 +445,7 @@ impl Context<Mainnet> {
         }
     }
 
+    #[cfg(feature = "eth2-cache")]
     pub fn mainnet_epoch_244816_128_slots() -> Self {
         let extra_blocks = mainnet::CAPELLA_BEACON_BLOCKS_FROM_244816_SLOTS
             .force()

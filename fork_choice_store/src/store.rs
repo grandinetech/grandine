@@ -709,24 +709,11 @@ impl<P: Preset> Store<P> {
     fn is_block_viable(&self, unfinalized_block: &UnfinalizedBlock<P>) -> bool {
         let voting_source = self.voting_source(unfinalized_block);
 
-        // > The voting source should be at the same height as the store's justified checkpoint
-        let mut correct_justified = self.justified_epoch() == GENESIS_EPOCH
-            || voting_source.epoch == self.justified_checkpoint.epoch;
-
-        // > If the previous epoch is justified, the block should be pulled-up.
-        // > In this case, check that unrealized justification is higher than the store and that
-        // > the voting source is not more than two epochs ago
-        if !correct_justified && self.is_previous_epoch_justified() {
-            let unrealized_justification_higher = unfinalized_block
-                .chain_link
-                .unrealized_justified_checkpoint
-                .epoch
-                >= self.justified_checkpoint.epoch;
-
-            let voting_source_recent = voting_source.epoch + 2 >= self.current_epoch();
-
-            correct_justified = unrealized_justification_higher && voting_source_recent;
-        }
+        // > The voting source should be at the same height as the store's justified checkpoint or
+        // > not more than two epochs ago
+        let correct_justified = self.justified_epoch() == GENESIS_EPOCH
+            || voting_source.epoch == self.justified_checkpoint.epoch
+            || voting_source.epoch + 2 >= self.current_epoch();
 
         // `correct_finalized` should always be true because our implementation prunes orphans as
         // soon as possible. We check it anyway to be safe.
@@ -770,11 +757,6 @@ impl<P: Preset> Store<P> {
                 .state(self)
                 .current_justified_checkpoint()
         }
-    }
-
-    /// [`is_previous_epoch_justified`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#is_previous_epoch_justified)
-    fn is_previous_epoch_justified(&self) -> bool {
-        self.justified_epoch() + 1 == self.current_epoch()
     }
 
     fn should_wait_for_justified_state(&self, checkpoint: Checkpoint) -> bool {

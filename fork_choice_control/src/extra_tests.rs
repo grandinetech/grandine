@@ -12,27 +12,29 @@
 #![allow(clippy::too_many_lines)]
 
 use core::ops::Not as _;
-use std::{path::PathBuf, sync::Arc};
+#[cfg(feature = "eth2-cache")]
+use std::sync::Arc;
 
-use anyhow::Result;
-use eth2_cache_utils::{mainnet, medalla, withdrawal_devnet_3};
+#[cfg(feature = "eth2-cache")]
+use eth2_cache_utils::medalla;
+#[cfg(feature = "eth2-cache")]
 use eth2_libp2p::GossipId;
-use execution_engine::PayloadStatusV1;
 use fork_choice_store::PayloadStatus;
 use helper_functions::misc;
+#[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
+#[cfg(feature = "eth2-cache")]
+use types::{config::Config, preset::Medalla};
 use types::{
-    combined::SignedBeaconBlock,
-    config::Config,
     phase0::{consts::GENESIS_SLOT, primitives::H256},
-    preset::{Medalla, Minimal},
+    preset::Minimal,
     traits::SignedBeaconBlock as _,
 };
 
-use crate::{
-    helpers::{is_at_start_of_epoch, start_of_epoch, Context, Status},
-    specialized::TestController,
-};
+use crate::helpers::{is_at_start_of_epoch, start_of_epoch, Context, Status};
+
+#[cfg(feature = "eth2-cache")]
+use crate::specialized::TestController;
 
 // This test was added to reproduce the bug described in
 // <https://github.com/ethereum/consensus-specs/issues/1887>.
@@ -84,180 +86,6 @@ fn processes_blocks_from_medalla_in_their_slots() {
 
         assert_eq!(head.slot(), block.message().slot());
         assert_eq!(head.block_root, block.message().hash_tree_root());
-    }
-}
-
-// The blocks were not actually invalid.
-// We had missed the change to the type of `WithdrawalV1.amount` in `execution-apis`.
-#[test]
-#[cfg(feature = "eth2-cache")]
-fn handles_invalid_blocks_from_withdrawal_devnet_3() -> Result<()> {
-    let config = Arc::new(Config::withdrawal_devnet_3());
-
-    let genesis_block = withdrawal_devnet_3::GENESIS_BEACON_BLOCK
-        .force()
-        .clone_arc();
-
-    let genesis_state = withdrawal_devnet_3::GENESIS_BEACON_STATE
-        .force()
-        .clone_arc();
-
-    let last_slot = 672;
-    let last_valid_slot = 643;
-    let justified_slot = 640;
-    let blocks = withdrawal_devnet_3::beacon_blocks(1..=last_slot, 6);
-
-    let index_of_slot = |slot| {
-        blocks
-            .binary_search_by_key(&slot, |block| block.message().slot())
-            .unwrap_or_else(|_| panic!("withdrawal-devnet-3 should have a block at slot {slot}"))
-    };
-
-    let last_valid_index = index_of_slot(last_valid_slot);
-    let justified_index = index_of_slot(justified_slot);
-    let last_valid_block = &blocks[last_valid_index];
-    let justified_block = &blocks[justified_index];
-    let (valid_blocks, invalid_blocks) = blocks.split_at(last_valid_index + 1);
-    let (invalid_blocks, poison_blocks) = invalid_blocks.split_at(invalid_blocks.len() - 1);
-
-    let (controller, _mutator_handle) = TestController::quiet(config, genesis_block, genesis_state);
-
-    let mut json_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    assert!(json_directory.pop());
-    json_directory.push("eth2-cache/withdrawals_devnet_3/json");
-
-    let add_block = |block: &Arc<SignedBeaconBlock<_>>| -> Result<()> {
-        let block_root = block.message().hash_tree_root();
-        let path = json_directory.join(format!("payload_response_block_root_{block_root:?}.json"));
-        let bytes = fs_err::read(path)?;
-        let payload_status = serde_json::from_slice::<PayloadStatusV1>(bytes.as_slice())?;
-
-        let execution_block_hash = block
-            .execution_block_hash()
-            .expect("every block from withdrawal-devnet-3 should be post-Bellatrix");
-
-        controller.on_slot(block.message().slot());
-        controller.on_gossip_block(block.clone_arc(), GossipId::default());
-        controller.on_notified_new_payload(execution_block_hash, payload_status);
-        controller.wait_for_tasks();
-
-        Ok(())
-    };
-
-    let assert_head = |block: &Arc<SignedBeaconBlock<_>>| {
-        let head = controller.head().value;
-
-        assert_eq!(head.slot(), block.message().slot());
-        assert_eq!(head.block_root, block.message().hash_tree_root());
-    };
-
-    for block in valid_blocks {
-        add_block(block)?;
-        assert_head(block);
-    }
-
-    assert_head(last_valid_block);
-
-    for block in invalid_blocks {
-        add_block(block)?;
-        assert_head(last_valid_block);
-    }
-
-    for block in poison_blocks {
-        add_block(block)?;
-        assert_head(justified_block);
-    }
-
-    Ok(())
-}
-
-// This test was added to verify the comment about anchors above `Store::is_block_viable`.
-// We weren't sure how long the store would remain without viable forks after the changes to
-// viability checking in `consensus-specs` version 1.3.0-rc.4.
-// The test revealed a bug in `Store::apply_tick` that was making the mutator panic.
-// `Store::head` was being called while the `Store` was in an inconsistent state.
-// That made `assert!(no_viable_segments)` fail, though the end result may have been unaffected.
-#[test]
-#[cfg(feature = "eth2-cache")]
-fn handles_blocks_after_non_genesis_anchor_in_their_slots() {
-    let config = Arc::new(Config::mainnet());
-    let anchor_state = mainnet::ALTAIR_BEACON_STATE.force().clone_arc();
-    let anchor_block = mainnet::ALTAIR_BEACON_BLOCK.force().clone_arc();
-
-    let (viable_block, non_viable_blocks) = mainnet::ALTAIR_BEACON_BLOCKS_FROM_32_SLOTS
-        .force()
-        .split_last()
-        .expect("range should contain at least one block");
-
-    let (controller, _mutator_handle) =
-        TestController::quiet(config, anchor_block.clone_arc(), anchor_state);
-
-    let add_block = |block: &Arc<SignedBeaconBlock<_>>| {
-        controller.on_slot(block.message().slot());
-        controller.on_gossip_block(block.clone_arc(), GossipId::default());
-        controller.wait_for_tasks();
-    };
-
-    let assert_head = |block: &Arc<SignedBeaconBlock<_>>| {
-        let head = controller.head().value;
-
-        assert_eq!(head.slot(), block.message().slot());
-        assert_eq!(head.block_root, block.message().hash_tree_root());
-    };
-
-    for block in non_viable_blocks {
-        add_block(block);
-        assert_head(&anchor_block);
-    }
-
-    add_block(viable_block);
-    assert_head(viable_block);
-}
-
-#[test]
-#[cfg(feature = "eth2-cache")]
-fn handles_blocks_after_non_genesis_anchor_in_a_future_slot() {
-    let config = Arc::new(Config::mainnet());
-    let anchor_state = mainnet::ALTAIR_BEACON_STATE.force().clone_arc();
-    let anchor_block = mainnet::ALTAIR_BEACON_BLOCK.force().clone_arc();
-    let supermajority_block_index = 22;
-
-    let (non_viable_blocks, viable_blocks) = mainnet::ALTAIR_BEACON_BLOCKS_FROM_32_SLOTS
-        .force()
-        .split_at(supermajority_block_index);
-
-    let last_slot = viable_blocks
-        .last()
-        .expect("range should contain at least one block")
-        .message()
-        .slot();
-
-    let (controller, _mutator_handle) =
-        TestController::quiet(config, anchor_block.clone_arc(), anchor_state);
-
-    let add_block = |block: &Arc<SignedBeaconBlock<_>>| {
-        controller.on_requested_block(block.clone_arc(), None);
-        controller.wait_for_tasks();
-    };
-
-    let assert_head = |block: &Arc<SignedBeaconBlock<_>>| {
-        let head = controller.head().value;
-
-        assert_eq!(head.slot(), block.message().slot());
-        assert_eq!(head.block_root, block.message().hash_tree_root());
-    };
-
-    controller.on_slot(last_slot);
-    controller.wait_for_tasks();
-
-    for block in non_viable_blocks {
-        add_block(block);
-        assert_head(&anchor_block);
-    }
-
-    for block in viable_blocks {
-        add_block(block);
-        assert_head(block);
     }
 }
 
@@ -507,124 +335,6 @@ fn best_child_is_updated_when_it_falls_behind_the_2nd_best_one() {
         finalized_block_count: 1,
         unfinalized_block_count_in_fork: 1,
         unfinalized_block_count_total: 2,
-    });
-}
-
-// ```text
-//   0
-//  / \
-// 1   |  block in epoch 1, justified between epochs 2 and 3 by blocks 2 and 3
-// |   |
-// 2   |  block at the start of epoch 2, with attestations justifying block 1 in epoch 1
-// |   |
-// |   4  block in epoch 2, justified between epochs 2 and 3 by blocks 5 and 6
-// |   |
-// |   5  block at the end of epoch 2, with attestations justifying block 4 in epoch 2
-// |   |
-// 3   |  block at the start of epoch 3, causing attestations added by block 2 to be processed
-//     |
-//     6  block at the start of epoch 3, causing attestations added by block 5 to be processed
-// ```
-//
-// There used to be separate tests for this happening early and late in an epoch.
-// The checkpoint would only be updated in the first `SAFE_SLOTS_TO_UPDATE_JUSTIFIED` slots.
-// The condition was removed from the Fork Choice specification in version 1.3.0-rc.4.
-#[test]
-fn justified_checkpoint_always_switches_to_later_one() {
-    let mut context = Context::minimal();
-
-    let (_, state_0) = context.genesis();
-    let (block_1, state_1) = context.empty_block(&state_0, start_of_epoch(1), H256::default());
-    let (block_2, state_2) = context.block_justifying_previous_epoch(&state_1, 2, H256::default());
-    let (block_3, _) = context.empty_block(&state_2, start_of_epoch(3), H256::default());
-    let (block_4, state_4) = context.empty_block(&state_0, start_of_epoch(2), H256::default());
-    let (block_5, state_5) = context.block_justifying_current_epoch(&state_4, 2, H256::default());
-    let (block_6, _) = context.empty_block(&state_5, start_of_epoch(3), H256::default());
-
-    context.on_slot(start_of_epoch(3));
-
-    context.on_acceptable_block(&block_1);
-
-    context.assert_status(Status {
-        head: &block_1,
-        attesting_validators: Some(0),
-        store_justified_epoch: 0,
-        store_finalized_epoch: 0,
-        fork_count_viable: 1,
-        fork_count_total: 1,
-        finalized_block_count: 1,
-        unfinalized_block_count_in_fork: 1,
-        unfinalized_block_count_total: 1,
-    });
-
-    context.on_acceptable_block(&block_2);
-
-    context.assert_status(Status {
-        head: &block_2,
-        attesting_validators: Some(0),
-        store_justified_epoch: 1,
-        store_finalized_epoch: 0,
-        fork_count_viable: 1,
-        fork_count_total: 1,
-        finalized_block_count: 1,
-        unfinalized_block_count_in_fork: 2,
-        unfinalized_block_count_total: 2,
-    });
-
-    context.on_acceptable_block(&block_3);
-
-    context.assert_status(Status {
-        head: &block_3,
-        attesting_validators: Some(0),
-        store_justified_epoch: 1,
-        store_finalized_epoch: 0,
-        fork_count_viable: 1,
-        fork_count_total: 1,
-        finalized_block_count: 1,
-        unfinalized_block_count_in_fork: 3,
-        unfinalized_block_count_total: 3,
-    });
-
-    context.on_acceptable_block(&block_4);
-
-    context.assert_status(Status {
-        head: &block_3,
-        attesting_validators: Some(0),
-        store_justified_epoch: 1,
-        store_finalized_epoch: 0,
-        fork_count_viable: 1,
-        fork_count_total: 2,
-        finalized_block_count: 1,
-        unfinalized_block_count_in_fork: 3,
-        unfinalized_block_count_total: 4,
-    });
-
-    context.on_acceptable_block(&block_5);
-
-    context.assert_status(Status {
-        head: &block_5,
-        attesting_validators: Some(0),
-        store_justified_epoch: 2,
-        store_finalized_epoch: 0,
-        fork_count_viable: 1,
-        fork_count_total: 2,
-        finalized_block_count: 1,
-        unfinalized_block_count_in_fork: 2,
-        unfinalized_block_count_total: 5,
-    });
-
-    context.on_acceptable_block(&block_6);
-
-    context.assert_status(Status {
-        head: &block_6,
-        attesting_validators: Some(0),
-        store_justified_epoch: 2,
-        store_finalized_epoch: 0,
-        fork_count_viable: 1,
-        fork_count_total: 2,
-        finalized_block_count: 1,
-        unfinalized_block_count_in_fork: 3,
-        unfinalized_block_count_total: 6,
     });
 }
 
