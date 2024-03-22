@@ -138,6 +138,16 @@ impl<P: Preset> AttestationPacker<P> {
         // - <https://en.wikipedia.org/wiki/Set_packing>
         // - <https://cstheory.stackexchange.com/questions/21448/set-packing-with-maximum-coverage-objective>
         // We use a greedy algorithm.
+
+        candidates.sort_by_cached_key(|attestation| {
+            self.added_weight(
+                attestation,
+                &previous_epoch_participation,
+                &current_epoch_participation,
+            )
+            .ok()
+        });
+
         let attestations = core::iter::from_fn(move || {
             let attestation = candidates.pop()?;
 
