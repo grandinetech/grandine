@@ -5,21 +5,28 @@ on: [push]
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-14]
+      fail-fast: false
     steps:
+    - name: Cache git folder
+      uses: actions/cache@v4
+      with:
+        path: .git
+        key: git-repository-key
     - uses: actions/checkout@v4
       with:
         submodules: true
         lfs: true
-          #    - name: Git lfs pull
-          #      working-directory: consensus-spec-tests
-          #      run: git lfs pull
     - name: Install Rust
       run: rustup toolchain install stable --profile minimal
     - uses: Swatinem/rust-cache@v2
     - name: Run formatter
       run: cargo fmt --check
+      if: matrix.os == 'ubuntu-latest'
     - name: Run clippy
       run: bash scripts/ci/clippy.bash
     - name: Run tests
