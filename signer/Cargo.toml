@@ -10,7 +10,6 @@ workspace = true
 anyhow = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
-derive_more = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }

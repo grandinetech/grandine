@@ -685,6 +685,10 @@ struct ValidatorOptions {
     #[clap(long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
 
+    /// Refetches keys from Web3Signer once every epoch. This overwrites changes done via Keymanager API
+    #[clap(long)]
+    web3signer_refresh_keys_every_epoch: bool,
+
     /// [DEPRECATED] List of Web3Signer API URLs
     #[clap(long, num_args = 1..)]
     web3signer_api_urls: Vec<Url>,
@@ -873,6 +877,7 @@ impl GrandineArgs {
             builder_max_skipped_slots_per_epoch,
             use_validator_key_cache,
             web3signer_public_keys,
+            web3signer_refresh_keys_every_epoch,
             web3signer_api_urls,
             web3signer_urls,
             slashing_protection_history_limit,
@@ -1152,6 +1157,7 @@ impl GrandineArgs {
 
         let web3signer_config = Web3SignerConfig {
             public_keys: web3signer_public_keys.into_iter().collect(),
+            allow_to_reload_keys: web3signer_refresh_keys_every_epoch,
             urls: web3signer_urls,
         };
 

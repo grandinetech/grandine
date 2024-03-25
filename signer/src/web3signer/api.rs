@@ -5,7 +5,6 @@ use std::{
 
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
-use derive_more::Constructor;
 use log::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{Client, Url};
@@ -17,24 +16,36 @@ use super::types::{SigningRequest, SigningResponse};
 
 #[derive(Clone, Default, Debug)]
 pub struct Config {
+    pub allow_to_reload_keys: bool,
     pub public_keys: HashSet<PublicKeyBytes>,
     pub urls: Vec<Url>,
 }
 
-#[derive(Clone, Constructor)]
+#[derive(Clone)]
 pub struct Web3Signer {
     client: Client,
     config: Config,
     metrics: Option<Arc<Metrics>>,
+    keys_loaded: HashSet<Url>,
 }
 
 impl Web3Signer {
+    #[must_use]
+    pub fn new(client: Client, config: Config, metrics: Option<Arc<Metrics>>) -> Self {
+        Self {
+            client,
+            config,
+            metrics,
+            keys_loaded: HashSet::new(),
+        }
+    }
+
     #[must_use]
     pub const fn client(&self) -> &Client {
         &self.client
     }
 
-    pub async fn load_public_keys(&self) -> HashMap<&Url, HashSet<PublicKeyBytes>> {
+    pub async fn load_public_keys(&mut self) -> HashMap<&Url, HashSet<PublicKeyBytes>> {
         let _timer = self
             .metrics
             .as_ref()
@@ -43,6 +54,10 @@ impl Web3Signer {
         let mut keys = HashMap::new();
 
         for url in &self.config.urls {
+            if !self.config.allow_to_reload_keys && self.keys_loaded.contains(url) {
+                continue;
+            }
+
             match self.load_public_keys_from_url(url).await {
                 Ok(mut remote_keys) => {
                     if !self.config.public_keys.is_empty() {
@@ -50,6 +65,7 @@ impl Web3Signer {
                     }
 
                     keys.insert(url, remote_keys);
+                    self.keys_loaded.insert(url.clone());
                 }
                 Err(error) => warn!("failed to load Web3Signer keys from {url}: {error:?}"),
             }
@@ -135,13 +151,50 @@ mod tests {
 
         let url = Url::parse(&server.url("/"))?;
         let config = super::Config {
+            allow_to_reload_keys: false,
             public_keys: HashSet::new(),
             urls: vec![url.clone()],
         };
-        let web3signer = Web3Signer::new(Client::new(), config, None);
+        let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
         let response = web3signer.load_public_keys().await;
         let expected = HashMap::from([(&url, HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]))]);
+
+        assert_eq!(response, expected);
+
+        let response = web3signer.load_public_keys().await;
+        // By default, do not load pubkeys from Web3Signer again if keys were loaded
+        let expected = HashMap::new();
+
+        assert_eq!(response, expected);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_load_public_keys_if_reload_is_allowed() -> Result<()> {
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/api/v1/eth2/publicKeys");
+            then.status(200)
+                .body(json!([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]).to_string());
+        });
+
+        let url = Url::parse(&server.url("/"))?;
+        let config = super::Config {
+            allow_to_reload_keys: true,
+            public_keys: HashSet::new(),
+            urls: vec![url.clone()],
+        };
+        let mut web3signer = Web3Signer::new(Client::new(), config, None);
+
+        let response = web3signer.load_public_keys().await;
+        let expected = HashMap::from([(&url, HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]))]);
+
+        assert_eq!(response, expected);
+
+        let response = web3signer.load_public_keys().await;
 
         assert_eq!(response, expected);
 
@@ -160,10 +213,11 @@ mod tests {
 
         let url = Url::parse(&server.url("/"))?;
         let config = super::Config {
+            allow_to_reload_keys: false,
             public_keys: vec![SAMPLE_PUBKEY_2].into_iter().collect(),
             urls: vec![url.clone()],
         };
-        let web3signer = Web3Signer::new(Client::new(), config, None);
+        let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
         let response = web3signer.load_public_keys().await;
         let expected = HashMap::from([(&url, HashSet::from([SAMPLE_PUBKEY_2]))]);
@@ -186,6 +240,7 @@ mod tests {
 
         let url = Url::parse(&server.url("/"))?;
         let config = super::Config {
+            allow_to_reload_keys: false,
             public_keys: HashSet::new(),
             urls: vec![url.clone()],
         };

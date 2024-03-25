@@ -770,6 +770,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if misc::is_epoch_start::<P>(slot) {
                     let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
                     self.spawn_slashing_protection_pruning(current_epoch);
+                    self.refresh_signer_keys();
                 }
             }
             _ => {}
@@ -2945,6 +2946,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     const fn start_of_epoch(epoch: Epoch) -> Slot {
         misc::compute_start_slot_at_epoch::<P>(epoch)
+    }
+
+    fn refresh_signer_keys(&self) {
+        let signer_arc = self.signer.clone_arc();
+
+        tokio::spawn(async move {
+            signer_arc
+                .write()
+                .await
+                .refresh_keys_from_web3signer()
+                .await
+        });
     }
 
     fn get_execution_payload_header(

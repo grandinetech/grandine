@@ -6955,7 +6955,6 @@ dependencies = [
  "anyhow",
  "bls",
  "builder_api",
- "derive_more",
  "futures",
  "helper_functions",
  "hex-literal",

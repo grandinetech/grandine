@@ -10,6 +10,7 @@ use futures::{
     try_join,
 };
 use itertools::Itertools as _;
+use log::info;
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use reqwest::{Client, Url};
@@ -149,6 +150,38 @@ impl Signer {
     #[must_use]
     pub fn no_keys(&self) -> bool {
         self.sign_methods.is_empty()
+    }
+
+    pub async fn refresh_keys_from_web3signer(&mut self) {
+        for (url, remote_keys) in self.web3signer.load_public_keys().await {
+            self.sign_methods
+                .retain(|public_key, sign_method| match sign_method {
+                    SignMethod::SecretKey(_, _) => true,
+                    SignMethod::Web3Signer(api_url) => {
+                        let retain = url != api_url || remote_keys.contains(public_key);
+
+                        if !retain {
+                            info!(
+                                "Validator credentials with public key {:?} were removed from Web3Signer at {}",
+                                public_key, url,
+                            );
+                        }
+
+                        retain
+                    }
+                });
+
+            for public_key in remote_keys {
+                self.sign_methods.entry(public_key).or_insert_with(|| {
+                    info!(
+                        "Validator credentials with public key {:?} were added to Web3Signer at {}",
+                        public_key, url,
+                    );
+
+                    SignMethod::Web3Signer(url.clone())
+                });
+            }
+        }
     }
 
     pub async fn sign<'block, P: Preset>(
