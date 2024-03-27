@@ -5,6 +5,7 @@ use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::warn;
+use operation_pools::PoolAdditionOutcome;
 use types::{
     altair::containers::SignedContributionAndProof,
     combined::{
@@ -27,8 +28,8 @@ pub type BlindedBlockSender<P> =
 pub enum ApiToValidator<P: Preset> {
     ProduceBeaconBlock(BeaconBlockSender<P>, H256, SignatureBytes, Slot, bool),
     ProduceBlindedBeaconBlock(BlindedBlockSender<P>, H256, SignatureBytes, Slot, bool),
-    AttesterSlashing(Box<AttesterSlashing<P>>),
-    ProposerSlashing(Box<ProposerSlashing>),
+    AttesterSlashing(Sender<PoolAdditionOutcome>, Box<AttesterSlashing<P>>),
+    ProposerSlashing(Sender<PoolAdditionOutcome>, Box<ProposerSlashing>),
     PublishSignedBlindedBlock(
         Sender<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>>,
         Box<SignedBlindedBeaconBlock<P>>,
@@ -37,7 +38,7 @@ pub enum ApiToValidator<P: Preset> {
     RequestAttesterSlashings(Sender<Vec<AttesterSlashing<P>>>),
     RequestProposerSlashings(Sender<Vec<ProposerSlashing>>),
     RequestSignedVoluntaryExits(Sender<Vec<SignedVoluntaryExit>>),
-    SignedVoluntaryExit(Box<SignedVoluntaryExit>),
+    SignedVoluntaryExit(Sender<PoolAdditionOutcome>, Box<SignedVoluntaryExit>),
     SignedValidatorRegistrations(
         Sender<Vec<(usize, Error)>>,
         Vec<SignedValidatorRegistrationV1>,

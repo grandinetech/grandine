@@ -382,12 +382,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 api_message = self.api_to_validator_rx.select_next_some() => {
                     let success = match api_message {
-                        ApiToValidator::AttesterSlashing(attester_slashing) => {
-                            if self.handle_external_attester_slashing(*attester_slashing.clone())?.is_publishable() {
+                        ApiToValidator::AttesterSlashing(sender, attester_slashing) => {
+                            let result = self.handle_external_attester_slashing(*attester_slashing.clone())?;
+
+                            if result.is_publishable() {
                                 ValidatorToP2p::PublishAttesterSlashing(attester_slashing).send(&self.p2p_tx);
                             }
 
-                            true
+                            sender.send(result).is_ok()
                         },
                         ApiToValidator::PublishSignedBlindedBlock(sender, signed_blinded_block) => {
                             let result = self.publish_signed_blinded_block(&signed_blinded_block).await;
@@ -423,12 +425,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 skip_randao_verification,
                             ).await
                         },
-                        ApiToValidator::ProposerSlashing(proposer_slashing) => {
-                            if self.handle_external_proposer_slashing(*proposer_slashing)?.is_publishable() {
+                        ApiToValidator::ProposerSlashing(sender, proposer_slashing) => {
+                            let result = self.handle_external_proposer_slashing(*proposer_slashing)?;
+
+                            if result.is_publishable() {
                                 ValidatorToP2p::PublishProposerSlashing(proposer_slashing).send(&self.p2p_tx);
                             }
 
-                            true
+                            sender.send(result).is_ok()
                         },
                         ApiToValidator::RegisteredValidators(sender) => {
                             let registered_pubkeys = self
@@ -484,12 +488,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             sender.send(errors).is_ok()
                         },
-                        ApiToValidator::SignedVoluntaryExit(voluntary_exit) => {
-                            if self.handle_external_voluntary_exit(voluntary_exit.clone())?.is_publishable() {
+                        ApiToValidator::SignedVoluntaryExit(sender, voluntary_exit) => {
+                            let result = self.handle_external_voluntary_exit(voluntary_exit.clone())?;
+
+                            if result.is_publishable() {
                                 ValidatorToP2p::PublishVoluntaryExit(voluntary_exit).send(&self.p2p_tx);
                             }
 
-                            true
+                            sender.send(result).is_ok()
                         }
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
                             let current_slot = self.controller.slot();

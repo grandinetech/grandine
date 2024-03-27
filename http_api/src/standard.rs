@@ -1134,8 +1134,16 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
 pub async fn submit_pool_proposer_slashing<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthJson(proposer_slashing): EthJson<Box<ProposerSlashing>>,
-) {
-    ApiToValidator::ProposerSlashing(proposer_slashing).send(&api_to_validator_tx);
+) -> Result<(), Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    ApiToValidator::ProposerSlashing(sender, proposer_slashing).send(&api_to_validator_tx);
+
+    if let PoolAdditionOutcome::Reject(_, error) = receiver.await? {
+        return Err(Error::InvalidProposerSlashing(error));
+    }
+
+    Ok(())
 }
 
 /// `GET /eth/v1/beacon/pool/proposer_slashings`
@@ -1155,8 +1163,16 @@ pub async fn pool_proposer_slashings<P: Preset>(
 pub async fn submit_pool_voluntary_exit<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthJson(signed_voluntary_exit): EthJson<Box<SignedVoluntaryExit>>,
-) {
-    ApiToValidator::SignedVoluntaryExit(signed_voluntary_exit).send(&api_to_validator_tx);
+) -> Result<(), Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    ApiToValidator::SignedVoluntaryExit(sender, signed_voluntary_exit).send(&api_to_validator_tx);
+
+    if let PoolAdditionOutcome::Reject(_, error) = receiver.await? {
+        return Err(Error::InvalidSignedVoluntaryExit(error));
+    }
+
+    Ok(())
 }
 
 /// `GET /eth/v1/beacon/pool/voluntary_exits`
@@ -1176,8 +1192,16 @@ pub async fn pool_voluntary_exits<P: Preset>(
 pub async fn submit_pool_attester_slashing<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthJson(attester_slashing): EthJson<Box<AttesterSlashing<P>>>,
-) {
-    ApiToValidator::AttesterSlashing(attester_slashing).send(&api_to_validator_tx);
+) -> Result<(), Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    ApiToValidator::AttesterSlashing(sender, attester_slashing).send(&api_to_validator_tx);
+
+    if let PoolAdditionOutcome::Reject(_, error) = receiver.await? {
+        return Err(Error::InvalidAttesterSlashing(error));
+    }
+
+    Ok(())
 }
 
 /// `GET /eth/v1/beacon/pool/attester_slashings`
