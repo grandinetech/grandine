@@ -710,6 +710,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         self.update_subnet_subscriptions(slot_head.as_ref()).await?;
 
+        if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
+            self.refresh_signer_keys();
+        }
+
         let Some(slot_head) = slot_head else {
             return Ok(());
         };
@@ -776,7 +780,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if misc::is_epoch_start::<P>(slot) {
                     let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
                     self.spawn_slashing_protection_pruning(current_epoch);
-                    self.refresh_signer_keys();
                 }
             }
             _ => {}
