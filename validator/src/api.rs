@@ -28,7 +28,9 @@ use jwt_simple::{
     claims::{JWTClaims, NoCustomClaims},
     reexports::coarsetime::Clock,
 };
-use keymanager::{KeyManager, KeymanagerOperationStatus, RemoteKey, ValidatingPubkey};
+use keymanager::{
+    KeyManager, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey, ValidatingPubkey,
+};
 use log::{debug, info};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use signer::{Signer, SigningMessage};
@@ -546,7 +548,7 @@ async fn keymanager_delete_keystores(
 /// `GET /eth/v1/remotekeys`
 async fn keymanager_list_remote_keys(
     State(keymanager): State<Arc<KeyManager>>,
-) -> Result<EthResponse<Vec<ValidatingPubkey>>, Error> {
+) -> Result<EthResponse<Vec<ListedRemoteKey>>, Error> {
     let remote_keys = keymanager.remote_keys().list().await;
 
     Ok(EthResponse::json(remote_keys))

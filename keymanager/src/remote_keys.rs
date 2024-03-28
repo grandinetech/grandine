@@ -4,12 +4,19 @@ use anyhow::{anyhow, Result};
 use bls::PublicKeyBytes;
 use futures::lock::Mutex;
 use reqwest::Url;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use signer::{KeyOrigin, Signer};
 use slashing_protection::SlashingProtector;
 use tokio::sync::RwLock;
 
-use crate::misc::{Error, OperationStatus, Status, ValidatingPubkey};
+use crate::misc::{Error, OperationStatus, Status};
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct ListedRemoteKey {
+    pub pubkey: PublicKeyBytes,
+    pub url: String,
+    pub readonly: bool,
+}
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 pub struct RemoteKey {
@@ -71,7 +78,7 @@ impl RemoteKeyManager {
                                 imported_pubkeys.push(pubkey);
                                 Status::Imported.into()
                             } else {
-                                Error::Duplicate.into()
+                                Status::Duplicate.into()
                             }
                         }
                         Err(error) => anyhow!(error).into(),
@@ -88,14 +95,14 @@ impl RemoteKeyManager {
         Ok(statuses)
     }
 
-    pub async fn list(&self) -> Vec<ValidatingPubkey> {
+    pub async fn list(&self) -> Vec<ListedRemoteKey> {
         self.signer
             .read()
             .await
             .web3signer_keys()
-            .map(|(pubkey, url)| ValidatingPubkey {
-                validating_pubkey: pubkey,
-                url: Some(url.to_string()),
+            .map(|(pubkey, url)| ListedRemoteKey {
+                pubkey,
+                url: url.to_string(),
                 readonly: false,
             })
             .collect()
@@ -169,8 +176,8 @@ mod tests {
                     message: None,
                 },
                 OperationStatus {
-                    status: Status::Error,
-                    message: Some("key already exists".into()),
+                    status: Status::Duplicate,
+                    message: None,
                 },
             ]
         );
@@ -182,9 +189,9 @@ mod tests {
 
         assert_eq!(
             manager.list().await,
-            [ValidatingPubkey {
-                validating_pubkey: PUBKEY_REMOTE,
-                url: Some("https://www.example.com/".into()),
+            [ListedRemoteKey {
+                pubkey: PUBKEY_REMOTE,
+                url: "https://www.example.com/".into(),
                 readonly: false,
             }],
         );

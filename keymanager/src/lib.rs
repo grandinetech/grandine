@@ -1,6 +1,6 @@
-pub use keystores::{load_key_storage, load_key_storage_password};
-pub use misc::{OperationStatus as KeymanagerOperationStatus, ValidatingPubkey};
-pub use remote_keys::RemoteKey;
+pub use keystores::{load_key_storage, load_key_storage_password, ValidatingPubkey};
+pub use misc::OperationStatus as KeymanagerOperationStatus;
+pub use remote_keys::{ListedRemoteKey, RemoteKey};
 
 pub use crate::proposer_configs::ProposerConfigs;
 

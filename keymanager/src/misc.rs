@@ -1,5 +1,4 @@
 use anyhow::Error as AnyhowError;
-use bls::PublicKeyBytes;
 use serde::Serialize;
 use thiserror::Error;
 use types::phase0::primitives::H256;
@@ -28,6 +27,7 @@ pub enum Error {
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Deleted,
+    Duplicate,
     Error,
     Imported,
 }
@@ -63,12 +63,4 @@ impl From<Status> for OperationStatus {
             message: None,
         }
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Serialize)]
-pub struct ValidatingPubkey {
-    pub validating_pubkey: PublicKeyBytes,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    pub readonly: bool,
 }

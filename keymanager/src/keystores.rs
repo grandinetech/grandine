@@ -10,6 +10,7 @@ use eip_2335::Keystore;
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use itertools::Itertools as _;
 use log::{info, warn};
+use serde::Serialize;
 use signer::{KeyOrigin, Signer};
 use slashing_protection::{interchange_format::InterchangeFormat, SlashingProtector};
 use std_ext::ArcExt as _;
@@ -20,7 +21,7 @@ use uuid::Uuid;
 use validator_key_cache::ValidatorKeyCache;
 use zeroize::Zeroizing;
 
-use crate::misc::{Error, OperationStatus, Status, ValidatingPubkey};
+use crate::misc::{Error, OperationStatus, Status};
 
 const KEYSTORE_STORAGE_FILE: &str = "keystores.json";
 
@@ -46,6 +47,12 @@ impl PersistenceConfig {
             Self::InMemory => Ok(()),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct ValidatingPubkey {
+    pub validating_pubkey: PublicKeyBytes,
+    pub readonly: bool,
 }
 
 pub struct KeystoreManager {
@@ -250,7 +257,6 @@ impl KeystoreManager {
             .keys_with_origin()
             .map(|(pubkey, origin)| ValidatingPubkey {
                 validating_pubkey: pubkey,
-                url: None,
                 readonly: match origin {
                     KeyOrigin::KeymanagerAPI => false,
                     KeyOrigin::LocalFileSystem | KeyOrigin::Web3Signer => true,
@@ -614,7 +620,6 @@ mod tests {
             manager.list_validating_pubkeys().await,
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                url: None,
                 readonly: false
             }],
         );
@@ -646,7 +651,6 @@ mod tests {
             manager.list_validating_pubkeys().await,
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                url: None,
                 readonly: false
             }],
         );
@@ -750,7 +754,6 @@ mod tests {
             manager.list_validating_pubkeys().await,
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                url: None,
                 readonly: false
             }],
         );
@@ -782,7 +785,6 @@ mod tests {
             manager.list_validating_pubkeys().await,
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                url: None,
                 readonly: false
             }],
         );
