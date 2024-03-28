@@ -45,7 +45,7 @@ impl Web3Signer {
         &self.client
     }
 
-    pub async fn load_public_keys(&mut self) -> HashMap<&Url, HashSet<PublicKeyBytes>> {
+    pub async fn load_public_keys(&mut self) -> HashMap<&Url, Option<HashSet<PublicKeyBytes>>> {
         let _timer = self
             .metrics
             .as_ref()
@@ -60,12 +60,16 @@ impl Web3Signer {
 
             match self.load_public_keys_from_url(url).await {
                 Ok(mut remote_keys) => {
-                    if !self.config.public_keys.is_empty() {
-                        remote_keys.retain(|pubkey| self.config.public_keys.contains(pubkey));
-                    }
+                    if remote_keys.is_empty() {
+                        keys.insert(url, None);
+                    } else {
+                        if !self.config.public_keys.is_empty() {
+                            remote_keys.retain(|pubkey| self.config.public_keys.contains(pubkey));
+                        }
 
-                    keys.insert(url, remote_keys);
-                    self.keys_loaded.insert(url.clone());
+                        keys.insert(url, Some(remote_keys));
+                        self.keys_loaded.insert(url.clone());
+                    }
                 }
                 Err(error) => warn!("failed to load Web3Signer keys from {url}: {error:?}"),
             }
@@ -158,7 +162,8 @@ mod tests {
         let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
         let response = web3signer.load_public_keys().await;
-        let expected = HashMap::from([(&url, HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]))]);
+        let expected =
+            HashMap::from([(&url, Some(HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2])))]);
 
         assert_eq!(response, expected);
 
@@ -190,7 +195,8 @@ mod tests {
         let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
         let response = web3signer.load_public_keys().await;
-        let expected = HashMap::from([(&url, HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]))]);
+        let expected =
+            HashMap::from([(&url, Some(HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2])))]);
 
         assert_eq!(response, expected);
 
@@ -220,7 +226,7 @@ mod tests {
         let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
         let response = web3signer.load_public_keys().await;
-        let expected = HashMap::from([(&url, HashSet::from([SAMPLE_PUBKEY_2]))]);
+        let expected = HashMap::from([(&url, Some(HashSet::from([SAMPLE_PUBKEY_2])))]);
 
         assert_eq!(response, expected);
 

@@ -10,7 +10,7 @@ use futures::{
     try_join,
 };
 use itertools::Itertools as _;
-use log::info;
+use log::{info, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use reqwest::{Client, Url};
@@ -137,10 +137,26 @@ impl Signer {
 
     pub async fn load_keys_from_web3signer(&mut self) -> Result<()> {
         for (url, remote_keys) in self.web3signer.load_public_keys().await {
-            for public_key in remote_keys {
-                self.sign_methods
-                    .entry(public_key)
-                    .or_insert_with(|| SignMethod::Web3Signer(url.clone()));
+            match remote_keys {
+                Some(keys) => {
+                    info!(
+                        "fetched {} validator key(s) from Web3Signer at {}",
+                        keys.len(),
+                        url,
+                    );
+
+                    for public_key in keys {
+                        self.sign_methods
+                            .entry(public_key)
+                            .or_insert_with(|| SignMethod::Web3Signer(url.clone()));
+                    }
+                }
+                None => {
+                    warn!(
+                        "Web3Signer at {} did not return any validator keys. It will retry to fetch keys again in the next epoch.",
+                        url,
+                    );
+                }
             }
         }
 
@@ -150,38 +166,6 @@ impl Signer {
     #[must_use]
     pub fn no_keys(&self) -> bool {
         self.sign_methods.is_empty()
-    }
-
-    pub async fn refresh_keys_from_web3signer(&mut self) {
-        for (url, remote_keys) in self.web3signer.load_public_keys().await {
-            self.sign_methods
-                .retain(|public_key, sign_method| match sign_method {
-                    SignMethod::SecretKey(_, _) => true,
-                    SignMethod::Web3Signer(api_url) => {
-                        let retain = url != api_url || remote_keys.contains(public_key);
-
-                        if !retain {
-                            info!(
-                                "Validator credentials with public key {:?} were removed from Web3Signer at {}",
-                                public_key, url,
-                            );
-                        }
-
-                        retain
-                    }
-                });
-
-            for public_key in remote_keys {
-                self.sign_methods.entry(public_key).or_insert_with(|| {
-                    info!(
-                        "Validator credentials with public key {:?} were added to Web3Signer at {}",
-                        public_key, url,
-                    );
-
-                    SignMethod::Web3Signer(url.clone())
-                });
-            }
-        }
     }
 
     pub async fn sign<'block, P: Preset>(

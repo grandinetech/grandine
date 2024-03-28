@@ -2960,13 +2960,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn refresh_signer_keys(&self) {
         let signer_arc = self.signer.clone_arc();
 
-        tokio::spawn(async move {
-            signer_arc
-                .write()
-                .await
-                .refresh_keys_from_web3signer()
-                .await
-        });
+        tokio::spawn(async move { signer_arc.write().await.load_keys_from_web3signer().await });
     }
 
     fn get_execution_payload_header(
