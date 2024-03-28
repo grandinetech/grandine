@@ -473,7 +473,7 @@ pub async fn run_after_genesis<P: Preset>(
         attestation_agg_pool.clone_arc(),
         builder_api,
         keymanager.proposer_configs().clone_arc(),
-        signer,
+        signer.clone_arc(),
         slashing_protector,
         sync_committee_agg_pool.clone_arc(),
         bls_to_execution_change_pool.clone_arc(),
@@ -558,7 +558,7 @@ pub async fn run_after_genesis<P: Preset>(
     let run_metrics_server = match metrics_server_config {
         Some(config) => Either::Left(run_metrics_server(
             config,
-            controller,
+            controller.clone_arc(),
             registry.take(),
             metrics.expect("Metrics registry must be present for metrics server"),
             metrics_to_metrics_tx,
@@ -580,8 +580,10 @@ pub async fn run_after_genesis<P: Preset>(
     let run_validator_api = match validator_api_config {
         Some(validator_api_config) => Either::Left(run_validator_api(
             validator_api_config,
-            keymanager,
+            controller,
             directories,
+            keymanager,
+            signer,
         )),
         None => Either::Right(core::future::pending()),
     };

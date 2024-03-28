@@ -29,6 +29,7 @@ fs-err = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
 hex = { workspace = true }
+http_api_utils = { workspace = true }
 itertools = { workspace = true }
 jwt-simple = { workspace = true }
 keymanager = { workspace = true }

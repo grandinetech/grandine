@@ -8175,6 +8175,7 @@ dependencies = [
  "futures",
  "helper_functions",
  "hex",
+ "http_api_utils",
  "interop",
  "itertools 0.12.1",
  "jwt-simple",

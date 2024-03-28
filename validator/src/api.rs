@@ -9,7 +9,7 @@ use anyhow::{Error as AnyhowError, Result};
 use axum::{
     async_trait,
     body::Body,
-    extract::{FromRef, FromRequest, FromRequestParts, Path as RequestPath, State},
+    extract::{FromRef, FromRequest, FromRequestParts, Path as RequestPath, Query, State},
     headers::{authorization::Bearer, Authorization},
     http::{request::Parts, Request, StatusCode},
     middleware::Next,
@@ -20,6 +20,9 @@ use axum::{
 use bls::PublicKeyBytes;
 use directories::Directories;
 use educe::Educe;
+use eth1_api::ApiController;
+use fork_choice_control::Wait;
+use helper_functions::{accessors, signing::SignForSingleFork};
 use jwt_simple::{
     algorithms::{HS256Key, MACLike as _},
     claims::{JWTClaims, NoCustomClaims},
@@ -27,11 +30,20 @@ use jwt_simple::{
 };
 use keymanager::{KeyManager, KeymanagerOperationStatus, RemoteKey, ValidatingPubkey};
 use log::{debug, info};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use signer::{Signer, SigningMessage};
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tokio::sync::RwLock;
 use tower_http::cors::AllowOrigin;
-use types::{bellatrix::primitives::Gas, phase0::primitives::ExecutionAddress};
+use types::{
+    bellatrix::primitives::Gas,
+    phase0::{
+        containers::{SignedVoluntaryExit, VoluntaryExit},
+        primitives::{Epoch, ExecutionAddress},
+    },
+    preset::Preset,
+};
 use zeroize::Zeroizing;
 
 const VALIDATOR_API_TOKEN_PATH: &str = "api-token.txt";
@@ -71,14 +83,25 @@ enum Error {
     InvalidJsonBody(#[source] AnyhowError),
     #[error("invalid public key")]
     InvalidPublicKey(#[source] AnyhowError),
+    #[error("invalid query string")]
+    InvalidQuery(#[source] AnyhowError),
     #[error("authentication error")]
     Unauthorized(#[source] AnyhowError),
+    #[error("validator {pubkey} not found")]
+    ValidatorNotFound { pubkey: PublicKeyBytes },
+    #[error("validator {pubkey} is not managed by validator client")]
+    ValidatorNotOwned { pubkey: PublicKeyBytes },
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         match self {
-            Self::InvalidJsonBody(_) | Self::InvalidPublicKey(_) => StatusCode::BAD_REQUEST,
+            Self::InvalidJsonBody(_) | Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            Self::ValidatorNotFound { pubkey: _ } | Self::ValidatorNotOwned { pubkey: _ } => {
+                StatusCode::NOT_FOUND
+            }
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
         }
@@ -252,21 +275,51 @@ impl<S> FromRequestParts<S> for EthPath<PublicKeyBytes> {
     }
 }
 
-#[derive(Clone)]
-struct ValidatorApiState {
-    keymanager: Arc<KeyManager>,
-    secret: Arc<Secret>,
+struct EthQuery<T>(pub T);
+
+#[async_trait]
+impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extract()
+            .await
+            .map(|Query(query)| Self(query))
+            .map_err(AnyhowError::msg)
+            .map_err(Error::InvalidQuery)
+    }
 }
 
-impl FromRef<ValidatorApiState> for Arc<KeyManager> {
-    fn from_ref(state: &ValidatorApiState) -> Self {
+#[derive(Clone)]
+struct ValidatorApiState<P: Preset, W: Wait> {
+    controller: ApiController<P, W>,
+    keymanager: Arc<KeyManager>,
+    secret: Arc<Secret>,
+    signer: Arc<RwLock<Signer>>,
+}
+
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for ApiController<P, W> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
+        state.controller.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<KeyManager> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
         state.keymanager.clone_arc()
     }
 }
 
-impl FromRef<ValidatorApiState> for Arc<Secret> {
-    fn from_ref(state: &ValidatorApiState) -> Self {
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Secret> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
         state.secret.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<RwLock<Signer>> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
+        state.signer.clone_arc()
     }
 }
 
@@ -317,6 +370,11 @@ struct ProposerConfigResponse {
     gas_limit: Option<Gas>,
     #[serde(skip_serializing_if = "Option::is_none")]
     graffiti: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateVoluntaryExitQuery {
+    epoch: Option<Epoch>,
 }
 
 /// `GET /eth/v1/validator/{pubkey}/feerecipient`
@@ -518,6 +576,48 @@ async fn keymanager_delete_remote_keys(
     Ok(EthResponse::json(delete_statuses))
 }
 
+/// `POST /eth/v1/validator/{pubkey}/voluntary_exit`
+async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(signer): State<Arc<RwLock<Signer>>>,
+    EthPath(pubkey): EthPath<PublicKeyBytes>,
+    EthQuery(query): EthQuery<CreateVoluntaryExitQuery>,
+) -> Result<EthResponse<SignedVoluntaryExit>, Error> {
+    let state = controller.preprocessed_state_at_current_slot()?;
+
+    let epoch = query
+        .epoch
+        .unwrap_or_else(|| accessors::get_current_epoch(&state));
+
+    if !signer.read().await.has_key(pubkey) {
+        return Err(Error::ValidatorNotOwned { pubkey });
+    }
+
+    let validator_index = accessors::index_of_public_key(&state, pubkey)
+        .ok_or(Error::ValidatorNotFound { pubkey })?;
+
+    let voluntary_exit = VoluntaryExit {
+        epoch,
+        validator_index,
+    };
+
+    let signature = signer
+        .read()
+        .await
+        .sign(
+            SigningMessage::VoluntaryExit(voluntary_exit),
+            voluntary_exit.signing_root(controller.chain_config(), &state),
+            Some(state.as_ref().into()),
+            pubkey,
+        )
+        .await?;
+
+    Ok(EthResponse::json(SignedVoluntaryExit {
+        message: voluntary_exit,
+        signature: signature.into(),
+    }))
+}
+
 async fn authorize_token(
     State(secret): State<Arc<Secret>>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
@@ -534,21 +634,28 @@ async fn authorize_token(
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub async fn run_validator_api(
+pub async fn run_validator_api<P: Preset, W: Wait>(
     validator_api_config: ValidatorApiConfig,
-    keymanager: Arc<KeyManager>,
+    controller: ApiController<P, W>,
     directories: Arc<Directories>,
+    keymanager: Arc<KeyManager>,
+    signer: Arc<RwLock<Signer>>,
 ) -> Result<()> {
     let Auth { secret, token } = load_or_build_auth_token(&directories)?;
 
-    info!(
-        "Validator API is listening on {}, authorization token: {token}",
-        validator_api_config.address
-    );
+    let ValidatorApiConfig {
+        address,
+        allow_origin,
+        timeout,
+    } = validator_api_config;
+
+    info!("Validator API is listening on {address}, authorization token: {token}");
 
     let state = ValidatorApiState {
+        controller,
         keymanager,
         secret: Arc::new(secret),
+        signer,
     };
 
     let router = eth_v1_keymanager_routes()
@@ -558,13 +665,16 @@ pub async fn run_validator_api(
         ))
         .with_state(state);
 
-    Server::bind(&validator_api_config.address)
+    let router =
+        http_api_utils::extend_router_with_middleware(router, Some(timeout), allow_origin, None);
+
+    Server::bind(&address)
         .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .map_err(AnyhowError::new)
 }
 
-fn eth_v1_keymanager_routes() -> Router<ValidatorApiState> {
+fn eth_v1_keymanager_routes<P: Preset, W: Wait>() -> Router<ValidatorApiState<P, W>> {
     Router::new()
         .route(
             "/eth/v1/validator/:pubkey/feerecipient",
@@ -601,6 +711,10 @@ fn eth_v1_keymanager_routes() -> Router<ValidatorApiState> {
         .route(
             "/eth/v1/validator/:pubkey/graffiti",
             delete(keymanager_delete_graffiti),
+        )
+        .route(
+            "/eth/v1/validator/:pubkey/voluntary_exit",
+            post(keymanager_create_voluntary_exit),
         )
         .route("/eth/v1/keystores", get(keymanager_list_validating_pubkeys))
         .route("/eth/v1/keystores", post(keymanager_import_keystores))

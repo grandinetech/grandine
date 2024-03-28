@@ -18,7 +18,7 @@ use types::{
     phase0::{
         containers::{
             AggregateAndProof, AttestationData, BeaconBlock as Phase0BeaconBlock,
-            BeaconBlockHeader, Fork,
+            BeaconBlockHeader, Fork, VoluntaryExit,
         },
         primitives::{Epoch, Slot, H256},
     },
@@ -73,6 +73,7 @@ pub enum SigningMessage<'block, P: Preset> {
     SyncAggregatorSelectionData(SyncAggregatorSelectionData),
     ContributionAndProof(ContributionAndProof<P>),
     ValidatorRegistration(ValidatorRegistrationV1),
+    VoluntaryExit(VoluntaryExit),
 }
 
 impl<'block, P: Preset> From<&'block Phase0BeaconBlock<P>> for SigningMessage<'block, P> {
