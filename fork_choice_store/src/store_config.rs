@@ -13,12 +13,13 @@ pub struct StoreConfig {
 }
 
 impl StoreConfig {
+    /// Returns a configuration more likely to trigger bugs.
+    ///
+    /// Intended for use in tests.
     #[must_use]
-    pub fn minimal(chain_config: &ChainConfig) -> Self {
-        let minimum = Self::min_unfinalized_states_in_memory(chain_config);
-
+    pub fn aggressive(chain_config: &ChainConfig) -> Self {
         Self {
-            unfinalized_states_in_memory: minimum,
+            unfinalized_states_in_memory: Self::min_unfinalized_states_in_memory(chain_config),
             ..Self::default()
         }
     }

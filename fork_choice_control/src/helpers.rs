@@ -5,8 +5,7 @@ use anyhow::Result;
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::GossipId;
-use execution_engine::{MockExecutionEngine, PayloadStatusV1};
-use fork_choice_store::PayloadStatus;
+use execution_engine::{MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use std_ext::ArcExt as _;
@@ -14,7 +13,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    nonstandard::{Phase, TimedPowBlock},
+    nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::{Attestation, AttesterSlashing, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Slot, UnixSeconds, ValidatorIndex, H256},
@@ -369,26 +368,36 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message().unwrap_none();
     }
 
-    // TODO(feature/in-memory-db): Figure out why changing this made tests flaky
-    //                             before adding the call to `wait_for_tasks`.
     pub fn on_notified_valid_payload(&self, block: &SignedBeaconBlock<P>) {
-        self.controller()
-            .on_notified_valid_payload(Self::execution_block_hash(block));
-        self.controller().wait_for_tasks();
+        let execution_block_hash = Self::execution_block_hash(block);
+
+        self.on_notified_new_payload(
+            execution_block_hash,
+            PayloadStatusV1 {
+                status: PayloadValidationStatus::Valid,
+                // According to the [Engine API specification], if the payload is valid,
+                // `latest_valid_hash` must equal `execution_block_hash`.
+                //
+                // [Engine API specification]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#payload-validation
+                latest_valid_hash: Some(execution_block_hash),
+                validation_error: None,
+            },
+        );
     }
 
-    // TODO(feature/in-memory-db): Figure out why changing this made tests flaky
-    //                             before adding the call to `wait_for_tasks`.
     pub fn on_notified_invalid_payload(
         &self,
         block: &SignedBeaconBlock<P>,
         latest_valid_block: Option<&SignedBeaconBlock<P>>,
     ) {
-        self.controller().on_notified_invalid_payload(
+        self.on_notified_new_payload(
             Self::execution_block_hash(block),
-            latest_valid_block.map(Self::execution_block_hash),
+            PayloadStatusV1 {
+                status: PayloadValidationStatus::Invalid,
+                latest_valid_hash: latest_valid_block.map(Self::execution_block_hash),
+                validation_error: None,
+            },
         );
-        self.controller().wait_for_tasks();
     }
 
     pub fn blocks_by_range(&self, range: Range<Slot>) -> Result<Vec<BlockWithRoot<P>>> {
@@ -600,6 +609,10 @@ pub struct Status<'block, P: Preset> {
     pub finalized_block_count: usize,
     pub unfinalized_block_count_in_fork: usize,
     pub unfinalized_block_count_total: usize,
+}
+
+pub fn epoch_at_slot(slot: Slot) -> Epoch {
+    misc::compute_epoch_at_slot::<Minimal>(slot)
 }
 
 pub const fn start_of_epoch(epoch: Epoch) -> Slot {

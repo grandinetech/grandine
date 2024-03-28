@@ -3,8 +3,6 @@ use test_generator::test_resources;
 
 use crate::context::Context;
 
-// TODO(feature/in-memory-db): Figure out why some `execution_optimistic` got updated late.
-//                             Is it because most requests are for objects derived from the head?
 // TODO(feature/deneb): Update snapshot tests just like for Capella.
 const UPDATE_RESPONSES: bool = false;
 

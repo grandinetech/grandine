@@ -215,6 +215,31 @@ impl Participation {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PayloadStatus {
+    Valid,
+    Invalid,
+    Optimistic,
+}
+
+impl PayloadStatus {
+    #[must_use]
+    pub const fn is_valid(self) -> bool {
+        matches!(self, Self::Valid)
+    }
+
+    #[must_use]
+    pub const fn is_invalid(self) -> bool {
+        matches!(self, Self::Invalid)
+    }
+
+    #[must_use]
+    pub const fn is_optimistic(self) -> bool {
+        matches!(self, Self::Optimistic)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct TimedPowBlock {
     pub pow_block: PowBlock,

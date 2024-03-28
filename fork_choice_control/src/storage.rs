@@ -61,6 +61,7 @@ pub struct Storage<P> {
 }
 
 impl<P: Preset> Storage<P> {
+    #[must_use]
     pub fn new(
         config: Arc<Config>,
         database: Database,
@@ -72,22 +73,6 @@ impl<P: Preset> Storage<P> {
             database,
             archival_epoch_interval,
             prune_storage,
-            phantom: PhantomData,
-        }
-    }
-
-    /// Returns an instance that uses an in-memory database.
-    ///
-    /// The trait-based dependency injection used elsewhere makes it harder to select
-    /// implementations at runtime.
-    #[must_use]
-    pub fn in_memory(config: Arc<Config>) -> Self {
-        // TODO(feature/in-memory-db): Use `Storage::new`?
-        Self {
-            config,
-            database: Database::in_memory(),
-            archival_epoch_interval: DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            prune_storage: false,
             phantom: PhantomData,
         }
     }
@@ -458,8 +443,7 @@ impl<P: Preset> Storage<P> {
         self.block_root_by_slot(slot)
     }
 
-    // TODO(feature/in-memory-db): This should look up unfinalized blocks too.
-    pub(crate) fn block_by_slot(
+    pub(crate) fn finalized_block_by_slot(
         &self,
         slot: Slot,
     ) -> Result<Option<(Arc<SignedBeaconBlock<P>>, H256)>> {
@@ -498,11 +482,9 @@ impl<P: Preset> Storage<P> {
         Ok(Some(state))
     }
 
-    // TODO(feature/in-memory-db): Rename this or other methods to match.
-    pub(crate) fn preprocessed_state_post_block(
+    pub(crate) fn state_post_block(
         &self,
         mut block_root: H256,
-        slot: Slot,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         let mut blocks = vec![];
 
@@ -535,12 +517,6 @@ impl<P: Preset> Storage<P> {
 
         for block in blocks.into_iter().rev() {
             combined::trusted_state_transition(&self.config, state.make_mut(), &block)?;
-        }
-
-        // TODO(feature/in-memory-db): Limit slot processing to `max_empty_slots`.
-        //                             Consider moving slot processing out of this method.
-        if state.slot() < slot {
-            combined::process_slots(&self.config, state.make_mut(), slot)?;
         }
 
         Ok(Some(state))

@@ -64,6 +64,11 @@
 //! object or return [`Err`]. All other operations that can raise exceptions in Python
 //! (like indexing into `dict`s) are represented by statements that panic on failure.
 //!
+//! Notes on nomenclature:
+//! - Pruning means removing orphaned blocks and outdated attestations.
+//! - Archiving means removing finalized blocks from memory.
+//! - Unloading means removing states that can be recreated through state transitions.
+//!
 //! [`Location`]:         misc::Location
 //! [`UnfinalizedBlock`]: misc::UnfinalizedBlock
 //!
@@ -74,8 +79,7 @@ pub use crate::{
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction,
-        BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction, PayloadStatus,
-        ValidAttestation,
+        BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction, ValidAttestation,
     },
     segment::Segment,
     store::Store,

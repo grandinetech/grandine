@@ -11,7 +11,6 @@ use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
-use serde::{self, Serialize};
 use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
@@ -20,7 +19,7 @@ use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    nonstandard::ValidationOutcome,
+    nonstandard::{PayloadStatus, ValidationOutcome},
     phase0::{
         containers::{Attestation, AttestationData, Checkpoint, SignedAggregateAndProof},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
@@ -146,31 +145,6 @@ impl<P: Preset> ChainLink<P> {
     // }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PayloadStatus {
-    Valid,
-    Invalid,
-    Optimistic,
-}
-
-impl PayloadStatus {
-    #[must_use]
-    pub const fn is_valid(self) -> bool {
-        matches!(self, Self::Valid)
-    }
-
-    #[must_use]
-    pub const fn is_invalid(self) -> bool {
-        matches!(self, Self::Invalid)
-    }
-
-    #[must_use]
-    pub const fn is_optimistic(self) -> bool {
-        matches!(self, Self::Optimistic)
-    }
-}
-
 pub enum PayloadAction {
     Accept,
     DelayUntilBlock(ExecutionBlockHash),
@@ -199,11 +173,6 @@ impl<P: Preset> UnfinalizedBlock<P> {
     #[must_use]
     pub fn epoch(&self) -> Slot {
         self.chain_link.epoch()
-    }
-
-    #[must_use]
-    pub const fn is_valid(&self) -> bool {
-        self.chain_link.is_valid()
     }
 
     #[must_use]

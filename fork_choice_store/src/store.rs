@@ -1,4 +1,7 @@
-use core::ops::{AddAssign as _, Bound, SubAssign as _};
+use core::{
+    cmp::Ordering,
+    ops::{AddAssign as _, Bound, SubAssign as _},
+};
 use std::{
     backtrace::Backtrace,
     collections::binary_heap::{BinaryHeap, PeekMut},
@@ -39,7 +42,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment},
     },
-    nonstandard::{BlobSidecarWithId, Phase, WithStatus},
+    nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
@@ -61,7 +64,7 @@ use crate::{
         AttestationAction, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction,
         BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, Difference, DifferenceAtLocation,
         DissolvedDifference, LatestMessage, Location, PartialAttestationAction, PartialBlockAction,
-        PayloadAction, PayloadStatus, Score, SegmentId, UnfinalizedBlock, ValidAttestation,
+        PayloadAction, Score, SegmentId, UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache::StateCache,
@@ -2297,15 +2300,12 @@ impl<P: Preset> Store<P> {
                     break;
                 }
 
+                // Checking whether `chain_link` is justified is neither necessary nor sufficient.
+                // It is not necessary because the justified state can be computed from the anchor
+                // (as long as the justified block is not orphaned, which is possible according to
+                // the Fork Choice specification). It is not sufficient because it does not prevent
+                // `ChainLink`s with unloaded states from becoming justified or finalized later.
                 if misc::is_epoch_start::<P>(chain_link.slot()) {
-                    continue;
-                }
-
-                // TODO(feature/in-memory-db): Remove the justified block check?
-                //                             It's neither necessary nor sufficient.
-                //                             It's not necessary because the justified state can be computed from the anchor.
-                //                             It's not sufficient because a `ChainLink` with an unloaded state can become justified later.
-                if chain_link.block_root == self.justified_checkpoint.root {
                     continue;
                 }
 
@@ -2702,10 +2702,36 @@ impl<P: Preset> Store<P> {
 
     #[must_use]
     pub fn latest_archivable_index(&self) -> Option<usize> {
+        // The binary search relies on `Store::set_block_ancestor_payload_statuses`
+        // updating payload statuses of finalized blocks.
+        let first_non_valid_index = self
+            .finalized
+            .binary_search_by(|chain_link| {
+                if chain_link.is_valid() {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .expect_err(
+                "Vector::binary_search_by should return Err because \
+                 the comparator never returns Ordering::Equal",
+            );
+
+        // `im::vector::Focus::narrow` panics if the range passed to it is empty.
+        // See <https://github.com/bodil/im-rs/issues/145>.
+        if first_non_valid_index == 0 {
+            return None;
+        }
+
         let next_archivable_epoch = self.anchor_epoch() + 1;
 
-        self.finalized()
-            .iter()
+        // Restrict the search to valid blocks to avoid archiving optimistic ones.
+        // They would be lost because we currently store only valid blocks in the database.
+        self.finalized
+            .focus()
+            .narrow(..first_non_valid_index)
+            .into_iter()
             .enumerate()
             .rev()
             .take_while(|(_, chain_link)| {
@@ -2715,8 +2741,6 @@ impl<P: Preset> Store<P> {
             .map(|(index, _)| index)
     }
 
-    // Pruning refers to removing orphaned blocks and outdated attestations.
-    // Archiving refers to removing blocks that are present in the finalized chain.
     pub fn archive_finalized(&mut self, new_anchor_index: usize) -> Vector<ChainLink<P>> {
         let archived = self.finalized.slice(..new_anchor_index);
 
@@ -2824,6 +2848,12 @@ impl<P: Preset> Store<P> {
                 .for_each(|hash| {
                     self.set_block_payload_status(hash, payload_status);
                 });
+
+            if self.last_finalized().payload_status != payload_status {
+                for chain_link in self.finalized.iter_mut() {
+                    chain_link.payload_status = payload_status;
+                }
+            }
         }
     }
 

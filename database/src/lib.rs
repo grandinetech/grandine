@@ -1,16 +1,18 @@
-// TODO(feature/in-memory-db): Minimize changes from `develop`.
-
 use core::ops::{Range, RangeFrom, RangeToInclusive};
-use std::{borrow::Cow, path::Path, sync::Mutex};
+use std::{
+    borrow::Cow,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
-use bytes::Bytes;
 use bytesize::ByteSize;
 use im::OrdMap;
 use itertools::Either;
 use libmdbx::{DatabaseFlags, Environment, Geometry, WriteFlags};
 use log::info;
 use snap::raw::{Decoder, Encoder};
+use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use thiserror::Error;
 use unwrap_none::UnwrapNone as _;
@@ -21,7 +23,7 @@ const MAX_NAMED_DATABASES: usize = 10;
 pub struct Database(DatabaseKind);
 
 impl Database {
-    pub fn persistent(name: &str, directory: impl AsRef<Path>, size: ByteSize) -> Result<Self> {
+    pub fn persistent(name: &str, directory: impl AsRef<Path>, max_size: ByteSize) -> Result<Self> {
         // If a database with the legacy name exists, keep using it.
         // Otherwise, create a new database with the specified name.
         // This check will not force existing users to resync.
@@ -34,7 +36,7 @@ impl Database {
         let environment = Environment::builder()
             .set_max_dbs(MAX_NAMED_DATABASES)
             .set_geometry(Geometry {
-                size: Some(..usize::try_from(size.as_u64())?),
+                size: Some(..usize::try_from(max_size.as_u64())?),
                 growth_step: Some(isize::try_from(GROWTH_STEP.as_u64())?),
                 shrink_threshold: None,
                 page_size: None,
@@ -138,7 +140,7 @@ impl Database {
 
                 if let Some((key, value)) = end_pair {
                     new_map
-                        .insert(key.clone(), value.clone())
+                        .insert(key.clone_arc(), value.clone_arc())
                         .expect_none("end_pair should have been discarded by OrdMap::split");
                 }
 
@@ -208,14 +210,13 @@ impl Database {
 
                 let mut cursor = transaction.cursor(&database)?;
 
-                let mut iterator = cursor
+                cursor
                     .set_range(start)
                     .transpose()
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.next().transpose()))
-                    .map(|result| decompress_pair(result?));
-
-                Either::Left(core::iter::from_fn(move || iterator.next()))
+                    .map(|result| decompress_pair(result?))
+                    .pipe(Either::Left)
             }
             DatabaseKind::InMemory { map } => {
                 let map = map.lock().expect("in-memory database mutex is poisoned");
@@ -224,7 +225,7 @@ impl Database {
 
                 if let Some((key, value)) = start_pair {
                     above
-                        .insert(key.clone(), value.clone())
+                        .insert(key.clone_arc(), value.clone_arc())
                         .expect_none("start_pair should have been discarded by OrdMap::split");
                 }
 
@@ -253,14 +254,13 @@ impl Database {
 
                 let mut cursor = transaction.cursor(&database)?;
 
-                let mut iterator = cursor
+                cursor
                     .set_key(end)
                     .transpose()
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.prev().transpose()))
-                    .map(|result| decompress_pair(result?));
-
-                Either::Left(core::iter::from_fn(move || iterator.next()))
+                    .map(|result| decompress_pair(result?))
+                    .pipe(Either::Left)
             }
             DatabaseKind::InMemory { map } => {
                 let map = map.lock().expect("in-memory database mutex is poisoned");
@@ -269,7 +269,7 @@ impl Database {
 
                 if let Some((key, value)) = end_pair {
                     below
-                        .insert(key.clone(), value.clone())
+                        .insert(key.clone_arc(), value.clone_arc())
                         .expect_none("end_pair should have been discarded by OrdMap::split");
                 }
 
@@ -312,7 +312,7 @@ impl Database {
                 let mut new_map = map.clone();
 
                 for (key, value) in pairs {
-                    let key = Bytes::copy_from_slice(key.as_ref());
+                    let key = key.as_ref().into();
                     let compressed = compress(value.as_ref())?.into();
                     new_map.insert(key, compressed);
                 }
@@ -396,19 +396,32 @@ enum DatabaseKind {
         environment: Environment,
     },
     InMemory {
-        // TODO(feature/in-memory-db): Consider other types for binary data:
-        //                             - `Vec<u8>`
-        //                             - `std::sync::Arc<[u8]>`
-        //                             - `triomphe::Arc<[u8]>`
-        //                             - `Box<[u8]>`
-        //                             Alternatively, return `Bytes` instead of `Cow` and `Vec`.
-        map: Mutex<OrdMap<Bytes, Bytes>>,
+        // Various methods of `OrdMap` and `Database` clone the elements of this map,
+        // so they should be cheaply cloneable. This disqualifies `Vec<u8>` and `Box<[u8]>`.
+        //
+        // Various methods of `Database` return keys in the form of `Vec<u8>` or `Cow<[u8]>`.
+        // Converting between them and `Arc<[u8]>` is costly due to the reference count before data.
+        // Returning `Arc<[u8]>` from the methods would require a conversion in the persistent case
+        // because `libmdbx` cannot decode directly into `std::sync::Arc` or `triomphe::Arc`.
+        //
+        // `Bytes` can be cheaply converted to and from `Vec<u8>` if its capacity equals its length,
+        // but `Database` cannot benefit from that with its current API.
+        // Returning a `Vec<u8>` or `Cow<u8>` requires copying due to shared ownership.
+        // Writing requires copying due to the signature of `Database::put`.
+        //
+        // Some versions of `libmdbx` (including the one from `reth-libmdbx`) can decode into
+        // `lifetimed_bytes::Bytes`, which functions like `Cow<[u8]>`, but with the internal
+        // representation of `Bytes`. `lifetimed_bytes::Bytes` is necessarily distinct from
+        // `bytes::Bytes`, which makes it harder to use.
+        map: Mutex<InMemoryMap>,
     },
 }
 
 #[derive(Debug, Error)]
 #[error("database directory path should be a valid Unicode string")]
 struct Error;
+
+type InMemoryMap = OrdMap<Arc<[u8]>, Arc<[u8]>>;
 
 fn compress(data: &[u8]) -> Result<Vec<u8>> {
     Encoder::new().compress_vec(data).map_err(Into::into)

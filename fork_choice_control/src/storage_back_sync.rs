@@ -54,7 +54,7 @@ impl<P: Preset> Storage<P> {
         }
 
         for slot in (start_slot + 1)..=end_slot {
-            if let Some((block, _)) = self.block_by_slot(slot)? {
+            if let Some((block, _)) = self.finalized_block_by_slot(slot)? {
                 state_transition(self.config(), state.make_mut(), &block)?;
                 previous_block = Some(block);
             } else {

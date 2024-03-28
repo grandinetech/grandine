@@ -16,7 +16,7 @@ use rand::seq::SliceRandom as _;
 use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
-    config::Config,
+    config::Config as ChainConfig,
     phase0::{consts::GENESIS_SLOT, primitives::Slot},
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -251,37 +251,37 @@ fn main() -> Result<()> {
 
     match options.blocks.into() {
         Chain::Mainnet => run(
-            Config::mainnet(),
+            ChainConfig::mainnet(),
             options,
             mainnet::beacon_state,
             mainnet::beacon_blocks,
         ),
         Chain::Medalla => run(
-            Config::medalla(),
+            ChainConfig::medalla(),
             options,
             medalla::beacon_state,
             medalla::beacon_blocks,
         ),
         Chain::Goerli => run(
-            Config::goerli(),
+            ChainConfig::goerli(),
             options,
             goerli::beacon_state,
             goerli::beacon_blocks,
         ),
         Chain::Withdrawals => run(
-            Config::withdrawal_devnet_4(),
+            ChainConfig::withdrawal_devnet_4(),
             options,
             withdrawal_devnet_4::beacon_state,
             withdrawal_devnet_4::beacon_blocks,
         ),
         Chain::Holesky => run(
-            Config::holesky(),
+            ChainConfig::holesky(),
             options,
             holesky::beacon_state,
             holesky::beacon_blocks,
         ),
         Chain::HoleskyDevnet => run(
-            Config::holesky_devnet(),
+            ChainConfig::holesky_devnet(),
             options,
             holesky_devnet::beacon_state,
             holesky_devnet::beacon_blocks,
@@ -297,7 +297,7 @@ fn main() -> Result<()> {
 #[allow(clippy::float_arithmetic)]
 #[allow(clippy::too_many_lines)]
 fn run<P: Preset>(
-    config: Config,
+    chain_config: ChainConfig,
     options: Options,
     beacon_state: impl FnOnce(Slot, usize) -> Arc<BeaconState<P>>,
     beacon_blocks: impl FnOnce(RangeInclusive<Slot>, usize) -> Vec<Arc<SignedBeaconBlock<P>>>,
@@ -327,7 +327,7 @@ fn run<P: Preset>(
         .message()
         .hash_tree_root();
 
-    let config = Arc::new(config);
+    let chain_config = Arc::new(chain_config);
 
     let store_config = StoreConfig {
         unfinalized_states_in_memory,
@@ -343,10 +343,16 @@ fn run<P: Preset>(
     let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
 
     let (controller, _mutator_handle) = if use_block_verification_pool {
-        AdHocBenchController::with_p2p_tx(config, store_config, anchor_block, anchor_state, p2p_tx)
+        AdHocBenchController::with_p2p_tx(
+            chain_config,
+            store_config,
+            anchor_block,
+            anchor_state,
+            p2p_tx,
+        )
     } else {
         AdHocBenchController::with_p2p_tx(
-            config,
+            chain_config,
             store_config,
             anchor_block,
             anchor_state,

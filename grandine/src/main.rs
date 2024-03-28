@@ -154,6 +154,12 @@ impl Context {
             validator_enabled,
         } = self;
 
+        let StorageConfig {
+            in_memory,
+            eth1_db_size,
+            ..
+        } = storage_config;
+
         // Load keys early so we can validate `eth1_rpc_urls`.
         signer.load_keys_from_web3signer().await;
 
@@ -187,16 +193,20 @@ impl Context {
             .then(futures::channel::mpsc::unbounded)
             .unzip();
 
-        let eth1_database = Database::persistent(
-            "eth1",
-            storage_config
-                .directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .join("eth1_cache"),
-            storage_config.eth1_db_size,
-        )?;
+        let eth1_database = if in_memory {
+            Database::in_memory()
+        } else {
+            Database::persistent(
+                "eth1",
+                storage_config
+                    .directories
+                    .store_directory
+                    .clone()
+                    .unwrap_or_default()
+                    .join("eth1_cache"),
+                eth1_db_size,
+            )?
+        };
 
         let eth1_chain = Eth1Chain::new(
             chain_config.clone_arc(),

@@ -1653,7 +1653,6 @@ name = "database"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "bytes",
  "bytesize",
  "fs-err",
  "im",
@@ -1661,6 +1660,7 @@ dependencies = [
  "log",
  "reth-libmdbx",
  "snap",
+ "std_ext",
  "tap",
  "tempfile",
  "test-case",
@@ -2654,7 +2654,6 @@ dependencies = [
  "kzg_utils",
  "log",
  "prometheus_metrics",
- "serde",
  "ssz",
  "static_assertions",
  "std_ext",

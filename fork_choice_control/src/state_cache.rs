@@ -37,12 +37,7 @@ impl<P: Preset, W> StateCache<P, W> {
         slot: Slot,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         match self.try_find_state(block_root, slot) {
-            Some(state) => Ok(Some(self.process_slots(
-                state,
-                block_root,
-                slot,
-                self.should_print_slot_processing_warning(),
-            )?)),
+            Some(state) => Ok(Some(self.process_slots(state, block_root, slot)?)),
             None => Ok(None),
         }
     }
@@ -52,12 +47,7 @@ impl<P: Preset, W> StateCache<P, W> {
             .try_find_state(block_root, slot)
             .ok_or(Error::StateNotFound { block_root })?;
 
-        self.process_slots(
-            state,
-            block_root,
-            slot,
-            self.should_print_slot_processing_warning(),
-        )
+        self.process_slots(state, block_root, slot)
     }
 
     pub fn state_at_slot_quiet(&self, block_root: H256, slot: Slot) -> Result<Arc<BeaconState<P>>> {
@@ -65,7 +55,21 @@ impl<P: Preset, W> StateCache<P, W> {
             .try_find_state(block_root, slot)
             .ok_or(Error::StateNotFound { block_root })?;
 
-        self.process_slots(state, block_root, slot, false)
+        self.process_slots_internal(state, block_root, slot, false)
+    }
+
+    pub fn process_slots(
+        &self,
+        state: Arc<BeaconState<P>>,
+        block_root: H256,
+        slot: Slot,
+    ) -> Result<Arc<BeaconState<P>>> {
+        self.process_slots_internal(
+            state,
+            block_root,
+            slot,
+            self.should_print_slot_processing_warning(),
+        )
     }
 
     fn try_find_state(&self, block_root: H256, slot: Slot) -> Option<Arc<BeaconState<P>>> {
@@ -77,7 +81,7 @@ impl<P: Preset, W> StateCache<P, W> {
             .or_else(|| store_snapshot.state_by_block_root(block_root))
     }
 
-    fn process_slots(
+    fn process_slots_internal(
         &self,
         mut state: Arc<BeaconState<P>>,
         block_root: H256,
@@ -98,9 +102,10 @@ impl<P: Preset, W> StateCache<P, W> {
                 );
             }
 
+            let store = self.store_snapshot();
             let state_slot = state.slot();
             let max_empty_slots = store.store_config().max_empty_slots;
-            let is_forward_synced = self.store_snapshot.load().is_forward_synced();
+            let is_forward_synced = store.is_forward_synced();
 
             if !is_forward_synced && state_slot + max_empty_slots < slot {
                 bail!(Error::StateFarBehind {
@@ -142,6 +147,6 @@ pub enum Error {
         max_empty_slots: u64,
         slot: Slot,
     },
-    #[error("state not found in fork choice: {block_root:?}")]
+    #[error("state not found in fork choice store: {block_root:?}")]
     StateNotFound { block_root: H256 },
 }

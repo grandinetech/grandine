@@ -28,7 +28,6 @@ use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSe
 use genesis::GenesisProvider;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
-use tap::TapFallible as _;
 use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -139,7 +138,16 @@ where
 
         mutator.process_unfinalized_blocks(unfinalized_blocks)?;
 
-        let wait_group = W::Swappable::default();
+        let join_handle = Builder::new().name("store-mutator".to_owned()).spawn(|| {
+            // The closure should be unwind safe.
+            // The synchronization primitives used by the mutator are unlikely to panic.
+            // The instance of `Store` used by the mutator may become inconsistent but cannot be
+            // observed because the shared snapshot is only updated with values that are consistent.
+            std::panic::catch_unwind(AssertUnwindSafe(move || mutator.run()))
+                .map_err(panics::payload_into_error)
+                .context(Error::MutatorPanicked)?
+                .context(Error::MutatorFailed)
+        })?;
 
         let controller = Arc::new(Self {
             store_snapshot,
@@ -147,27 +155,10 @@ where
             state_cache,
             storage,
             thread_pool,
-            wait_group: wait_group.clone(),
+            wait_group: W::Swappable::default(),
             metrics,
             mutator_tx: mutator_tx.clone(),
         });
-
-        let thread_name = "store-mutator".to_owned();
-
-        // TODO(feature/in-memory-db): Move and/or rephrase comment if still relevant.
-        // Call `Wait::poison` to prevent tests from hanging if the mutator thread fails or panics.
-        let join_handle = Builder::new().name(thread_name).spawn(move || {
-            // The closure should be unwind safe.
-            // The synchronization primitives used by the mutator are unlikely to panic.
-            // The instance of `Store` used by the mutator may become inconsistent but cannot be
-            // observed because the shared snapshot is only updated with values that are consistent.
-            std::panic::catch_unwind(AssertUnwindSafe(move || mutator.run()))
-                .map_err(panics::payload_into_error)
-                .tap_err(|_| W::poison(&wait_group))
-                .context(Error::MutatorPanicked)?
-                .tap_err(|_| W::poison(&wait_group))
-                .context(Error::MutatorFailed)
-        })?;
 
         let mutator_handle = MutatorHandle {
             join_handle: Some(join_handle),

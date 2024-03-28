@@ -150,7 +150,7 @@ pub async fn run_after_genesis<P: Preset>(
                 .store_directory
                 .clone()
                 .unwrap_or_default()
-                .join("beacon_fork_choice"),
+                .join("sync"),
             db_size,
         )?
     };
@@ -295,15 +295,19 @@ pub async fn run_after_genesis<P: Preset>(
         sync_to_metrics_tx,
     };
 
-    let block_sync_database = Database::persistent(
-        "sync",
-        directories
-            .store_directory
-            .clone()
-            .unwrap_or_default()
-            .join("sync"),
-        db_size,
-    )?;
+    let block_sync_database = if in_memory {
+        Database::in_memory()
+    } else {
+        Database::persistent(
+            "sync",
+            directories
+                .store_directory
+                .clone()
+                .unwrap_or_default()
+                .join("sync"),
+            db_size,
+        )?
+    };
 
     let mut block_sync_service = BlockSyncService::new(
         block_sync_database,
@@ -329,62 +333,64 @@ pub async fn run_after_genesis<P: Preset>(
         .map(|slasher_config| -> Result<_> {
             let fork_version = chain_config.genesis_fork_version;
 
-            let votes_db = Database::persistent(
-                "SLASHER_ATTESTATION_VOTES",
-                directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join(format!("slasher_attestation_votes_{fork_version:?}_db")),
-                ByteSize::gib(128),
-            )?;
+            let databases = if in_memory {
+                Databases {
+                    votes_db: Database::in_memory(),
+                    attestations_db: Database::in_memory(),
+                    min_targets_db: Database::in_memory(),
+                    max_targets_db: Database::in_memory(),
+                    blocks_db: Database::in_memory(),
+                }
+            } else {
+                let db_size = ByteSize::gib(128);
 
-            let attestations_db = Database::persistent(
-                "SLASHER_INDEXED_ATTESTATIONS",
-                directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join(format!("slasher_indexed_attestations_{fork_version:?}_db")),
-                ByteSize::gib(128),
-            )?;
-
-            let min_targets_db = Database::persistent(
-                "SLASHER_MIN_TARGETS",
-                directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join(format!("slasher_min_targets_{fork_version:?}_db")),
-                ByteSize::gib(128),
-            )?;
-
-            let max_targets_db = Database::persistent(
-                "SLASHER_MAX_TARGETS",
-                directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join(format!("slasher_max_targets_{fork_version:?}_db")),
-                ByteSize::gib(128),
-            )?;
-
-            let blocks_db = Database::persistent(
-                "SLASHER_BLOCKS",
-                directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join(format!("slasher_blocks_{fork_version:?}_db")),
-                ByteSize::gib(128),
-            )?;
-
-            let databases = Databases {
-                votes_db,
-                attestations_db,
-                min_targets_db,
-                max_targets_db,
-                blocks_db,
+                Databases {
+                    votes_db: Database::persistent(
+                        "SLASHER_ATTESTATION_VOTES",
+                        directories
+                            .store_directory
+                            .clone()
+                            .unwrap_or_default()
+                            .join(format!("slasher_attestation_votes_{fork_version:?}_db")),
+                        db_size,
+                    )?,
+                    attestations_db: Database::persistent(
+                        "SLASHER_INDEXED_ATTESTATIONS",
+                        directories
+                            .store_directory
+                            .clone()
+                            .unwrap_or_default()
+                            .join(format!("slasher_indexed_attestations_{fork_version:?}_db")),
+                        db_size,
+                    )?,
+                    min_targets_db: Database::persistent(
+                        "SLASHER_MIN_TARGETS",
+                        directories
+                            .store_directory
+                            .clone()
+                            .unwrap_or_default()
+                            .join(format!("slasher_min_targets_{fork_version:?}_db")),
+                        db_size,
+                    )?,
+                    max_targets_db: Database::persistent(
+                        "SLASHER_MAX_TARGETS",
+                        directories
+                            .store_directory
+                            .clone()
+                            .unwrap_or_default()
+                            .join(format!("slasher_max_targets_{fork_version:?}_db")),
+                        db_size,
+                    )?,
+                    blocks_db: Database::persistent(
+                        "SLASHER_BLOCKS",
+                        directories
+                            .store_directory
+                            .clone()
+                            .unwrap_or_default()
+                            .join(format!("slasher_blocks_{fork_version:?}_db")),
+                        db_size,
+                    )?,
+                }
             };
 
             let (network_tx, network_to_slasher_rx) = mpsc::unbounded();

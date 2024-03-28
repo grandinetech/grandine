@@ -34,7 +34,7 @@ pub fn export_state_and_blocks<P: Preset>(
                 let mut temporary_state = genesis_provider.clone().state();
 
                 for current_slot in (temporary_state.slot() + 1)..=state_slot {
-                    if let Some((block, _)) = storage.block_by_slot(current_slot)? {
+                    if let Some((block, _)) = storage.finalized_block_by_slot(current_slot)? {
                         combined::untrusted_state_transition(
                             storage.config(),
                             temporary_state.make_mut(),
@@ -71,7 +71,7 @@ pub fn export_state_and_blocks<P: Preset>(
     export_state(to_slot)?;
 
     for current_slot in from_slot..=to_slot {
-        if let Some((block, block_root)) = storage.block_by_slot(current_slot)? {
+        if let Some((block, block_root)) = storage.finalized_block_by_slot(current_slot)? {
             let block_file_name =
                 format!("beacon_block_slot_{current_slot:06}_root_{block_root:?}.ssz");
 

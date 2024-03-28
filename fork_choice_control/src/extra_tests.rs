@@ -11,7 +11,6 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::too_many_lines)]
 
-use core::ops::Not as _;
 #[cfg(feature = "eth2-cache")]
 use std::sync::Arc;
 
@@ -19,19 +18,22 @@ use std::sync::Arc;
 use eth2_cache_utils::medalla;
 #[cfg(feature = "eth2-cache")]
 use eth2_libp2p::GossipId;
-use fork_choice_store::PayloadStatus;
 use helper_functions::misc;
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
 #[cfg(feature = "eth2-cache")]
 use types::{config::Config, preset::Medalla};
 use types::{
-    phase0::{consts::GENESIS_SLOT, primitives::H256},
+    nonstandard::PayloadStatus,
+    phase0::{
+        consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        primitives::H256,
+    },
     preset::Minimal,
     traits::SignedBeaconBlock as _,
 };
 
-use crate::helpers::{is_at_start_of_epoch, start_of_epoch, Context, Status};
+use crate::helpers::{epoch_at_slot, is_at_start_of_epoch, start_of_epoch, Context, Status};
 
 #[cfg(feature = "eth2-cache")]
 use crate::specialized::TestController;
@@ -623,54 +625,91 @@ fn finalizes_and_prunes_many_segments_correctly() {
     });
 }
 
-// TODO(feature/in-memory-db): Add more information to comment?
+// This covers a bug we found in `Store::unload_old_states` while implementing in-memory mode.
+// The bug would cause blocks to become anchors while having unloaded post-states, making it
+// impossible to access their post-states or compute the post-states of their descendants.
+//
 // ```text
-//   epoch 0  epoch 1  epoch 2  epoch 3  epoch 4
-// |0-------|1------2|X------3|4------5|6-------|
+// | epoch 0| epoch 1| epoch 2| epoch 3| epoch 4|
+// |□-------|--------|□------▣|-------▣|□-------|
+// |0       |        |1      2|       3|4       |
 // ```
+//
+// | symbol | meaning                                            |
+// | :----: | -------------------------------------------------- |
+// | □      | block without attestations                         |
+// | ▣      | block with enough attestations to justify an epoch |
+// | -      | slot that may contain a block                      |
+//
+// Block 1 becomes justified after processing block 3 (or block 2 with unrealized justification).
+// Block 1 becomes the anchor after processing block 4 (or block 3 with unrealized justification).
+// Before the fix, its post-state could be unloaded after block 2 became the justified block.
+//
+// Block 2 delivers attestations that justify block 1.
+// Block 2 becomes justified after processing block 4 (or block 3 with unrealized justification).
+// Before the fix, block 2 becoming justified would leave block 1 unprotected from unloading.
+//
+// Block 3 triggers epoch processing that justifies block 1.
+// Block 3 delivers attestations that justify block 2 and finalize block 1.
+//
+// Block 4 triggers epoch processing that justifies block 2 and finalizes block 1.
+// Block 4 causes the post-state of block 1 to be unloaded from memory.
+// Block 4 causes block 0 to be archived, making block 1 the anchor.
+//
+// Block 4 is not strictly necessary due to unrealized justification.
+// However, unrealized justification is a recent addition.
+// It was not present in historical designs of the consensus layer that are commonly taught.
+// Other specifications do not use it, though Lighthouse seems to use it at the p2p level.
 #[test]
 fn does_not_unload_states_that_may_become_anchors() {
     let mut context = Context::bellatrix_minimal();
 
     let (_, state_0) = context.genesis();
-    let (block_1, state_1) = context.empty_block(&state_0, start_of_epoch(1), H256::default());
-    let (block_2, state_2) = context.empty_block(&state_1, start_of_epoch(2) - 1, H256::default());
-    let (block_3, state_3) = context.block_justifying_current_epoch(&state_2, 2, H256::default());
-    let (block_4, state_4) = context.empty_block(&state_3, start_of_epoch(3), H256::default());
-    let (block_5, state_5) = context.block_justifying_current_epoch(&state_4, 3, H256::default());
-    // TODO(feature/in-memory-db): Consider removing block 6 in favor of unrealized justification.
-    let (block_6, _) = context.empty_block(&state_5, start_of_epoch(4), H256::default());
+    let (block_1, state_1) = context.empty_block(&state_0, start_of_epoch(2), H256::default());
+    let (block_2, state_2) = context.block_justifying_current_epoch(&state_1, 2, H256::default());
+    let (block_3, state_3) = context.block_justifying_current_epoch(&state_2, 3, H256::default());
+    let (block_4, _) = context.empty_block(&state_3, start_of_epoch(4), H256::default());
 
-    // TODO(feature/in-memory-db): Reorder assertions?
-    // TODO(feature/in-memory-db): Add custom messages to all preconditions.
-    assert!(is_at_start_of_epoch(&block_1));
-    assert!(!is_at_start_of_epoch(&block_2));
-
-    assert!([&block_1, &block_2, &block_3, &block_4, &block_5, &block_6]
-        .map(|block| block.message().slot())
-        .contains(&start_of_epoch(2))
-        .not());
-
-    assert!(is_at_start_of_epoch(&block_4));
-
+    assert!(
+        is_at_start_of_epoch(&block_1),
+        "block 1 must be at the start of an epoch to become the anchor",
+    );
+    assert!(
+        GENESIS_EPOCH + 1 < epoch_at_slot(block_2.message().slot()),
+        "block 2 must be in epoch 2 or later to have its attestations processed",
+    );
+    assert!(
+        GENESIS_EPOCH + 1 < epoch_at_slot(block_3.message().slot()),
+        "block 3 must be in epoch 2 or later to have its attestations processed",
+    );
+    assert!(
+        epoch_at_slot(block_2.message().slot()) < epoch_at_slot(block_3.message().slot()),
+        "block 3 must be in an epoch after block 2 to trigger epoch processing",
+    );
+    assert!(
+        epoch_at_slot(block_3.message().slot()) < epoch_at_slot(block_4.message().slot()),
+        "block 4 must be in an epoch after block 3 to trigger epoch processing",
+    );
+    assert!(
+        is_at_start_of_epoch(&block_4),
+        "block 4 must be at the start of an epoch to trigger unloading",
+    );
     assert!(
         block_4.message().slot() - block_1.message().slot()
             >= context.unfinalized_states_in_memory(),
+        "block 1 and block 4 must be sufficiently far apart to unload the post-state of block 1",
     );
-    assert!(is_at_start_of_epoch(&block_6));
 
-    context.on_slot(block_6.message().slot());
+    context.on_slot(block_4.message().slot());
 
     context.on_acceptable_block(&block_1);
     context.on_acceptable_block(&block_2);
     context.on_acceptable_block(&block_3);
     context.on_acceptable_block(&block_4);
-    context.on_acceptable_block(&block_5);
-    context.on_acceptable_block(&block_6);
 
     assert_eq!(context.anchor_state(), state_1);
-    assert_eq!(context.last_finalized_state(), state_2);
-    assert_eq!(context.justified_state(), state_4);
+    assert_eq!(context.last_finalized_state(), state_1);
+    assert_eq!(context.justified_state(), state_2);
 }
 
 // 0
@@ -948,7 +987,6 @@ fn handles_orphan_block_that_was_previously_known() {
 // Based on the test `ffg_case_01` from Lighthouse.
 // The name is taken from Prysm. It's called `TestFFGUpdates_OneBranch` there.
 //
-// TODO(feature/in-memory-db): Review if this is true.
 // A chain with just 4 blocks cannot finalize epoch 1. The 2-block finalization rules
 // (rule 2 and rule 4) require the previous checkpoint to have been finalized in its own epoch.
 // However, `process_justification_and_finalization` is not run in epoch 1.

@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
-use execution_engine::{
-    ExecutionEngine, NullExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
-};
+use database::Database;
+use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use fork_choice_store::StoreConfig;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
@@ -13,14 +12,14 @@ use tap::Pipe as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
-    phase0::primitives::{ExecutionBlockHash, Slot},
+    phase0::primitives::Slot,
     preset::Preset,
 };
 
 use crate::{
     controller::{Controller, MutatorHandle},
     messages::P2pMessage,
-    storage::Storage,
+    storage::{Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL},
     unbounded_sink::UnboundedSink,
 };
 
@@ -55,34 +54,6 @@ where
         self.on_tick(Tick::start_of_slot(slot));
     }
 
-    pub fn on_notified_valid_payload(&self, execution_block_hash: ExecutionBlockHash) {
-        let payload_status = PayloadStatusV1 {
-            status: PayloadValidationStatus::Valid,
-            // According to the [Engine API specification], if the payload is valid,
-            // `latest_valid_hash` must equal `execution_block_hash`.
-            //
-            // [Engine API specification]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#payload-validation
-            latest_valid_hash: Some(execution_block_hash),
-            validation_error: None,
-        };
-
-        self.on_notified_new_payload(execution_block_hash, payload_status)
-    }
-
-    pub fn on_notified_invalid_payload(
-        &self,
-        execution_block_hash: ExecutionBlockHash,
-        latest_valid_hash: Option<ExecutionBlockHash>,
-    ) {
-        let payload_status = PayloadStatusV1 {
-            status: PayloadValidationStatus::Invalid,
-            latest_valid_hash,
-            validation_error: None,
-        };
-
-        self.on_notified_new_payload(execution_block_hash, payload_status)
-    }
-
     /// Waits until currently spawned tasks are completed.
     ///
     /// If the mutator spawns new tasks while handling messages from old ones,
@@ -112,8 +83,15 @@ where
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let tick = Tick::block_proposal(&anchor_block);
 
-        Self::new(
+        let storage = Arc::new(Storage::new(
             chain_config.clone_arc(),
+            Database::in_memory(),
+            DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+            false,
+        ));
+
+        Self::new(
+            chain_config,
             store_config,
             anchor_block,
             anchor_state,
@@ -125,7 +103,7 @@ where
             futures::sink::drain(),
             futures::sink::drain(),
             futures::sink::drain(),
-            Arc::new(Storage::in_memory(chain_config)),
+            storage,
             core::iter::empty(),
         )
         .expect("Controller::new should not fail in tests and benchmarks")
@@ -195,7 +173,7 @@ impl<P: Preset> TestController<P> {
         execution_engine: TestExecutionEngine,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
-        let store_config = StoreConfig::minimal(&chain_config);
+        let store_config = StoreConfig::aggressive(&chain_config);
 
         Self::new_internal(
             chain_config,

@@ -55,7 +55,6 @@ pub struct Databases {
     pub blocks_db: Database,
 }
 
-#[allow(clippy::struct_field_names)]
 pub struct Slasher<P: Preset> {
     controller: RealController<P>,
     fork_version: Version,

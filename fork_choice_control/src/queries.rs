@@ -5,9 +5,7 @@ use anyhow::{bail, ensure, Result};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
-use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationOrigin, ChainLink, PayloadStatus, Segment, Store,
-};
+use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin, ChainLink, Segment, Store};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use serde::Serialize;
@@ -16,7 +14,7 @@ use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    nonstandard::{Phase, WithStatus},
+    nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::{Attestation, Checkpoint, SignedAggregateAndProof},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, UnixSeconds, H256},
@@ -121,7 +119,7 @@ where
         WithStatus {
             value: chain_link.block_root,
             optimistic: chain_link.is_optimistic(),
-            finalized: store.is_slot_finalized(chain_link.slot()),
+            finalized: true,
         }
     }
 
@@ -133,7 +131,7 @@ where
         WithStatus {
             value: chain_link.block.clone_arc(),
             optimistic: chain_link.is_optimistic(),
-            finalized: store.is_slot_finalized(chain_link.slot()),
+            finalized: true,
         }
     }
 
@@ -151,7 +149,7 @@ where
         WithStatus {
             value: chain_link.state(&store),
             optimistic: chain_link.is_optimistic(),
-            finalized: store.is_slot_finalized(chain_link.slot()),
+            finalized: true,
         }
     }
 
@@ -297,7 +295,8 @@ where
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
-        self.snapshot().state_before_or_at_slot(block_root, slot)
+        self.store_snapshot()
+            .state_before_or_at_slot(block_root, slot)
     }
 
     // TODO(Grandine Team): This will perform linear search on states still stored in memory.
@@ -379,12 +378,9 @@ where
             }
         }
 
-        if let Some((block, root)) = self.storage().block_by_slot(slot)? {
-            // TODO(feature/in-memory-db): The call to `Store::is_slot_finalized`
-            //                             is either pointless or incorrect.
-            let finalized = store.is_slot_finalized(block.message().slot());
+        if let Some((block, root)) = self.storage().finalized_block_by_slot(slot)? {
             let block_with_root = BlockWithRoot { block, root };
-            return Ok(Some(WithStatus::valid(block_with_root, finalized)));
+            return Ok(Some(WithStatus::valid_and_finalized(block_with_root)));
         }
 
         Ok(None)
@@ -490,11 +486,8 @@ where
             return Ok(state);
         }
 
-        if let Some(state) = self
-            .storage()
-            .preprocessed_state_post_block(block_root, slot)?
-        {
-            return Ok(state);
+        if let Some(state) = self.storage().state_post_block(block_root)? {
+            return self.state_cache().process_slots(state, block_root, slot);
         }
 
         bail!(Error::StateNotFound { block_root })
@@ -820,16 +813,6 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         VerifyAttestationResult { result, origin }
     }
 
-    #[must_use]
-    pub fn state_before_or_at_slot(
-        &self,
-        block_root: H256,
-        slot: Slot,
-    ) -> Option<Arc<BeaconState<P>>> {
-        self.store_snapshot
-            .state_before_or_at_slot(block_root, slot)
-    }
-
     // TODO(Grandine Team): If `slot` is empty, this advances the next most recent state to `slot`,
     //                      even if `slot` is later than the current fork choice slot. This was
     //                      originally done to match the behavior of Lighthouse API endpoints that the
@@ -883,7 +866,7 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         itertools::process_results(
             (start..storage_end_slot)
                 .rev()
-                .map(|slot| self.storage.block_by_slot(slot))
+                .map(|slot| self.storage.finalized_block_by_slot(slot))
                 .filter_map(Result::transpose),
             |options| {
                 blocks.extend(options.map(|(block, root)| BlockWithRoot { block, root }));
@@ -923,7 +906,6 @@ enum Error {
         justified_checkpoint: Checkpoint,
         finalized_checkpoint: Checkpoint,
     },
-    // TODO(feature/in-memory-db): Reuse error from `fork_choice_control::state_cache`.
-    #[error("state not found in fork choice: {block_root:?}")]
+    #[error("state not found in fork choice store: {block_root:?}")]
     StateNotFound { block_root: H256 },
 }

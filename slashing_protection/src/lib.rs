@@ -166,7 +166,7 @@ impl SlashingProtector {
         Self::set_shared_pragma(&connection)?;
 
         // See the last paragraph of <https://www.sqlite.org/pragma.html#pragma_journal_mode>.
-        connection.execute_batch("PRAGMA journal_mode = MEMORY;")?;
+        connection.pragma_update(None, "journal_mode", "MEMORY")?;
 
         Ok(Self {
             connection,
@@ -181,7 +181,7 @@ impl SlashingProtector {
         schema::migrations::runner().run(&mut connection)?;
         Self::set_shared_pragma(&connection)?;
 
-        connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
 
         Ok(connection)
     }
@@ -1043,7 +1043,10 @@ mod tests {
         ))
     }
 
-    // SQLite silently converts invalid integers and booleans in pragma statements to 0.
+    // SQLite silently ignores invalid values in most pragma statements.
+    // Invalid integers and booleans are converted to 0.
+    // Invalid non-boolean keywords leave the pragma set to the current value.
+    // Invalid encodings appear to be the only type rejected with an error message.
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_shared_pragma(constructor: Constructor) -> Result<()> {

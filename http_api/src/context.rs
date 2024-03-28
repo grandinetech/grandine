@@ -16,7 +16,7 @@ use features::Feature;
 use fork_choice_control::{
     Controller, StateLoadStrategy, Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
 };
-use fork_choice_store::{PayloadStatus, StoreConfig};
+use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
 use genesis::GenesisProvider;
 use keymanager::KeyManager;
@@ -34,7 +34,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::Phase,
-    phase0::primitives::{ExecutionBlockHash, NodeId, H256},
+    phase0::primitives::{NodeId, H256},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
@@ -57,7 +57,6 @@ pub struct Context<P: Preset> {
     anchor_state: Arc<BeaconState<P>>,
     deposit_tree: Option<DepositTree>,
     extra_blocks: Vec<Arc<SignedBeaconBlock<P>>>,
-    payload_statuses: Vec<(ExecutionBlockHash, PayloadStatus)>,
     validator_keys: Vec<(PublicKeyBytes, Arc<SecretKey>, KeyOrigin)>,
 }
 
@@ -80,7 +79,6 @@ impl<P: Preset> Context<P> {
             anchor_state,
             deposit_tree,
             extra_blocks,
-            payload_statuses,
             validator_keys,
             ..
         } = self;
@@ -108,7 +106,7 @@ impl<P: Preset> Context<P> {
         let (execution_service_tx, execution_service_rx) = futures::channel::mpsc::unbounded();
 
         let chain_config = Arc::new(chain_config);
-        let store_config = StoreConfig::minimal(&chain_config);
+        let store_config = StoreConfig::aggressive(&chain_config);
 
         let eth1_config = Arc::new(Eth1Config {
             default_deposit_tree: deposit_tree,
@@ -187,23 +185,6 @@ impl<P: Preset> Context<P> {
             storage,
             core::iter::empty(),
         )?;
-
-        // TODO(feature/in-memory-db): Rephrase comment.
-        // Payload statuses have to be submitted before blocks to ensure that blocks get saved to
-        // the database when archiving. That is because the fork choice store does not attempt to
-        // archive blocks again after they are confirmed. Confirming all blocks in
-        // `mainnet/mainnet/epoch-244816` also works, but only due to a convenient race condition.
-        // Payload statuses in that get delayed because blocks take so long to process.
-        // Submitting payload statuses first ensures that they get delayed.
-        for (execution_block_hash, payload_status) in payload_statuses {
-            match payload_status {
-                PayloadStatus::Valid => controller.on_notified_valid_payload(execution_block_hash),
-                PayloadStatus::Invalid => {
-                    controller.on_notified_invalid_payload(execution_block_hash, None)
-                }
-                PayloadStatus::Optimistic => {}
-            }
-        }
 
         for block in extra_blocks {
             // Strictly speaking the blocks are not requested from anywhere, but we want them to be
@@ -412,7 +393,6 @@ impl Context<Mainnet> {
             anchor_state: genesis_provider.state(),
             deposit_tree: None,
             extra_blocks: vec![],
-            payload_statuses: vec![],
             validator_keys: vec![],
         }
     }
@@ -428,7 +408,6 @@ impl Context<Mainnet> {
             anchor_state: genesis_provider.state(),
             deposit_tree: None,
             extra_blocks: mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force().to_vec(),
-            payload_statuses: vec![],
             validator_keys: vec![],
         }
     }
@@ -446,7 +425,6 @@ impl Context<Mainnet> {
             anchor_state: mainnet::ALTAIR_BEACON_STATE.force().clone_arc(),
             deposit_tree: None,
             extra_blocks,
-            payload_statuses: vec![],
             validator_keys: vec![],
         }
     }
@@ -457,14 +435,6 @@ impl Context<Mainnet> {
             .force()
             .to_vec();
 
-        // TODO(feature/in-memory-db): Confirming just the last block should work, but some `Store`
-        //                             methods need to be updated to confirm finalized blocks too.
-        let payload_statuses = extra_blocks
-            .iter()
-            .filter_map(|block| block.execution_block_hash())
-            .map(|execution_block_hash| (execution_block_hash, PayloadStatus::Valid))
-            .collect();
-
         Self {
             chain_config: ChainConfig::mainnet(),
             genesis_provider: predefined_chains::mainnet(),
@@ -472,7 +442,6 @@ impl Context<Mainnet> {
             anchor_state: mainnet::CAPELLA_BEACON_STATE.force().clone_arc(),
             deposit_tree: None,
             extra_blocks,
-            payload_statuses,
             validator_keys: vec![],
         }
     }
@@ -492,7 +461,6 @@ impl Context<Minimal> {
             anchor_state: genesis_provider.state(),
             deposit_tree: Some(deposit_tree),
             extra_blocks: vec![],
-            payload_statuses: vec![],
             validator_keys,
         }
     }
@@ -512,7 +480,6 @@ impl Context<Minimal> {
             anchor_state: genesis_provider.state(),
             deposit_tree: Some(deposit_tree),
             extra_blocks,
-            payload_statuses: vec![],
             validator_keys: vec![],
         }
     }
@@ -529,7 +496,6 @@ impl Context<Minimal> {
             anchor_state: genesis_provider.state(),
             deposit_tree: Some(deposit_tree),
             extra_blocks: vec![],
-            payload_statuses: vec![],
             validator_keys: vec![],
         }
     }
@@ -547,7 +513,6 @@ impl Context<Minimal> {
             anchor_state: genesis_provider.state(),
             deposit_tree: Some(deposit_tree),
             extra_blocks: vec![],
-            payload_statuses: vec![],
             validator_keys,
         }
     }
@@ -574,7 +539,6 @@ impl Context<Minimal> {
             anchor_state: genesis_provider.state(),
             deposit_tree: Some(deposit_tree),
             extra_blocks,
-            payload_statuses: vec![],
             validator_keys,
         }
     }
