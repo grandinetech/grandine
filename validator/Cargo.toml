@@ -62,3 +62,5 @@ zeroize = { workspace = true }
 [dev-dependencies]
 factory = { workspace = true }
 interop = { workspace = true }
+serde_json = { workspace = true }
+test-case = { workspace = true }
