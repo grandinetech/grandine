@@ -3,3 +3,5 @@
 cobertura.xml
 
 /target/
+book/book
+book/deploy
