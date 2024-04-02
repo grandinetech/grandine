@@ -1301,12 +1301,9 @@ impl<P: Preset> Network<P> {
                 let blob_identifier = blob_sidecar.as_ref().into();
                 let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
 
-                self.log(
-                    Level::Info,
-                    format_args!(
-                        "received blob from RPC (blob_id: {blob_identifier:?}, slot: {blob_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
-                    ),
-                );
+                self.log_with_feature(format_args!(
+                    "received blob from RPC (blob_id: {blob_identifier:?}, slot: {blob_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
+                ));
 
                 if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
                     let block_seen = self
@@ -1452,13 +1449,9 @@ impl<P: Preset> Network<P> {
                 let (subnet_id, blob_sidecar) = *data;
                 let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-                self.log(
-                    Level::Info,
-                    format_args!(
-                        "received blob sidecar as gossip in subnet {subnet_id}: \
-                        {blob_identifier:?} from {source}",
-                    ),
-                );
+                self.log_with_feature(format_args!(
+                    "received blob sidecar as gossip in subnet {subnet_id}: {blob_identifier:?} from {source}",
+                ));
 
                 let block_seen = self
                     .received_block_roots
