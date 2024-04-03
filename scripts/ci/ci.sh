@@ -28,8 +28,6 @@ curl                     \
     sponge               |
     sh -s -- --no-modify-path -y
 
-cargo install cargo-tarpaulin
-
 # `cargo-fmt` must be run in the root of a crate. It appears to be a regression:
 # <https://github.com/rust-lang/rustfmt/issues/3647>
 # Running `cargo-fmt` with `--all` works too but takes noticeably longer. This explains why:
@@ -40,5 +38,5 @@ cargo install cargo-tarpaulin
 )
 
 ./clippy.bash --deny warnings
-./tarpaulin.sh
+cargo test --release --no-fail-fast
 ./consensus-spec-tests-coverage.rb
