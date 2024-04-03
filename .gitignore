@@ -5,3 +5,6 @@ cobertura.xml
 /target/
 book/book
 book/deploy
+
+# Omit the trailing slash from `/eth2-cache`. This way it can be a symlink.
+/eth2-cache
