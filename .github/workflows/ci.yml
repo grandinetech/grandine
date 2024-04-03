@@ -12,15 +12,16 @@ jobs:
       with:
         submodules: true
         lfs: true
-          #    - name: Git lfs pull
-          #      working-directory: consensus-spec-tests
-          #      run: git lfs pull
-    - name: Install Rust
-      run: rustup toolchain install stable --profile minimal
+    # There should be no need to install Rustup or a Rust toolchain explicitly.
+    # The `ubuntu-22.04` image already includes Rustup:
+    # <https://github.com/actions/runner-images/blob/ubuntu22/20240401.4/images/ubuntu/Ubuntu2204-Readme.md#rust-tools>
+    # Running `rustc` or Cargo should automatically install the toolchain specified in `rust-toolchain.toml`.
     - uses: Swatinem/rust-cache@v2
-    - name: Run formatter
+    - name: Check if code is formatted
       run: cargo fmt --check
-    - name: Run clippy
-      run: bash scripts/ci/clippy.bash
+    - name: Run Clippy
+      run: scripts/ci/clippy.bash --deny warnings
     - name: Run tests
-      run: cargo test --release
+      run: cargo test --release --no-fail-fast
+    - name: Check consensus-spec-tests coverage
+      run: scripts/ci/consensus-spec-tests-coverage.rb
