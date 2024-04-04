@@ -3,8 +3,8 @@ use core::time::Duration;
 
 use log::warn;
 use prometheus::{
-    histogram_opts, opts, Gauge, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge,
-    IntGaugeVec,
+    histogram_opts, opts, Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec,
 };
 use types::phase0::primitives::{Epoch, Gwei, Slot, UnixSeconds};
 
@@ -156,6 +156,9 @@ pub struct Metrics {
     pub jemalloc_bytes_resident: IntGauge,
     pub jemalloc_bytes_mapped: IntGauge,
     pub jemalloc_bytes_retained: IntGauge,
+
+    // Tick delay metrics
+    tick_delay_times: GaugeVec,
 }
 
 impl Metrics {
@@ -655,6 +658,12 @@ impl Metrics {
                 "JEMALLOC_BYTES_RETAINED",
                 "Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system",
             )?,
+
+            // Tick delay metrics
+            tick_delay_times: GaugeVec::new(
+                opts!("TICK_DELAY_TIMES", "Tick delay times"),
+                &["tick"],
+            )?,
         })
     }
 
@@ -797,6 +806,7 @@ impl Metrics {
         default_registry.register(Box::new(self.jemalloc_bytes_resident.clone()))?;
         default_registry.register(Box::new(self.jemalloc_bytes_mapped.clone()))?;
         default_registry.register(Box::new(self.jemalloc_bytes_retained.clone()))?;
+        default_registry.register(Box::new(self.tick_delay_times.clone()))?;
 
         Ok(())
     }
@@ -987,5 +997,16 @@ impl Metrics {
 
     pub fn set_jemalloc_bytes_retained(&self, bytes: usize) {
         self.jemalloc_bytes_retained.set(bytes as i64)
+    }
+
+    // Tick delay metrics
+    pub fn set_tick_delay(&self, tick_kind: &str, delay: Duration) {
+        self.tick_delay_times
+            .get_metric_with_label_values(&[tick_kind])
+            .expect(
+                "the number of label values should match the number \
+                 of labels that tick_delay_times was created with",
+            )
+            .set(delay.as_secs_f64())
     }
 }

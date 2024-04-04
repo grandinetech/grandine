@@ -638,6 +638,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[allow(clippy::too_many_lines)]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
+        if let Some(metrics) = self.metrics.as_ref() {
+            if tick.is_start_of_interval() {
+                let tick_delay = tick.delay(&self.chain_config, self.controller.genesis_time())?;
+                metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
+            }
+        }
+
         let Tick { slot, kind } = tick;
 
         let no_validators =

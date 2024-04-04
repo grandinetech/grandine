@@ -69,6 +69,7 @@ use enum_iterator::Sequence;
 use futures::stream::{Stream, StreamExt as _, TryStreamExt as _};
 use helper_functions::misc;
 use serde::Deserialize;
+use strum::AsRefStr;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
 use types::{
@@ -139,7 +140,8 @@ impl Tick {
         misc::is_epoch_start::<P>(self.slot) && self.is_start_of_slot()
     }
 
-    const fn is_start_of_interval(self) -> bool {
+    #[must_use]
+    pub const fn is_start_of_interval(self) -> bool {
         matches!(
             self.kind,
             TickKind::Propose | TickKind::Attest | TickKind::Aggregate,
@@ -152,6 +154,23 @@ impl Tick {
             self.kind,
             TickKind::AttestFourth | TickKind::AggregateFourth | TickKind::ProposeFourth,
         )
+    }
+
+    pub fn delay(self, config: &Config, genesis_time: UnixSeconds) -> Result<Duration> {
+        let duration_since_unix_epoch = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+        let unix_epoch_to_genesis = Duration::from_secs(genesis_time);
+
+        let duration_since_genesis =
+            duration_since_unix_epoch.saturating_sub(unix_epoch_to_genesis);
+
+        let Self { slot, kind } = self;
+        let slot_duration = slot_duration(config);
+        let tick_duration = tick_duration(config)?;
+        let duration_before_slot = slot_duration.saturating_mul((slot - GENESIS_SLOT).try_into()?);
+        let duration_after_slot = tick_duration.saturating_mul(kind as u32);
+        let duration_until_tick = duration_before_slot + duration_after_slot;
+
+        Ok(duration_since_genesis.saturating_sub(duration_until_tick))
     }
 
     fn from_duration(
@@ -199,7 +218,7 @@ impl Tick {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Sequence, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Sequence, AsRefStr, Deserialize)]
 pub enum TickKind {
     Propose,
     ProposeSecond,
@@ -335,7 +354,7 @@ fn next_tick_with_instant<I: InstantLike, S: SystemTimeLike>(
 }
 
 fn tick_duration(config: &Config) -> Result<Duration, Error> {
-    let slot_duration = Duration::from_secs(config.seconds_per_slot.get());
+    let slot_duration = slot_duration(config);
 
     let ticks_per_slot_u32 =
         u32::try_from(TickKind::CARDINALITY).expect("number of ticks per slot fits in u32");
@@ -348,6 +367,10 @@ fn tick_duration(config: &Config) -> Result<Duration, Error> {
     }
 
     Ok(slot_duration / ticks_per_slot_u32)
+}
+
+const fn slot_duration(config: &Config) -> Duration {
+    Duration::from_secs(config.seconds_per_slot.get())
 }
 
 #[cfg(test)]

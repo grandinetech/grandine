@@ -1251,6 +1251,7 @@ dependencies = [
  "nonzero_ext",
  "serde",
  "serde_utils",
+ "strum",
  "test-case",
  "thiserror",
  "tokio",
