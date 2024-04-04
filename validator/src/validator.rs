@@ -8,7 +8,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{ensure, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result};
 use bls::{AggregateSignature, PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     combined::SignedBuilderBid,
@@ -57,7 +57,6 @@ use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
-use thiserror::Error;
 use tokio::{
     sync::{OnceCell as TokioOnceCell, RwLock},
     task::JoinHandle,
@@ -134,16 +133,6 @@ const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
 
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
-
-#[derive(Debug, Error)]
-enum Error<P: Preset> {
-    #[error("self-incriminating attester slashing: {attester_slashing:?}")]
-    SelfIncriminatingAttesterSlashing {
-        attester_slashing: AttesterSlashing<P>,
-    },
-    #[error("self-incriminating proposer slashing: {proposer_slashing:?}")]
-    SelfIncriminatingProposerSlashing { proposer_slashing: ProposerSlashing },
-}
 
 #[derive(Display)]
 #[display(fmt = "too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
@@ -1055,8 +1044,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .best_proposable_attestations(slot_head.beacon_state.clone_arc())
             .await?;
 
-        let own_public_keys = self.own_public_keys().await;
-
         tokio::task::block_in_place(|| -> Result<_> {
             let eth1_data = match self.eth1_chain.eth1_vote(
                 &self.chain_config,
@@ -1094,10 +1081,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             //                      in an invalid block because a validator can only exit or be
             //                      slashed once. The code below can handle invalid blocks, but it may
             //                      prevent the validator from proposing.
-            let attester_slashings =
-                self.prepare_attester_slashings_for_proposal(slot_head, &own_public_keys);
-            let proposer_slashings =
-                self.prepare_proposer_slashings_for_proposal(slot_head, &own_public_keys);
+            let attester_slashings = self.prepare_attester_slashings_for_proposal(slot_head);
+            let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
             let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
 
             let without_state_root = match slot_head.beacon_state.phase() {
@@ -2613,56 +2598,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
     }
 
-    // This cannot be a method due to a borrow conflict.
-    fn validate_proposer_slashing_for_block(
-        proposer_slashing: &ProposerSlashing,
-        slot_head: &SlotHead<P>,
-        own_public_keys: &HashSet<PublicKeyBytes>,
-    ) -> Result<()> {
-        unphased::validate_proposer_slashing(
-            &slot_head.config,
-            &slot_head.beacon_state,
-            *proposer_slashing,
-        )?;
-
-        // check matching proposer_indexes
-        let proposer_index_1 = proposer_slashing.signed_header_1.message.proposer_index;
-
-        // check for self-incrimination
-        ensure!(
-            !slot_head.is_validator_index_protected(proposer_index_1, own_public_keys),
-            Error::SelfIncriminatingProposerSlashing::<P> {
-                proposer_slashing: *proposer_slashing,
-            },
-        );
-
-        Ok(())
-    }
-
-    // This cannot be a method due to a borrow conflict.
-    fn validate_attester_slashing_for_block(
-        attester_slashing: &AttesterSlashing<P>,
-        slot_head: &SlotHead<P>,
-        own_public_keys: &HashSet<PublicKeyBytes>,
-    ) -> Result<()> {
-        let slashable_indices = unphased::validate_attester_slashing(
-            &slot_head.config,
-            &slot_head.beacon_state,
-            attester_slashing,
-        )?;
-
-        ensure!(
-            !slashable_indices.into_iter().any(|validator_index| {
-                slot_head.is_validator_index_protected(validator_index, own_public_keys)
-            }),
-            Error::SelfIncriminatingAttesterSlashing::<P> {
-                attester_slashing: attester_slashing.clone()
-            },
-        );
-
-        Ok(())
-    }
-
     fn prepare_voluntary_exits_for_proposal(
         &mut self,
         slot_head: &SlotHead<P>,
@@ -2698,7 +2633,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn prepare_attester_slashings_for_proposal(
         &mut self,
         slot_head: &SlotHead<P>,
-        own_public_keys: &HashSet<PublicKeyBytes>,
     ) -> ContiguousList<AttesterSlashing<P>, P::MaxAttesterSlashings> {
         let _timer = self
             .metrics
@@ -2706,7 +2640,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
 
         let split_index = itertools::partition(&mut self.attester_slashings, |slashing| {
-            Self::validate_attester_slashing_for_block(slashing, slot_head, own_public_keys).is_ok()
+            unphased::validate_attester_slashing(
+                &slot_head.config,
+                &slot_head.beacon_state,
+                slashing,
+            )
+            .is_ok()
         });
 
         let attester_slashings = ContiguousList::try_from_iter(
@@ -2835,7 +2774,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn prepare_proposer_slashings_for_proposal(
         &mut self,
         slot_head: &SlotHead<P>,
-        own_public_keys: &HashSet<PublicKeyBytes>,
     ) -> ContiguousList<ProposerSlashing, P::MaxProposerSlashings> {
         let _timer = self
             .metrics
@@ -2843,7 +2781,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(|metrics| metrics.prepare_proposer_slashings_times.start_timer());
 
         let split_index = itertools::partition(&mut self.proposer_slashings, |slashing| {
-            Self::validate_proposer_slashing_for_block(slashing, slot_head, own_public_keys).is_ok()
+            unphased::validate_proposer_slashing(
+                &slot_head.config,
+                &slot_head.beacon_state,
+                *slashing,
+            )
+            .is_ok()
         });
 
         let proposer_slashings = ContiguousList::try_from_iter(

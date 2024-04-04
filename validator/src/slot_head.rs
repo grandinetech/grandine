@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 use bls::{CachedPublicKey, PublicKeyBytes, SignatureBytes};
@@ -53,15 +53,6 @@ impl<P: Preset> SlotHead<P> {
                  indices of validators in SlotHead.beacon_state",
             )
             .pubkey
-    }
-
-    #[must_use]
-    pub fn is_validator_index_protected(
-        &self,
-        validator_index: ValidatorIndex,
-        own_public_keys: &HashSet<PublicKeyBytes>,
-    ) -> bool {
-        own_public_keys.contains(&self.public_key(validator_index).to_bytes())
     }
 
     pub fn proposer_index(&self) -> Result<ValidatorIndex> {
