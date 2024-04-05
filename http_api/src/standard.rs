@@ -161,7 +161,6 @@ pub struct PoolAttestationQuery {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ValidatorBlockQuery {
     randao_reveal: SignatureBytes,
     graffiti: Option<H256>,
