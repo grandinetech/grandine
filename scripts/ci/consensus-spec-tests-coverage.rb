@@ -12,10 +12,11 @@ IGNORED_GLOBS = %w[
   LICENSE
   configs/*.yaml
   presets/*/*.yaml
-  presets/*/trusted_setups/testing_trusted_setups.json
+  presets/*/trusted_setups/*.json
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/eip6110/*/*/*/*/*.{ssz_snappy,yaml}
+  tests/*/whisk/*/*/*/*/*.{ssz_snappy,yaml}
   tests/diagnostics_obj.json{,.lock}
 ].map! { |glob| File.join(SUBMODULE, glob) }
 
