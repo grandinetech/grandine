@@ -9,7 +9,6 @@ export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
 git submodule update --init       \
     ../../consensus-spec-tests    \
-    ../../eth2-cache              \
     ../../eth2_libp2p             \
     ../../grandine-snapshot-tests \
     ../../slashing-protection-interchange-tests
