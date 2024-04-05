@@ -17,6 +17,7 @@ use features::Feature;
 use fork_choice_control::{StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
 use genesis::GenesisProvider;
+use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
 use http_api::HttpApiConfig;
 use log::{error, info, warn};
 use metrics::MetricsServerConfig;
@@ -412,7 +413,7 @@ fn try_main() -> Result<()> {
     // Create a single one for the whole application and reuse it through `Signer::client`.
     let client = ClientBuilder::new()
         .timeout(request_timeout)
-        .user_agent(grandine_version::version_with_platform())
+        .user_agent(APPLICATION_VERSION_WITH_PLATFORM)
         .build()?;
 
     let mut cache = use_validator_key_cache.then(|| {
