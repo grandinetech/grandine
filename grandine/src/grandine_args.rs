@@ -1106,13 +1106,10 @@ impl GrandineArgs {
 
         let validators = keystore_dir
             .zip(keystore_password_file.or(keystore_password_dir))
-            .map(
-                |(keystore_dir, keystore_password_file)| Validators::KeystoreDirectory {
-                    keystore_dir,
-                    keystore_password_file,
-                },
-            )
-            .unwrap_or_default();
+            .map(|(keystore_dir, keystore_password_file)| Validators {
+                keystore_dir,
+                keystore_password_file,
+            });
 
         let minimum = StoreConfig::min_unfinalized_states_in_memory(&chain_config);
 
@@ -1623,6 +1620,12 @@ mod tests {
     }
 
     #[test]
+    fn validators_from_no_keystore_paths() {
+        let config = config_from_args([]);
+        assert_eq!(config.validators, None);
+    }
+
+    #[test]
     fn validators_from_keystore_password_file() {
         let config = config_from_args([
             "--keystore-dir",
@@ -1633,10 +1636,10 @@ mod tests {
 
         assert_eq!(
             config.validators,
-            Validators::KeystoreDirectory {
+            Some(Validators {
                 keystore_dir: PathBuf::from("dir_value"),
                 keystore_password_file: PathBuf::from("pass_file"),
-            },
+            }),
         );
     }
 
@@ -1651,10 +1654,10 @@ mod tests {
 
         assert_eq!(
             config.validators,
-            Validators::KeystoreDirectory {
+            Some(Validators {
                 keystore_dir: PathBuf::from("dir_value"),
                 keystore_password_file: PathBuf::from("pass_dir"),
-            },
+            }),
         );
     }
 

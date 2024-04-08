@@ -35,7 +35,7 @@ pub struct GrandineConfig {
     pub back_sync: bool,
     pub eth1_rpc_urls: Vec<Url>,
     pub data_dir: PathBuf,
-    pub validators: Validators,
+    pub validators: Option<Validators>,
     pub keystore_storage_password_file: Option<PathBuf>,
     pub graffiti: Vec<H256>,
     pub max_empty_slots: u64,

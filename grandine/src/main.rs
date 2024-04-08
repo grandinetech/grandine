@@ -23,7 +23,7 @@ use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use reqwest::{Client, ClientBuilder, Url};
 use runtime::{MetricsConfig, StorageConfig};
-use signer::Signer;
+use signer::{KeyOrigin, Signer};
 use slasher::SlasherConfig;
 use slashing_protection::SlashingProtector;
 use ssz::SszRead as _;
@@ -96,6 +96,7 @@ struct Context {
     metrics_config: MetricsConfig,
     track_liveness: bool,
     slashing_protection_history_limit: u64,
+    validator_enabled: bool,
 }
 
 impl Context {
@@ -150,6 +151,7 @@ impl Context {
             metrics_config,
             track_liveness,
             slashing_protection_history_limit,
+            validator_enabled,
         } = self;
 
         // Load keys early so we can validate `eth1_rpc_urls`.
@@ -269,6 +271,7 @@ impl Context {
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
             slashing_protection_history_limit,
+            validator_enabled,
         )
         .await
     }
@@ -428,8 +431,32 @@ fn try_main() -> Result<()> {
         None => ValidatorKeyCache::default(),
     };
 
+    let validator_enabled = validator_api_config.is_some()
+        || cache.is_some()
+        || !web3signer_config.is_empty()
+        || validators.is_some()
+        || validator_config.keystore_storage_password_file.is_some();
+
+    if validator_enabled {
+        info!("started loading validator keys");
+    }
+
+    let mut validator_keys = validators
+        .map(|validators| {
+            validators
+                .normalize(cache.as_mut())
+                .expect("unable to load local validator keys")
+        })
+        .unwrap_or_default();
+
+    validator_keys.extend(
+        keystore_storage
+            .keypairs()
+            .map(|(public_key, secret_key)| (public_key, secret_key, KeyOrigin::KeymanagerAPI)),
+    );
+
     let signer = Arc::new(Signer::new(
-        validators.normalize(cache.as_mut(), &keystore_storage)?,
+        validator_keys,
         client,
         web3signer_config,
         metrics.clone(),
@@ -470,6 +497,7 @@ fn try_main() -> Result<()> {
         metrics_config,
         track_liveness,
         slashing_protection_history_limit,
+        validator_enabled,
     };
 
     match context.chain_config.preset_base {

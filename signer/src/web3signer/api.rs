@@ -23,6 +23,13 @@ pub struct Config {
     pub urls: Vec<Url>,
 }
 
+impl Config {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.public_keys.is_empty() || self.urls.is_empty()
+    }
+}
+
 #[derive(Clone)]
 pub struct Web3Signer {
     client: Client,

@@ -69,6 +69,7 @@ pub async fn run_after_genesis<P: Preset>(
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
     slashing_protection_history_limit: u64,
+    validator_enabled: bool,
 ) -> Result<()> {
     let MetricsConfig {
         metrics,
@@ -89,7 +90,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     if !signer_snapshot.is_empty() {
         info!("loaded {} validator key(s)", signer_snapshot.keys().len());
-    } else if validator_config.keystore_storage_password_file.is_some() {
+    } else if validator_enabled {
         warn!("failed to load validator keys");
     }
 
