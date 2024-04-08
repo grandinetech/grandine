@@ -109,6 +109,7 @@ pub enum AttestationEpoch {
     Current,
 }
 
+#[derive(Clone, Copy)]
 pub enum SyncCommitteeEpoch {
     Current,
     Next,

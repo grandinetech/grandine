@@ -9,7 +9,6 @@ use helper_functions::{
 };
 use log::warn;
 use signer::{Signer, SigningMessage, SigningTriple};
-use tokio::sync::RwLock;
 use types::{
     altair::{
         containers::{SyncAggregatorSelectionData, SyncCommitteeMessage},
@@ -86,7 +85,7 @@ impl<P: Preset> SlotHead<P> {
     pub async fn selection_proofs<I>(
         &self,
         committee_indices_with_pubkeys: I,
-        signer: &RwLock<Signer>,
+        signer: &Signer,
     ) -> Result<Vec<Option<SignatureBytes>>>
     where
         I: IntoIterator<Item = (CommitteeIndex, PublicKeyBytes)> + Send,
@@ -107,8 +106,7 @@ impl<P: Preset> SlotHead<P> {
             .unzip();
 
         signer
-            .read()
-            .await
+            .load()
             .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
             .await?
             .zip(committee_indices)
@@ -132,7 +130,7 @@ impl<P: Preset> SlotHead<P> {
         &self,
         slot: Slot,
         validator_indices_with_pubkeys: I,
-        signer: &RwLock<Signer>,
+        signer: &Signer,
     ) -> Result<impl Iterator<Item = SyncCommitteeMessage> + '_>
     where
         I: IntoIterator<Item = (ValidatorIndex, PublicKeyBytes)> + Send,
@@ -158,8 +156,7 @@ impl<P: Preset> SlotHead<P> {
             .unzip();
 
         let messages = signer
-            .read()
-            .await
+            .load()
             .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
             .await?
             .zip(validator_indices)
@@ -178,7 +175,7 @@ impl<P: Preset> SlotHead<P> {
         &self,
         subcommittee_indices_with_pubkeys: impl Iterator<Item = (SubcommitteeIndex, PublicKeyBytes)>
             + Send,
-        signer: &RwLock<Signer>,
+        signer: &Signer,
     ) -> Result<Vec<Option<SignatureBytes>>> {
         let triples = subcommittee_indices_with_pubkeys.map(|(subcommittee_index, public_key)| {
             let selection_data = SyncAggregatorSelectionData {
@@ -194,8 +191,7 @@ impl<P: Preset> SlotHead<P> {
         });
 
         signer
-            .read()
-            .await
+            .load()
             .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
             .await?
             .map(|signature| {
@@ -208,7 +204,7 @@ impl<P: Preset> SlotHead<P> {
 
     pub async fn sign_beacon_block(
         &self,
-        signer: &RwLock<Signer>,
+        signer: &Signer,
         block: &(impl SignForSingleFork<P> + Debug + Send + Sync),
         message: SigningMessage<'_, P>,
         cached_public_key: &CachedPublicKey,
@@ -216,8 +212,7 @@ impl<P: Preset> SlotHead<P> {
         let public_key = cached_public_key.to_bytes();
 
         match signer
-            .read()
-            .await
+            .load()
             .sign(
                 message,
                 block.signing_root(&self.config, &self.beacon_state),

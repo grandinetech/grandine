@@ -6954,6 +6954,7 @@ name = "signer"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "bls",
  "builder_api",
  "futures",
@@ -6969,7 +6970,7 @@ dependencies = [
  "serde-aux",
  "serde_json",
  "serde_utils",
- "tap",
+ "std_ext",
  "thiserror",
  "tokio",
  "types",

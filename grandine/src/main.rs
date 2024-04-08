@@ -88,7 +88,7 @@ struct Context {
     storage_config: StorageConfig,
     command: Option<GrandineCommand>,
     builder_config: Option<BuilderConfig>,
-    signer: Signer,
+    signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     state_slot: Option<Slot>,
     eth1_auth: Arc<Auth>,
@@ -142,7 +142,7 @@ impl Context {
             storage_config,
             command,
             builder_config,
-            mut signer,
+            signer,
             slasher_config,
             state_slot,
             eth1_auth,
@@ -153,10 +153,15 @@ impl Context {
         } = self;
 
         // Load keys early so we can validate `eth1_rpc_urls`.
-        signer.load_keys_from_web3signer().await?;
+        signer.load_keys_from_web3signer().await;
+
+        let signer_snapshot = signer.load();
 
         if eth1_rpc_urls.is_empty() {
-            ensure!(signer.no_keys(), Error::MissingEth1RpcUrlsWithValidators);
+            ensure!(
+                signer_snapshot.no_keys(),
+                Error::MissingEth1RpcUrlsWithValidators,
+            );
         }
 
         let default_deposit_tree = predefined_network.map(PredefinedNetwork::genesis_deposit_tree);
@@ -194,7 +199,7 @@ impl Context {
         let eth1_chain = Eth1Chain::new(
             chain_config.clone_arc(),
             eth1_config.clone_arc(),
-            signer.client().clone(),
+            signer_snapshot.client().clone(),
             eth1_database,
             eth1_api_to_metrics_tx.clone(),
             metrics_config.metrics.clone(),
@@ -206,7 +211,7 @@ impl Context {
             &chain_config,
             genesis_state_file,
             predefined_network,
-            signer.client(),
+            signer_snapshot.client(),
             storage_config
                 .directories
                 .store_directory
@@ -423,12 +428,12 @@ fn try_main() -> Result<()> {
         None => ValidatorKeyCache::default(),
     };
 
-    let signer = Signer::new(
+    let signer = Arc::new(Signer::new(
         validators.normalize(cache.as_mut(), &keystore_storage)?,
         client,
         web3signer_config,
         metrics.clone(),
-    );
+    ));
 
     if let Some(cache) = cache {
         if let Err(error) = cache.save() {

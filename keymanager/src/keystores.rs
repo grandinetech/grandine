@@ -15,7 +15,6 @@ use signer::{KeyOrigin, Signer};
 use slashing_protection::{interchange_format::InterchangeFormat, SlashingProtector};
 use std_ext::ArcExt as _;
 use tap::{Pipe as _, TryConv as _};
-use tokio::sync::RwLock;
 use types::phase0::primitives::H256;
 use uuid::Uuid;
 use validator_key_cache::ValidatorKeyCache;
@@ -56,7 +55,7 @@ pub struct ValidatingPubkey {
 }
 
 pub struct KeystoreManager {
-    signer: Arc<RwLock<Signer>>,
+    signer: Arc<Signer>,
     slashing_protector: Arc<Mutex<SlashingProtector>>,
     genesis_validators_root: H256,
     storage: Mutex<Option<ValidatorKeyCache>>,
@@ -66,7 +65,7 @@ pub struct KeystoreManager {
 impl KeystoreManager {
     #[must_use]
     pub fn new_in_memory(
-        signer: Arc<RwLock<Signer>>,
+        signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
     ) -> Self {
@@ -80,7 +79,7 @@ impl KeystoreManager {
     }
 
     pub fn new_persistent(
-        signer: Arc<RwLock<Signer>>,
+        signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
         validator_directory: PathBuf,
@@ -115,24 +114,22 @@ impl KeystoreManager {
         self.persistence_config
             .validate_storage_password_presence()?;
 
-        let signer_keys = self
-            .signer
-            .read()
-            .await
-            .keys_with_origin()
-            .collect::<HashMap<_, _>>();
         let mut deleted_keys = vec![];
+        let mut delete_results = vec![];
 
-        let statuses = {
-            let mut signer = self.signer.write().await;
+        self.signer.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
 
-            pubkeys
-                .iter()
-                .copied()
-                .map(|pubkey| match signer_keys.get(&pubkey) {
+            let signer_keys = snapshot.keys_with_origin().collect::<HashMap<_, _>>();
+
+            deleted_keys.clear();
+            delete_results.clear();
+
+            for pubkey in pubkeys.iter().copied() {
+                let result = match signer_keys.get(&pubkey) {
                     Some(origin) => match origin {
                         KeyOrigin::KeymanagerAPI => {
-                            signer.delete_key(pubkey);
+                            snapshot.delete_key(pubkey);
                             deleted_keys.push(pubkey);
                             Status::Deleted.into()
                         }
@@ -141,9 +138,13 @@ impl KeystoreManager {
                         }
                     },
                     None => Error::NotFound.into(),
-                })
-                .collect()
-        };
+                };
+
+                delete_results.push(result);
+            }
+
+            snapshot
+        });
 
         if !deleted_keys.is_empty() {
             let mut key_storage = self.key_storage_mut().await?;
@@ -157,7 +158,7 @@ impl KeystoreManager {
             .await
             .build_interchange_data_for_validators(self.genesis_validators_root, pubkeys)?;
 
-        Ok((statuses, serde_json::to_string(&slashing_protection)?))
+        Ok((delete_results, serde_json::to_string(&slashing_protection)?))
     }
 
     pub async fn import(
@@ -223,7 +224,14 @@ impl KeystoreManager {
                 .lock()
                 .await
                 .register_validators(imported_keys.iter().map(|(pubkey, _)| *pubkey))?;
-            self.signer.write().await.append_keys(imported_keys);
+
+            self.signer.update(|snapshot| {
+                let mut snapshot = snapshot.as_ref().clone();
+
+                snapshot.append_keys(imported_keys.clone());
+
+                snapshot
+            });
         }
 
         Ok(statuses)
@@ -250,10 +258,9 @@ impl KeystoreManager {
         Ok(())
     }
 
-    pub async fn list_validating_pubkeys(&self) -> Vec<ValidatingPubkey> {
+    pub fn list_validating_pubkeys(&self) -> Vec<ValidatingPubkey> {
         self.signer
-            .read()
-            .await
+            .load()
             .keys_with_origin()
             .map(|(pubkey, origin)| ValidatingPubkey {
                 validating_pubkey: pubkey,
@@ -549,13 +556,13 @@ mod tests {
 
     fn build_keystore_manager(
         storage_dir: Option<PathBuf>,
-    ) -> Result<(KeystoreManager, Arc<RwLock<Signer>>)> {
-        let signer = Arc::new(RwLock::new(Signer::new(
+    ) -> Result<(KeystoreManager, Arc<Signer>)> {
+        let signer = Arc::new(Signer::new(
             vec![],
             Client::new(),
             Web3SignerConfig::default(),
             None,
-        )));
+        ));
         let slashing_protector = Arc::new(Mutex::new(SlashingProtector::in_memory(
             DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT,
         )?));
@@ -593,7 +600,7 @@ mod tests {
             .tempdir()?;
         let (manager, signer) = build_keystore_manager(Some(storage_tempdir.path().to_path_buf()))?;
 
-        assert!(manager.list_validating_pubkeys().await.is_empty());
+        assert!(manager.list_validating_pubkeys().is_empty());
 
         let normalized_password = eip_2335::normalize_password(KEYSTORE_PASSWORD)?;
         let expected_pubkey = PublicKeyBytes::from(PUBKEY_BYTES);
@@ -617,7 +624,7 @@ mod tests {
         );
 
         assert_eq!(
-            manager.list_validating_pubkeys().await,
+            manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
                 readonly: false
@@ -625,7 +632,7 @@ mod tests {
         );
 
         assert_eq!(
-            signer.read().await.keys().copied().collect_vec(),
+            signer.load().keys().copied().collect_vec(),
             vec![expected_pubkey],
         );
 
@@ -648,7 +655,7 @@ mod tests {
         );
 
         assert_eq!(
-            manager.list_validating_pubkeys().await,
+            manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
                 readonly: false
@@ -727,7 +734,7 @@ mod tests {
     async fn test_keystore_import_load_and_delete_with_in_memory_storage() -> Result<()> {
         let (manager, signer) = build_keystore_manager(None)?;
 
-        assert!(manager.list_validating_pubkeys().await.is_empty());
+        assert!(manager.list_validating_pubkeys().is_empty());
 
         let normalized_password = eip_2335::normalize_password(KEYSTORE_PASSWORD)?;
         let expected_pubkey = PublicKeyBytes::from(PUBKEY_BYTES);
@@ -751,7 +758,7 @@ mod tests {
         );
 
         assert_eq!(
-            manager.list_validating_pubkeys().await,
+            manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
                 readonly: false
@@ -759,7 +766,7 @@ mod tests {
         );
 
         assert_eq!(
-            signer.read().await.keys().copied().collect_vec(),
+            signer.load().keys().copied().collect_vec(),
             vec![expected_pubkey],
         );
 
@@ -782,7 +789,7 @@ mod tests {
         );
 
         assert_eq!(
-            manager.list_validating_pubkeys().await,
+            manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
                 readonly: false

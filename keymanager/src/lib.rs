@@ -14,7 +14,6 @@ use futures::lock::Mutex;
 use signer::Signer;
 use slashing_protection::SlashingProtector;
 use std_ext::ArcExt as _;
-use tokio::sync::RwLock;
 use types::phase0::primitives::{ExecutionAddress, H256};
 
 use crate::{keystores::KeystoreManager, remote_keys::RemoteKeyManager};
@@ -32,7 +31,7 @@ pub struct KeyManager {
 
 impl KeyManager {
     pub fn new_in_memory(
-        signer: Arc<RwLock<Signer>>,
+        signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
         default_fee_recipient: ExecutionAddress,
@@ -59,7 +58,7 @@ impl KeyManager {
     }
 
     pub fn new_persistent(
-        signer: Arc<RwLock<Signer>>,
+        signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
         validator_directory: PathBuf,

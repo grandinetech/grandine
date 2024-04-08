@@ -38,7 +38,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
 use signer::{Signer, SigningMessage};
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tokio::sync::RwLock;
 use tower_http::cors::AllowOrigin;
 use types::{
     bellatrix::primitives::Gas,
@@ -341,7 +340,7 @@ struct ValidatorApiState<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     keymanager: Arc<KeyManager>,
     secret: Arc<Secret>,
-    signer: Arc<RwLock<Signer>>,
+    signer: Arc<Signer>,
 }
 
 impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for ApiController<P, W> {
@@ -362,7 +361,7 @@ impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Secret> {
     }
 }
 
-impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<RwLock<Signer>> {
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Signer> {
     fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
         state.signer.clone_arc()
     }
@@ -552,7 +551,7 @@ async fn keymanager_delete_graffiti(
 async fn keymanager_list_validating_pubkeys(
     State(keymanager): State<Arc<KeyManager>>,
 ) -> Result<EthResponse<Vec<ValidatingPubkey>>, Error> {
-    let pubkeys = keymanager.keystores().list_validating_pubkeys().await;
+    let pubkeys = keymanager.keystores().list_validating_pubkeys();
 
     Ok(EthResponse::json(pubkeys))
 }
@@ -592,7 +591,7 @@ async fn keymanager_delete_keystores(
 async fn keymanager_list_remote_keys(
     State(keymanager): State<Arc<KeyManager>>,
 ) -> Result<EthResponse<Vec<ListedRemoteKey>>, Error> {
-    let remote_keys = keymanager.remote_keys().list().await;
+    let remote_keys = keymanager.remote_keys().list();
 
     Ok(EthResponse::json(remote_keys))
 }
@@ -616,7 +615,7 @@ async fn keymanager_delete_remote_keys(
 ) -> Result<EthResponse<Vec<KeymanagerOperationStatus>>, Error> {
     let RemoteKeysDeleteQuery { pubkeys } = query;
 
-    let delete_statuses = keymanager.remote_keys().delete(pubkeys).await;
+    let delete_statuses = keymanager.remote_keys().delete(&pubkeys);
 
     Ok(EthResponse::json(delete_statuses))
 }
@@ -624,7 +623,7 @@ async fn keymanager_delete_remote_keys(
 /// `POST /eth/v1/validator/{pubkey}/voluntary_exit`
 async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(signer): State<Arc<RwLock<Signer>>>,
+    State(signer): State<Arc<Signer>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
     EthQuery(query): EthQuery<CreateVoluntaryExitQuery>,
 ) -> Result<EthResponse<SignedVoluntaryExit>, Error> {
@@ -634,7 +633,9 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
         .epoch
         .unwrap_or_else(|| accessors::get_current_epoch(&state));
 
-    if !signer.read().await.has_key(pubkey) {
+    let signer_snapshot = signer.load();
+
+    if !signer_snapshot.has_key(pubkey) {
         return Err(Error::ValidatorNotOwned { pubkey });
     }
 
@@ -646,9 +647,7 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
         validator_index,
     };
 
-    let signature = signer
-        .read()
-        .await
+    let signature = signer_snapshot
         .sign(
             SigningMessage::VoluntaryExit(voluntary_exit),
             voluntary_exit.signing_root(controller.chain_config(), &state),
@@ -684,7 +683,7 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     directories: Arc<Directories>,
     keymanager: Arc<KeyManager>,
-    signer: Arc<RwLock<Signer>>,
+    signer: Arc<Signer>,
 ) -> Result<()> {
     let Auth { secret, token } = load_or_build_auth_token(&directories)?;
 

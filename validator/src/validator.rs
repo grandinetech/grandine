@@ -57,10 +57,7 @@ use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
-use tokio::{
-    sync::{OnceCell as TokioOnceCell, RwLock},
-    task::JoinHandle,
-};
+use tokio::task::JoinHandle;
 use transition_functions::{capella, combined, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -174,7 +171,7 @@ pub struct Validator<P: Preset, W: Wait> {
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     own_beacon_committee_subscriptions: OwnBeaconCommitteeSubscriptions,
     own_singular_attestations: OnceCell<Vec<OwnAttestation<P>>>,
-    own_sync_committee_members: TokioOnceCell<Vec<SyncCommitteeMember>>,
+    own_sync_committee_members: OnceCell<Vec<SyncCommitteeMember>>,
     own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions<P>,
     published_own_sync_committee_messages: bool,
     own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
@@ -182,7 +179,7 @@ pub struct Validator<P: Preset, W: Wait> {
     builder_api: Option<Arc<BuilderApi>>,
     last_registration_epoch: Option<Epoch>,
     proposer_configs: Arc<ProposerConfigs>,
-    signer: Arc<RwLock<Signer>>,
+    signer: Arc<Signer>,
     slashing_protector: Arc<Mutex<SlashingProtector>>,
     slasher_to_validator_rx: Option<UnboundedReceiver<SlasherToValidator<P>>>,
     subnet_service_tx: UnboundedSender<ToSubnetService>,
@@ -213,7 +210,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
         proposer_configs: Arc<ProposerConfigs>,
-        signer: Arc<RwLock<Signer>>,
+        signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
@@ -247,7 +244,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             attestation_agg_pool,
             own_beacon_committee_subscriptions: OwnBeaconCommitteeSubscriptions::default(),
             own_singular_attestations: OnceCell::new(),
-            own_sync_committee_members: TokioOnceCell::new(),
+            own_sync_committee_members: OnceCell::new(),
             own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions::default(),
             published_own_sync_committee_messages: false,
             own_aggregators: BTreeMap::new(),
@@ -647,8 +644,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Tick { slot, kind } = tick;
 
-        let no_validators =
-            self.signer.read().await.no_keys() && self.registered_validators.is_empty();
+        let no_validators = self.signer.load().no_keys() && self.registered_validators.is_empty();
 
         log!(
             if no_validators {
@@ -704,7 +700,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
-        self.update_subnet_subscriptions(slot_head.as_ref()).await?;
+        self.update_subnet_subscriptions(slot_head.as_ref()).await;
 
         if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
             self.refresh_signer_keys();
@@ -721,18 +717,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             if misc::is_epoch_start::<P>(state.slot() + 1) {
                 self.own_sync_committee_members.take();
 
-                self.own_sync_committee_members
-                    .get_or_try_init(|| {
-                        self.own_sync_committee_members_for_epoch(SyncCommitteeEpoch::Next, state)
-                    })
-                    .await?;
+                self.own_sync_committee_members.get_or_try_init(|| {
+                    self.own_sync_committee_members_for_epoch(SyncCommitteeEpoch::Next, state)
+                })?;
             }
 
-            self.own_sync_committee_members
-                .get_or_try_init(|| {
-                    self.own_sync_committee_members_for_epoch(SyncCommitteeEpoch::Current, state)
-                })
-                .await?;
+            self.own_sync_committee_members.get_or_try_init(|| {
+                self.own_sync_committee_members_for_epoch(SyncCommitteeEpoch::Current, state)
+            })?;
         }
 
         match kind {
@@ -1308,8 +1300,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let proposer_index = tokio::task::block_in_place(|| slot_head.proposer_index())?;
         let public_key = slot_head.public_key(proposer_index);
+        let signer_snapshot = self.signer.load();
 
-        if !self.signer.read().await.has_key(public_key.to_bytes()) {
+        if !signer_snapshot.has_key(public_key.to_bytes()) {
             return Ok(());
         }
 
@@ -1323,10 +1316,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let epoch = slot_head.current_epoch();
 
-        let result = self
-            .signer
-            .read()
-            .await
+        let result = signer_snapshot
             .sign(
                 SigningMessage::RandaoReveal { epoch },
                 RandaoEpoch::from(epoch).signing_root(&self.chain_config, &slot_head.beacon_state),
@@ -1698,8 +1688,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let sign_result = self
             .signer
-            .read()
-            .await
+            .load()
             .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
             .await;
 
@@ -1937,13 +1926,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.validator_config.graffiti[index]
     }
 
-    async fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
-        self.signer
-            .read()
-            .await
-            .keys()
-            .copied()
-            .collect::<HashSet<_>>()
+    fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
+        self.signer.load().keys().copied().collect::<HashSet<_>>()
     }
 
     async fn own_singular_attestations(
@@ -1954,7 +1938,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_attestations);
         }
 
-        let own_public_keys = self.own_public_keys().await;
+        let own_public_keys = self.own_public_keys();
 
         let (triples, other_data) = tokio::task::block_in_place(|| {
             let target = Checkpoint {
@@ -2010,8 +1994,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let result = self
             .signer
-            .read()
-            .await
+            .load()
             .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
             .await;
 
@@ -2054,12 +2037,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(Vec::as_slice)
     }
 
-    async fn own_sync_committee_members_for_epoch(
+    fn own_sync_committee_members_for_epoch(
         &self,
         relative_epoch: SyncCommitteeEpoch,
         state: &(impl PostAltairBeaconState<P> + ?Sized),
     ) -> Result<Vec<SyncCommitteeMember>> {
-        let own_public_keys = self.own_public_keys().await;
+        let own_public_keys = self.own_public_keys();
 
         tokio::task::block_in_place(|| {
             let sync_committee = match relative_epoch {
@@ -2186,8 +2169,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let result = self
             .signer
-            .read()
-            .await
+            .load()
             .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
             .await;
 
@@ -2515,9 +2497,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    async fn update_sync_committee_subscriptions(&mut self, beacon_state: &BeaconState<P>) {
+    fn update_sync_committee_subscriptions(&mut self, beacon_state: &BeaconState<P>) {
         if let Some(post_altair_state) = beacon_state.post_altair() {
-            let own_public_keys = self.own_public_keys().await;
+            let own_public_keys = self.own_public_keys();
 
             self.own_sync_committee_subscriptions
                 .build(post_altair_state, &own_public_keys);
@@ -2534,7 +2516,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    async fn update_subnet_subscriptions(&mut self, slot_head: Option<&SlotHead<P>>) -> Result<()> {
+    async fn update_subnet_subscriptions(&mut self, slot_head: Option<&SlotHead<P>>) {
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
             None => match self.controller.preprocessed_state_at_current_slot() {
@@ -2549,7 +2531,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         warn!("failed to obtain beacon state for current slot: {error}");
                     }
 
-                    return Ok(());
+                    return;
                 }
             },
         };
@@ -2561,10 +2543,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.update_beacon_committee_subscriptions(current_epoch + 1, &beacon_state)
             .await;
 
-        self.update_sync_committee_subscriptions(&beacon_state)
-            .await;
-
-        Ok(())
+        self.update_sync_committee_subscriptions(&beacon_state);
     }
 
     async fn handle_external_contributions_and_proofs(
@@ -2908,9 +2887,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn refresh_signer_keys(&self) {
-        let signer_arc = self.signer.clone_arc();
+        let signer = self.signer.clone_arc();
 
-        tokio::spawn(async move { signer_arc.write().await.load_keys_from_web3signer().await });
+        tokio::spawn(async move {
+            signer.load_keys_from_web3signer().await;
+        });
     }
 
     fn get_execution_payload_header(
@@ -2970,7 +2951,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let subnet_service_tx = self.subnet_service_tx.clone();
 
         tokio::spawn(async move {
-            let pubkeys = signer.read().await.keys().copied().collect_vec();
+            let signer_snapshot = signer.load();
+            let pubkeys = signer_snapshot.keys().copied().collect_vec();
 
             ToSubnetService::SetRegisteredValidators(
                 registered_validators
@@ -3009,7 +2991,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 })
                 .collect_vec();
 
-            let signatures = signer.read().await.sign_triples(triples, None).await?;
+            let signatures = signer_snapshot.sign_triples(triples, None).await?;
 
             let signed_registrations = registrations
                 .into_iter()

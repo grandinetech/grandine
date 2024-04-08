@@ -4,23 +4,24 @@ use std::{
 };
 
 use anyhow::Result;
+use arc_swap::{ArcSwap, Guard};
 use bls::{PublicKeyBytes, SecretKey, Signature};
 use futures::{
     stream::{FuturesUnordered, TryStreamExt as _},
-    try_join,
+    try_join, TryFutureExt as _,
 };
 use itertools::Itertools as _;
 use log::{info, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use reqwest::{Client, Url};
-use tap::Pipe as _;
+use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{phase0::primitives::H256, preset::Preset};
 
 use crate::{
     types::{ForkInfo, SigningMessage, SigningTriple},
-    web3signer::Web3Signer,
+    web3signer::{FetchedKeys, Web3Signer},
     Web3SignerConfig,
 };
 
@@ -43,10 +44,8 @@ enum SignMethod {
     Web3Signer(Url),
 }
 
-#[derive(Clone)]
 pub struct Signer {
-    sign_methods: HashMap<PublicKeyBytes, SignMethod>,
-    web3signer: Web3Signer,
+    snapshot: ArcSwap<Snapshot>,
 }
 
 impl Signer {
@@ -63,12 +62,65 @@ impl Signer {
             })
             .collect();
 
-        Self {
+        let snapshot = ArcSwap::from_pointee(Snapshot {
             sign_methods,
             web3signer: Web3Signer::new(client, web3signer_config, metrics),
+        });
+
+        Self { snapshot }
+    }
+
+    pub async fn load_keys_from_web3signer(&self) {
+        let keys = self.load().fetch_keys_from_web3signer().await;
+
+        self.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
+
+            snapshot.save_fetched_keys_from_web3signer(&keys);
+
+            snapshot
+        });
+
+        for (url, remote_keys) in keys {
+            match remote_keys {
+                Some(keys) => {
+                    info!(
+                        "loaded {} validator key(s) from Web3Signer at {}",
+                        keys.len(),
+                        url,
+                    );
+                }
+                None => {
+                    warn!(
+                        "Web3Signer at {} did not return any validator keys. It will retry to fetch keys again in the next epoch.",
+                        url,
+                    );
+                }
+            }
         }
     }
 
+    #[must_use]
+    pub fn load(&self) -> Guard<Arc<Snapshot>> {
+        self.snapshot.load()
+    }
+
+    pub fn update<R, F>(&self, f: F) -> Arc<Snapshot>
+    where
+        F: FnMut(&Arc<Snapshot>) -> R,
+        R: Into<Arc<Snapshot>>,
+    {
+        self.snapshot.rcu(f)
+    }
+}
+
+#[derive(Clone)]
+pub struct Snapshot {
+    sign_methods: HashMap<PublicKeyBytes, SignMethod>,
+    web3signer: Web3Signer,
+}
+
+impl Snapshot {
     #[must_use]
     pub fn has_key(&self, public_key: PublicKeyBytes) -> bool {
         self.sign_methods.contains_key(&public_key)
@@ -135,37 +187,27 @@ impl Signer {
         self.sign_methods.remove(&public_key);
     }
 
-    pub async fn load_keys_from_web3signer(&mut self) -> Result<()> {
-        for (url, remote_keys) in self.web3signer.load_public_keys().await {
-            match remote_keys {
-                Some(keys) => {
-                    info!(
-                        "fetched {} validator key(s) from Web3Signer at {}",
-                        keys.len(),
-                        url,
-                    );
-
-                    for public_key in keys {
-                        self.sign_methods
-                            .entry(public_key)
-                            .or_insert_with(|| SignMethod::Web3Signer(url.clone()));
-                    }
-                }
-                None => {
-                    warn!(
-                        "Web3Signer at {} did not return any validator keys. It will retry to fetch keys again in the next epoch.",
-                        url,
-                    );
-                }
-            }
-        }
-
-        Ok(())
+    pub async fn fetch_keys_from_web3signer(&self) -> FetchedKeys {
+        self.web3signer.fetch_public_keys().await
     }
 
     #[must_use]
     pub fn no_keys(&self) -> bool {
         self.sign_methods.is_empty()
+    }
+
+    pub fn save_fetched_keys_from_web3signer(&mut self, keys: &FetchedKeys) {
+        for (url, remote_keys) in keys {
+            if let Some(keys) = remote_keys {
+                for public_key in keys {
+                    self.sign_methods
+                        .entry(*public_key)
+                        .or_insert_with(|| SignMethod::Web3Signer(url.clone()));
+                }
+
+                self.web3signer.mark_keys_loaded_from(url.clone());
+            }
+        }
     }
 
     pub async fn sign<'block, P: Preset>(
@@ -204,7 +246,7 @@ impl Signer {
 
             match self.sign_method(public_key)? {
                 SignMethod::SecretKey(secret_key, _) => {
-                    sign_locally.push((index, signing_root, secret_key));
+                    sign_locally.push((index, signing_root, secret_key.clone_arc()));
                 }
                 SignMethod::Web3Signer(_) => {
                     sign_remotely.push((index, message, signing_root, public_key))
@@ -212,7 +254,7 @@ impl Signer {
             }
         }
 
-        let sign_locally_future = async {
+        let sign_locally_future = tokio::task::spawn_blocking(|| {
             sign_locally
                 .into_par_iter()
                 .map(|(index, signing_root, secret_key)| {
@@ -220,8 +262,8 @@ impl Signer {
                     (index, signature)
                 })
                 .collect::<Vec<_>>()
-                .pipe(Ok)
-        };
+        })
+        .map_err(Into::into);
 
         let sign_remotely_future = async {
             sign_remotely

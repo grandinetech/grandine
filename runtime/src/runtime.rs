@@ -35,7 +35,7 @@ use signer::Signer;
 use slasher::{Databases, Slasher, SlasherConfig};
 use slashing_protection::SlashingProtector;
 use std_ext::ArcExt as _;
-use tokio::{select, sync::RwLock};
+use tokio::select;
 use types::{config::Config as ChainConfig, preset::Preset, traits::BeaconState as _};
 use validator::{
     run_validator_api, Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig,
@@ -60,7 +60,7 @@ pub async fn run_after_genesis<P: Preset>(
     eth1_config: Arc<Eth1Config>,
     storage_config: StorageConfig,
     builder_config: Option<BuilderConfig>,
-    signer: Signer,
+    signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     http_api_config: HttpApiConfig,
     back_sync_enabled: bool,
@@ -85,8 +85,10 @@ pub async fn run_after_genesis<P: Preset>(
         ..
     } = storage_config;
 
-    if !signer.is_empty() {
-        info!("loaded {} validator key(s)", signer.keys().len());
+    let signer_snapshot = signer.load();
+
+    if !signer_snapshot.is_empty() {
+        info!("loaded {} validator key(s)", signer_snapshot.keys().len());
     } else if validator_config.keystore_storage_password_file.is_some() {
         warn!("failed to load validator keys");
     }
@@ -125,7 +127,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let eth1_api = Arc::new(Eth1Api::new(
         chain_config.clone_arc(),
-        signer.client().clone(),
+        signer_snapshot.client().clone(),
         eth1_config.eth1_auth.clone_arc(),
         eth1_config.eth1_rpc_urls.clone(),
         eth1_api_to_metrics_tx,
@@ -159,8 +161,9 @@ pub async fn run_after_genesis<P: Preset>(
         prune_storage,
     ));
 
-    let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) =
-        storage.load(signer.client(), state_load_strategy).await?;
+    let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
+        .load(signer_snapshot.client(), state_load_strategy)
+        .await?;
 
     let mut slashing_protector = if in_memory {
         SlashingProtector::in_memory(slashing_protection_history_limit)?
@@ -178,7 +181,7 @@ pub async fn run_after_genesis<P: Preset>(
         )?
     };
 
-    slashing_protector.register_validators(signer.keys().copied())?;
+    slashing_protector.register_validators(signer_snapshot.keys().copied())?;
 
     let slashing_protector = Arc::new(Mutex::new(slashing_protector));
 
@@ -204,7 +207,7 @@ pub async fn run_after_genesis<P: Preset>(
     let execution_service =
         ExecutionService::new(eth1_api, controller.clone_arc(), execution_service_rx);
 
-    let validator_keys = Arc::new(signer.keys().copied().collect::<HashSet<_>>());
+    let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
 
     let num_of_cpus = num_cpus::get();
 
@@ -316,7 +319,7 @@ pub async fn run_after_genesis<P: Preset>(
     let builder_api = builder_config.map(|builder_config| {
         Arc::new(BuilderApi::new(
             builder_config,
-            signer.client().clone(),
+            signer_snapshot.client().clone(),
             metrics.clone(),
         ))
     });
@@ -402,8 +405,6 @@ pub async fn run_after_genesis<P: Preset>(
             ))
         })
         .transpose()?;
-
-    let signer = Arc::new(RwLock::new(signer));
 
     let graffiti = validator_config
         .graffiti

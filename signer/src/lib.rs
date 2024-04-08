@@ -7,7 +7,7 @@ pub use crate::{
 mod signer;
 mod types;
 mod web3signer {
-    pub use api::{Config, Web3Signer};
+    pub use api::{Config, FetchedKeys, Web3Signer};
 
     mod api;
     mod types;

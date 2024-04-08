@@ -5,7 +5,6 @@ use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork a
 use log::warn;
 use p2p::BeaconCommitteeSubscription;
 use signer::{Signer, SigningMessage, SigningTriple};
-use tokio::sync::RwLock;
 use types::{config::Config, phase0::primitives::Epoch, preset::Preset, traits::BeaconState};
 
 #[derive(Default)]
@@ -19,7 +18,7 @@ impl OwnBeaconCommitteeSubscriptions {
         config: &Config,
         epoch: Epoch,
         state: &impl BeaconState<P>,
-        signer: &RwLock<Signer>,
+        signer: &Signer,
     ) -> Result<Vec<BeaconCommitteeSubscription>> {
         if self
             .latest_computed_epoch
@@ -29,9 +28,9 @@ impl OwnBeaconCommitteeSubscriptions {
             return Ok(vec![]);
         }
 
-        let own_public_keys = signer
-            .read()
-            .await
+        let signer_snapshot = signer.load();
+
+        let own_public_keys = signer_snapshot
             .keys()
             .copied()
             .filter_map(|public_key| {
@@ -75,9 +74,7 @@ impl OwnBeaconCommitteeSubscriptions {
             }
         }
 
-        let slot_signatures = signer
-            .read()
-            .await
+        let slot_signatures = signer_snapshot
             .sign_triples(triples, Some(state.into()))
             .await?;
 

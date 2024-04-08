@@ -7,7 +7,6 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use signer::{KeyOrigin, Signer};
 use slashing_protection::SlashingProtector;
-use tokio::sync::RwLock;
 
 use crate::misc::{Error, OperationStatus, Status};
 
@@ -25,80 +24,92 @@ pub struct RemoteKey {
 }
 
 pub struct RemoteKeyManager {
-    signer: Arc<RwLock<Signer>>,
+    signer: Arc<Signer>,
     slashing_protector: Arc<Mutex<SlashingProtector>>,
 }
 
 impl RemoteKeyManager {
     #[must_use]
-    pub fn new(
-        signer: Arc<RwLock<Signer>>,
-        slashing_protector: Arc<Mutex<SlashingProtector>>,
-    ) -> Self {
+    pub fn new(signer: Arc<Signer>, slashing_protector: Arc<Mutex<SlashingProtector>>) -> Self {
         Self {
             signer,
             slashing_protector,
         }
     }
 
-    pub async fn delete(&self, pubkeys: Vec<PublicKeyBytes>) -> Vec<OperationStatus> {
-        let mut signer = self.signer.write().await;
-        let signer_keys = signer.keys_with_origin().collect::<HashMap<_, _>>();
+    pub fn delete(&self, pubkeys: &[PublicKeyBytes]) -> Vec<OperationStatus> {
+        let mut delete_results = vec![];
 
-        pubkeys
-            .iter()
-            .copied()
-            .map(|pubkey| match signer_keys.get(&pubkey) {
-                Some(origin) => match origin {
-                    KeyOrigin::KeymanagerAPI | KeyOrigin::LocalFileSystem => Error::ReadOnly.into(),
-                    KeyOrigin::Web3Signer => {
-                        signer.delete_key(pubkey);
-                        Status::Deleted.into()
-                    }
-                },
-                None => Error::NotFound.into(),
-            })
-            .collect()
+        self.signer.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
+
+            let signer_keys = snapshot.keys_with_origin().collect::<HashMap<_, _>>();
+
+            delete_results.clear();
+
+            for pubkey in pubkeys.iter().copied() {
+                let result = match signer_keys.get(&pubkey) {
+                    Some(origin) => match origin {
+                        KeyOrigin::KeymanagerAPI | KeyOrigin::LocalFileSystem => {
+                            Error::ReadOnly.into()
+                        }
+                        KeyOrigin::Web3Signer => {
+                            snapshot.delete_key(pubkey);
+                            Status::Deleted.into()
+                        }
+                    },
+                    None => Error::NotFound.into(),
+                };
+
+                delete_results.push(result);
+            }
+
+            snapshot
+        });
+
+        delete_results
     }
 
     pub async fn import(&self, remote_keys: Vec<RemoteKey>) -> Result<Vec<OperationStatus>> {
         let mut imported_pubkeys = vec![];
+        let mut import_results = vec![];
 
-        let statuses = {
-            let mut signer = self.signer.write().await;
+        self.signer.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
 
-            remote_keys
-                .into_iter()
-                .map(|remote_key| {
-                    let RemoteKey { pubkey, url } = remote_key;
+            imported_pubkeys.clear();
+            import_results.clear();
 
-                    match Url::parse(&url) {
-                        Ok(url) => {
-                            if signer.append_remote_key(pubkey, url) {
-                                imported_pubkeys.push(pubkey);
-                                Status::Imported.into()
-                            } else {
-                                Status::Duplicate.into()
-                            }
+            for RemoteKey { pubkey, url } in &remote_keys {
+                let result = match Url::parse(url) {
+                    Ok(url) => {
+                        if snapshot.append_remote_key(*pubkey, url) {
+                            imported_pubkeys.push(*pubkey);
+                            Status::Imported.into()
+                        } else {
+                            Status::Duplicate.into()
                         }
-                        Err(error) => anyhow!(error).into(),
                     }
-                })
-                .collect()
-        };
+                    Err(error) => anyhow!(error).into(),
+                };
+
+                import_results.push(result);
+            }
+
+            snapshot
+        });
 
         self.slashing_protector
             .lock()
             .await
             .register_validators(imported_pubkeys)?;
 
-        Ok(statuses)
+        Ok(import_results)
     }
 
-    pub async fn list(&self) -> Vec<ListedRemoteKey> {
+    pub fn list(&self) -> Vec<ListedRemoteKey> {
         self.signer
-            .read()
-            .await
+            .load()
             .web3signer_keys()
             .map(|(pubkey, url)| ListedRemoteKey {
                 pubkey,
@@ -130,8 +141,8 @@ mod tests {
     const SECRET_LOCAL: [u8; 32] =
         hex!("47b8192d77bf871b62e87859d653922725724a5c031afeabc60bcef5ff665138");
 
-    fn build_signer() -> Arc<RwLock<Signer>> {
-        Arc::new(RwLock::new(Signer::new(
+    fn build_signer() -> Arc<Signer> {
+        Arc::new(Signer::new(
             vec![(
                 PUBKEY_LOCAL,
                 Arc::new(
@@ -144,7 +155,7 @@ mod tests {
             Client::new(),
             Web3SignerConfig::default(),
             None,
-        )))
+        ))
     }
 
     fn build_slashing_protector() -> Result<Arc<Mutex<SlashingProtector>>> {
@@ -183,12 +194,12 @@ mod tests {
         );
 
         assert_eq!(
-            signer.read().await.keys().copied().sorted().collect_vec(),
+            signer.load().keys().copied().sorted().collect_vec(),
             [PUBKEY_REMOTE, PUBKEY_LOCAL],
         );
 
         assert_eq!(
-            manager.list().await,
+            manager.list(),
             [ListedRemoteKey {
                 pubkey: PUBKEY_REMOTE,
                 url: "https://www.example.com/".into(),
@@ -211,10 +222,10 @@ mod tests {
 
         manager.import(vec![remote_key]).await?;
 
-        assert_eq!(manager.list().await.len(), 1);
+        assert_eq!(manager.list().len(), 1);
 
         assert_eq!(
-            manager.delete(vec![PUBKEY_REMOTE, PUBKEY_LOCAL]).await,
+            manager.delete(&[PUBKEY_REMOTE, PUBKEY_LOCAL]),
             [
                 OperationStatus {
                     status: Status::Deleted,
@@ -227,12 +238,9 @@ mod tests {
             ],
         );
 
-        assert_eq!(
-            signer.read().await.keys().copied().collect_vec(),
-            [PUBKEY_LOCAL]
-        );
+        assert_eq!(signer.load().keys().copied().collect_vec(), [PUBKEY_LOCAL]);
 
-        assert_eq!(manager.list().await, []);
+        assert_eq!(manager.list(), []);
 
         Ok(())
     }

@@ -29,7 +29,7 @@ use slashing_protection::{SlashingProtector, DEFAULT_SLASHING_PROTECTION_HISTORY
 use snapshot_test_utils::Case;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
-use tokio::{runtime::Builder, sync::RwLock};
+use tokio::runtime::Builder;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
@@ -214,17 +214,23 @@ impl<P: Preset> Context<P> {
         let execution_service =
             ExecutionService::new(eth1_api, controller.clone_arc(), execution_service_rx);
 
-        let signer = Signer::new(validator_keys, client, Web3SignerConfig::default(), None);
-        let validator_keys = Arc::new(signer.keys().copied().collect());
+        let signer = Arc::new(Signer::new(
+            validator_keys,
+            client,
+            Web3SignerConfig::default(),
+            None,
+        ));
+
+        let signer_snapshot = signer.load();
+
+        let validator_keys = Arc::new(signer_snapshot.keys().copied().collect());
 
         let mut slashing_protector =
             SlashingProtector::in_memory(DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT)?;
 
-        slashing_protector.register_validators(signer.keys().copied())?;
+        slashing_protector.register_validators(signer_snapshot.keys().copied())?;
 
         let slashing_protector = Arc::new(Mutex::new(slashing_protector));
-
-        let signer = Arc::new(RwLock::new(signer));
 
         let validator_config = Arc::new(ValidatorConfig::default());
 

@@ -14,6 +14,8 @@ use crate::{ForkInfo, SigningMessage};
 
 use super::types::{SigningRequest, SigningResponse};
 
+pub type FetchedKeys = HashMap<Url, Option<HashSet<PublicKeyBytes>>>;
+
 #[derive(Clone, Default, Debug)]
 pub struct Config {
     pub allow_to_reload_keys: bool,
@@ -45,7 +47,7 @@ impl Web3Signer {
         &self.client
     }
 
-    pub async fn load_public_keys(&mut self) -> HashMap<&Url, Option<HashSet<PublicKeyBytes>>> {
+    pub async fn fetch_public_keys(&self) -> FetchedKeys {
         let _timer = self
             .metrics
             .as_ref()
@@ -53,12 +55,12 @@ impl Web3Signer {
 
         let mut keys = HashMap::new();
 
-        for url in &self.config.urls {
-            if !self.config.allow_to_reload_keys && self.keys_loaded.contains(url) {
+        for url in self.config.urls.iter().cloned() {
+            if !self.config.allow_to_reload_keys && self.keys_loaded.contains(&url) {
                 continue;
             }
 
-            match self.load_public_keys_from_url(url).await {
+            match self.fetch_public_keys_from_url(&url).await {
                 Ok(mut remote_keys) => {
                     if remote_keys.is_empty() {
                         keys.insert(url, None);
@@ -68,7 +70,6 @@ impl Web3Signer {
                         }
 
                         keys.insert(url, Some(remote_keys));
-                        self.keys_loaded.insert(url.clone());
                     }
                 }
                 Err(error) => warn!("failed to load Web3Signer keys from {url}: {error:?}"),
@@ -76,6 +77,10 @@ impl Web3Signer {
         }
 
         keys
+    }
+
+    pub fn mark_keys_loaded_from(&mut self, url: Url) {
+        self.keys_loaded.insert(url);
     }
 
     pub async fn sign<P: Preset>(
@@ -107,7 +112,7 @@ impl Web3Signer {
         Ok(response.signature)
     }
 
-    async fn load_public_keys_from_url(&self, api_url: &Url) -> Result<HashSet<PublicKeyBytes>> {
+    async fn fetch_public_keys_from_url(&self, api_url: &Url) -> Result<HashSet<PublicKeyBytes>> {
         let url = api_url.join("/api/v1/eth2/publicKeys")?;
 
         self.client
@@ -144,7 +149,7 @@ mod tests {
     ));
 
     #[tokio::test]
-    async fn test_load_public_keys() -> Result<()> {
+    async fn test_fetch_public_keys() -> Result<()> {
         let server = MockServer::start();
 
         server.mock(|when, then| {
@@ -161,13 +166,17 @@ mod tests {
         };
         let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
-        let response = web3signer.load_public_keys().await;
-        let expected =
-            HashMap::from([(&url, Some(HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2])))]);
+        let response = web3signer.fetch_public_keys().await;
+        let expected = HashMap::from([(
+            url.clone(),
+            Some(HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2])),
+        )]);
 
         assert_eq!(response, expected);
 
-        let response = web3signer.load_public_keys().await;
+        web3signer.mark_keys_loaded_from(url);
+
+        let response = web3signer.fetch_public_keys().await;
         // By default, do not load pubkeys from Web3Signer again if keys were loaded
         let expected = HashMap::new();
 
@@ -177,7 +186,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_public_keys_if_reload_is_allowed() -> Result<()> {
+    async fn test_fetch_public_keys_if_reload_is_allowed() -> Result<()> {
         let server = MockServer::start();
 
         server.mock(|when, then| {
@@ -194,13 +203,17 @@ mod tests {
         };
         let mut web3signer = Web3Signer::new(Client::new(), config, None);
 
-        let response = web3signer.load_public_keys().await;
-        let expected =
-            HashMap::from([(&url, Some(HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2])))]);
+        let response = web3signer.fetch_public_keys().await;
+        let expected = HashMap::from([(
+            url.clone(),
+            Some(HashSet::from([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2])),
+        )]);
 
         assert_eq!(response, expected);
 
-        let response = web3signer.load_public_keys().await;
+        web3signer.mark_keys_loaded_from(url);
+
+        let response = web3signer.fetch_public_keys().await;
 
         assert_eq!(response, expected);
 
@@ -208,7 +221,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_filtered_public_keys() -> Result<()> {
+    async fn test_fetch_filtered_public_keys() -> Result<()> {
         let server = MockServer::start();
 
         server.mock(|when, then| {
@@ -223,10 +236,10 @@ mod tests {
             public_keys: vec![SAMPLE_PUBKEY_2].into_iter().collect(),
             urls: vec![url.clone()],
         };
-        let mut web3signer = Web3Signer::new(Client::new(), config, None);
+        let web3signer = Web3Signer::new(Client::new(), config, None);
 
-        let response = web3signer.load_public_keys().await;
-        let expected = HashMap::from([(&url, Some(HashSet::from([SAMPLE_PUBKEY_2])))]);
+        let response = web3signer.fetch_public_keys().await;
+        let expected = HashMap::from([(url, Some(HashSet::from([SAMPLE_PUBKEY_2])))]);
 
         assert_eq!(response, expected);
 
