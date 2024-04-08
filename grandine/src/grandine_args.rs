@@ -26,7 +26,7 @@ use eth2_libp2p::PeerIdSerialized;
 use features::Feature;
 use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
 use fork_choice_store::StoreConfig;
-use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
+use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATION_VERSION};
 use http_api::HttpApiConfig;
 use itertools::{EitherOrBoth, Itertools as _};
 use log::warn;
@@ -98,7 +98,7 @@ pub struct GrandineArgs {
     #[clap(flatten)]
     validator_api_options: ValidatorApiOptions,
 
-    #[clap(long, value_parser = parse_graffiti)]
+    #[clap(long, value_parser = parse_graffiti, default_value = APPLICATION_NAME_AND_VERSION)]
     graffiti: Vec<H256>,
 
     /// List of optional runtime features to enable
