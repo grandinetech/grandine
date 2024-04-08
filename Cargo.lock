@@ -3162,6 +3162,7 @@ dependencies = [
  "static_assertions",
  "std_ext",
  "tap",
+ "test-case",
  "test-generator",
  "thiserror",
  "try_from_iterator",

@@ -38,4 +38,5 @@ duplicate = { workspace = true }
 hex-literal = { workspace = true }
 nonzero_ext = { workspace = true }
 spec_test_utils = { workspace = true }
+test-case = { workspace = true }
 test-generator = { workspace = true }

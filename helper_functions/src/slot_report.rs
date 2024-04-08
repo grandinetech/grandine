@@ -2,7 +2,7 @@
 
 use core::{
     num::{NonZeroU64, TryFromIntError},
-    ops::Neg as _,
+    ops::{Add, AddAssign, Neg as _},
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -181,8 +181,9 @@ impl SlotReport for RealSlotReport {
     #[inline]
     fn set_sync_committee_delta(&mut self, participant_index: ValidatorIndex, delta: Delta) {
         self.sync_committee_deltas
-            .insert(participant_index, delta)
-            .unwrap_none();
+            .entry(participant_index)
+            .and_modify(|existing| *existing += delta)
+            .or_insert(delta);
     }
 
     #[inline]
@@ -280,6 +281,35 @@ impl Delta {
     }
 }
 
+impl Add for Delta {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Penalty(penalty), Self::Penalty(other)) => {
+                Self::Penalty(penalty.saturating_add(other))
+            }
+            (Self::Penalty(penalty), Self::Reward(reward))
+            | (Self::Reward(reward), Self::Penalty(penalty)) => {
+                if penalty > reward {
+                    Self::Penalty(penalty - reward)
+                } else {
+                    Self::Reward(reward - penalty)
+                }
+            }
+            (Self::Reward(reward), Self::Reward(other)) => {
+                Self::Reward(reward.saturating_add(other))
+            }
+        }
+    }
+}
+
+impl AddAssign for Delta {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct SyncAggregateRewards {
@@ -296,3 +326,20 @@ impl SyncAggregateRewards {
 }
 
 pub type Assignment = (ValidatorIndex, AttestationEpoch);
+
+#[cfg(test)]
+mod tests {
+    use test_case::test_case;
+
+    use super::*;
+
+    #[test_case(Delta::Reward(2), Delta::Reward(3) => Delta::Reward(5))]
+    #[test_case(Delta::Reward(2), Delta::Penalty(3) => Delta::Penalty(1))]
+    #[test_case(Delta::Penalty(2), Delta::Reward(3) => Delta::Reward(1))]
+    #[test_case(Delta::Penalty(2), Delta::Penalty(3) => Delta::Penalty(5))]
+    #[test_case(Delta::Reward(2), Delta::Penalty(2) => Delta::Reward(0))]
+    #[test_case(Delta::Reward(Gwei::MAX), Delta::Reward(2) => Delta::Reward(Gwei::MAX))]
+    fn test_addition_of_deltas(first: Delta, second: Delta) -> Delta {
+        first + second
+    }
+}
