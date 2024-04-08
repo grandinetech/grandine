@@ -161,7 +161,9 @@ pub struct PoolAttestationQuery {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+// Allow custom fields in ValidatorBlockQuery.
+// This is required for Lodestar interoperability.
+// #[serde(deny_unknown_fields)]
 pub struct ValidatorBlockQuery {
     randao_reveal: SignatureBytes,
     graffiti: Option<H256>,
@@ -204,6 +206,21 @@ pub struct EventsQuery {
 #[serde(deny_unknown_fields)]
 pub struct ExpectedWithdrawalsQuery {
     proposal_slot: Option<Slot>,
+}
+
+#[derive(Deserialize)]
+#[serde(bound = "", rename_all = "snake_case")]
+pub enum BroadcastValidation {
+    Gossip,
+    Consensus,
+    ConsensusAndEquivocation,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+pub struct PublishBlockQuery {
+    broadcast_validation: BroadcastValidation,
 }
 
 #[allow(clippy::struct_field_names)]
@@ -1014,6 +1031,27 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
 
     publish_signed_block(
         signed_beacon_block,
+        blob_sidecars,
+        controller,
+        api_to_p2p_tx,
+    )
+    .await
+}
+
+/// `POST /eth/v2/beacon/blocks`
+pub async fn publish_block_v2<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthQuery(_query): EthQuery<PublishBlockQuery>,
+    EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
+) -> Result<StatusCode, Error> {
+    let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
+
+    let blob_sidecars =
+        misc::construct_blob_sidecars(&signed_beacon_block, blobs.into_iter(), proofs.into_iter())?;
+
+    publish_signed_block(
+        Arc::new(signed_beacon_block),
         blob_sidecars,
         controller,
         api_to_p2p_tx,

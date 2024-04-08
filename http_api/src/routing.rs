@@ -34,9 +34,9 @@ use crate::{
         node_peer, node_peer_count, node_peers, node_syncing_status, node_version,
         pool_attestations, pool_attester_slashings, pool_bls_to_execution_changes,
         pool_proposer_slashings, pool_voluntary_exits, publish_blinded_block, publish_block,
-        state_committees, state_finality_checkpoints, state_fork, state_randao, state_root,
-        state_sync_committees, state_validator, state_validator_balances, state_validators,
-        submit_pool_attestations, submit_pool_attester_slashing,
+        publish_block_v2, state_committees, state_finality_checkpoints, state_fork, state_randao,
+        state_root, state_sync_committees, state_validator, state_validator_balances,
+        state_validators, submit_pool_attestations, submit_pool_attester_slashing,
         submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
         submit_pool_sync_committees, submit_pool_voluntary_exit, sync_committee_rewards,
         validator_aggregate_attestation, validator_attestation_data, validator_attester_duties,
@@ -208,7 +208,7 @@ pub struct TestState<P: Preset> {
 pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
     gui_routes()
         .merge(eth_v1_beacon_routes(state.clone()))
-        .merge(eth_v2_beacon_routes())
+        .merge(eth_v2_beacon_routes(state.clone()))
         .merge(eth_v1_builder_routes())
         .merge(eth_v1_config_routes())
         .merge(eth_v1_debug_routes())
@@ -425,8 +425,16 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .merge(reward_routes)
 }
 
-fn eth_v2_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
-    Router::new().route("/eth/v2/beacon/blocks/:block_id", get(block))
+fn eth_v2_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<NormalState<P, W>> {
+    Router::new()
+        .route("/eth/v2/beacon/blocks/:block_id", get(block))
+        .route(
+            "/eth/v2/beacon/blocks",
+            post(publish_block_v2).route_layer(axum::middleware::map_request_with_state(
+                state,
+                middleware::is_synced,
+            )),
+        )
 }
 
 fn eth_v1_builder_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
