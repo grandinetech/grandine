@@ -150,7 +150,7 @@ pub async fn run_after_genesis<P: Preset>(
                 .store_directory
                 .clone()
                 .unwrap_or_default()
-                .join("sync"),
+                .join("beacon_fork_choice"),
             db_size,
         )?
     };
