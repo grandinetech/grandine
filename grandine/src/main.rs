@@ -688,6 +688,11 @@ fn handle_command<P: Preset>(
                     .clone()
                     .unwrap_or_default()
                     .as_path(),
+                directories
+                    .validator_dir
+                    .clone()
+                    .unwrap_or_default()
+                    .as_path(),
                 slashing_protection_history_limit,
                 genesis_validators_root,
             )?;

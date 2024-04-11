@@ -12,6 +12,7 @@ bls = { workspace = true }
 chrono = { workspace = true }
 educe = { workspace = true }
 fs-err = { workspace = true }
+glob = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }

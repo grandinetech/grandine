@@ -143,16 +143,20 @@ pub struct SlashingProtector {
 impl SlashingProtector {
     pub fn persistent(
         store_directory: impl AsRef<Path>,
+        validator_directory: impl AsRef<Path>,
         history_limit: u64,
         genesis_validators_root: H256,
     ) -> Result<Self> {
+        move_interchange_backup_files_to_validator_dir(&store_directory, &validator_directory)?;
+        move_slashing_protection_db_to_validator_dir(&store_directory, &validator_directory)?;
+
         remove_fork_version_from_validators_if_needed(
-            &store_directory,
+            &validator_directory,
             history_limit,
             genesis_validators_root,
         )?;
 
-        let connection = Self::initialize_persistent_db(store_directory)?;
+        let connection = Self::initialize_persistent_db(validator_directory)?;
 
         Ok(Self {
             connection,
@@ -174,10 +178,10 @@ impl SlashingProtector {
         })
     }
 
-    fn initialize_persistent_db(store_directory: impl AsRef<Path>) -> Result<Connection> {
-        let store_directory = store_directory.as_ref();
+    fn initialize_persistent_db(validator_directory: impl AsRef<Path>) -> Result<Connection> {
+        let validator_directory = validator_directory.as_ref();
 
-        let mut connection = Self::open_connection_from_path(store_directory, DB_PATH)?;
+        let mut connection = Self::open_connection_from_path(validator_directory, DB_PATH)?;
         schema::migrations::runner().run(&mut connection)?;
         Self::set_shared_pragma(&connection)?;
 
@@ -200,14 +204,11 @@ impl SlashingProtector {
         Ok(())
     }
 
-    fn open_connection_from_path(
-        store_directory: impl AsRef<Path>,
-        db_path: &str,
-    ) -> Result<Connection> {
-        let path = store_directory.as_ref().join(db_path);
+    fn open_connection_from_path(directory: impl AsRef<Path>, db_path: &str) -> Result<Connection> {
+        let path = directory.as_ref().join(db_path);
 
         if !path.try_exists()? {
-            fs_err::create_dir_all(store_directory)?;
+            fs_err::create_dir_all(directory)?;
         }
 
         Connection::open(path).map_err(Into::into)
@@ -881,12 +882,12 @@ impl InterchangeBuilder {
 }
 
 fn remove_fork_version_from_validators_if_needed(
-    store_directory: impl AsRef<Path>,
+    validator_directory: impl AsRef<Path>,
     history_limit: u64,
     genesis_validators_root: H256,
 ) -> Result<()> {
     let mut slashing_protector = SlashingProtector {
-        connection: SlashingProtector::open_connection_from_path(&store_directory, DB_PATH)?,
+        connection: SlashingProtector::open_connection_from_path(&validator_directory, DB_PATH)?,
         history_limit,
     };
 
@@ -906,7 +907,7 @@ fn remove_fork_version_from_validators_if_needed(
 
     let interchange = slashing_protector.build_interchange_data(genesis_validators_root)?;
 
-    let interchange_file_path = store_directory.as_ref().join(format!(
+    let interchange_file_path = validator_directory.as_ref().join(format!(
         "interchange-{}.json",
         chrono::Local::now().format("%Y-%m-%dT%H_%M_%S"),
     ));
@@ -921,14 +922,65 @@ fn remove_fork_version_from_validators_if_needed(
 
     info!("Interchange file saved");
 
-    fs_err::remove_file(store_directory.as_ref().join(DB_PATH))?;
+    fs_err::remove_file(validator_directory.as_ref().join(DB_PATH))?;
 
     let mut slashing_protector = SlashingProtector {
-        connection: SlashingProtector::initialize_persistent_db(&store_directory)?,
+        connection: SlashingProtector::initialize_persistent_db(&validator_directory)?,
         history_limit,
     };
 
     slashing_protector.import(interchange)?;
+
+    Ok(())
+}
+
+fn move_interchange_backup_files_to_validator_dir(
+    store_directory: impl AsRef<Path>,
+    validator_directory: impl AsRef<Path>,
+) -> Result<()> {
+    if let Some(glob_pattern) = &store_directory.as_ref().join("interchange-*.json").to_str() {
+        let movable_backup_files = glob::glob(glob_pattern)
+            .expect("glob pattern should be valid")
+            .flatten();
+
+        for interchange_backup_file in movable_backup_files {
+            if let Some(file_name) = interchange_backup_file.file_name() {
+                let beacon_backup_path = store_directory.as_ref().join(file_name);
+                let validator_backup_path = validator_directory.as_ref().join(file_name);
+
+                if !validator_backup_path.try_exists()? {
+                    fs_err::copy(&beacon_backup_path, &validator_backup_path)?;
+                    fs_err::remove_file(&beacon_backup_path)?;
+
+                    info!(
+                        "moved interchange backup file from {beacon_backup_path:?} to {validator_backup_path:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn move_slashing_protection_db_to_validator_dir(
+    store_directory: impl AsRef<Path>,
+    validator_directory: impl AsRef<Path>,
+) -> Result<()> {
+    let beacon_db_path = store_directory.as_ref().join(DB_PATH);
+    let validator_db_path = validator_directory.as_ref().join(DB_PATH);
+
+    // If database already exists, don't overwrite
+    if validator_db_path.try_exists()? {
+        return Ok(());
+    }
+
+    if beacon_db_path.try_exists()? {
+        fs_err::copy(&beacon_db_path, &validator_db_path)?;
+        fs_err::remove_file(&beacon_db_path)?;
+
+        info!("moved {DB_PATH} from {beacon_db_path:?} to {validator_db_path:?}");
+    }
 
     Ok(())
 }
@@ -961,7 +1013,7 @@ mod tests {
     // Bundle `TempDir` with `SlashingProtector` to prevent the directory from being dropped early.
     // Calls to SQLite fail if the directory containing the database is deleted.
     // `libmdbx` doesn't seem to have the same problem.
-    type ConstructorResult = Result<(SlashingProtector, Option<TempDir>)>;
+    type ConstructorResult = Result<(SlashingProtector, Option<TempDir>, Option<TempDir>)>;
     type Constructor = fn() -> ConstructorResult;
 
     #[derive(Deserialize)]
@@ -1027,18 +1079,29 @@ mod tests {
             .rand_bytes(10)
             .tempdir()?;
 
+        let temp_validator_dir = Builder::new()
+            .prefix("slashing_protector_validator")
+            .rand_bytes(10)
+            .tempdir()?;
+
         let slashing_protector = SlashingProtector::persistent(
             temp_store_dir.path(),
+            temp_validator_dir.path(),
             DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT,
             H256::default(),
         )?;
 
-        Ok((slashing_protector, Some(temp_store_dir)))
+        Ok((
+            slashing_protector,
+            Some(temp_store_dir),
+            Some(temp_validator_dir),
+        ))
     }
 
     fn build_in_memory_slashing_protector() -> ConstructorResult {
         Ok((
             SlashingProtector::in_memory(DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT)?,
+            None,
             None,
         ))
     }
@@ -1050,7 +1113,7 @@ mod tests {
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_shared_pragma(constructor: Constructor) -> Result<()> {
-        let (slashing_protector, _dir) = constructor()?;
+        let (slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         let foreign_keys = slashing_protector.connection.query_row(
             "SELECT foreign_keys FROM pragma_foreign_keys",
@@ -1073,7 +1136,7 @@ mod tests {
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_on_empty_db_block(constructor: Constructor) -> Result<()> {
-        let (mut slashing_protector, _dir) = constructor()?;
+        let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         let proposal = BlockProposal {
             slot: 81952,
@@ -1090,7 +1153,7 @@ mod tests {
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_on_empty_db_attestation(constructor: Constructor) -> Result<()> {
-        let (mut slashing_protector, _dir) = constructor()?;
+        let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
 
@@ -1116,7 +1179,7 @@ mod tests {
     fn test_slashing_protection_current_epoch(constructor: Constructor) -> Result<()> {
         let config = Config::minimal();
 
-        let (mut slashing_protector, _dir) = constructor()?;
+        let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         assert_eq!(slashing_protector.stored_current_epoch()?, None);
         assert_eq!(slashing_protector.validate_current_epoch(0)?, None);
@@ -1196,7 +1259,7 @@ mod tests {
     ) -> Result<()> {
         let config = Config::minimal();
 
-        let (mut slashing_protector, _dir) = constructor()?;
+        let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
 
@@ -1237,7 +1300,7 @@ mod tests {
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_block_proposal_pruning(constructor: Constructor) -> Result<()> {
-        let (mut slashing_protector, _dir) = constructor()?;
+        let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         let proposal = BlockProposal {
             slot: 32,
@@ -1277,7 +1340,7 @@ mod tests {
     #[test_resources(glob)]
     fn function_name(json_path: &str) {
         let run = || -> Result<()> {
-            let (mut slashing_protector, _dir) = constructor()?;
+            let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
             // read .json test file
             let json_path = Path::new("..").join(json_path);
@@ -1375,5 +1438,52 @@ mod tests {
         };
 
         run().expect("slashing protection interchange test should succeed")
+    }
+
+    #[test]
+    fn test_migrations_from_store_to_validator_dir() -> Result<()> {
+        let store_dir = Builder::new()
+            .prefix("slashing_protector")
+            .rand_bytes(10)
+            .tempdir()?;
+
+        let validator_dir = Builder::new()
+            .prefix("slashing_protector_validator")
+            .rand_bytes(10)
+            .tempdir()?;
+
+        let backup_file_path = store_dir
+            .as_ref()
+            .join("interchange-2024-04-09T12_51_36.json");
+
+        let db_file_path = store_dir.as_ref().join(DB_PATH);
+
+        let validator_file_path = validator_dir
+            .as_ref()
+            .join("interchange-2024-04-09T12_51_36.json");
+
+        let validator_db_file_path = validator_dir.as_ref().join(DB_PATH);
+
+        let _backup_file = File::create(&backup_file_path)?;
+        let _db_file = File::create(&db_file_path)?;
+
+        assert!(backup_file_path.try_exists()?);
+        assert!(db_file_path.try_exists()?);
+        assert!(!validator_file_path.try_exists()?);
+        assert!(!validator_db_file_path.try_exists()?);
+
+        let _slashing_protector = SlashingProtector::persistent(
+            store_dir.path(),
+            validator_dir.path(),
+            DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT,
+            H256::default(),
+        )?;
+
+        assert!(!backup_file_path.try_exists()?);
+        assert!(!db_file_path.try_exists()?);
+        assert!(validator_file_path.try_exists()?);
+        assert!(validator_db_file_path.try_exists()?);
+
+        Ok(())
     }
 }

@@ -7091,6 +7091,7 @@ dependencies = [
  "educe",
  "factory",
  "fs-err",
+ "glob",
  "helper_functions",
  "hex-literal",
  "itertools 0.12.1",

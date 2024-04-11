@@ -177,6 +177,11 @@ pub async fn run_after_genesis<P: Preset>(
                 .clone()
                 .unwrap_or_default()
                 .as_path(),
+            directories
+                .validator_dir
+                .clone()
+                .unwrap_or_default()
+                .as_path(),
             slashing_protection_history_limit,
             genesis_validators_root,
         )?
