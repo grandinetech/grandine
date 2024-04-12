@@ -1,14 +1,11 @@
 use core::{
     fmt::Display,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     num::{NonZeroU16, NonZeroU64},
     ops::Not as _,
     time::Duration,
 };
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
@@ -1389,7 +1386,7 @@ fn headers_to_allow_origin(allowed_origins: Vec<HeaderValue>) -> Option<AllowOri
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, SocketAddr};
+    use core::net::{Ipv4Addr, SocketAddr};
 
     use tempfile::NamedTempFile;
 

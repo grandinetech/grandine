@@ -1,4 +1,5 @@
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use core::net::SocketAddr;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use axum::{Router, Server};

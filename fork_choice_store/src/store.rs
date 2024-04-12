@@ -506,14 +506,10 @@ impl<P: Preset> Store<P> {
 
     #[must_use]
     pub fn unfinalized_chain_link_mut(&mut self, block_root: H256) -> Option<&mut ChainLink<P>> {
-        let Some(location) = self.unfinalized_locations.get(&block_root) else {
-            return None;
-        };
-
         let Location {
             segment_id,
             position,
-        } = location;
+        } = self.unfinalized_locations.get(&block_root)?;
 
         Some(&mut self.unfinalized[segment_id][*position].chain_link)
     }
@@ -2147,10 +2143,7 @@ impl<P: Preset> Store<P> {
         .collect_vec();
 
         // Updating the finalized checkpoint does not always result in new finalized blocks.
-        let Some(locations) = locations_from_newest_to_root.split_first() else {
-            return None;
-        };
-
+        let locations = locations_from_newest_to_root.split_first()?;
         let (partially_finalized_location, completely_finalized_locations) = locations;
 
         for completely_finalized_location in completely_finalized_locations.iter().rev() {

@@ -3053,10 +3053,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &mut self,
         block: &SignedBlindedBeaconBlock<P>,
     ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
-        let Some(builder_api) = &self.builder_api else {
-            return None;
-        };
-
+        let builder_api = self.builder_api.as_deref()?;
         let current_slot = self.controller.slot();
         let head_block_root = self.controller.head_block_root().value;
 

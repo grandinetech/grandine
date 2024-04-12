@@ -1,5 +1,5 @@
-use core::time::Duration;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use core::{net::SocketAddr, time::Duration};
+use std::{path::PathBuf, sync::Arc};
 
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;

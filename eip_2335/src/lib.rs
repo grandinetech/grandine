@@ -252,6 +252,8 @@ impl Kdf {
     content = "params"
 )]
 enum Checksum {
+    // The empty braces affect the generated Serde impls.
+    #[allow(clippy::empty_enum_variants_with_brackets)]
     Sha256 {},
 }
 

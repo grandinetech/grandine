@@ -391,9 +391,7 @@ impl SyncManager {
     }
 
     pub fn random_peer(&self) -> Option<PeerId> {
-        let Some(chain_id) = self.chain_with_max_peer_count() else {
-            return None;
-        };
+        let chain_id = self.chain_with_max_peer_count()?;
 
         self.peers
             .iter()

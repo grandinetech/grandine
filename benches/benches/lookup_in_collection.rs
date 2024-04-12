@@ -38,6 +38,7 @@ struct Small;
 
 // This is a new type rather than an alias to make the output of `tynm::type_name` look better.
 #[derive(Clone, Copy, Default)]
+#[allow(dead_code)]
 struct Large([usize; 8]);
 
 // Criterion macros only add confusion.

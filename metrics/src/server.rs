@@ -1,10 +1,10 @@
 #![allow(clippy::unused_async)]
 
-use core::time::Duration;
-use std::{
+use core::{
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    time::Duration,
 };
+use std::sync::Arc;
 
 use anyhow::{anyhow, Error as AnyhowError, Result};
 use axum::{

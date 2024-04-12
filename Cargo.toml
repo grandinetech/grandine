@@ -138,6 +138,10 @@ wildcard_dependencies   = 'warn'
 #   Setting it to deny (as opposed to forbid) makes no sense.
 #   `core::mem::forget` is impossible to use by mistake.
 #
+# - `clippy::single_call_fn`.
+#   It's unidiomatic and conflicts with lints like `clippy::too_many_lines`.
+#   Public functions are not exempt from it as of Rust 1.77.2.
+#
 # - `clippy::std_instead_of_alloc`
 #   It would require adding `extern crate alloc;` everywhere.
 #
@@ -146,50 +150,51 @@ wildcard_dependencies   = 'warn'
 #
 # - `clippy::unimplemented`
 #   It's useful to leave some trait methods unimplemented.
-alloc_instead_of_core           = 'warn'
-allow_attributes                = 'warn'
-allow_attributes_without_reason = 'warn'
-assertions_on_result_states     = 'warn'
-clone_on_ref_ptr                = 'warn'
-dbg_macro                       = 'warn'
-decimal_literal_representation  = 'warn'
-empty_drop                      = 'warn'
-empty_structs_with_brackets     = 'warn'
-filetype_is_file                = 'warn'
-float_arithmetic                = 'warn'
-float_cmp_const                 = 'warn'
-format_push_string              = 'warn'
-get_unwrap                      = 'warn'
-host_endian_bytes               = 'warn'
-if_then_some_else_none          = 'warn'
-lossy_float_literal             = 'warn'
-missing_asserts_for_indexing    = 'warn'
-mixed_read_write_in_expression  = 'warn'
-multiple_inherent_impl          = 'warn'
-mutex_atomic                    = 'warn'
-needless_raw_strings            = 'warn'
-partial_pub_fields              = 'warn'
-print_stderr                    = 'warn'
-print_stdout                    = 'warn'
-pub_without_shorthand           = 'warn'
-rc_buffer                       = 'warn'
-rc_mutex                        = 'warn'
-redundant_type_annotations      = 'warn'
-rest_pat_in_fully_bound_structs = 'warn'
-same_name_method                = 'warn'
-semicolon_inside_block          = 'warn'
-std_instead_of_core             = 'warn'
-str_to_string                   = 'warn'
-string_add                      = 'warn'
-string_lit_chars_any            = 'warn'
-string_slice                    = 'warn'
-string_to_string                = 'warn'
-todo                            = 'warn'
+alloc_instead_of_core             = 'warn'
+allow_attributes                  = 'warn'
+allow_attributes_without_reason   = 'warn'
+assertions_on_result_states       = 'warn'
+clone_on_ref_ptr                  = 'warn'
+dbg_macro                         = 'warn'
+decimal_literal_representation    = 'warn'
+empty_drop                        = 'warn'
+empty_enum_variants_with_brackets = 'warn'
+empty_structs_with_brackets       = 'warn'
+filetype_is_file                  = 'warn'
+float_arithmetic                  = 'warn'
+float_cmp_const                   = 'warn'
+format_push_string                = 'warn'
+get_unwrap                        = 'warn'
+host_endian_bytes                 = 'warn'
+if_then_some_else_none            = 'warn'
+lossy_float_literal               = 'warn'
+missing_asserts_for_indexing      = 'warn'
+mixed_read_write_in_expression    = 'warn'
+multiple_inherent_impl            = 'warn'
+mutex_atomic                      = 'warn'
+needless_raw_strings              = 'warn'
+partial_pub_fields                = 'warn'
+print_stderr                      = 'warn'
+print_stdout                      = 'warn'
+pub_without_shorthand             = 'warn'
+rc_buffer                         = 'warn'
+rc_mutex                          = 'warn'
+redundant_type_annotations        = 'warn'
+rest_pat_in_fully_bound_structs   = 'warn'
+same_name_method                  = 'warn'
+semicolon_inside_block            = 'warn'
+std_instead_of_core               = 'warn'
+str_to_string                     = 'warn'
+string_add                        = 'warn'
+string_lit_chars_any              = 'warn'
+string_slice                      = 'warn'
+string_to_string                  = 'warn'
+todo                              = 'warn'
 # Enable `clippy::undocumented_unsafe_blocks` in case we ever change our stance on unsafe code.
-undocumented_unsafe_blocks      = 'warn'
-unnecessary_self_imports        = 'warn'
-unwrap_used                     = 'warn'
-verbose_file_reads              = 'warn'
+undocumented_unsafe_blocks        = 'warn'
+unnecessary_self_imports          = 'warn'
+unwrap_used                       = 'warn'
+verbose_file_reads                = 'warn'
 
 # These are almost never helpful.
 assertions_on_constants = { level = 'allow', priority = 1 }
@@ -224,7 +229,7 @@ semicolon_if_nothing_returned = { level = 'allow', priority = 1 }
 # - <https://github.com/rust-lang/rust-clippy/issues/9072>
 significant_drop_in_scrutinee = { level = 'allow', priority = 1 }
 
-# `clippy::significant_drop_tightening` produces only false positives.
+# `clippy::significant_drop_tightening` often produces false positives.
 # See <https://github.com/rust-lang/rust-clippy/issues/10413>.
 significant_drop_tightening = { level = 'allow', priority = 1 }
 

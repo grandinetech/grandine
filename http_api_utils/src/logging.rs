@@ -1,5 +1,5 @@
-use core::time::Duration;
-use std::{net::SocketAddr, sync::Arc};
+use core::{net::SocketAddr, time::Duration};
+use std::sync::Arc;
 
 use axum::{
     body::Body,

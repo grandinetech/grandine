@@ -1,6 +1,6 @@
-use core::{future::Future, panic::AssertUnwindSafe, pin::pin};
+use core::{future::Future, net::SocketAddr, panic::AssertUnwindSafe, pin::pin};
 use std::{
-    net::{SocketAddr, TcpListener, UdpSocket},
+    net::{TcpListener, UdpSocket},
     path::PathBuf,
     process::ExitCode,
     sync::Arc,

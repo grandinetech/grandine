@@ -1,8 +1,5 @@
-use core::ops::Range;
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+use core::{net::SocketAddr, ops::Range};
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, ensure, Context as _, Error, Result};
 use assert_json_diff::{CompareMode, Config as CompareConfig};

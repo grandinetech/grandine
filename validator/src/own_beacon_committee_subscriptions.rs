@@ -22,8 +22,7 @@ impl OwnBeaconCommitteeSubscriptions {
     ) -> Result<Vec<BeaconCommitteeSubscription>> {
         if self
             .latest_computed_epoch
-            .map(|computed_epoch| computed_epoch >= epoch)
-            .unwrap_or_default()
+            .is_some_and(|computed_epoch| computed_epoch >= epoch)
         {
             return Ok(vec![]);
         }

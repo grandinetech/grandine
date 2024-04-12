@@ -1,5 +1,5 @@
-use core::future::Future;
-use std::{net::Ipv4Addr, sync::Arc};
+use core::{future::Future, net::Ipv4Addr};
+use std::sync::Arc;
 
 use anyhow::Result;
 use bls::{PublicKeyBytes, SecretKey};

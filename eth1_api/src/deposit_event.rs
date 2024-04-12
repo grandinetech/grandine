@@ -114,6 +114,8 @@ impl TryFrom<Log> for DepositEvent {
 
         ensure!(log_data.len() == Self::LENGTH, Error::WrongLength { log });
 
+        // `core::mem::offset_of!` was stabilized in Rust 1.77.0,
+        // but there is no equivalent to `memoffset::span_of!` in the standard library.
         let (
             pubkey_range,
             withdrawal_credentials_range,

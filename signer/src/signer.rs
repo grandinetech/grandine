@@ -131,10 +131,6 @@ impl Snapshot {
         self.sign_methods.is_empty()
     }
 
-    // The `#[must_use]` is redundant starting with Rust 1.66.0, but Clippy hasn't caught up yet.
-    // See <https://github.com/rust-lang/rust/pull/102287/>.
-    // There seems to be no issue about this in <https://github.com/rust-lang/rust-clippy>.
-    #[must_use]
     pub fn keys(&self) -> impl ExactSizeIterator<Item = &PublicKeyBytes> {
         self.sign_methods.keys()
     }

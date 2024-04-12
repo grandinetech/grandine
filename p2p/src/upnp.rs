@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr, SocketAddrV4};
+use core::net::{IpAddr, SocketAddr, SocketAddrV4};
 
 use anyhow::{bail, Result};
 use eth2_libp2p::{service::Network as Service, NetworkConfig};

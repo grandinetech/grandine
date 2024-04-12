@@ -1,10 +1,9 @@
-use core::{fmt::Display, time::Duration};
-use std::{
-    error::Error as StdError,
+use core::{
+    fmt::Display,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::Path,
-    sync::Arc,
+    time::Duration,
 };
+use std::{error::Error as StdError, path::Path, sync::Arc};
 
 use anyhow::{Error as AnyhowError, Result};
 use axum::{
@@ -134,7 +133,7 @@ impl Error {
         self.sources().format(": ")
     }
 
-    // `StdError::sources` is not stable as of Rust 1.76.0.
+    // `StdError::sources` is not stable as of Rust 1.77.2.
     fn sources(&self) -> impl Iterator<Item = &dyn StdError> {
         let mut error: Option<&dyn StdError> = Some(self);
 

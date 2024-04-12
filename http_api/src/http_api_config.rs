@@ -1,5 +1,7 @@
-use core::time::Duration;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use core::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Duration,
+};
 
 use educe::Educe;
 use hyper::{server::conn::AddrIncoming, Result};

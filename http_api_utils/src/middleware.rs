@@ -1,4 +1,5 @@
-use std::{error::Error as StdError, net::SocketAddr};
+use core::net::SocketAddr;
+use std::error::Error as StdError;
 
 use axum::{
     body::{Body, Bytes, HttpBody},
