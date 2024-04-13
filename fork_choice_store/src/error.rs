@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use eip_7594::DataColumnSidecar;
 use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
@@ -73,6 +74,53 @@ pub enum Error<P: Preset> {
     )]
     BlobSidecarProposerIndexMismatch {
         blob_sidecar: Arc<BlobSidecar<P>>,
+        computed: ValidatorIndex,
+    },
+    #[error("The current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}")]
+    DataColumnSidecarBlockNotADescendantOfFinalized {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
+    // TODO(feature/deneb): This is vague.
+    //                      The validation that fails with this error actually checks commitments.
+    #[error("data_column sidecar is invalid: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalid {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
+    #[error("data_column sidecar's block's parent is invalid: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalidParentOfBlock {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
+    #[error("data_column sidecar contains invalid inclusion proof: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalidInclusionProof {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
+    #[error("data_column sidecar index is invalid: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalidIndex {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
+    #[error(
+        "data_column sidecar is not newer than block parent \
+         (data_column sidecar: {data_column_sidecar:?}, parent_slot: {parent_slot})"
+    )]
+    DataColumnSidecarNotNewerThanBlockParent {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        parent_slot: Slot,
+    },
+    #[error(
+        "data_column sidecar published on incorrect subnet \
+         (data_column_sidecar: {data_column_sidecar:?}, expected: {expected}, actual: {actual})"
+    )]
+    DataColumnSidecarOnIncorrectSubnet {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        expected: SubnetId,
+        actual: SubnetId,
+    },
+    #[error(
+        "data_column sidecar has incorrect proposer index \
+         (data_column_sidecar: {data_column_sidecar:?}, computed: {computed})"
+    )]
+    DataColumnSidecarProposerIndexMismatch {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]

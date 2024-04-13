@@ -10,7 +10,8 @@ use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockAction, BlockOrigin, StateCacheProcessor, Store,
+    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor,
+    Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -28,6 +29,7 @@ use types::{
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::DataColumnIdentifier,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -44,6 +46,7 @@ use crate::{
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
 };
+use eip_7594::DataColumnSidecar;
 
 pub trait Run {
     fn run(self);
@@ -374,6 +377,56 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
             result,
             origin,
             blob_identifier,
+            block_seen,
+            submission_time,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+pub struct DataColumnSidecarTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub block_seen: bool,
+    pub origin: DataColumnSidecarOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            data_column_sidecar,
+            block_seen,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
+
+        let block_root = data_column_sidecar
+            .signed_block_header
+            .message
+            .hash_tree_root();
+        let index = data_column_sidecar.index;
+        let data_column_identifier = DataColumnIdentifier { block_root, index };
+
+        let result =
+            store_snapshot.validate_data_column_sidecar(data_column_sidecar, block_seen, &origin);
+
+        MutatorMessage::DataColumnSidecar {
+            wait_group,
+            result,
+            origin,
+            data_column_identifier,
             block_seen,
             submission_time,
         }
