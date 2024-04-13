@@ -1244,6 +1244,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "c-kzg"
+version = "1.0.0"
+source = "git+https://github.com/ethereum/c-kzg-4844?branch=das#7027b082ee6a647f44de61646813aa58e955093e"
+dependencies = [
+ "blst",
+ "cc",
+ "glob",
+ "hex",
+ "libc",
+ "serde",
+]
+
+[[package]]
 name = "cached"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2337,10 +2350,16 @@ dependencies = [
 name = "eip_7594"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "c-kzg",
  "duplicate",
+ "hashing",
+ "helper_functions",
  "num-traits",
+ "primitive-types",
  "serde",
  "sha2 0.10.8",
+ "sha3",
  "spec_test_utils",
  "ssz",
  "test-generator",
@@ -2949,6 +2968,7 @@ dependencies = [
  "derive_more 1.0.0",
  "drain_filter_polyfill",
  "duplicate",
+ "eip_7594",
  "eth2_cache_utils",
  "eth2_libp2p",
  "execution_engine",
@@ -2998,6 +3018,7 @@ dependencies = [
  "crossbeam-skiplist",
  "derivative",
  "derive_more 1.0.0",
+ "eip_7594",
  "eth2_libp2p",
  "execution_engine",
  "features",
@@ -3008,6 +3029,7 @@ dependencies = [
  "itertools 0.14.0",
  "kzg_utils",
  "log",
+ "primitive-types",
  "prometheus_metrics",
  "serde",
  "ssz",
@@ -3387,6 +3409,7 @@ dependencies = [
  "dirs",
  "doppelganger_protection",
  "eip_2335",
+ "eip_7594",
  "enum-iterator",
  "eth1",
  "eth1_api",

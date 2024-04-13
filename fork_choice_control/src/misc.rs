@@ -17,6 +17,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
+    eip7594::DataColumnIdentifier,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -129,6 +130,10 @@ pub enum MutatorRejectionReason {
     #[strum(serialize = "invalid_blob_sidecar")]
     InvalidBlobSidecar {
         blob_identifier: BlobIdentifier,
+    },
+    #[strum(serialize = "invalid_data_column_sidecar")]
+    InvalidDataColumnSidecar {
+        data_column_identifier: DataColumnIdentifier,
     },
 }
 

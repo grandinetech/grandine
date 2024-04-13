@@ -10,13 +10,14 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-    ChainLink,
+    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, Store,
 };
 use log::debug;
 use serde::Serialize;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::DataColumnIdentifier,
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -119,6 +120,14 @@ pub enum MutatorMessage<P: Preset, W> {
         // `helper_functions::accessors::latest_block_root`, but the latter may involve hashing.
         checkpoint: Checkpoint,
         checkpoint_state: Option<Arc<BeaconState<P>>>,
+    },
+    DataColumnSidecar {
+        wait_group: W,
+        result: Result<DataColumnSidecarAction<P>>,
+        origin: DataColumnSidecarOrigin,
+        data_column_identifier: DataColumnIdentifier,
+        block_seen: bool,
+        submission_time: Instant,
     },
     FinishedPersistingBlobSidecars {
         wait_group: W,

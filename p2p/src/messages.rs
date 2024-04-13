@@ -16,6 +16,7 @@ use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::DataColumnIdentifier,
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
