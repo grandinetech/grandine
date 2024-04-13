@@ -408,41 +408,43 @@ serde_with = '3'
 serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
-sha2 = { version = '0.10', features = ['compress'] }
-slog = { version = '2', features = ['max_level_trace'] }
-slog-async = '2'
-slog-stdlog = '4'
-slog-term = '2'
-smallvec = { version = '1', features = ['serde', 'union'] }
-snap = '1'
-static_assertions = '1'
-strum = { version = '0.26', features = ['derive'] }
-syn = { version = '2', features = ['full'] }
-sysinfo = '0.31'
-tap = '1'
-tempfile = '3'
-test-case = '3'
-test-generator = '0.3'
-testing_logger = '0.1'
-thiserror = '1'
-tiny-keccak = '2'
-tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
-tokio-io-timeout = '1'
-tokio-stream = { version = '0.1', features = ['sync'] }
-tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
-tower = { version = '0.5', features = ['timeout'] }
-tower-http = { version = '0.5', features = ['cors', 'trace'] }
-tracing = '0.1'
-triomphe = '0.1'
-tynm = '0.1'
-typenum = '1'
-unicode-normalization = '0.1'
-unsigned-varint = { version = '= 0.8', features = ['codec'] }
-unwrap_none = '0.1'
-url = '2'
-uuid = { version = '1', features = ['serde', 'v4'] }
-variant_count = '1'
-void = '1'
+sha2 = { version = '0.10.8', features = ['compress'] }
+sha3 = { version = '0.10.8'}
+slog = { version = '2.7.0', features = ['max_level_trace'] }
+slog-async = '2.8.0'
+slog-stdlog = '4.1.1'
+slog-term = '2.9.0'
+smallvec = { version = '1.13.1', features = ['serde', 'union'] }
+snap = '1.1.1'
+static_assertions = '1.1.0'
+strum = { version = '0.26.1', features = ['derive'] }
+syn = { version = '2.0.48', features = ['full'] }
+sysinfo = '0.30.5'
+tap = '1.0.1'
+tempfile = '3.9.0'
+test-case = '3.3.1'
+test-generator = '0.3.1'
+testing_logger = '0.1.1'
+thiserror = '1.0.56'
+tiny-keccak = '2.0.2'
+tokio = { version = '1.36.0', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
+tokio-io-timeout = '1.2.0'
+tokio-stream = { version = '0.1.14', features = ['sync'] }
+tokio-util = { version = '0.6.10', features = ['codec', 'compat', 'time'] }
+tower = { version = '0.4.13', features = ['timeout'] }
+tower-http = { version = '0.4.4', features = ['cors', 'trace'] }
+tracing = '0.1.40'
+triomphe = '0.1.11'
+tynm = '0.1.9'
+typenum = '1.17.0'
+unicode-normalization = '0.1.22'
+# 0.7.2 breaks `eth2_libp2p`. Update this is no longer the case.
+unsigned-varint = { version = '= 0.7.1', features = ['codec'] }
+unwrap_none = '0.1.2'
+url = '2.5.0'
+uuid = { version = '1.7.0', features = ['serde', 'v4'] }
+variant_count = '1.1.0'
+void = '1.0.2'
 web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
 
@@ -453,6 +455,7 @@ binary_utils = { path = 'binary_utils' }
 block_producer = { path = 'block_producer' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
+c-kzg = { git = 'https://github.com/ethereum/c-kzg-4844', branch = 'das' }  
 clock = { path = 'clock' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
