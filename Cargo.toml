@@ -8,10 +8,12 @@ members = [
     'bls',
     'builder_api',
     'clock',
+    'c-kzg',
     'database',
     'deposit_tree',
     'directories',
     'eip_2335',
+    'eip_7594',
     'eth1',
     'eth1_api',
     'eth2_cache_utils',
@@ -379,6 +381,7 @@ serde_yaml = '0.9.31'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
 sha2 = { version = '0.10.8', features = ['compress'] }
+sha3 = { version = '0.10.8'}
 slog = { version = '2.7.0', features = ['max_level_trace'] }
 slog-async = '2.8.0'
 slog-stdlog = '4.1.1'
@@ -422,11 +425,13 @@ arithmetic = { path = 'arithmetic' }
 binary_utils = { path = 'binary_utils' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
+c-kzg = {path = 'c-kzg'}  
 clock = { path = 'clock' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
 directories = { path = 'directories' }
 eip_2335 = { path = 'eip_2335' }
+eip_7594 = { path = 'eip_7594' }
 eth1 = { path = 'eth1' }
 eth1_api = { path = 'eth1_api' }
 eth2_cache_utils = { path = 'eth2_cache_utils' }

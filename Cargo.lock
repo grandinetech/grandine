@@ -1030,6 +1030,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "c-kzg"
+version = "1.0.0"
+dependencies = [
+ "bindgen",
+ "blst",
+ "cc",
+ "criterion",
+ "glob",
+ "hex",
+ "libc",
+ "rand",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
 name = "cached"
 version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2012,6 +2029,18 @@ dependencies = [
  "unicode-normalization",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "eip_7594"
+version = "0.0.0"
+dependencies = [
+ "c-kzg",
+ "kzg",
+ "kzg_utils",
+ "sha3",
+ "ssz",
+ "tiny-keccak",
 ]
 
 [[package]]

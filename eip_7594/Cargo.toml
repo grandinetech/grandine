@@ -1,0 +1,15 @@
+[package]
+name = 'eip_7594'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+kzg_utils = { workspace = true }
+kzg = { workspace = true }
+ssz = { workspace = true}
+c-kzg = {workspace = true}
+tiny-keccak = {workspace = true}
+sha3 = {workspace = true}
