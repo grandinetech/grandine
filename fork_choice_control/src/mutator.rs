@@ -48,6 +48,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::DataColumnIdentifier,
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -56,6 +57,10 @@ use types::{
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
+
+use eip_7594::DataColumnSidecar;
+use fork_choice_store::DataColumnSidecarAction;
+use fork_choice_store::DataColumnSidecarOrigin;
 
 use crate::{
     block_processor::BlockProcessor,
@@ -252,6 +257,21 @@ where
                     checkpoint,
                     checkpoint_state,
                 } => self.handle_checkpoint_state(&wait_group, checkpoint, checkpoint_state)?,
+                MutatorMessage::DataColumnSidecar {
+                    wait_group,
+                    result,
+                    origin,
+                    data_column_identifier,
+                    block_seen,
+                    submission_time,
+                } => self.handle_data_column_sidecar(
+                    wait_group,
+                    result,
+                    origin,
+                    data_column_identifier,
+                    block_seen,
+                    submission_time,
+                ),
                 MutatorMessage::FinishedPersistingBlobSidecars {
                     wait_group,
                     persisted_blob_ids,
@@ -1297,6 +1317,54 @@ where
         }
     }
 
+    fn handle_data_column_sidecar(
+        &mut self,
+        wait_group: W,
+        result: Result<DataColumnSidecarAction<P>>,
+        origin: DataColumnSidecarOrigin,
+        data_column_identifier: DataColumnIdentifier,
+        block_seen: bool,
+        submission_time: Instant,
+    ) {
+        match result {
+            Ok(DataColumnSidecarAction::Accept(data_column_sidecar)) => {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+
+                self.accept_data_column_sidecar(&wait_group, data_column_sidecar);
+            }
+            Ok(DataColumnSidecarAction::Ignore(publishable)) => {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+            }
+            Err(error) => {
+                warn!("data column sidecar rejected (error: {error}, origin: {origin:?})");
+
+                let (gossip_id, sender) = origin.split();
+
+                P2pMessage::Reject(
+                    gossip_id,
+                    MutatorRejectionReason::InvalidDataColumnSidecar {
+                        data_column_identifier,
+                    },
+                )
+                .send(&self.p2p_tx);
+
+                reply_to_http_api(sender, Err(error));
+            }
+        }
+    }
+
     fn handle_checkpoint_state(
         &mut self,
         wait_group: &W,
@@ -1903,6 +1971,39 @@ where
         }
 
         self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
+    }
+
+    fn accept_data_column_sidecar(
+        &mut self,
+        wait_group: &W,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    ) {
+        let old_head = self.store.head().clone();
+        let head_was_optimistic = old_head.is_optimistic();
+        let block_root = data_column_sidecar
+            .signed_block_header
+            .message
+            .hash_tree_root();
+
+        todo!();
+        // NESUKODINTAS DALYKAS
+        // self.store_mut().apply_blob_sidecar(blob_sidecar);
+
+        // self.update_store_snapshot();
+
+        // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
+        //     self.retry_block(wait_group.clone(), pending_block.clone());
+        // }
+
+        // self.spawn(PersistBlobSidecarsTask {
+        //     store_snapshot: self.owned_store(),
+        //     storage: self.storage.clone_arc(),
+        //     mutator_tx: self.owned_mutator_tx(),
+        //     wait_group: wait_group.clone(),
+        //     metrics: self.metrics.clone(),
+        // });
+
+        // self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
 
     fn notify_about_finalized_checkpoint(&self) {
