@@ -195,6 +195,8 @@ impl<P: Preset> BackSync<P> {
         // Store back-synced blocks in fork choice db.
         controller.store_back_sync_blocks(blocks)?;
         controller.store_back_sync_blob_sidecars(blob_sidecars)?;
+        // TODO(feature/fulu): enable this once `store_back_sync_data_column_sidecars` implemented
+        // controller.store_back_sync_data_column_sidecars(data_column_sidecars)?;
 
         // Update back-sync progress in sync database.
         self.data.current = checkpoint;
@@ -280,6 +282,8 @@ impl<P: Preset> Batch<P> {
             })
             .collect()
     }
+
+    // TODO(feature/fulu): implement valid_data_column_sidecars_for
 
     #[expect(clippy::type_complexity)]
     fn verify_from_checkpoint(

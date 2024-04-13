@@ -7,6 +7,7 @@ use std::sync::Arc;
 use anyhow::{Error as AnyhowError, Result};
 use derivative::Derivative;
 use derive_more::Debug;
+use eip_7594::DataColumnSidecar;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
@@ -542,6 +543,61 @@ impl BlobSidecarOrigin {
     }
 }
 
+#[derive(Debug)]
+pub enum DataColumnSidecarOrigin {
+    Api(Option<OneshotSender<Result<ValidationOutcome>>>),
+    BackSync,
+    Gossip(SubnetId, GossipId),
+    Requested(PeerId),
+    Own,
+}
+
+impl DataColumnSidecarOrigin {
+    #[must_use]
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        match self {
+            Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, sender),
+            Self::BackSync | Self::Own | Self::Requested(_) => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
+            Self::BackSync | Self::Api(_) | Self::Own | Self::Requested(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn peer_id(&self) -> Option<PeerId> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id.source),
+            Self::Requested(peer_id) => Some(*peer_id),
+            Self::BackSync | Self::Api(_) | Self::Own => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn subnet_id(&self) -> Option<SubnetId> {
+        match self {
+            Self::Gossip(subnet_id, _) => Some(*subnet_id),
+            Self::BackSync | Self::Api(_) | Self::Own | Self::Requested(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_back_sync(&self) -> bool {
+        matches!(self, Self::BackSync)
+    }
+}
+
 pub enum BlockAction<P: Preset> {
     Accept(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>),
     Ignore(Publishable),
@@ -607,6 +663,19 @@ pub enum BlobSidecarAction<P: Preset> {
 }
 
 impl<P: Preset> BlobSidecarAction<P> {
+    #[must_use]
+    pub const fn accepted(&self) -> bool {
+        matches!(self, Self::Accept(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum DataColumnSidecarAction<P: Preset> {
+    Accept(Arc<DataColumnSidecar<P>>),
+    Ignore(Publishable),
+}
+
+impl<P: Preset> DataColumnSidecarAction<P> {
     #[must_use]
     pub const fn accepted(&self) -> bool {
         matches!(self, Self::Accept(_))
