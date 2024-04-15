@@ -146,7 +146,9 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
             .attestation_subnets
             .update(current_slot, self.beacon_committee_subscriptions.all())?;
 
-        SubnetServiceToP2p::UpdateAttestationSubnets(actions).send(&self.p2p_tx);
+        if !actions.is_empty() {
+            SubnetServiceToP2p::UpdateAttestationSubnets(actions).send(&self.p2p_tx);
+        }
 
         Ok(())
     }
@@ -160,6 +162,8 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
             .sync_committee_subnets
             .update(current_epoch, subscriptions);
 
-        SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions).send(&self.p2p_tx);
+        if !actions.is_empty() {
+            SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions).send(&self.p2p_tx);
+        }
     }
 }

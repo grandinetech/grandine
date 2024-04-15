@@ -62,14 +62,6 @@ impl<P: Preset> SlotHead<P> {
         accessors::beacon_committee(&self.beacon_state, self.slot(), committee_index)
     }
 
-    pub fn beacon_committees(
-        &self,
-        slot: Slot,
-    ) -> Result<impl Iterator<Item = (CommitteeIndex, IndexSlice)>> {
-        let committees = accessors::beacon_committees(&self.beacon_state, slot)?;
-        Ok((0..).zip(committees))
-    }
-
     #[must_use]
     pub fn has_sync_committee(&self) -> bool {
         self.beacon_state.phase() >= Phase::Altair
@@ -80,49 +72,6 @@ impl<P: Preset> SlotHead<P> {
             accessors::get_committee_count_per_slot(&self.beacon_state, RelativeEpoch::Current);
 
         misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
-    }
-
-    pub async fn selection_proofs<I>(
-        &self,
-        committee_indices_with_pubkeys: I,
-        signer: &Signer,
-    ) -> Result<Vec<Option<SignatureBytes>>>
-    where
-        I: IntoIterator<Item = (CommitteeIndex, PublicKeyBytes)> + Send,
-    {
-        let slot = self.slot();
-
-        let (triples, committee_indices): (Vec<_>, Vec<_>) = committee_indices_with_pubkeys
-            .into_iter()
-            .map(|(committee_index, public_key)| {
-                let triple = SigningTriple {
-                    message: SigningMessage::AggregationSlot { slot },
-                    signing_root: slot.signing_root(&self.config, &self.beacon_state),
-                    public_key,
-                };
-
-                (triple, committee_index)
-            })
-            .unzip();
-
-        signer
-            .load()
-            .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
-            .await?
-            .zip(committee_indices)
-            .map(|(signature, committee_index)| {
-                let slot_signature = signature.into();
-
-                let aggregator = predicates::is_aggregator(
-                    &self.beacon_state,
-                    self.slot(),
-                    committee_index,
-                    slot_signature,
-                )?;
-
-                Ok(aggregator.then_some(slot_signature))
-            })
-            .collect()
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/dc14b79a521fb621f0d2b9da9410f6e7ffaa7df5/specs/altair/validator.md#prepare-sync-committee-message>

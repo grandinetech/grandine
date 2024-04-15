@@ -8234,6 +8234,7 @@ dependencies = [
  "prometheus_metrics",
  "rand",
  "rayon",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_utils",
