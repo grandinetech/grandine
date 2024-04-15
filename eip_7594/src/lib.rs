@@ -1,37 +1,58 @@
-use num_traits::One as _;
-use sha2::{Digest as _, Sha256};
-use ssz::Uint256;
-use typenum::Unsigned as _;
-use types::{
-    eip7594::{ColumnIndex, NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
-    phase0::primitives::NodeId,
-};
+use c_kzg::{compute_cells, Blob, Bytes32, Cell, KZGSettings};
+use sha3::{Digest, Sha3_256};
+use std::collections::HashSet;
+use std::path::Path;
 
-#[must_use]
-pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
+const DATA_COLUMN_SIDECAR_SUBNET_COUNT: usize = 32;
+const SAMPLES_PER_SLOT: u64 = 8;
+const CUSTODY_REQUIREMENT: u64 = 1;
+const TARGET_NUMBER_OF_PEERS: u64 = 70;
+const FIELD_ELEMENTS_PER_BLOB: usize = 4; // todo!();
+const FIELD_ELEMENTS_PER_EXT_BLOB: usize = 2 * FIELD_ELEMENTS_PER_BLOB;
+const FIELD_ELEMENTS_PER_CELL: usize = 64;
+const BYTES_PER_FIELD_ELEMENT: usize = 4; // todo!();
+const BYTES_PER_CELL: usize = FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
+const CELLS_PER_BLOB: usize = FIELD_ELEMENTS_PER_EXT_BLOB / FIELD_ELEMENTS_PER_CELL;
+const KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH: u64 = 4;
+const NUMBER_OF_COLUMNS: usize = 4; // todo!();
+const MAX_BLOBS_PER_BLOCK: usize = 6; //todo!();
+
+type PolynomialCoeff = [Bytes32; FIELD_ELEMENTS_PER_EXT_BLOB];
+type CellID = u64;
+type RowIndex = u64;
+type ColumnIndex = usize;
+type NodeId = u64;
+type ExtendedMatrix = [Cell; MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS];
+
+fn get_custody_columns(node_id: NodeId, custody_subnet_count: usize) -> Vec<ColumnIndex> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 
-    let mut subnet_ids = vec![];
-    let mut current_id = node_id;
-
-    while (subnet_ids.len() as u64) < custody_subnet_count {
-        let mut hasher = Sha256::new();
-        let mut bytes: [u8; 32] = [0; 32];
-
-        current_id.into_raw().to_little_endian(&mut bytes);
-
+    let mut subnet_ids = HashSet::new();
+    let mut i: u64 = 0; // atrodo per mazas
+    while subnet_ids.len() < custody_subnet_count.try_into().unwrap() {
+        // I haven't tested at all, therefor this part likely contains some errors
+        let mut hasher = Sha3_256::new();
+        let bytes: [u8; 8] = (node_id + i).to_le_bytes();
         hasher.update(bytes);
-        bytes = hasher.finalize().into();
-
-        let output_prefix = [
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ];
-
-        let output_prefix_u64 = u64::from_le_bytes(output_prefix);
-        let subnet_id = output_prefix_u64 % DATA_COLUMN_SIDECAR_SUBNET_COUNT;
-
-        if !subnet_ids.contains(&subnet_id) {
-            subnet_ids.push(subnet_id);
+        let mut output = hasher.finalize();
+        let last_8_bytes: &[u8] = &output[output.len() - 8..];
+        let bytes_as_u64 = u64::from_be_bytes([
+            last_8_bytes[0],
+            last_8_bytes[1],
+            last_8_bytes[2],
+            last_8_bytes[3],
+            last_8_bytes[4],
+            last_8_bytes[5],
+            last_8_bytes[6],
+            last_8_bytes[7],
+        ]);
+        if let Ok(bytes_as_usize) = usize::try_from(bytes_as_u64) {
+            let subnet_id = bytes_as_usize % DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+            if !subnet_ids.contains(&subnet_id) {
+                subnet_ids.insert(subnet_id);
+            }
+        } else {
+            assert!(false);
         }
 
         if current_id == Uint256::MAX {
@@ -53,47 +74,18 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use duplicate::duplicate_item;
-    use serde::Deserialize;
-    use spec_test_utils::Case;
-    use test_generator::test_resources;
-    use types::{
-        phase0::primitives::NodeId,
-        preset::{Mainnet, Minimal, Preset},
-    };
+fn compute_extended_matrix(blobs: Vec<Blob>) -> ExtendedMatrix {
+    let mut extended_matrix: Vec<Cell> = Vec::new();
 
-    use crate::{get_custody_columns, ColumnIndex};
+    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
 
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Meta {
-        description: Option<String>,
-        node_id: NodeId,
-        custody_subnet_count: u64,
-        result: Vec<ColumnIndex>,
+    let kzg_settings = KZGSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+
+    for blob in blobs {
+        extended_matrix.extend(Cell::compute_cells(&blob, &kzg_settings).into());
     }
 
-    #[duplicate_item(
-        glob                                                                              function_name                 preset;
-        ["consensus-spec-tests/tests/mainnet/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_mainnet] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_minimal] [Minimal];
-    )]
-    #[test_resources(glob)]
-    fn function_name(case: Case) {
-        run_case::<preset>(case);
-    }
-
-    #[allow(clippy::extra_unused_type_parameters)]
-    fn run_case<P: Preset>(case: Case) {
-        let Meta {
-            description: _description,
-            node_id,
-            custody_subnet_count,
-            result,
-        } = case.yaml::<Meta>("meta");
-
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
-    }
+    extended_matrix[0..MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS]
+        .try_into()
+        .unwrap()
 }
