@@ -11,6 +11,7 @@ use anyhow::{bail, ensure, Context as _, Result};
 use builder_api::BuilderConfig;
 use clap::{Error as ClapError, Parser as _};
 use database::Database;
+use eip_7594::{get_custody_columns};
 use eth1::{Eth1Chain, Eth1Config};
 use eth1_api::Auth;
 use features::Feature;
@@ -333,7 +334,12 @@ fn main() -> ExitCode {
 
 #[allow(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
-    binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
+    let my_cols = get_custody_columns(1, 0);
+    binary_utils::initialize_logger(
+        module_path!(),
+        cfg!(feature = "logger-always-write-style"),
+        cfg!(feature = "logger-parse-env"),
+    )?;
     binary_utils::initialize_rayon()?;
 
     let config = GrandineArgs::try_parse()?

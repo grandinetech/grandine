@@ -21,6 +21,7 @@ derive_more = { workspace = true }
 directories = { workspace = true }
 doppelganger_protection = { workspace = true }
 eip_2335 = { workspace = true }
+eip_7594 = { workspace = true }
 enum-iterator = { workspace = true }
 eth1 = { workspace = true }
 eth1_api = { workspace = true }

@@ -2124,7 +2124,6 @@ dependencies = [
  "duplicate",
  "kzg",
  "kzg_utils",
- "num-traits",
  "serde",
  "sha2 0.10.8",
  "sha3",
