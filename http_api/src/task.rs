@@ -13,6 +13,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use genesis::GenesisProvider;
+use http_api_utils::ApiMetrics;
 use hyper::server::conn::AddrIncoming;
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info};
@@ -135,8 +136,12 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         };
 
         let router = extend_router(state.clone(), routing::normal_routes(state));
-        let router =
-            http_api_utils::extend_router_with_middleware(router, timeout, allow_origin, metrics);
+        let router = http_api_utils::extend_router_with_middleware(
+            router,
+            timeout,
+            allow_origin,
+            metrics.map(ApiMetrics::http),
+        );
 
         let service = router.into_make_service_with_connect_info::<SocketAddr>();
         let serve_requests = Server::builder(incoming).serve(service).err_into();

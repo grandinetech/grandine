@@ -573,7 +573,9 @@ pub async fn run_after_genesis<P: Preset>(
             config,
             controller.clone_arc(),
             registry.take(),
-            metrics.expect("Metrics registry must be present for metrics server"),
+            metrics
+                .clone()
+                .expect("Metrics registry must be present for metrics server"),
             metrics_to_metrics_tx,
             network.network_globals().clone_arc(),
         )),
@@ -597,6 +599,7 @@ pub async fn run_after_genesis<P: Preset>(
             directories,
             keymanager,
             signer,
+            metrics,
         )),
         None => Either::Right(core::future::pending()),
     };

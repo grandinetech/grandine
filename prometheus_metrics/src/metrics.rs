@@ -32,6 +32,9 @@ pub struct Metrics {
     // HTTP API metrics
     http_api_response_times: HistogramVec,
 
+    // Validator API metrics
+    validator_api_response_times: HistogramVec,
+
     // Dedicated Executor
     pub dedicated_executor_task_times: Histogram,
     dedicated_executor_task_count: IntGauge,
@@ -198,6 +201,15 @@ impl Metrics {
                 histogram_opts!(
                     "HTTP_API_RESPONSE_TIMES",
                     "Response times for HTTP API responses"
+                ),
+                &["request_path"],
+            )?,
+
+            // Validator API metrics
+            validator_api_response_times: HistogramVec::new(
+                histogram_opts!(
+                    "VALIDATOR_API_RESPONSE_TIMES",
+                    "Response times for Validator API responses"
                 ),
                 &["request_path"],
             )?,
@@ -682,6 +694,7 @@ impl Metrics {
         default_registry.register(Box::new(self.total_cpu_percentage.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
         default_registry.register(Box::new(self.http_api_response_times.clone()))?;
+        default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_task_count.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_thread_count.clone()))?;
         default_registry.register(Box::new(self.gossip_objects.clone()))?;
@@ -862,13 +875,26 @@ impl Metrics {
     }
 
     // HTTP API metrics
-    pub fn set_http_response_time(&self, labels: &[&str], response_duration: Duration) {
+    pub fn set_http_api_response_time(&self, labels: &[&str], response_duration: Duration) {
         match self
             .http_api_response_times
             .get_metric_with_label_values(labels)
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
             Err(error) => warn!("unable to track HTTP API resposne time for {labels:?}: {error:?}"),
+        }
+    }
+
+    // Validator API metrics
+    pub fn set_validator_api_response_time(&self, labels: &[&str], response_duration: Duration) {
+        match self
+            .validator_api_response_times
+            .get_metric_with_label_values(labels)
+        {
+            Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
+            Err(error) => {
+                warn!("unable to track Validator API resposne time for {labels:?}: {error:?}")
+            }
         }
     }
 

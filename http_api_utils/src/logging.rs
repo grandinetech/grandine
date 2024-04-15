@@ -1,5 +1,4 @@
 use core::{net::SocketAddr, time::Duration};
-use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -9,10 +8,9 @@ use axum::{
 };
 use features::Feature;
 use log::{info, warn};
-use prometheus_metrics::Metrics;
 use tracing::Span;
 
-use crate::error::Error;
+use crate::{error::Error, misc::ApiMetrics};
 
 // `TraceLayer` already logs most of this out of the box, but we still use `log`.
 // We have to duplicate some of the information because `log` does not have spans.
@@ -43,7 +41,9 @@ pub fn log_request(request: &Request<Body>, _span: &Span) {
     }
 }
 
-pub fn log_response(metrics: Option<Arc<Metrics>>) -> impl Fn(&Response, Duration, &Span) + Clone {
+pub fn log_response(
+    api_metrics: Option<ApiMetrics>,
+) -> impl Fn(&Response, Duration, &Span) + Clone {
     move |response: &Response, latency: Duration, _span: &Span| {
         if Feature::LogHttpRequests.is_enabled() {
             let version = response.version();
@@ -77,13 +77,13 @@ pub fn log_response(metrics: Option<Arc<Metrics>>) -> impl Fn(&Response, Duratio
             }
         }
 
-        if let Some(metrics) = metrics.clone() {
-            log_latency_metrics(&metrics, response, latency);
+        if let Some(api_metrics) = api_metrics.clone() {
+            log_latency_metrics(&api_metrics, response, latency);
         }
     }
 }
 
-pub fn log_latency_metrics(metrics: &Arc<Metrics>, response: &Response, latency: Duration) {
+pub fn log_latency_metrics(api_metrics: &ApiMetrics, response: &Response, latency: Duration) {
     // Don't observe arbitrary requests
     if response.status().as_u16() == 404 {
         return;
@@ -100,7 +100,7 @@ pub fn log_latency_metrics(metrics: &Arc<Metrics>, response: &Response, latency:
         .cloned()
         .flatten()
     {
-        metrics.set_http_response_time(&[&format!("{method} {}", matched_path.as_str())], latency);
+        api_metrics.set_response_time(&[&format!("{method} {}", matched_path.as_str())], latency);
     } else {
         let OriginalUri(original_uri) = response.extensions().get().expect(
             "OriginalUri response extension should be inserted by insert_response_extensions",

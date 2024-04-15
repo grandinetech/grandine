@@ -23,6 +23,7 @@ use educe::Educe;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, signing::SignForSingleFork};
+use http_api_utils::ApiMetrics;
 use itertools::Itertools as _;
 use jwt_simple::{
     algorithms::{HS256Key, MACLike as _},
@@ -33,6 +34,7 @@ use keymanager::{
     KeyManager, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey, ValidatingPubkey,
 };
 use log::{debug, info};
+use prometheus_metrics::Metrics;
 use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
 use signer::{Signer, SigningMessage};
 use std_ext::ArcExt as _;
@@ -683,6 +685,7 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
     directories: Arc<Directories>,
     keymanager: Arc<KeyManager>,
     signer: Arc<Signer>,
+    metrics: Option<Arc<Metrics>>,
 ) -> Result<()> {
     let Auth { secret, token } = load_or_build_auth_token(&directories)?;
 
@@ -708,8 +711,12 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
         ))
         .with_state(state);
 
-    let router =
-        http_api_utils::extend_router_with_middleware(router, Some(timeout), allow_origin, None);
+    let router = http_api_utils::extend_router_with_middleware(
+        router,
+        Some(timeout),
+        allow_origin,
+        metrics.map(ApiMetrics::validator),
+    );
 
     Server::bind(&address)
         .serve(router.into_make_service_with_connect_info::<SocketAddr>())
