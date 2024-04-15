@@ -21,26 +21,26 @@ fn main() {
         .benchmark_greedy_attestation_packing(
             "greedy attestation packing in Goerli at slot 547813",
             LazyBeaconState::new(|| goerli::beacon_state(547_813, 6)),
-            Lazy::new(|| goerli::attestations("aggregate_attestations", 17119 - 1)),
-            Lazy::new(|| goerli::attestations("aggregate_attestations", 17119)),
+            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119 - 1)),
+            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119)),
         )
-        .benchmark_dynamical_attestation_packing(
-            "dynamical attestation packing in Goerli at slot 547813",
+        .benchmark_optimal_attestation_packing(
+            "optimal attestation packing in Goerli at slot 547813",
             LazyBeaconState::new(|| goerli::beacon_state(547_813, 6)),
-            Lazy::new(|| goerli::attestations("aggregate_attestations", 17119 - 1)),
-            Lazy::new(|| goerli::attestations("aggregate_attestations", 17119)),
+            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119 - 1)),
+            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119)),
         )
         .benchmark_greedy_attestation_packing(
             "greedy attestation packing in Holesky at slot 50015",
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562 - 1)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
         )
-        .benchmark_dynamical_attestation_packing(
-            "dynamical attestation packing in Holesky at slot 50015",
+        .benchmark_optimal_attestation_packing(
+            "optimal attestation packing in Holesky at slot 50015",
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562 - 1)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch(1562)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
+            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
         )
         .final_summary();
 }
@@ -67,7 +67,7 @@ impl Criterion {
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(1))
             .bench_function(
-                "AttestationPacker::pack_proposable_attestations",
+                "AttestationPacker::pack_proposable_attestations_greedily",
                 |bencher| {
                     let packer = Lazy::force(&packer);
                     let previous_aggregates = Lazy::force(&previous_aggregates);
@@ -85,7 +85,7 @@ impl Criterion {
         self
     }
 
-    fn benchmark_dynamical_attestation_packing<P: Preset>(
+    fn benchmark_optimal_attestation_packing<P: Preset>(
         &mut self,
         group_name: &str,
         state: LazyBeaconState<P>,
@@ -105,17 +105,17 @@ impl Criterion {
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(1))
             .bench_function(
-                "AttestationPacker::pack_proposable_attestations_dynamically",
+                "AttestationPacker::pack_proposable_attestations_optimally",
                 |bencher| {
                     let packer = Lazy::force(&packer);
                     let previous_aggregates = Lazy::force(&previous_aggregates);
                     let current_aggregates = Lazy::force(&current_aggregates);
 
                     bencher.iter_with_large_drop(|| {
-                        packer.pack_proposable_attestations_dynamically(
+                        packer.pack_proposable_attestations_optimally(
                             previous_aggregates,
                             current_aggregates,
-                        )
+                        );
                     })
                 },
             );

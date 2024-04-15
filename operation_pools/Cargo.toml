@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 bit_field = { workspace = true }
 bls = { workspace = true }
 clock = { workspace = true }
+conv = { workspace = true }
 dedicated_executor = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }

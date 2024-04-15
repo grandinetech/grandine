@@ -2,6 +2,7 @@ use core::ops::RangeInclusive;
 use std::sync::Arc;
 
 use helper_functions::misc;
+use itertools::Itertools;
 use spec_test_utils::Case;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -41,6 +42,16 @@ pub fn aggregate_attestations_by_epoch(epoch: Epoch) -> Vec<Attestation<Mainnet>
 
     CASE.glob(pattern)
         .map(|path| CASE.ssz_uncompressed_default(path))
+        .collect()
+}
+
+#[must_use]
+pub fn aggregate_attestations_by_epoch_sorted_by_data(epoch: Epoch) -> Vec<Attestation<Mainnet>> {
+    let pattern = format!("attestations/epoch_{epoch:08}/aggregate_attestations/*.ssz");
+
+    CASE.glob(pattern)
+        .map(|path| CASE.ssz_uncompressed_default::<Attestation<_>>(path))
+        .sorted_by_key(|attestation| attestation.data)
         .collect()
 }
 

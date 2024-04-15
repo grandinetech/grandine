@@ -273,6 +273,7 @@ cached = '0.48.1'
 chrono = '0.4.33'
 clap = { version = '4.4.18', features = ['derive'] }
 const_format = '0.2.32'
+conv = '0.3.3'
 criterion = '0.5.1'
 crossbeam-skiplist = '0.1.1'
 crossbeam-utils = '0.8.19'

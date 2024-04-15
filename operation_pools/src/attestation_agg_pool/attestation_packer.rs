@@ -1,13 +1,13 @@
 use core::{cmp::min, marker::PhantomData};
 use std::{
-    collections::{btree_map::BTreeMap, HashMap},
+    collections::{btree_map::BTreeMap, HashMap, HashSet},
     sync::Arc,
-    time::Instant,
 };
 
 use anyhow::{bail, Result};
 use bit_field::BitField as _;
 use clock::Tick;
+use conv::ValueFrom as _;
 use good_lp::{
     solvers::highs::highs, solvers::highs::HighsParallelType, variable, variables, Expression,
     Solution, SolverModel,
@@ -17,8 +17,10 @@ use helper_functions::{
     misc,
 };
 use itertools::Itertools as _;
-use log::info;
-use rayon::prelude::*;
+use rayon::iter::{
+    IndexedParallelIterator as _, IntoParallelIterator as _, IntoParallelRefIterator as _,
+    ParallelIterator as _,
+};
 use ssz::ContiguousList;
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
@@ -37,13 +39,26 @@ use types::{
     traits::BeaconState as _,
 };
 
-// TODO(Grandine Team): Consider rewriting the algorithm to take validators' effective balances into
-//                      account. They are currently ignored. This has a negligible effect in typical
-//                      networks because most validators have over 32 ETH.
+/// Constant used to limit number of calls to `select_max_cover_attestation_integer_programming`
+/// It is used when we need a lot of aggregates (more than `MAXIMUM_ATTESTATIONS_WITH_SAME_DATA`)
+/// to include all validators that signed same attestation data. In that case it could improve performance,
+/// while it is unlikely to drastically decrease score.
+const MAXIMUM_ATTESTATIONS_WITH_SAME_DATA: usize = 6;
+
+/// Constant used to compute time that integer programming solver can use.
+/// Since `good_lp` calls external solvers, there is no way to stop execution if it takes too long.
+/// However, one can set time limit for solver. Here it is some fraction of remaining time until deadline.
+const TIME_FRACTION_FOR_SUBPROBLEM: f64 = 0.25;
 
 pub struct PackOutcome<P: Preset> {
     pub attestations: ContiguousList<Attestation<P>, P::MaxAttestations>,
     pub deadline_reached: bool,
+}
+
+#[derive(Default)]
+struct AttestationWeights {
+    compressed_validator_indices: Vec<usize>,
+    validator_weights: Vec<u64>,
 }
 
 // The phantom type parameter is needed to prevent the impl below from causing `E0207`.
@@ -88,8 +103,6 @@ impl<P: Preset> AttestationPacker<P> {
         previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
         current_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
     ) -> PackOutcome<P> {
-        let start_time = Instant::now();
-
         let mut previous_epoch_participation = self.previous_epoch_participation.clone();
         let mut current_epoch_participation = self.current_epoch_participation.clone();
 
@@ -166,186 +179,189 @@ impl<P: Preset> AttestationPacker<P> {
              of attestations to P::MaxAttestations::USIZE",
         );
 
-        // Picking the best attestations is a variation of the set packing problem, which is
-        // NP-complete. See:
-        // - <https://en.wikipedia.org/wiki/Set_packing>
-        // - <https://cstheory.stackexchange.com/questions/21448/set-packing-with-maximum-coverage-objective>
-        // We use a greedy algorithm.
-        // let attestations = core::iter::from_fn(move || {
-        //     // If time runs out, pack attestations as is,
-        //     // without trying to find the best ones anymore.
-        //     if !self.deadline_reached() {
-        //         candidates.sort_by_cached_key(|attestation| {
-        //             self.added_weight(
-        //                 attestation,
-        //                 &previous_epoch_participation,
-        //                 &current_epoch_participation,
-        //             )
-        //             .ok()
-        //         });
-        //     }
-
-        //     let attestation = candidates.pop()?;
-
-        //     self.add_attestation(
-        //         &attestation,
-        //         &mut previous_epoch_participation,
-        //         &mut current_epoch_participation,
-        //     )
-        //     .unwrap_or_default()
-        //     .then_some(attestation)
-        // })
-        // .take(P::MaxAttestations::USIZE)
-        // .pipe(ContiguousList::try_from_iter)
-        // .expect(
-        //     "the call to Iterator::take limits the number \
-        //      of attestations to P::MaxAttestations::USIZE",
-        // );
-
-        let end_time = Instant::now();
-        let elapsed_time = end_time.duration_since(start_time);
-        //println!(
-        //    "Greedy packing took: {}.{:03} seconds and deadline_reached() value is: {}",
-        //    elapsed_time.as_secs(),
-        //    elapsed_time.subsec_millis(),
-        //    self.deadline_reached()
-        //);
-        info!(
-            "Greedy packing took: {}.{:03} seconds and deadline_reached() value is: {}",
-            elapsed_time.as_secs(),
-            elapsed_time.subsec_millis(),
-            self.deadline_reached()
-        );
-
         PackOutcome {
             attestations,
             deadline_reached: self.deadline_reached(),
         }
     }
 
-    #[allow(clippy::too_many_lines)]
-    pub fn pack_proposable_attestations_dynamically<'a>(
+    fn aggregates_grouped_by_data<'a>(
+        &self,
+        previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
+        current_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
+    ) -> Vec<Vec<Attestation<P>>> {
+        previous_epoch_aggregates
+            .into_iter()
+            .chain(current_epoch_aggregates)
+            .take_while(|_| !self.deadline_reached())
+            .filter(|aggregate| self.is_valid_for_inclusion(aggregate))
+            .map(|aggregate| (aggregate.data, aggregate))
+            .group_by(|&(data, _)| data)
+            .into_iter()
+            .map(|(_, group)| group.map(|(_, y)| y.clone()).collect())
+            .collect_vec()
+    }
+
+    // this function assumes that every aggregate have same AttestationData
+    fn find_attestation_weights(
+        &self,
+        aggregates: &Vec<Attestation<P>>,
+    ) -> Result<Vec<AttestationWeights>> {
+        let mut attestation_weights = Vec::new();
+        let base_reward_per_increment = get_base_reward_per_increment(&self.state);
+
+        for attestation in aggregates {
+            let attestation_epoch = self.attestation_epoch(attestation)?;
+            let participation_flags = self.participation_flags(attestation)?;
+
+            let mut compressed_validator_indices = Vec::new();
+            let mut validator_weights = Vec::new();
+            for validator_index in self.attesting_indices(attestation)? {
+                let index = usize::try_from(validator_index)?;
+                let epoch_participation = match attestation_epoch {
+                    AttestationEpoch::Previous => self.previous_epoch_participation[index],
+                    AttestationEpoch::Current => self.current_epoch_participation[index],
+                };
+                let combined_weight_for_validator = PARTICIPATION_FLAG_WEIGHTS
+                    .iter()
+                    .filter(|(flag_index, _)| {
+                        participation_flags.get_bit(*flag_index)
+                            && !epoch_participation.get_bit(*flag_index)
+                    })
+                    .map(|(_, weight)| {
+                        weight
+                            * get_base_reward(
+                                &self.state,
+                                validator_index,
+                                base_reward_per_increment,
+                            )
+                            .unwrap_or(0)
+                    })
+                    .sum::<u64>();
+                compressed_validator_indices.push(index);
+                validator_weights.push(combined_weight_for_validator);
+            }
+            attestation_weights.push(AttestationWeights {
+                compressed_validator_indices,
+                validator_weights,
+            });
+        }
+        Ok(attestation_weights)
+    }
+
+    fn find_optimal_selections(
+        &self,
+        aggregates: &[Attestation<P>],
+        group_weights: &[AttestationWeights],
+    ) -> (Vec<Vec<usize>>, Vec<u64>) {
+        let mut choices = vec![vec![]];
+        let mut values = vec![0];
+
+        let mut best_weight;
+
+        if self.deadline_reached() {
+            return (choices, values);
+        }
+
+        let maximum_possible_weight = Self::maximum_added_weight(group_weights);
+
+        if self.deadline_reached() {
+            return (choices, values);
+        }
+
+        let (one_vec, one_weight) =
+            Self::select_one_attestation_greedily(aggregates, group_weights);
+        best_weight = one_weight;
+        choices.push(one_vec);
+        values.push(one_weight);
+
+        for number_of_aggregates_to_select in
+            2..=min(aggregates.len(), MAXIMUM_ATTESTATIONS_WITH_SAME_DATA)
+        {
+            if self.deadline_reached() || best_weight == maximum_possible_weight {
+                break;
+            }
+
+            match self.select_max_cover_attestation_integer_programming(
+                aggregates,
+                group_weights,
+                number_of_aggregates_to_select,
+            ) {
+                Err(_) => break,
+                Ok((attestation_choice, weight)) => {
+                    if weight > best_weight {
+                        choices.push(attestation_choice);
+                        values.push(weight);
+                        best_weight = weight;
+                    }
+                }
+            }
+        }
+
+        (choices, values)
+    }
+
+    pub fn pack_proposable_attestations_optimally<'a>(
         &self,
         previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
         current_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
     ) -> PackOutcome<P> {
-        let start_time = Instant::now();
+        let grouped_aggregates =
+            self.aggregates_grouped_by_data(previous_epoch_aggregates, current_epoch_aggregates);
 
-        let previous_epoch_participation = self.previous_epoch_participation.clone();
-        let current_epoch_participation = self.current_epoch_participation.clone();
-
-        let mut candidates: Vec<_> = current_epoch_aggregates
-            .into_iter()
-            .chain(previous_epoch_aggregates)
-            .filter(|aggregate| self.is_valid_for_inclusion(aggregate))
-            .map(|aggregate| {
-                let added_weight = self
-                    .better_added_weight(
-                        aggregate,
-                        &previous_epoch_participation,
-                        &current_epoch_participation,
-                    )
-                    .unwrap_or_default();
-                (aggregate, added_weight)
+        let grouped_aggregates_weights = grouped_aggregates
+            .par_iter()
+            .map(|aggregates| {
+                self.find_attestation_weights(aggregates)
+                    .unwrap_or_default()
             })
-            .filter(|(_, added_weight)| *added_weight > 0)
-            .collect();
-
-        candidates.sort_by_cached_key(|(aggregate, _)| aggregate.data);
-
-        // let mut result: Vec<Vec<_>> = Vec::<Vec<_>>::new();
-
-        let candidate_data_aggregate: Vec<_> = candidates
-            .into_iter()
-            .map(|(aggregate, _)| (aggregate.data, aggregate.clone()))
-            .collect();
-
-        let mut grouped_aggregates: Vec<Vec<Attestation<P>>> = Vec::new();
-
-        // it seems that this sort helps with speed (somehow it increases performance by 30%), So I am not going to delete it
-        // as it might have something to do with integer programming solver, I am going to leave it for the future
-        for (_, group) in &candidate_data_aggregate
-            .into_iter()
-            .group_by(|(data, _)| *data)
-        {
-            grouped_aggregates.push(group.map(|(_, aggregate)| aggregate).collect::<Vec<_>>());
-        }
+            .collect::<Vec<_>>();
 
         let different_data_count = grouped_aggregates.len();
 
-        let (choices, choice_values): (Vec<_>, Vec<_>) = (0..different_data_count)
-            .into_par_iter()
-            .map(|index| {
-                let mut vec_choices = Vec::new();
-                let mut vec_values = Vec::new();
-                vec_choices.push(Vec::new()); // for zero attestations only choice is nothing
-                vec_values.push(0);
-                let mut best_weight = 0;
-                match self.select_one_attestation_greedily(&grouped_aggregates[index]) {
-                    Ok((one_vec, one_weight)) => {
-                        best_weight = one_weight;
-                        vec_choices.push(one_vec);
-                        vec_values.push(one_weight);
-                    }
-                    _ => assert!(false),
-                }
-                for sz in 2..=grouped_aggregates[index].len() {
-                    if self.deadline_reached() {
-                        break;
-                    }
-                    let mut improved = false;
-                    match self.select_max_cover_attestation_integer_programming(
-                        &grouped_aggregates[index],
-                        sz,
-                    ) {
-                        Err(_) => {} // should only happen when there is an time-out
-                        Ok((choices, weight)) => {
-                            if weight > best_weight {
-                                assert!(choices.len() == sz);
-                                vec_choices.push(choices);
-                                vec_values.push(weight);
-                                best_weight = weight;
-                                improved = true;
-                            }
-                        }
-                    }
-                    if !improved {
-                        break;
-                    }
-                }
-                assert!(vec_choices.len() == vec_values.len());
-                (vec_choices, vec_values)
+        let (choices, choice_values): (Vec<_>, Vec<_>) = grouped_aggregates
+            .par_iter()
+            .zip(grouped_aggregates_weights.into_par_iter())
+            .map(|(agg_group, group_weights)| {
+                self.find_optimal_selections(agg_group, &group_weights)
             })
             .unzip();
 
-        let mut dp = vec![vec![0; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
+        let mut best_weight =
+            vec![vec![0; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
         let mut prev = vec![vec![0; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
-        let mut reached =
+        let mut reachable =
             vec![vec![false; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
 
-        reached[0][0] = true;
+        reachable[0][0] = true;
 
         for groups_analyzed in 0..different_data_count {
             for att_selected in 0..=P::MaxAttestations::USIZE {
                 for new_att_selected in 0..min(choices[groups_analyzed].len(), att_selected + 1) {
                     let value_of_new_att = choice_values[groups_analyzed][new_att_selected];
                     let previously_had_attestations = att_selected - new_att_selected;
-                    if reached[groups_analyzed][previously_had_attestations]
-                        && (dp[groups_analyzed + 1][att_selected]
-                            <= dp[groups_analyzed][previously_had_attestations] + value_of_new_att)
+                    if reachable[groups_analyzed][previously_had_attestations]
+                        && (best_weight[groups_analyzed + 1][att_selected]
+                            <= best_weight[groups_analyzed][previously_had_attestations]
+                                + value_of_new_att)
                     {
-                        dp[groups_analyzed + 1][att_selected] =
-                            dp[groups_analyzed][previously_had_attestations] + value_of_new_att;
+                        best_weight[groups_analyzed + 1][att_selected] = best_weight
+                            [groups_analyzed][previously_had_attestations]
+                            + value_of_new_att;
                         prev[groups_analyzed + 1][att_selected] = previously_had_attestations;
-                        reached[groups_analyzed + 1][att_selected] = true;
+                        reachable[groups_analyzed + 1][att_selected] = true;
                     }
                 }
             }
         }
 
+        // att_selected is the minimal number of attestations that reach best weight
+        // minimal number is chosen so there wouldn't be attestations that don't add weight
         let mut att_selected = 0;
         for i in 0..=P::MaxAttestations::USIZE {
-            if dp[different_data_count][i] > dp[different_data_count][att_selected] {
+            if best_weight[different_data_count][i]
+                > best_weight[different_data_count][att_selected]
+            {
                 att_selected = i;
             }
         }
@@ -354,20 +370,10 @@ impl<P: Preset> AttestationPacker<P> {
         for groups_analyzed in (1..=different_data_count).rev() {
             let new_att_selected = att_selected - prev[groups_analyzed][att_selected];
             for choice in &choices[groups_analyzed - 1][new_att_selected] {
-                attestations.push(choice.clone());
+                attestations.push(grouped_aggregates[groups_analyzed - 1][*choice].clone());
             }
             att_selected = prev[groups_analyzed][att_selected];
         }
-        assert!(att_selected == 0 || self.deadline_reached());
-
-        let end_time = Instant::now();
-        let elapsed_time = end_time.duration_since(start_time);
-        info!(
-            "Dynamic algorithm packing took: {}.{:03} seconds and deadline_reached() value is: {}",
-            elapsed_time.as_secs(),
-            elapsed_time.subsec_millis(),
-            self.deadline_reached()
-        );
 
         PackOutcome {
             attestations: attestations
@@ -381,181 +387,164 @@ impl<P: Preset> AttestationPacker<P> {
         }
     }
 
+    #[allow(clippy::float_arithmetic)]
+    fn f64_values_are_approximately_equal(a: f64, b: f64) -> bool {
+        (a - b).abs() < f64::EPSILON
+    }
+
+    // This function solves maximum coverage problem by using integer linear programming (https://en.wikipedia.org/wiki/Maximum_coverage_problem)
+    // It uses the assumption that all aggregates have the same AttestationData
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::float_arithmetic)]
     fn select_max_cover_attestation_integer_programming(
         &self,
-        attestations: &[Attestation<P>],
-        max_count: usize,
-    ) -> Result<(Vec<Attestation<P>>, u64)> {
+        aggregates: &[Attestation<P>],
+        group_weights: &[AttestationWeights],
+        selected_aggregates_count: usize,
+    ) -> Result<(Vec<usize>, u64)> {
         variables! {
             vars:
         }
 
-        let attestation_count = attestations.len();
-        let _unused = vars.add(variable().integer().min(0).max(0));
+        let attestation_count = aggregates.len();
 
-        let x: Vec<_> = (0..attestation_count)
-            .map(|_| vars.add(variable().binary()))
+        let mut number_of_aggregates_selected = Expression::with_capacity(attestation_count);
+        let is_aggregate_selected: Vec<_> = (0..attestation_count)
+            .map(|_| {
+                let aggregate_selected = vars.add(variable().binary());
+                number_of_aggregates_selected += aggregate_selected;
+                aggregate_selected
+            })
             .collect();
 
-        let mut x_sum = Expression::with_capacity(0);
-        for xi in x.iter().take(attestation_count) {
-            x_sum += xi;
-        }
+        let mut is_validator_included_variables = Vec::new();
+        let mut validator_weights = Vec::new();
 
-        let mut y = Vec::new();
-        let mut weights = Vec::new();
+        let mut validator_index_to_validator_included_variable_index = HashMap::new();
+        let mut aggregates_containing_validator = Vec::new();
 
-        let mut val_ind_and_epoch_to_y_ind = HashMap::new();
-        let mut attestations_containing_validator = Vec::new();
-        let mut validator_epochs = Vec::new();
-
-        let (mut attestations_in_previous_epoch, mut attestations_in_current_epoch) = (0, 0);
-
-        for (i, attestation) in attestations.iter().enumerate() {
-            let attestation_epoch = self.attestation_epoch(attestation)?;
-            match &attestation_epoch {
-                AttestationEpoch::Previous => attestations_in_previous_epoch += 1,
-                AttestationEpoch::Current => attestations_in_current_epoch += 1,
-            }
-            let participation_flags = self.participation_flags(attestation)?;
-            let base_reward_per_increment = get_base_reward_per_increment(&self.state);
-            for validator_index in self.attesting_indices(attestation)? {
-                let index = usize::try_from(validator_index)?;
-
-                let epoch_participation = match attestation_epoch {
-                    AttestationEpoch::Previous => self.previous_epoch_participation[index],
-                    AttestationEpoch::Current => self.current_epoch_participation[index],
-                };
-
+        for (i, group_weight) in group_weights.iter().enumerate() {
+            for (validator_index, combined_weight_for_validator) in group_weight
+                .compressed_validator_indices
+                .iter()
+                .zip(group_weight.validator_weights.iter())
+            {
                 let mut useless_validator = false;
                 if let std::collections::hash_map::Entry::Vacant(_) =
-                    val_ind_and_epoch_to_y_ind.entry((attestation_epoch, validator_index))
+                    validator_index_to_validator_included_variable_index.entry(validator_index)
                 {
-                    let combined_weight_for_validator = PARTICIPATION_FLAG_WEIGHTS
-                        .iter()
-                        .filter(|(flag_index, _)| {
-                            participation_flags.get_bit(*flag_index)
-                                && !epoch_participation.get_bit(*flag_index)
-                        })
-                        .map(|(_, weight)| {
-                            weight
-                                * get_base_reward(
-                                    &self.state,
-                                    validator_index,
-                                    base_reward_per_increment,
-                                )
-                                .unwrap_or(0)
-                        })
-                        .sum::<u64>();
-
-                    if combined_weight_for_validator > 0 {
-                        val_ind_and_epoch_to_y_ind
-                            .insert((attestation_epoch, validator_index), y.len());
-                        y.push(vars.add(variable().binary()));
-                        attestations_containing_validator.push(Vec::new());
-                        validator_epochs.push(attestation_epoch);
-                        weights.push(combined_weight_for_validator);
+                    if *combined_weight_for_validator > 0 {
+                        validator_index_to_validator_included_variable_index
+                            .insert(validator_index, is_validator_included_variables.len());
+                        is_validator_included_variables.push(vars.add(variable().binary()));
+                        aggregates_containing_validator.push(Vec::new());
+                        validator_weights.push(combined_weight_for_validator);
                     } else {
                         useless_validator = true;
                     }
                 }
                 if !useless_validator {
-                    attestations_containing_validator
-                        [val_ind_and_epoch_to_y_ind[&(attestation_epoch, validator_index)]]
+                    aggregates_containing_validator
+                        [validator_index_to_validator_included_variable_index[&validator_index]]
                         .push(i);
                 }
             }
         }
-        assert!(validator_epochs.len() == y.len());
-        assert!(weights.len() == y.len());
 
-        let mut validator_in_every_attestation = Vec::new();
-        for (i, val_epoch) in validator_epochs.iter().enumerate() {
-            let in_all = match val_epoch {
-                AttestationEpoch::Previous => {
-                    attestations_containing_validator[i].len() == attestations_in_previous_epoch
-                }
-                AttestationEpoch::Current => {
-                    attestations_containing_validator[i].len() == attestations_in_current_epoch
-                }
-            };
-            validator_in_every_attestation.push(in_all);
-        }
+        // Validators that are in every attestation will be included anyway,
+        // thus, some expression for solver can be simplified (it speeds up solver).
+        let validator_in_every_aggregate = aggregates_containing_validator
+            .iter()
+            .map(|agg_containing_val| agg_containing_val.len() == aggregates.len())
+            .collect_vec();
 
         let mut objective = Expression::with_capacity(0);
 
         let mut answer_value = 0;
-        for i in 0..y.len() {
-            if validator_in_every_attestation[i] {
-                answer_value += weights[i];
+        for i in 0..is_validator_included_variables.len() {
+            if validator_in_every_aggregate[i] {
+                answer_value += validator_weights[i];
             } else {
-                objective += y[i] * i32::try_from(weights[i])?;
+                // here conversion to i32 is needed, since `good_lp` only support i32 integers
+                objective +=
+                    is_validator_included_variables[i] * i32::value_from(*validator_weights[i])?;
             }
         }
 
         let mut problem = vars.maximise(objective).using(highs);
-        problem = problem.with(x_sum.eq(i32::try_from(max_count)?));
+        problem = problem
+            .with(number_of_aggregates_selected.eq(i32::try_from(selected_aggregates_count)?));
 
-        for (i, yi) in y.iter().enumerate() {
-            if !validator_in_every_attestation[i] {
+        for (i, is_validator_included) in is_validator_included_variables.iter().enumerate() {
+            if !validator_in_every_aggregate[i] {
                 let mut validator_expression = Expression::with_capacity(0);
-                for ind in &attestations_containing_validator[i] {
-                    validator_expression += x[*ind];
+                for ind in &aggregates_containing_validator[i] {
+                    validator_expression += is_aggregate_selected[*ind];
                 }
-                validator_expression -= yi;
+                validator_expression -= is_validator_included;
                 problem = problem.with(validator_expression.geq(0));
             }
         }
 
-        let mut selected_attestations = Vec::new();
+        let mut selected_aggregates = Vec::new();
 
+        // Here parallelization is unnecessary, since integer programming is called for each different attestation data
         problem = problem.set_parallel(HighsParallelType::Off);
-        problem = problem.set_time_limit(1.0); // currently set to 1 second, later on it should be dynamical based on remaining time
+
+        problem = problem
+            .set_time_limit(self.time_until_deadline_in_seconds()? * TIME_FRACTION_FOR_SUBPROBLEM);
         let solution = problem.solve()?;
 
-        for i in 0..attestation_count {
-            if solution.value(x[i]).abs() > 0.5 {
-                selected_attestations.push(attestations[i].clone());
+        for (i, is_selected) in is_aggregate_selected.iter().enumerate() {
+            // Crate `good_lp` represents all variables with floating point, so this checks if binary value is 1.
+            if Self::f64_values_are_approximately_equal(solution.value(*is_selected), 1.0) {
+                selected_aggregates.push(i);
             }
         }
 
-        for i in 0..y.len() {
-            if !validator_in_every_attestation[i] && solution.value(y[i]).abs() > 0.5 {
-                answer_value += weights[i];
+        if selected_aggregates.len() != selected_aggregates_count {
+            bail!("Integer programming returned incomplete solution for attestation packing");
+        }
+
+        for i in 0..is_validator_included_variables.len() {
+            if !validator_in_every_aggregate[i]
+                && Self::f64_values_are_approximately_equal(
+                    solution.value(is_validator_included_variables[i]),
+                    1.0,
+                )
+            {
+                // In case of incomplete solution, this tests whether validator would actually be included.
+                let attestation_was_included =
+                    aggregates_containing_validator[i].iter().any(|id| {
+                        Self::f64_values_are_approximately_equal(
+                            solution.value(is_aggregate_selected[*id]),
+                            1.0,
+                        )
+                    });
+                if attestation_was_included {
+                    answer_value += validator_weights[i];
+                }
             }
         }
-        if selected_attestations.len() != max_count {
-            bail!("Can not pack attestations in require time");
-        }
-        assert!(selected_attestations.len() == max_count);
 
-        Ok((selected_attestations, answer_value))
+        Ok((selected_aggregates, answer_value))
     }
 
     fn select_one_attestation_greedily(
-        &self,
-        attestations: &Vec<Attestation<P>>,
-    ) -> Result<(Vec<Attestation<P>>, u64)> {
-        let mut weights = Vec::new();
-        for attestation in attestations {
-            let weight = self.better_added_weight(
-                attestation,
-                &self.previous_epoch_participation,
-                &self.current_epoch_participation,
-            )?;
-            weights.push(weight);
-        }
+        attestations: &[Attestation<P>],
+        group_weights: &[AttestationWeights],
+    ) -> (Vec<usize>, u64) {
         let mut best_id = 0;
         let mut best_weight = 0;
-        for (i, weight) in weights.iter().enumerate().take(attestations.len()) {
-            if *weight > best_weight {
-                best_weight = *weight;
+        for (i, group_weight) in group_weights.iter().enumerate().take(attestations.len()) {
+            let sum_weight = group_weight.validator_weights.iter().sum::<u64>();
+            if sum_weight > best_weight {
+                best_weight = sum_weight;
                 best_id = i;
             }
         }
 
-        Ok((vec![attestations[best_id].clone()], best_weight))
+        (vec![best_id], best_weight)
     }
 
     #[must_use]
@@ -594,9 +583,7 @@ impl<P: Preset> AttestationPacker<P> {
         attestation.data.source.root == expected_justified_checkpoint.root
     }
 
-    // this seems to cause 30 % increase in runtime, so it is not used in greedy and may be removed from optimal solution (depending on comparison)
-    // it includes balance into weight calculation
-    fn better_added_weight(
+    fn added_weight(
         &self,
         attestation: &Attestation<P>,
         previous_epoch_participation: &[ParticipationFlags],
@@ -638,36 +625,23 @@ impl<P: Preset> AttestationPacker<P> {
             .sum()
     }
 
-    fn added_weight(
-        &self,
-        attestation: &Attestation<P>,
-        previous_epoch_participation: &[ParticipationFlags],
-        current_epoch_participation: &[ParticipationFlags],
-    ) -> Result<u64> {
-        let attestation_epoch = self.attestation_epoch(attestation)?;
-        let participation_flags = self.participation_flags(attestation)?;
+    fn maximum_added_weight(group_weights: &[AttestationWeights]) -> u64 {
+        let mut ans = 0;
+        let mut counted_validator_indices = HashSet::new();
+        for attestation_weight in group_weights {
+            for (id, weight) in attestation_weight
+                .compressed_validator_indices
+                .iter()
+                .zip(attestation_weight.validator_weights.iter())
+            {
+                if !counted_validator_indices.contains(id) {
+                    ans += weight;
+                    counted_validator_indices.insert(id);
+                }
+            }
+        }
 
-        self.attesting_indices(attestation)?
-            .map(|validator_index| {
-                let index = usize::try_from(validator_index)?;
-
-                let epoch_participation = match attestation_epoch {
-                    AttestationEpoch::Previous => previous_epoch_participation[index],
-                    AttestationEpoch::Current => current_epoch_participation[index],
-                };
-
-                let combined_weight_for_validator = PARTICIPATION_FLAG_WEIGHTS
-                    .iter()
-                    .filter(|(flag_index, _)| {
-                        participation_flags.get_bit(*flag_index)
-                            && !epoch_participation.get_bit(*flag_index)
-                    })
-                    .map(|(_, weight)| weight)
-                    .sum::<u64>();
-
-                Ok(combined_weight_for_validator)
-            })
-            .sum()
+        ans
     }
 
     fn add_attestation(
@@ -698,6 +672,18 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn attestation_epoch(&self, attestation: &Attestation<P>) -> Result<AttestationEpoch> {
         accessors::attestation_epoch(&self.state, attestation.data.target.epoch)
+    }
+
+    fn time_until_deadline_in_seconds(&self) -> Result<f64> {
+        let (_, remaining_time) =
+            clock::next_interval_with_remaining_time(&self.config, self.state.genesis_time())?;
+        if self.ignore_deadline {
+            Ok(f64::value_from(self.config.seconds_per_slot.get())?)
+        } else if self.deadline_reached() {
+            Ok(0.0)
+        } else {
+            Ok(remaining_time.as_secs_f64())
+        }
     }
 
     fn deadline_reached(&self) -> bool {
@@ -807,16 +793,47 @@ mod tests {
     type BitListMap<P> =
         HashMap<AttestationData, BitList<<P as Preset>::MaxValidatorsPerCommittee>>;
 
+    fn compute_total_reward<P: Preset>(
+        packer: &AttestationPacker<P>,
+        pack_outcome: &PackOutcome<P>,
+    ) -> Result<u64> {
+        let mut previous_epoch_participation =
+            compute_epoch_participation(&packer.state, AttestationEpoch::Previous)?;
+        let mut current_epoch_participation =
+            compute_epoch_participation(&packer.state, AttestationEpoch::Current)?;
+
+        let mut total = 0;
+
+        for attestation in pack_outcome.attestations.clone() {
+            let weight = packer.added_weight(
+                &attestation,
+                &previous_epoch_participation,
+                &current_epoch_participation,
+            )?;
+            total += weight;
+            let _unused = packer.add_attestation(
+                &attestation,
+                &mut previous_epoch_participation,
+                &mut current_epoch_participation,
+            );
+        }
+        Ok(total)
+    }
+
     #[test]
-    fn test_goerli_aggregate_attestation_packing() -> Result<()> {
+    #[cfg(feature = "eth2-cache")]
+    fn test_goerli_greedy_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::goerli());
         let slot = 547_813;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = goerli::beacon_state(slot, 6);
         let latest_block_root = accessors::latest_block_root(&state);
 
-        let previous_epoch_aggregates = goerli::attestations("aggregate_attestations", epoch - 1);
-        let current_epoch_aggregates = goerli::attestations("aggregate_attestations", epoch);
+        // Optimal packing uses the assumption that attestations are sorted by their data (this assumption is fulfilled when values are taken from BTree)
+        let previous_epoch_aggregates =
+            goerli::attestations_sorted_by_data("aggregate_attestations", epoch - 1);
+        let current_epoch_aggregates =
+            goerli::attestations_sorted_by_data("aggregate_attestations", epoch);
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
@@ -832,8 +849,9 @@ mod tests {
             &current_epoch_aggregates,
         );
 
-        let proposable_attestations = pack_outcome.attestations;
+        assert_eq!(compute_total_reward(&packer, &pack_outcome)?, 8_308_701_824);
 
+        let proposable_attestations = pack_outcome.attestations;
         assert_eq!(
             proposable_attestations
                 .iter()
@@ -847,15 +865,19 @@ mod tests {
     }
 
     #[test]
-    fn test_goerli_aggregate_attestation_packing_dynamically() -> Result<()> {
+    #[cfg(feature = "eth2-cache")]
+    fn test_goerli_optimal_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::goerli());
         let slot = 547_813;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = goerli::beacon_state(slot, 6);
         let latest_block_root = accessors::latest_block_root(&state);
 
-        let previous_epoch_aggregates = goerli::attestations("aggregate_attestations", epoch - 1);
-        let current_epoch_aggregates = goerli::attestations("aggregate_attestations", epoch);
+        // Optimal packing uses the assumption that attestations are sorted by their data (this assumption is fulfilled when values are taken from BTree)
+        let previous_epoch_aggregates =
+            goerli::attestations_sorted_by_data("aggregate_attestations", epoch - 1);
+        let current_epoch_aggregates =
+            goerli::attestations_sorted_by_data("aggregate_attestations", epoch);
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
@@ -866,10 +888,13 @@ mod tests {
             state.clone_arc(),
             true,
         )?;
-        let pack_outcome = packer.pack_proposable_attestations_dynamically(
+        let pack_outcome = packer.pack_proposable_attestations_optimally(
             &previous_epoch_aggregates,
             &current_epoch_aggregates,
         );
+
+        // value computed without optimizations
+        assert_eq!(compute_total_reward(&packer, &pack_outcome)?, 8_323_509_056);
 
         let proposable_attestations = pack_outcome.attestations;
         assert_eq!(
@@ -885,15 +910,19 @@ mod tests {
     }
 
     #[test]
-    fn test_holesky_aggregate_attestation_packing() -> Result<()> {
+    #[cfg(feature = "eth2-cache")]
+    fn test_holesky_greedy_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::holesky());
         let slot = 50_015;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = holesky::beacon_state(slot, 8);
         let latest_block_root = accessors::latest_block_root(&state);
 
-        let previous_epoch_aggregates = holesky::aggregate_attestations_by_epoch(epoch - 1);
-        let current_epoch_aggregates = holesky::aggregate_attestations_by_epoch(epoch);
+        // Optimal packing uses the assumption that attestations are sorted by their data (this assumption is fulfilled when values are taken from BTree)
+        let previous_epoch_aggregates =
+            holesky::aggregate_attestations_by_epoch_sorted_by_data(epoch - 1);
+        let current_epoch_aggregates =
+            holesky::aggregate_attestations_by_epoch_sorted_by_data(epoch);
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
@@ -910,6 +939,8 @@ mod tests {
             &current_epoch_aggregates,
         );
 
+        assert_eq!(compute_total_reward(&packer, &pack_outcome)?, 5_250_660_160);
+
         let proposable_attestations = pack_outcome.attestations;
         assert_eq!(
             proposable_attestations
@@ -924,15 +955,19 @@ mod tests {
     }
 
     #[test]
-    fn test_holesky_dynamic_aggregate_attestation_packing() -> Result<()> {
+    #[cfg(feature = "eth2-cache")]
+    fn test_holesky_optimal_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::holesky());
         let slot = 50_015;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = holesky::beacon_state(slot, 8);
         let latest_block_root = accessors::latest_block_root(&state);
 
-        let previous_epoch_aggregates = holesky::aggregate_attestations_by_epoch(epoch - 1);
-        let current_epoch_aggregates = holesky::aggregate_attestations_by_epoch(epoch);
+        // Optimal packing uses the assumption that attestations are sorted by their data (this assumption is fulfilled when values are taken from BTree)
+        let previous_epoch_aggregates =
+            holesky::aggregate_attestations_by_epoch_sorted_by_data(epoch - 1);
+        let current_epoch_aggregates =
+            holesky::aggregate_attestations_by_epoch_sorted_by_data(epoch);
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
@@ -944,10 +979,13 @@ mod tests {
             true,
         )?;
 
-        let pack_outcome = packer.pack_proposable_attestations_dynamically(
+        let pack_outcome = packer.pack_proposable_attestations_optimally(
             &previous_epoch_aggregates,
             &current_epoch_aggregates,
         );
+
+        // value computed without optimizations
+        assert_eq!(compute_total_reward(&packer, &pack_outcome)?, 5_260_609_920);
 
         let proposable_attestations = pack_outcome.attestations;
         assert_eq!(

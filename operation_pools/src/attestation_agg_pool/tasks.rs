@@ -119,7 +119,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
                         .start_timer()
                 });
 
-                pack_attestations_dynamically(&attestation_packer, &pool, &beacon_state).await
+                pack_attestations_optimally(&attestation_packer, &pool, &beacon_state).await
             };
 
             if is_empty || !deadline_reached {
@@ -256,7 +256,7 @@ fn aggregate_attestation<P: Preset>(
     Ok(())
 }
 
-async fn pack_attestations_dynamically<P: Preset>(
+async fn pack_attestations_optimally<P: Preset>(
     attestation_packer: &AttestationPacker<P>,
     pool: &Pool<P>,
     state: &BeaconState<P>,
@@ -264,7 +264,7 @@ async fn pack_attestations_dynamically<P: Preset>(
     let previous_epoch = accessors::get_previous_epoch(state);
     let current_epoch = accessors::get_current_epoch(state);
 
-    attestation_packer.pack_proposable_attestations_dynamically(
+    attestation_packer.pack_proposable_attestations_optimally(
         &pool.aggregate_attestations_by_epoch(previous_epoch).await,
         &pool.aggregate_attestations_by_epoch(current_epoch).await,
     )
