@@ -7,7 +7,7 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
-num-traits = { workspace = true }
+anyhow = { workspace = true }
 kzg_utils = { workspace = true }
 kzg = { workspace = true }
 ssz = { workspace = true}
