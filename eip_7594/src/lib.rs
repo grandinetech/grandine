@@ -1,4 +1,5 @@
-use c_kzg::{compute_cells, Blob, Bytes32, Cell, KZGSettings};
+use anyhow::Result;
+use c_kzg::{Blob, Bytes32, Cell, KzgSettings};
 use sha3::{Digest, Sha3_256};
 use std::collections::HashSet;
 use std::path::Path;
@@ -7,10 +8,10 @@ const DATA_COLUMN_SIDECAR_SUBNET_COUNT: usize = 32;
 const SAMPLES_PER_SLOT: u64 = 8;
 const CUSTODY_REQUIREMENT: u64 = 1;
 const TARGET_NUMBER_OF_PEERS: u64 = 70;
-const FIELD_ELEMENTS_PER_BLOB: usize = 4; // todo!();
+const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
 const FIELD_ELEMENTS_PER_EXT_BLOB: usize = 2 * FIELD_ELEMENTS_PER_BLOB;
 const FIELD_ELEMENTS_PER_CELL: usize = 64;
-const BYTES_PER_FIELD_ELEMENT: usize = 4; // todo!();
+const BYTES_PER_FIELD_ELEMENT: usize = 32;
 const BYTES_PER_CELL: usize = FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
 const CELLS_PER_BLOB: usize = FIELD_ELEMENTS_PER_EXT_BLOB / FIELD_ELEMENTS_PER_CELL;
 const KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH: u64 = 4;
@@ -24,7 +25,7 @@ type ColumnIndex = usize;
 type NodeId = u64;
 type ExtendedMatrix = [Cell; MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS];
 
-fn get_custody_columns(node_id: NodeId, custody_subnet_count: usize) -> Vec<ColumnIndex> {
+pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: usize) -> Vec<ColumnIndex> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 
     let mut subnet_ids = HashSet::new();
@@ -68,18 +69,20 @@ fn get_custody_columns(node_id: NodeId, custody_subnet_count: usize) -> Vec<Colu
     result
 }
 
-fn compute_extended_matrix(blobs: Vec<Blob>) -> ExtendedMatrix {
+pub fn compute_extended_matrix(blobs: Vec<Blob>) -> Result<ExtendedMatrix> {
     let mut extended_matrix: Vec<Cell> = Vec::new();
 
     let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
 
-    let kzg_settings = KZGSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
 
     for blob in blobs {
-        extended_matrix.extend(Cell::compute_cells(&blob, &kzg_settings).into());
+        let cells = *Cell::compute_cells(&blob, &kzg_settings)?;
+        extended_matrix.extend(cells);
     }
 
-    extended_matrix[0..MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS]
-        .try_into()
-        .unwrap()
+    let mut array = [Cell::default(); MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS];
+    array.copy_from_slice(&extended_matrix[..]);
+
+    Ok(array)
 }

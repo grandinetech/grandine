@@ -2035,6 +2035,7 @@ dependencies = [
 name = "eip_7594"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "c-kzg",
  "kzg",
  "kzg_utils",
@@ -3075,6 +3076,7 @@ dependencies = [
  "dirs",
  "educe",
  "eip_2335",
+ "eip_7594",
  "enum-iterator",
  "eth1",
  "eth1_api",
