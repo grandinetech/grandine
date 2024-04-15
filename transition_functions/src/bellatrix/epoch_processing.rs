@@ -7,6 +7,7 @@ use helper_functions::{
     mutators::decrease_balance,
 };
 use once_cell::unsync::Lazy;
+use prometheus_metrics::METRICS;
 use typenum::Unsigned as _;
 use types::{
     bellatrix::beacon_state::BeaconState as CapellaBeaconState, config::Config,
@@ -20,6 +21,10 @@ use crate::{
 };
 
 pub fn process_epoch(config: &Config, state: &mut CapellaBeaconState<impl Preset>) -> Result<()> {
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.epoch_processing_times.start_timer());
+
     // TODO(Grandine Team): Some parts of epoch processing could be done in parallel.
     let (statistics, mut summaries, participation) = altair::statistics(state);
 

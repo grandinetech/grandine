@@ -2995,12 +2995,13 @@ impl<P: Preset> Store<P> {
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         let type_name = tynm::type_name::<Self>();
 
-        metrics.set_collection_length(&[&type_name, "blob_store"], self.blob_cache.size());
-        metrics.set_collection_length(&[&type_name, "finalized"], self.finalized().len());
-        metrics.set_collection_length(&[&type_name, "unfinalized"], self.unfinalized().len());
+        metrics.set_collection_length(&type_name, "blob_store", self.blob_cache.size());
+        metrics.set_collection_length(&type_name, "finalized", self.finalized().len());
+        metrics.set_collection_length(&type_name, "unfinalized", self.unfinalized().len());
 
         metrics.set_collection_length(
-            &[&type_name, "unfinalized_segment_blocks"],
+            &type_name,
+            "unfinalized_segment_blocks",
             self.unfinalized
                 .values()
                 .map(|segment| segment.len().get())
@@ -3008,34 +3009,40 @@ impl<P: Preset> Store<P> {
         );
 
         metrics.set_collection_length(
-            &[&type_name, "finalized_indices"],
+            &type_name,
+            "finalized_indices",
             self.finalized_indices.len(),
         );
 
         metrics.set_collection_length(
-            &[&type_name, "unfinalized_locations"],
+            &type_name,
+            "unfinalized_locations",
             self.unfinalized_locations.len(),
         );
 
         metrics.set_collection_length(
-            &[&type_name, "justified_active_balances"],
+            &type_name,
+            "justified_active_balances",
             self.justified_active_balances.len(),
         );
 
-        metrics.set_collection_length(&[&type_name, "latest_messages"], self.latest_messages.len());
+        metrics.set_collection_length(&type_name, "latest_messages", self.latest_messages.len());
 
         metrics.set_collection_length(
-            &[&type_name, "checkpoint_states"],
+            &type_name,
+            "checkpoint_states",
             self.checkpoint_states.len(),
         );
 
         metrics.set_collection_length(
-            &[&type_name, "current_slot_attestations"],
+            &type_name,
+            "current_slot_attestations",
             self.current_slot_attestations.len(),
         );
 
         metrics.set_collection_length(
-            &[&type_name, "preprocessed_states"],
+            &type_name,
+            "preprocessed_states",
             self.preprocessed_states.len(),
         );
     }

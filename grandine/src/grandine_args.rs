@@ -29,7 +29,7 @@ use itertools::{EitherOrBoth, Itertools as _};
 use log::warn;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
-use prometheus_metrics::Metrics;
+use prometheus_metrics::{Metrics, METRICS};
 use reqwest::{header::HeaderValue, Url};
 use runtime::{
     MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
@@ -1090,7 +1090,9 @@ impl GrandineArgs {
         let metrics = if metrics {
             let metrics = Metrics::new()?;
             metrics.register_with_default_metrics()?;
-            Some(Arc::new(metrics))
+            let metrics = Arc::new(metrics);
+            METRICS.get_or_init(|| metrics.clone_arc());
+            Some(metrics)
         } else {
             None
         };

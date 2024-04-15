@@ -9,6 +9,7 @@ use helper_functions::{
     },
 };
 use itertools::Itertools as _;
+use prometheus_metrics::METRICS;
 use ssz::SszHash as _;
 use types::{
     capella::containers::HistoricalSummary, config::Config, deneb::beacon_state::BeaconState,
@@ -23,6 +24,10 @@ use crate::{
 };
 
 pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.epoch_processing_times.start_timer());
+
     // TODO(Grandine Team): Some parts of epoch processing could be done in parallel.
 
     let (statistics, mut summaries, participation) = altair::statistics(state);

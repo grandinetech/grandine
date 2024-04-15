@@ -1385,32 +1385,6 @@
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
-      },
-      {
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "definition": "label_values(hash)",
-        "hide": 0,
-        "includeAll": true,
-        "multi": true,
-        "name": "Fork",
-        "options": [],
-        "query": {
-          "query": "label_values(hash)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 1,
-        "regex": "/eth2/(.{8}).*/",
-        "skipUrlSync": false,
-        "sort": 0,
-        "type": "query"
       }
     ]
   },

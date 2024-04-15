@@ -1,7 +1,9 @@
-use anyhow::Result;
 use core::time::Duration;
+use std::sync::Arc;
 
+use anyhow::Result;
 use log::warn;
+use once_cell::sync::OnceCell;
 use prometheus::{
     histogram_opts, opts, Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec,
@@ -9,6 +11,8 @@ use prometheus::{
 use types::phase0::primitives::{Epoch, Gwei, Slot, UnixSeconds};
 
 use crate::helpers;
+
+pub static METRICS: OnceCell<Arc<Metrics>> = OnceCell::new();
 
 #[derive(Debug)]
 pub struct Metrics {
@@ -118,11 +122,17 @@ pub struct Metrics {
     pub fc_checkpoint_state_task_times: Histogram,
 
     // Cache metrics
-    active_validator_indices_ordered_init_count: IntCounter,
-    active_validator_indices_shuffled_init_count: IntCounter,
-    beacon_proposer_index_init_count: IntCounter,
-    total_active_balance_init_count: IntCounter,
-    validator_indices_init_count: IntCounter,
+    pub active_validator_indices_ordered_init_count: IntCounter,
+    pub active_validator_indices_shuffled_init_count: IntCounter,
+    pub beacon_proposer_index_init_count: IntCounter,
+    pub total_active_balance_init_count: IntCounter,
+    pub validator_indices_init_count: IntCounter,
+
+    // Transition function metrics
+    pub blinded_block_transition_times: Histogram,
+    pub block_transition_times: Histogram,
+    pub epoch_processing_times: Histogram,
+    pub process_slot_times: Histogram,
 
     // EF interop metrics
     beacon_current_active_validators: IntGauge,
@@ -543,6 +553,27 @@ impl Metrics {
                 "Validator indices cache init count",
             )?,
 
+            // Transition function metrics
+            blinded_block_transition_times: Histogram::with_opts(histogram_opts!(
+                "BLINDED_BLOCK_TRANSITION_TIMES",
+                "Transition function blinded block processing times",
+            ))?,
+
+            block_transition_times: Histogram::with_opts(histogram_opts!(
+                "BLOCK_TRANSITION_TIMES",
+                "Transition function block processing times",
+            ))?,
+
+            epoch_processing_times: Histogram::with_opts(histogram_opts!(
+                "EPOCH_PROCESSING_TIMES",
+                "Transition function epoch processing times",
+            ))?,
+
+            process_slot_times: Histogram::with_opts(histogram_opts!(
+                "PROCESS_SLOT_TIMES",
+                "Transition function empty slots processing times",
+            ))?,
+
             // EF interop metrics
             beacon_current_active_validators: IntGauge::new(
                 "beacon_current_active_validators",
@@ -787,6 +818,10 @@ impl Metrics {
         default_registry.register(Box::new(self.beacon_proposer_index_init_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
         default_registry.register(Box::new(self.validator_indices_init_count.clone()))?;
+        default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
+        default_registry.register(Box::new(self.block_transition_times.clone()))?;
+        default_registry.register(Box::new(self.epoch_processing_times.clone()))?;
+        default_registry.register(Box::new(self.process_slot_times.clone()))?;
         default_registry.register(Box::new(self.beacon_current_active_validators.clone()))?;
         default_registry.register(Box::new(self.beacon_current_justified_epoch.clone()))?;
         default_registry.register(Box::new(self.beacon_finalized_epoch.clone()))?;
@@ -867,11 +902,14 @@ impl Metrics {
     }
 
     // Collection Lengths
-    pub fn set_collection_length(&self, labels: &[&str], value: usize) {
-        match self.collection_lengths.get_metric_with_label_values(labels) {
-            Ok(gauge) => gauge.set(value as i64),
-            Err(error) => warn!("unable to track collection length for {labels:?}: {error:?}"),
-        }
+    pub fn set_collection_length(&self, typename: &str, collection_name: &str, value: usize) {
+        self.collection_lengths
+            .get_metric_with_label_values(&[typename, collection_name])
+            .expect(
+                "the number of label values should match the number \
+                 of labels that collection_lengths was created with",
+            )
+            .set(value as i64)
     }
 
     // HTTP API metrics

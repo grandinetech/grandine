@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
 use helper_functions::{accessors, misc, slot_report::SlotReport, verifier::Verifier};
+use prometheus_metrics::METRICS;
 use types::{
     config::Config,
     deneb::{
@@ -22,6 +23,10 @@ pub fn custom_process_blinded_block<P: Preset>(
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.blinded_block_transition_times.start_timer());
+
     debug_assert_eq!(state.slot, block.slot);
 
     unphased::process_block_header(state, block)?;

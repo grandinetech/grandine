@@ -9,6 +9,7 @@ use helper_functions::{
     slot_report::{NullSlotReport, SlotReport},
     verifier::{Triple, Verifier},
 };
+use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use ssz::SszHash as _;
 use typenum::Unsigned as _;
@@ -51,6 +52,10 @@ pub fn process_block<P: Preset>(
     block: &BeaconBlock<P>,
     mut verifier: impl Verifier,
 ) -> Result<()> {
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.block_transition_times.start_timer());
+
     verifier.reserve(altair::count_required_signatures(block));
 
     custom_process_block(

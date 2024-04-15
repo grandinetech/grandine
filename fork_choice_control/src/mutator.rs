@@ -2301,12 +2301,14 @@ where
             let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_block"],
+                &type_name,
+                "delayed_until_block",
                 self.delayed_until_block.len(),
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_block_blocks"],
+                &type_name,
+                "delayed_until_block_blocks",
                 self.delayed_until_block
                     .values()
                     .map(|delayed| delayed.blocks.len())
@@ -2314,7 +2316,8 @@ where
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_block_attestations"],
+                &type_name,
+                "delayed_until_block_attestations",
                 self.delayed_until_block
                     .values()
                     .map(|delayed| delayed.attestations.len())
@@ -2322,7 +2325,8 @@ where
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_block_aggregates"],
+                &type_name,
+                "delayed_until_block_aggregates",
                 self.delayed_until_block
                     .values()
                     .map(|delayed| delayed.aggregates.len())
@@ -2330,12 +2334,14 @@ where
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_slot"],
+                &type_name,
+                "delayed_until_slot",
                 self.delayed_until_slot.len(),
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_slot_blocks"],
+                &type_name,
+                "delayed_until_slot_blocks",
                 self.delayed_until_slot
                     .values()
                     .map(|delayed| delayed.blocks.len())
@@ -2343,7 +2349,8 @@ where
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_slot_attestations"],
+                &type_name,
+                "delayed_until_slot_attestations",
                 self.delayed_until_slot
                     .values()
                     .map(|delayed| delayed.attestations.len())
@@ -2351,17 +2358,16 @@ where
             );
 
             metrics.set_collection_length(
-                &[&type_name, "delayed_until_slot_aggregates"],
+                &type_name,
+                "delayed_until_slot_aggregates",
                 self.delayed_until_slot
                     .values()
                     .map(|delayed| delayed.aggregates.len())
                     .sum(),
             );
 
-            metrics
-                .set_collection_length(&[&type_name, "high_priority_tasks"], high_priority_tasks);
-
-            metrics.set_collection_length(&[&type_name, "low_priority_tasks"], low_priority_tasks);
+            metrics.set_collection_length(&type_name, "high_priority_tasks", high_priority_tasks);
+            metrics.set_collection_length(&type_name, "low_priority_tasks", low_priority_tasks);
 
             self.store.track_collection_metrics(metrics);
         }

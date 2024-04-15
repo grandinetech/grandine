@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 43,
+  "id": 56,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -56,6 +56,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -115,7 +116,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "IS_LIVE",
+          "expr": "IS_LIVE{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -164,11 +165,11 @@
         },
         "textMode": "value"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_slot",
+          "expr": "beacon_slot{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -217,11 +218,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_finalized_slot",
+          "expr": "beacon_finalized_slot{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -275,11 +276,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "SYSTEM_TOTAL_MEMORY",
+          "expr": "SYSTEM_TOTAL_MEMORY{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -333,11 +334,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "builder",
-          "expr": "CORE_COUNT",
+          "expr": "CORE_COUNT{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -367,6 +368,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -423,7 +425,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "GRANDINE_TOTAL_CPU_PERCENTAGE",
+          "expr": "GRANDINE_TOTAL_CPU_PERCENTAGE{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -452,6 +454,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -508,7 +511,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "SYSTEM_CPU_PERCENTAGE",
+          "expr": "SYSTEM_CPU_PERCENTAGE{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -537,6 +540,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -593,7 +597,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "GRANDINE_USED_MEMORY",
+          "expr": "GRANDINE_USED_MEMORY{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -622,6 +626,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -678,7 +683,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "SYSTEM_USED_MEMORY",
+          "expr": "SYSTEM_USED_MEMORY{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -738,8 +743,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -773,7 +777,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "rate(DEDICATED_EXECUTOR_TASK_TIMES_sum[$__rate_interval]) / rate(DEDICATED_EXECUTOR_TASK_TIMES_count[$__rate_interval])\n",
+              "expr": "rate(DEDICATED_EXECUTOR_TASK_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(DEDICATED_EXECUTOR_TASK_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])\n",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -823,8 +827,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -857,7 +860,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "DEDICATED_EXECUTOR_TASK_COUNT",
+              "expr": "DEDICATED_EXECUTOR_TASK_COUNT{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -877,8 +880,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -914,7 +916,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "DEDICATED_EXECUTOR_THREAD_COUNT",
+              "expr": "DEDICATED_EXECUTOR_THREAD_COUNT{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -979,8 +981,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1014,7 +1015,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "JEMALLOC_BYTES_ALLOCATED",
+              "expr": "JEMALLOC_BYTES_ALLOCATED{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1065,8 +1066,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1100,7 +1100,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "JEMALLOC_BYTES_ACTIVE",
+              "expr": "JEMALLOC_BYTES_ACTIVE{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1151,8 +1151,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1186,7 +1185,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "JEMALLOC_BYTES_METADATA",
+              "expr": "JEMALLOC_BYTES_METADATA{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1237,8 +1236,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1272,7 +1270,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "JEMALLOC_BYTES_RESIDENT",
+              "expr": "JEMALLOC_BYTES_RESIDENT{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1323,8 +1321,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1358,7 +1355,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "JEMALLOC_BYTES_MAPPED",
+              "expr": "JEMALLOC_BYTES_MAPPED{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1409,8 +1406,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1444,7 +1440,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "JEMALLOC_BYTES_RETAINED",
+              "expr": "JEMALLOC_BYTES_RETAINED{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1458,7 +1454,7 @@
       "type": "row"
     },
     {
-      "collapsed": true,
+      "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1466,120 +1462,95 @@
         "y": 27
       },
       "id": 12,
-      "panels": [
-        {
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
+      "panels": [],
+      "title": "Collection Lengths",
+      "type": "row"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
             },
-            "overrides": [
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
               {
-                "__systemRef": "hideSeriesFrom",
-                "matcher": {
-                  "id": "byNames",
-                  "options": {
-                    "mode": "exclude",
-                    "names": [
-                      "unfinalized_segment_blocks (Store)"
-                    ],
-                    "prefix": "All except:",
-                    "readOnly": true
-                  }
-                },
-                "properties": [
-                  {
-                    "id": "custom.hideFrom",
-                    "value": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": true
-                    }
-                  }
-                ]
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
               }
             ]
-          },
-          "gridPos": {
-            "h": 21,
-            "w": 24,
-            "x": 0,
-            "y": 28
-          },
-          "id": 13,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "editorMode": "code",
-              "expr": "COLLECTION_LENGTHS",
-              "instant": false,
-              "legendFormat": "{{name}} ({{type}})",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Collection Lengths",
-          "type": "timeseries"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 21,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "COLLECTION_LENGTHS{instance=~\"$Instance\"}",
+          "instant": false,
+          "legendFormat": "{{name}} ({{type}})",
+          "range": true,
+          "refId": "A"
         }
       ],
       "title": "Collection Lengths",
-      "type": "row"
+      "type": "timeseries"
     },
     {
       "collapsed": true,
@@ -1587,7 +1558,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 49
       },
       "id": 9,
       "panels": [
@@ -1632,8 +1603,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1667,7 +1637,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "rate(NODE_RX_BYTES[$__rate_interval])",
+              "expr": "rate(NODE_RX_BYTES{instance=~\"$Instance\"}[$__rate_interval])",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1717,8 +1687,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1752,7 +1721,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "rate(NODE_TX_BYTES[$__rate_interval])",
+              "expr": "rate(NODE_TX_BYTES{instance=~\"$Instance\"}[$__rate_interval])",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1771,7 +1740,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 50
       },
       "id": 14,
       "panels": [
@@ -1816,8 +1785,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1851,7 +1819,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "GRANDINE_DISK_USAGE",
+              "expr": "GRANDINE_DISK_USAGE{instance=~\"$Instance\"}",
               "instant": false,
               "range": true,
               "refId": "A"
@@ -1870,7 +1838,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 51
       },
       "id": 25,
       "panels": [],
@@ -1900,7 +1868,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 52
       },
       "id": 27,
       "options": {
@@ -1917,11 +1885,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_finalized_epoch",
+          "expr": "beacon_finalized_epoch{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -1953,7 +1921,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 52
       },
       "id": 26,
       "options": {
@@ -1970,11 +1938,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_current_justified_epoch",
+          "expr": "beacon_current_justified_epoch{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2006,7 +1974,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 60
       },
       "id": 23,
       "options": {
@@ -2023,11 +1991,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_head_slot",
+          "expr": "beacon_head_slot{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2059,7 +2027,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 60
       },
       "id": 24,
       "options": {
@@ -2076,11 +2044,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_current_active_validators",
+          "expr": "beacon_current_active_validators{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2109,6 +2077,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2146,7 +2115,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 47
+        "y": 68
       },
       "id": 28,
       "options": {
@@ -2164,7 +2133,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_processed_deposits_total",
+          "expr": "beacon_processed_deposits_total{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2193,6 +2162,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2230,7 +2200,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 47
+        "y": 68
       },
       "id": 29,
       "options": {
@@ -2248,7 +2218,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "rate(beacon_reorgs_total[$__rate_interval])",
+          "expr": "rate(beacon_reorgs_total{instance=~\"$Instance\"}[$__rate_interval])",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2281,7 +2251,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 47
+        "y": 68
       },
       "id": 32,
       "options": {
@@ -2298,11 +2268,11 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.3",
+      "pluginVersion": "10.1.0",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "validator_count",
+          "expr": "validator_count{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2331,6 +2301,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2368,7 +2339,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 55
+        "y": 76
       },
       "id": 30,
       "options": {
@@ -2386,7 +2357,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_participation_prev_epoch_active_gwei_total",
+          "expr": "beacon_participation_prev_epoch_active_gwei_total{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2415,6 +2386,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -2452,7 +2424,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 55
+        "y": 76
       },
       "id": 31,
       "options": {
@@ -2470,7 +2442,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "beacon_participation_prev_epoch_target_attesting_gwei_total",
+          "expr": "beacon_participation_prev_epoch_target_attesting_gwei_total{instance=~\"$Instance\"}",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -2490,10 +2462,10 @@
         "current": {
           "selected": true,
           "text": [
-            "0.0.0.0:5054"
+            "0.0.0.0:5056"
           ],
           "value": [
-            "0.0.0.0:5054"
+            "0.0.0.0:5056"
           ]
         },
         "definition": "label_values(instance)",
@@ -2511,32 +2483,6 @@
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
-      },
-      {
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "definition": "label_values(hash)",
-        "hide": 0,
-        "includeAll": true,
-        "multi": true,
-        "name": "Fork",
-        "options": [],
-        "query": {
-          "query": "label_values(hash)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 1,
-        "regex": "/eth2/(.{8}).*/",
-        "skipUrlSync": false,
-        "sort": 0,
-        "type": "query"
       }
     ]
   },
@@ -2548,6 +2494,6 @@
   "timezone": "",
   "title": "Overview",
   "uid": "eb977235-e486-4662-9e99-a2631b9eddca",
-  "version": 11,
+  "version": 4,
   "weekStart": ""
 }

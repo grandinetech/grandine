@@ -11,6 +11,7 @@ use bls::{AggregatePublicKey, CachedPublicKey, PublicKeyBytes};
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;
+use prometheus_metrics::METRICS;
 use rc_box::ArcBox;
 use ssz::{BitList, ContiguousList, ContiguousVector, FitsInU64, Hc, SszHash as _};
 use std_ext::CopyExt as _;
@@ -188,9 +189,15 @@ pub fn index_of_public_key<P: Preset>(
 
 pub fn get_or_init_validator_indices<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
-    _report_cache_miss: bool,
+    report_cache_miss: bool,
 ) -> &HashMap<PublicKeyBytes, ValidatorIndex> {
     state.cache().validator_indices.get_or_init(|| {
+        if report_cache_miss {
+            if let Some(metrics) = METRICS.get() {
+                metrics.validator_indices_init_count.inc();
+            }
+        }
+
         state
             .validators()
             .into_iter()
@@ -231,7 +238,7 @@ pub fn active_validator_indices_ordered<P: Preset>(
 pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-    _report_cache_miss: bool,
+    report_cache_miss: bool,
 ) -> &PackedIndices {
     fn pack<T>(indices: Vec<ValidatorIndex>) -> Arc<[T]>
     where
@@ -253,6 +260,12 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
     }
 
     state.cache().active_validator_indices_ordered[relative_epoch].get_or_init(|| {
+        if report_cache_miss {
+            if let Some(metrics) = METRICS.get() {
+                metrics.active_validator_indices_ordered_init_count.inc();
+            }
+        }
+
         // Possible optimization: cache the number of active validators and index of the last one.
         // That would make it possible to avoid temporary allocations.
         // The cached values would have to be kept up to date as the validator registry changes.
@@ -299,6 +312,12 @@ where
     }
 
     state.cache().active_validator_indices_shuffled[relative_epoch].get_or_init(|| {
+        if report_cache_miss {
+            if let Some(metrics) = METRICS.get() {
+                metrics.active_validator_indices_shuffled_init_count.inc();
+            }
+        }
+
         let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_ATTESTER);
 
         match get_or_init_active_validator_indices_ordered(state, relative_epoch, report_cache_miss)
@@ -431,14 +450,22 @@ pub fn get_beacon_proposer_index<P: Preset>(state: &impl BeaconState<P>) -> Resu
 
 pub fn get_or_try_init_beacon_proposer_index<P: Preset>(
     state: &impl BeaconState<P>,
-    _report_cache_miss: bool,
+    report_cache_miss: bool,
 ) -> Result<ValidatorIndex> {
     // `accessors::relative_epoch` never fails when called with the current epoch,
     // but `misc::compute_proposer_index` fails when the state has no active validators.
     state
         .cache()
         .proposer_index
-        .get_or_try_init(|| get_beacon_proposer_index_at_slot(state, state.slot()))
+        .get_or_try_init(|| {
+            if report_cache_miss {
+                if let Some(metrics) = METRICS.get() {
+                    metrics.beacon_proposer_index_init_count.inc();
+                }
+            }
+
+            get_beacon_proposer_index_at_slot(state, state.slot())
+        })
         .copied()
 }
 
@@ -536,10 +563,16 @@ pub fn total_active_balance<P: Preset>(state: &impl BeaconState<P>) -> Gwei {
 
 pub fn get_or_init_total_active_balance<P: Preset>(
     state: &impl BeaconState<P>,
-    _report_cache_miss: bool,
+    report_cache_miss: bool,
 ) -> Gwei {
     state.cache().total_active_balance[RelativeEpoch::Current]
         .get_or_init(|| {
+            if report_cache_miss {
+                if let Some(metrics) = METRICS.get() {
+                    metrics.total_active_balance_init_count.inc();
+                }
+            }
+
             let current_epoch = get_current_epoch(state);
             state
                 .validators()

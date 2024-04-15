@@ -6,6 +6,7 @@ use helper_functions::{
     accessors::get_current_epoch, misc::vec_of_default, mutators::decrease_balance,
 };
 use once_cell::unsync::Lazy;
+use prometheus_metrics::METRICS;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -32,6 +33,10 @@ pub struct EpochReport {
 }
 
 pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.epoch_processing_times.start_timer());
+
     let (statistics, mut summaries, performance) =
         epoch_intermediates::statistics::<_, StatisticsForTransition>(state)?;
 

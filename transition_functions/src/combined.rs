@@ -7,6 +7,7 @@ use helper_functions::{
     slot_report::{NullSlotReport, RealSlotReport, SlotReport},
     verifier::{MultiVerifier, NullVerifier, Verifier, VerifierOption},
 };
+use prometheus_metrics::METRICS;
 use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{
@@ -230,6 +231,10 @@ pub fn process_slots<P: Preset>(
             target: slot,
         },
     );
+
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.process_slot_times.start_timer());
 
     // If multiple phases have the same fork slots,
     // the state may need to be upgraded multiple times in the same slot.

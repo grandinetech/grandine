@@ -169,7 +169,8 @@ impl Eth1Chain {
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         metrics.set_collection_length(
-            &[&tynm::type_name::<Self>(), "unfinalized_blocks"],
+            &tynm::type_name::<Self>(),
+            "unfinalized_blocks",
             self.unfinalized_blocks
                 .read()
                 .expect("unfinalized blocks lock is poisoned")

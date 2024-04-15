@@ -101,12 +101,12 @@
           "editorMode": "code",
           "expr": "TICK_DELAY_TIMES{instance=~\"$Instance\"}",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Validator tick delays",
+      "title": "Combined validator tick delays",
       "type": "timeseries"
     },
     {
@@ -191,7 +191,7 @@
           "exemplar": false,
           "expr": "TICK_DELAY_TIMES{tick=\"Propose\",instance=~\"$Instance\"}",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "",
           "range": true,
           "refId": "A"
         }
@@ -280,7 +280,7 @@
           "editorMode": "code",
           "expr": "TICK_DELAY_TIMES{tick=\"Attest\",instance=~\"$Instance\"}",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "",
           "range": true,
           "refId": "A"
         }
@@ -369,7 +369,7 @@
           "editorMode": "code",
           "expr": "TICK_DELAY_TIMES{tick=\"Aggregate\",instance=~\"$Instance\"}",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "",
           "range": true,
           "refId": "A"
         }
@@ -386,12 +386,12 @@
     "list": [
       {
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
-            "0.0.0.0:5056"
+            "All"
           ],
           "value": [
-            "0.0.0.0:5056"
+            "$__all"
           ]
         },
         "definition": "label_values(instance)",
@@ -409,43 +409,17 @@
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "definition": "label_values(hash)",
-        "hide": 0,
-        "includeAll": true,
-        "multi": true,
-        "name": "Fork",
-        "options": [],
-        "query": {
-          "query": "label_values(hash)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 1,
-        "regex": "/eth2/(.{8}).*/",
-        "skipUrlSync": false,
-        "sort": 0,
-        "type": "query"
       }
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-6h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Ticks",
   "uid": "f8788d8c-e247-4b8f-8db6-d4a560751c99",
-  "version": 13,
+  "version": 15,
   "weekStart": ""
 }

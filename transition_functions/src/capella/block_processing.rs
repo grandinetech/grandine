@@ -13,6 +13,7 @@ use helper_functions::{
     verifier::{SingleVerifier, Triple, Verifier},
 };
 use itertools::izip;
+use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use ssz::SszHash as _;
 use tap::Pipe as _;
@@ -53,6 +54,10 @@ pub fn process_block<P: Preset>(
     block: &BeaconBlock<P>,
     mut verifier: impl Verifier,
 ) -> Result<()> {
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.block_transition_times.start_timer());
+
     verifier.reserve(count_required_signatures(block));
 
     custom_process_block(

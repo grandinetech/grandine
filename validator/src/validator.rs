@@ -3097,7 +3097,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let type_name = tynm::type_name::<Self>();
 
             metrics.set_collection_length(
-                &[&type_name, "own_singular_attestations"],
+                &type_name,
+                "own_singular_attestations",
                 self.own_singular_attestations
                     .get()
                     .map(Vec::len)
@@ -3105,22 +3106,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
 
             metrics.set_collection_length(
-                &[&type_name, "proposer_slashings"],
+                &type_name,
+                "proposer_slashings",
                 self.proposer_slashings.len(),
             );
 
             metrics.set_collection_length(
-                &[&type_name, "attester_slashings"],
+                &type_name,
+                "attester_slashings",
                 self.attester_slashings.len(),
             );
 
             metrics.set_collection_length(
-                &[&type_name, "voluntary_exits"],
+                &type_name,
+                "voluntary_exits",
                 self.voluntary_exits.len(),
             );
 
             metrics.set_collection_length(
-                &[&type_name, "validator_votes"],
+                &type_name,
+                "validator_votes",
                 self.validator_votes.values().map(Vec::len).sum(),
             );
 
