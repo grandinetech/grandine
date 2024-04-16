@@ -20,7 +20,7 @@ use futures::{
     lock::Mutex,
     stream::TryStreamExt as _,
 };
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
@@ -54,7 +54,7 @@ pub async fn run_after_genesis<P: Preset>(
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
     network_config: NetworkConfig,
-    genesis_provider: GenesisProvider<P>,
+    anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     state_load_strategy: StateLoadStrategy<P>,
     eth1_chain: Eth1Chain,
     eth1_config: Arc<Eth1Config>,
@@ -316,7 +316,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let mut block_sync_service = BlockSyncService::new(
         block_sync_database,
-        genesis_provider.clone(),
+        anchor_checkpoint_provider.clone(),
         controller.clone_arc(),
         metrics.clone(),
         block_sync_service_channels,
@@ -548,7 +548,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let http_api = HttpApi {
         controller: controller.clone_arc(),
-        genesis_provider,
+        anchor_checkpoint_provider,
         validator_keys,
         validator_config,
         network_config: Arc::new(network_config),

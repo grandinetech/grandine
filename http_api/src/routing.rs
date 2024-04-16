@@ -10,7 +10,7 @@ use eth1_api::ApiController;
 use features::Feature;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use liveness_tracker::ApiToLiveness;
 use metrics::ApiToMetrics;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
@@ -65,7 +65,7 @@ use crate::{misc::SpyReceiver, test_endpoints};
 pub struct NormalState<P: Preset, W: Wait> {
     pub chain_config: Arc<ChainConfig>,
     pub controller: ApiController<P, W>,
-    pub genesis_provider: GenesisProvider<P>,
+    pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub metrics: Option<Arc<Metrics>>,
@@ -97,9 +97,9 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for ApiController<P, W> {
     }
 }
 
-impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for GenesisProvider<P> {
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for AnchorCheckpointProvider<P> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
-        state.genesis_provider.clone()
+        state.anchor_checkpoint_provider.clone()
     }
 }
 
@@ -235,7 +235,7 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
             get(|extracted| async {
                 let (
                     State(controller),
-                    State(genesis_provider),
+                    State(anchor_checkpoint_provider),
                     State::<Arc<_>>(validator_keys),
                     State(api_to_validator_tx),
                     QsQuery(query),
@@ -243,7 +243,7 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
 
                 gui::get_validator_statistics(
                     &controller,
-                    genesis_provider,
+                    anchor_checkpoint_provider,
                     &validator_keys,
                     api_to_validator_tx,
                     query,

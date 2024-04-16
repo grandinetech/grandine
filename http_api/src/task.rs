@@ -12,7 +12,7 @@ use futures::{
     select,
     stream::StreamExt as _,
 };
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use http_api_utils::ApiMetrics;
 use hyper::server::conn::AddrIncoming;
 use liveness_tracker::ApiToLiveness;
@@ -49,7 +49,7 @@ pub struct Channels<P: Preset> {
 #[allow(clippy::struct_field_names)]
 pub struct HttpApi<P: Preset, W: Wait> {
     pub controller: ApiController<P, W>,
-    pub genesis_provider: GenesisProvider<P>,
+    pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub network_config: Arc<NetworkConfig>,
@@ -79,7 +79,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
     ) -> Result<()> {
         let Self {
             controller,
-            genesis_provider,
+            anchor_checkpoint_provider,
             validator_keys,
             validator_config,
             network_config,
@@ -117,7 +117,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         let state = NormalState {
             chain_config: controller.chain_config().clone_arc(),
             controller,
-            genesis_provider,
+            anchor_checkpoint_provider,
             validator_keys,
             validator_config,
             metrics: metrics.clone(),

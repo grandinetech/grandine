@@ -25,7 +25,7 @@ use fork_choice_store::{
     BlockOrigin, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -415,10 +415,10 @@ where
         &self,
         start_slot: Slot,
         end_slot: Slot,
-        genesis_provider: GenesisProvider<P>,
+        anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
     ) -> Result<()> {
         self.storage
-            .archive_back_sync_states(start_slot, end_slot, genesis_provider)
+            .archive_back_sync_states(start_slot, end_slot, anchor_checkpoint_provider)
     }
 
     fn spawn_blob_sidecar_task(

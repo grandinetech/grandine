@@ -5,7 +5,7 @@ use database::Database;
 use derive_more::Display;
 use eth1_api::RealController;
 use futures::channel::mpsc::UnboundedSender;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use log::{info, warn};
 use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
@@ -85,7 +85,7 @@ impl<P: Preset> BackSync<P> {
     pub fn try_to_spawn_state_archiver(
         &mut self,
         controller: RealController<P>,
-        genesis_provider: GenesisProvider<P>,
+        anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
         sync_tx: UnboundedSender<ArchiverToSync>,
     ) -> Result<()> {
         if !self.is_finished() {
@@ -117,7 +117,11 @@ impl<P: Preset> BackSync<P> {
                     "archiving back sync states from {start_slot} to {end_slot}",
                 );
 
-                match controller.archive_back_sync_states(start_slot, end_slot, genesis_provider) {
+                match controller.archive_back_sync_states(
+                    start_slot,
+                    end_slot,
+                    &anchor_checkpoint_provider,
+                ) {
                     Ok(()) => info!("back sync state archiver thread finished successfully"),
                     Err(error) => warn!("back sync state archiver thread failed: {error:?}"),
                 };

@@ -19,6 +19,7 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
+    combined::{BeaconState, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
@@ -417,6 +418,59 @@ pub struct SystemStats {
     pub system_cpu_percentage: f32,
     pub system_used_memory: u64,
     pub system_total_memory: u64,
+}
+
+#[derive(Clone)]
+pub struct FinalizedCheckpoint<P: Preset> {
+    pub block: Arc<SignedBeaconBlock<P>>,
+    pub state: Arc<BeaconState<P>>,
+}
+
+#[derive(Clone, Copy)]
+pub enum Origin {
+    CheckpointSync,
+    Genesis,
+}
+
+impl Origin {
+    #[must_use]
+    pub const fn is_checkpoint_sync(self) -> bool {
+        matches!(self, Self::CheckpointSync)
+    }
+}
+
+#[derive(Clone, Constructor)]
+pub struct WithOrigin<T> {
+    pub value: T,
+    pub origin: Origin,
+}
+
+impl<T: Clone> WithOrigin<T> {
+    #[must_use]
+    pub fn new_from_genesis(value: T) -> Self {
+        Self::new(value, Origin::Genesis)
+    }
+
+    #[must_use]
+    pub fn new_from_checkpoint(value: T) -> Self {
+        Self::new(value, Origin::CheckpointSync)
+    }
+
+    #[must_use]
+    pub fn checkpoint_synced(&self) -> Option<T> {
+        match self.origin {
+            Origin::CheckpointSync => Some(self.value.clone()),
+            Origin::Genesis => None,
+        }
+    }
+
+    #[must_use]
+    pub fn genesis(&self) -> Option<T> {
+        match self.origin {
+            Origin::CheckpointSync => None,
+            Origin::Genesis => Some(self.value.clone()),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use parse_display::FromStr;
 use types::{
     combined::BeaconState,
@@ -34,11 +34,15 @@ impl StateId {
     pub fn state<P: Preset, W: Wait>(
         self,
         controller: &ApiController<P, W>,
-        genesis_provider: GenesisProvider<P>,
+        anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
     ) -> Result<WithStatus<Arc<BeaconState<P>>>, Error> {
         match self {
             Self::Head => Some(controller.head_state()),
-            Self::Genesis => Some(WithStatus::valid_and_finalized(genesis_provider.state())),
+            Self::Genesis => anchor_checkpoint_provider
+                .checkpoint()
+                .genesis()
+                .map(|checkpoint| checkpoint.state)
+                .map(WithStatus::valid_and_finalized),
             Self::Finalized => Some(controller.last_finalized_state()),
             Self::Justified => Some(controller.justified_state()?),
             Self::Slot(slot) => controller.state_at_slot(slot)?,

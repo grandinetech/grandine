@@ -18,7 +18,7 @@ use fork_choice_control::{
 };
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
@@ -33,7 +33,7 @@ use tokio::runtime::Builder;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
-    nonstandard::Phase,
+    nonstandard::{FinalizedCheckpoint, Phase},
     phase0::primitives::{NodeId, H256},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
@@ -52,7 +52,7 @@ const IDENTIFY_AGENT_VERSION: &str = "deterministic-version-for-snapshot-tests";
 #[must_use]
 pub struct Context<P: Preset> {
     chain_config: ChainConfig,
-    genesis_provider: GenesisProvider<P>,
+    anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     anchor_block: Arc<SignedBeaconBlock<P>>,
     anchor_state: Arc<BeaconState<P>>,
     deposit_tree: Option<DepositTree>,
@@ -74,7 +74,7 @@ impl<P: Preset> Context<P> {
 
         let Self {
             chain_config,
-            genesis_provider,
+            anchor_checkpoint_provider,
             anchor_block,
             anchor_state,
             deposit_tree,
@@ -315,7 +315,7 @@ impl<P: Preset> Context<P> {
 
         let http_api = HttpApi {
             controller,
-            genesis_provider,
+            anchor_checkpoint_provider,
             validator_keys,
             validator_config,
             network_config,
@@ -384,13 +384,18 @@ impl<P: Preset> Context<P> {
 
 impl Context<Mainnet> {
     pub fn mainnet_genesis_none() -> Self {
-        let genesis_provider = predefined_chains::mainnet();
+        let anchor_checkpoint_provider = predefined_chains::mainnet();
+
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
 
         Self {
             chain_config: ChainConfig::mainnet(),
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: None,
             extra_blocks: vec![],
             validator_keys: vec![],
@@ -399,13 +404,18 @@ impl Context<Mainnet> {
 
     #[cfg(feature = "eth2-cache")]
     pub fn mainnet_genesis_128_slots() -> Self {
-        let genesis_provider = predefined_chains::mainnet();
+        let anchor_checkpoint_provider = predefined_chains::mainnet();
+
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
 
         Self {
             chain_config: ChainConfig::mainnet(),
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: None,
             extra_blocks: mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force().to_vec(),
             validator_keys: vec![],
@@ -420,7 +430,7 @@ impl Context<Mainnet> {
 
         Self {
             chain_config: ChainConfig::mainnet(),
-            genesis_provider: predefined_chains::mainnet(),
+            anchor_checkpoint_provider: predefined_chains::mainnet(),
             anchor_block: mainnet::ALTAIR_BEACON_BLOCK.force().clone_arc(),
             anchor_state: mainnet::ALTAIR_BEACON_STATE.force().clone_arc(),
             deposit_tree: None,
@@ -437,7 +447,7 @@ impl Context<Mainnet> {
 
         Self {
             chain_config: ChainConfig::mainnet(),
-            genesis_provider: predefined_chains::mainnet(),
+            anchor_checkpoint_provider: predefined_chains::mainnet(),
             anchor_block: mainnet::CAPELLA_BEACON_BLOCK.force().clone_arc(),
             anchor_state: mainnet::CAPELLA_BEACON_STATE.force().clone_arc(),
             deposit_tree: None,
@@ -452,13 +462,20 @@ impl Context<Minimal> {
         let chain_config = ChainConfig::minimal();
         let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
         let validator_keys = Self::interop_validator_keys(genesis_state.validators().len_u64());
-        let genesis_provider = GenesisProvider::Custom(genesis_state);
+
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state);
+
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
 
         Self {
             chain_config,
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: Some(deposit_tree),
             extra_blocks: vec![],
             validator_keys,
@@ -468,16 +485,22 @@ impl Context<Minimal> {
     pub fn minimal_minimal_4_epochs() -> Self {
         let chain_config = ChainConfig::minimal();
         let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
-        let genesis_provider = GenesisProvider::Custom(genesis_state.clone_arc());
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state.clone_arc());
 
         let extra_blocks = factory::full_blocks_up_to_epoch(&chain_config, genesis_state, 4)
             .expect("blocks should be constructed successfully");
 
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
+
         Self {
             chain_config,
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: Some(deposit_tree),
             extra_blocks,
             validator_keys: vec![],
@@ -487,13 +510,19 @@ impl Context<Minimal> {
     pub fn minimal_rapid_upgrade_none() -> Self {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
         let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
-        let genesis_provider = GenesisProvider::Custom(genesis_state);
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state);
+
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
 
         Self {
             chain_config,
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: Some(deposit_tree),
             extra_blocks: vec![],
             validator_keys: vec![],
@@ -504,13 +533,19 @@ impl Context<Minimal> {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
         let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
         let validator_keys = Self::interop_validator_keys(genesis_state.validators().len_u64());
-        let genesis_provider = GenesisProvider::Custom(genesis_state);
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state);
+
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
 
         Self {
             chain_config,
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: Some(deposit_tree),
             extra_blocks: vec![],
             validator_keys,
@@ -520,7 +555,8 @@ impl Context<Minimal> {
     pub fn minimal_rapid_upgrade_all_phases_all_keys() -> Self {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
         let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
-        let genesis_provider = GenesisProvider::Custom(genesis_state.clone_arc());
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state.clone_arc());
         let validator_keys = Self::interop_validator_keys(genesis_state.validators().len_u64());
 
         let extra_blocks = factory::full_blocks_up_to_epoch(
@@ -532,11 +568,16 @@ impl Context<Minimal> {
         )
         .expect("blocks should be constructed successfully");
 
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
+
         Self {
             chain_config,
-            genesis_provider: genesis_provider.clone(),
-            anchor_block: genesis_provider.block(),
-            anchor_state: genesis_provider.state(),
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
             deposit_tree: Some(deposit_tree),
             extra_blocks,
             validator_keys,

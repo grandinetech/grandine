@@ -4,14 +4,18 @@ use std::{io::ErrorKind, path::Path, sync::Arc};
 use anyhow::{bail, Context as _, Result};
 use deposit_tree::DepositTree;
 use fork_choice_control::checkpoint_sync;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use log::info;
 use p2p::{Enr, NetworkConfig};
 use reqwest::{Client, Url};
 use ssz::SszRead as _;
 use strum::Display;
 use tap::Pipe as _;
-use types::{combined::BeaconState, config::Config as ChainConfig, preset::Preset};
+use types::{
+    config::Config as ChainConfig,
+    nonstandard::{FinalizedCheckpoint, WithOrigin},
+    preset::Preset,
+};
 
 #[cfg(any(feature = "network-mainnet", test))]
 use ::{hex_literal::hex, types::phase0::primitives::H256};
@@ -121,13 +125,13 @@ impl PredefinedNetwork {
         }
     }
 
-    pub async fn genesis_provider<P: Preset>(
+    pub async fn anchor_checkpoint_provider<P: Preset>(
         self,
         client: &Client,
         store_directory: impl AsRef<Path> + Send,
         checkpoint_sync_url: Option<Url>,
         genesis_download_url: Option<Url>,
-    ) -> Result<GenesisProvider<P>> {
+    ) -> Result<AnchorCheckpointProvider<P>> {
         let config = &self.chain_config();
 
         #[cfg(any(
@@ -136,8 +140,8 @@ impl PredefinedNetwork {
             feature = "network-holesky",
             test
         ))]
-        let load_genesis_state = |default_download_url: &str| {
-            load_or_download_genesis_state(
+        let load_anchor_checkpoint = |default_download_url: &str| {
+            load_or_download_anchor_checkpoint(
                 config,
                 client,
                 store_directory,
@@ -154,25 +158,25 @@ impl PredefinedNetwork {
             #[cfg(any(feature = "network-mainnet", test))]
             Self::Mainnet => predefined_chains::mainnet::<P>(),
             #[cfg(any(feature = "network-goerli", test))]
-            Self::Goerli => load_genesis_state(
+            Self::Goerli => load_anchor_checkpoint(
                 "https://github.com/eth-clients/goerli/raw/397ecd128e8162fa9b352cd28cdea77d64502629/prater/genesis.ssz",
             )
             .await
-            .map(GenesisProvider::Custom)
+            .map(AnchorCheckpointProvider::Custom)
             .context("failed to load Goerli genesis state")?,
             #[cfg(any(feature = "network-sepolia", test))]
-            Self::Sepolia => load_genesis_state(
+            Self::Sepolia => load_anchor_checkpoint(
                 "https://github.com/eth-clients/sepolia/raw/ab4137ed529bec09fbffd914ff8da70ca8082c0f/bepolia/genesis.ssz",
             )
             .await
-            .map(GenesisProvider::Custom)
+            .map(AnchorCheckpointProvider::Custom)
             .context("failed to load Sepolia genesis state")?,
             #[cfg(any(feature = "network-holesky", test))]
-            Self::Holesky => load_genesis_state(
+            Self::Holesky => load_anchor_checkpoint(
                 "https://github.com/eth-clients/holesky/raw/613c333b66c3787cb0418948be82d283770bd44a/custom_config_data/genesis.ssz",
             )
             .await
-            .map(GenesisProvider::Custom)
+            .map(AnchorCheckpointProvider::Custom)
             .context("failed to load Holesky genesis state")?,
         }
         .pipe(Ok)
@@ -271,13 +275,13 @@ impl PredefinedNetwork {
     }
 }
 
-async fn load_or_download_genesis_state<P: Preset>(
+async fn load_or_download_anchor_checkpoint<P: Preset>(
     config: &ChainConfig,
     client: &Client,
     store_directory: impl AsRef<Path> + Send,
     download_url: Url,
     checkpoint_sync_url: Option<Url>,
-) -> Result<Arc<BeaconState<P>>> {
+) -> Result<WithOrigin<FinalizedCheckpoint<P>>> {
     let genesis_state_path = store_directory.as_ref().join("genesis_state.ssz");
 
     let ssz_bytes = match fs_err::tokio::read(genesis_state_path.as_path()).await {
@@ -290,10 +294,12 @@ async fn load_or_download_genesis_state<P: Preset>(
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {
             if let Some(url) = checkpoint_sync_url {
+                info!("downloading genesis state from {url}…");
+
                 let finalized_checkpoint =
                     checkpoint_sync::load_finalized_from_remote(config, client, &url).await?;
 
-                return Ok(finalized_checkpoint.state);
+                return Ok(WithOrigin::new_from_checkpoint(finalized_checkpoint));
             }
 
             info!("downloading genesis state from {download_url}…");
@@ -313,7 +319,13 @@ async fn load_or_download_genesis_state<P: Preset>(
         Err(error) => bail!(error),
     };
 
-    Arc::from_ssz(config, ssz_bytes).map_err(Into::into)
+    let state = Arc::from_ssz(config, ssz_bytes)?;
+    let block = Arc::new(genesis::beacon_block(&state));
+
+    Ok(WithOrigin::new_from_genesis(FinalizedCheckpoint {
+        block,
+        state,
+    }))
 }
 
 #[cfg(test)]
@@ -329,12 +341,12 @@ mod tests {
     }
 
     fn assert_deposit_tree_valid<P: Preset>(predefined_network: PredefinedNetwork) {
-        let genesis_provider = predefined_network
-            .genesis_provider::<P>(&Client::new(), "", None, None)
+        let anchor_checkpoint_provider = predefined_network
+            .anchor_checkpoint_provider::<P>(&Client::new(), "", None, None)
             .pipe(futures::executor::block_on)
             .expect("this test should not load files or access the network");
 
-        let state = genesis_provider.state();
+        let state = anchor_checkpoint_provider.checkpoint().value.state;
         let deposit_tree = predefined_network.genesis_deposit_tree();
 
         assert_eq!(state.eth1_data().deposit_count, deposit_tree.deposit_count);

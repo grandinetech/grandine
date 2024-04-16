@@ -12,15 +12,11 @@ use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
+    nonstandard::FinalizedCheckpoint,
     phase0::{consts::GENESIS_EPOCH, primitives::H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
-
-pub struct FinalizedCheckpoint<P: Preset> {
-    pub block: Arc<SignedBeaconBlock<P>>,
-    pub state: Arc<BeaconState<P>>,
-}
 
 pub async fn load_finalized_from_remote<P: Preset>(
     config: &Config,

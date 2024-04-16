@@ -1,5 +1,5 @@
 use core::num::NonZeroU64;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
@@ -32,7 +32,7 @@ use types::{
         beacon_state::BeaconState as DenebBeaconState,
         containers::{BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody},
     },
-    nonstandard::{Phase, RelativeEpoch},
+    nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
@@ -43,7 +43,7 @@ use types::{
         primitives::{DepositIndex, ExecutionBlockHash, UnixSeconds, H256},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::BeaconState as _,
 };
 
 pub struct Incremental<'config, P: Preset> {
@@ -206,49 +206,33 @@ impl<'config, P: Preset> Incremental<'config, P> {
 }
 
 #[derive(Clone)]
-pub enum GenesisProvider<P: Preset> {
-    Predefined(
-        Arc<OnceLock<Arc<BeaconState<P>>>>,
-        fn() -> Arc<BeaconState<P>>,
-        Phase,
-        H256,
-    ),
-    Custom(Arc<BeaconState<P>>),
+pub enum AnchorCheckpointProvider<P: Preset> {
+    Predefined(WithOrigin<FinalizedCheckpoint<P>>, H256),
+    Custom(WithOrigin<FinalizedCheckpoint<P>>),
 }
 
-impl<P: Preset> GenesisProvider<P> {
+impl<P: Preset> AnchorCheckpointProvider<P> {
+    pub fn custom_from_genesis(genesis_state: Arc<BeaconState<P>>) -> Self {
+        let block = Arc::new(beacon_block(&genesis_state));
+
+        Self::Custom(WithOrigin::new_from_genesis(FinalizedCheckpoint {
+            block,
+            state: genesis_state,
+        }))
+    }
+
     #[must_use]
-    pub fn state(self) -> Arc<BeaconState<P>> {
+    pub fn checkpoint(&self) -> WithOrigin<FinalizedCheckpoint<P>> {
         match self {
-            Self::Predefined(loaded_state, state_lookup, _, _) => {
-                loaded_state.get_or_init(state_lookup).clone_arc()
-            }
-            Self::Custom(state) => state.clone_arc(),
+            Self::Custom(checkpoint) | Self::Predefined(checkpoint, _) => checkpoint.clone(),
         }
     }
 
     #[must_use]
     pub fn state_root(&self) -> H256 {
         match self {
-            Self::Predefined(_, _, _, state_root) => *state_root,
-            Self::Custom(state) => state.hash_tree_root(),
-        }
-    }
-
-    #[must_use]
-    pub fn block(&self) -> Arc<SignedBeaconBlock<P>> {
-        Arc::new(beacon_block_internal(self.phase(), self.state_root()))
-    }
-
-    #[must_use]
-    pub fn block_root(&self) -> H256 {
-        self.block().message().hash_tree_root()
-    }
-
-    fn phase(&self) -> Phase {
-        match self {
-            Self::Predefined(_, _, phase, _) => *phase,
-            Self::Custom(state) => state.phase(),
+            Self::Predefined(_, state_root) => *state_root,
+            Self::Custom(checkpoint) => checkpoint.value.state.hash_tree_root(),
         }
     }
 }

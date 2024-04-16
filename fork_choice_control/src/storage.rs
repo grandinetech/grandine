@@ -6,7 +6,7 @@ use arithmetic::U64Ext as _;
 use database::Database;
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use log::{debug, info, warn};
@@ -23,7 +23,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    nonstandard::BlobSidecarWithId,
+    nonstandard::{BlobSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Epoch, Slot, H256},
@@ -32,7 +32,7 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use crate::checkpoint_sync::{self, FinalizedCheckpoint};
+use crate::checkpoint_sync;
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 
@@ -40,7 +40,7 @@ pub enum StateLoadStrategy<P: Preset> {
     Auto {
         state_slot: Option<Slot>,
         checkpoint_sync_url: Option<Url>,
-        genesis_provider: GenesisProvider<P>,
+        anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     },
     Remote {
         checkpoint_sync_url: Url,
@@ -82,6 +82,7 @@ impl<P: Preset> Storage<P> {
         &self.config
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn load(
         &self,
         client: &Client,
@@ -96,7 +97,7 @@ impl<P: Preset> Storage<P> {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
-                genesis_provider,
+                anchor_checkpoint_provider,
             } => 'block: {
                 // Attempt to load local state first: either latest or from specified slot.
                 let local_state_storage = match state_slot {
@@ -105,12 +106,17 @@ impl<P: Preset> Storage<P> {
                 };
 
                 if let Some(url) = checkpoint_sync_url {
-                    // Do checkpoint sync only if local state is not present.
                     if local_state_storage.is_none() {
-                        let result =
+                        let result = if let Some(checkpoint) =
+                            anchor_checkpoint_provider.checkpoint().checkpoint_synced()
+                        {
+                            info!("anchor checkpoint is already loaded from remote checkpoint sync server");
+                            Ok(checkpoint)
+                        } else {
                             checkpoint_sync::load_finalized_from_remote(&self.config, client, &url)
                                 .await
-                                .context(Error::CheckpointSyncFailed);
+                                .context(Error::CheckpointSyncFailed)
+                        };
 
                         match result {
                             Ok(FinalizedCheckpoint { block, state }) => {
@@ -136,13 +142,19 @@ impl<P: Preset> Storage<P> {
                     }
                     // State might not be found but unfinalized blocks could be present.
                     OptionalStateStorage::UnfinalizedOnly(local_unfinalized_blocks) => {
-                        anchor_block = genesis_provider.block();
-                        anchor_state = genesis_provider.state();
+                        let FinalizedCheckpoint { block, state } =
+                            anchor_checkpoint_provider.checkpoint().value;
+
+                        anchor_block = block;
+                        anchor_state = state;
                         unfinalized_blocks = local_unfinalized_blocks;
                     }
                     OptionalStateStorage::None => {
-                        anchor_block = genesis_provider.block();
-                        anchor_state = genesis_provider.state();
+                        let FinalizedCheckpoint { block, state } =
+                            anchor_checkpoint_provider.checkpoint().value;
+
+                        anchor_block = block;
+                        anchor_state = state;
                         unfinalized_blocks = Box::new(core::iter::empty());
                     }
                 }

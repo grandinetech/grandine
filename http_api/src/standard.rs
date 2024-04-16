@@ -27,7 +27,7 @@ use futures::{
     channel::mpsc::UnboundedSender,
     stream::{FuturesOrdered, Stream, StreamExt as _},
 };
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc, slot_report::SyncAggregateRewards};
 use http_api_utils::BlockId;
 use itertools::{izip, Either, Itertools as _};
@@ -393,13 +393,13 @@ pub struct ValidatorLivenessResponse {
 /// `GET /eth/v1/beacon/genesis`
 pub async fn genesis<P: Preset>(
     State(chain_config): State<Arc<ChainConfig>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
 ) -> Result<EthResponse<GetGenesisResponse>, Error> {
-    let genesis_state = genesis_provider.state();
+    let anchor_state = anchor_checkpoint_provider.checkpoint().value.state;
 
     let response = GetGenesisResponse {
-        genesis_time: genesis_state.genesis_time(),
-        genesis_validators_root: genesis_state.genesis_validators_root(),
+        genesis_time: anchor_state.genesis_time(),
+        genesis_validators_root: anchor_state.genesis_validators_root(),
         genesis_fork_version: chain_config.genesis_fork_version,
     };
 
@@ -409,7 +409,7 @@ pub async fn genesis<P: Preset>(
 /// `GET /eth/v1/builder/states/{state_id}/expected_withdrawals`
 pub async fn expected_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ExpectedWithdrawalsQuery>,
 ) -> Result<EthResponse<Vec<Withdrawal>>, Error> {
@@ -417,7 +417,7 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let proposal_slot = query.proposal_slot.unwrap_or_else(|| state.slot() + 1);
 
@@ -448,14 +448,14 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/root`
 pub async fn state_root<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<RootResponse>, Error> {
     let WithStatus {
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let root = state.hash_tree_root();
 
@@ -467,14 +467,14 @@ pub async fn state_root<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/fork`
 pub async fn state_fork<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<Fork>, Error> {
     let WithStatus {
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     Ok(EthResponse::json(state.fork())
         .execution_optimistic(optimistic)
@@ -484,14 +484,14 @@ pub async fn state_fork<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/finality_checkpoints`
 pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<StateFinalityCheckpointsResponse>, Error> {
     let WithStatus {
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let response = StateFinalityCheckpointsResponse {
         previous_justified: state.previous_justified_checkpoint(),
@@ -507,7 +507,7 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/validators`
 pub async fn state_validators<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ValidatorIdOrStatusQuery>,
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
@@ -515,7 +515,7 @@ pub async fn state_validators<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let validators = izip!(
         0..,
@@ -555,14 +555,14 @@ pub async fn state_validators<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}`
 pub async fn state_validator<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath((state_id, validator_id)): EthPath<(StateId, ValidatorId)>,
 ) -> Result<EthResponse<StateValidatorResponse>, Error> {
     let WithStatus {
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let validator_index = validator_id
         .validator_index(&state)
@@ -594,7 +594,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/validator_balances`
 pub async fn state_validator_balances<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ValidatorIdQuery>,
 ) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
@@ -602,7 +602,7 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let balances = izip!(
         0..,
@@ -627,7 +627,7 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/committees`
 pub async fn state_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateCommitteesQuery>,
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
@@ -635,7 +635,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
         value: mut state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
     let epoch = query.epoch.unwrap_or(state_epoch);
@@ -695,7 +695,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/sync_committees`
 pub async fn state_sync_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateSyncCommitteesQuery>,
 ) -> Result<Response, Error> {
@@ -703,7 +703,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let Some(state) = state.post_altair() else {
         return Ok(EthResponse::json(StateSyncCommitteeResponse::default())
@@ -751,7 +751,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/randao`
 pub async fn state_randao<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateRandaoQuery>,
 ) -> Result<EthResponse<StateRandaoResponse>, Error> {
@@ -759,7 +759,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     // If `epoch` is in the future, return the RANDAO mix for the current epoch.
     // This matches how RANDAO mixes are updated during epoch transitions.
@@ -858,10 +858,10 @@ pub async fn block_headers<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/headers/{block_id}`
 pub async fn block_id_headers<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<BlockHeadersResponse>, Error> {
-    let root = block_id::block_root(block_id, &controller, &genesis_provider)?.value;
+    let root = block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?.value;
 
     let WithStatus {
         value: block,
@@ -886,7 +886,7 @@ pub async fn block_id_headers<P: Preset, W: Wait>(
 /// `GET /eth/v2/beacon/blocks/{block_id}`
 pub async fn block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
     headers: HeaderMap,
 ) -> Result<EthResponse<Arc<SignedBeaconBlock<P>>, (), JsonOrSsz>, Error> {
@@ -894,7 +894,7 @@ pub async fn block<P: Preset, W: Wait>(
         value: block,
         optimistic,
         finalized,
-    } = block_id::block(block_id, &controller, &genesis_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = block.phase();
 
@@ -907,14 +907,14 @@ pub async fn block<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/blocks/{block_id}/root`
 pub async fn block_root<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<RootResponse>, Error> {
     let WithStatus {
         value: root,
         optimistic,
         finalized,
-    } = block_id::block_root(block_id, &controller, &genesis_provider)?;
+    } = block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?;
 
     Ok(EthResponse::json(RootResponse { root })
         .execution_optimistic(optimistic)
@@ -924,14 +924,14 @@ pub async fn block_root<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/blocks/{block_id}/attestations`
 pub async fn block_attestations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<Response, Error> {
     let WithStatus {
         value: block,
         optimistic,
         finalized,
-    } = block_id::block(block_id, &controller, &genesis_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     block
         .message()
@@ -947,7 +947,7 @@ pub async fn block_attestations<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
 pub async fn blob_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
     EthQuery(query): EthQuery<BlobSidecarsQuery>,
     headers: HeaderMap,
@@ -955,7 +955,8 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
     EthResponse<ContiguousList<Arc<BlobSidecar<P>>, P::MaxBlobsPerBlock>, (), JsonOrSsz>,
     Error,
 > {
-    let block_root = block_id::block_root(block_id, &controller, &genesis_provider)?.value;
+    let block_root =
+        block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?.value;
     let blob_identifiers = query
         .indices
         .unwrap_or_else(|| (0..P::MaxBlobsPerBlock::U64).collect())
@@ -1063,14 +1064,14 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 pub async fn block_rewards<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<BlockRewardsResponse>, Error> {
     let WithStatus {
         value: block,
         optimistic,
         finalized,
-    } = block_id::block(block_id, &controller, &genesis_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let rewards = calculate_block_rewards(&chain_config, &controller, &block)?;
 
@@ -1083,7 +1084,7 @@ pub async fn block_rewards<P: Preset, W: Wait>(
 pub async fn sync_committee_rewards<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
     EthJson(validator_ids): EthJson<Vec<ValidatorId>>,
 ) -> Result<EthResponse<Vec<SyncCommitteeRewardsResponse>>, Error> {
@@ -1091,7 +1092,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
         value: block,
         optimistic,
         finalized,
-    } = block_id::block(block_id, &controller, &genesis_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let block_slot = block.message().slot();
 
@@ -1499,7 +1500,7 @@ pub async fn debug_fork_choice<P: Preset, W: Wait>(
 /// `GET /eth/v2/debug/beacon/states/{state_id}`
 pub async fn beacon_state<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<EthResponse<Arc<BeaconState<P>>, (), JsonOrSsz>, Error> {
@@ -1507,7 +1508,7 @@ pub async fn beacon_state<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, genesis_provider)?;
+    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
 
     let version = state.phase();
 
@@ -1754,7 +1755,7 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 /// `POST /eth/v1/validator/duties/sync/{epoch}`
 pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(genesis_provider): State<GenesisProvider<P>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorSyncDutyResponse>>, Error> {
@@ -1765,7 +1766,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
         optimistic,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
-    } = StateId::Slot(start_slot).state(&controller, genesis_provider)?;
+    } = StateId::Slot(start_slot).state(&controller, &anchor_checkpoint_provider)?;
 
     let Some(state) = state.post_altair() else {
         return Ok(EthResponse::json(vec![]).execution_optimistic(optimistic));

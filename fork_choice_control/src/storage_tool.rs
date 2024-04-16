@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use log::info;
 use ssz::{SszHash as _, SszRead, SszWrite as _};
 use std_ext::ArcExt as _;
@@ -25,13 +25,14 @@ pub fn export_state_and_blocks<P: Preset>(
     from_slot: Slot,
     to_slot: Slot,
     output_dir: &Path,
-    genesis_provider: &GenesisProvider<P>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
 ) -> Result<()> {
     let export_state = |state_slot| -> Result<()> {
         let state = match storage.stored_state(state_slot)? {
             Some(found_state) => found_state,
             None => {
-                let mut temporary_state = genesis_provider.clone().state();
+                let mut temporary_state =
+                    anchor_checkpoint_provider.clone().checkpoint().value.state;
 
                 for current_slot in (temporary_state.slot() + 1)..=state_slot {
                     if let Some((block, _)) = storage.finalized_block_by_slot(current_slot)? {

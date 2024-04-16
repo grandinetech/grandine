@@ -12,7 +12,7 @@ use futures::{
     future::Either,
     StreamExt as _,
 };
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use log::{error, info};
 use prometheus_metrics::Metrics;
@@ -62,7 +62,7 @@ pub struct BlockSyncService<P: Preset> {
     database: Option<Database>,
     sync_direction: SyncDirection,
     back_sync: Option<BackSync<P>>,
-    genesis_provider: GenesisProvider<P>,
+    anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     block_verification_pool: BlockVerificationPool<P>,
     controller: RealController<P>,
     sync_manager: SyncManager,
@@ -83,7 +83,7 @@ pub struct BlockSyncService<P: Preset> {
 impl<P: Preset> BlockSyncService<P> {
     pub fn new(
         db: Database,
-        genesis_provider: GenesisProvider<P>,
+        anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
         controller: RealController<P>,
         metrics: Option<Arc<Metrics>>,
         channels: Channels<P>,
@@ -102,7 +102,14 @@ impl<P: Preset> BlockSyncService<P> {
                 // Checkpoint sync happened, so we need to back sync to
                 // previously stored latest finalized checkpoint or genesis.
                 let back_sync_checkpoint = get_latest_finalized_back_sync_checkpoint(&db)?
-                    .unwrap_or_else(|| genesis_provider.block().as_ref().into());
+                    .unwrap_or_else(|| {
+                        anchor_checkpoint_provider
+                            .checkpoint()
+                            .value
+                            .block
+                            .as_ref()
+                            .into()
+                    });
 
                 let back_sync_process = BackSync::<P>::new(BackSyncData::new(
                     anchor_checkpoint,
@@ -148,7 +155,7 @@ impl<P: Preset> BlockSyncService<P> {
             database,
             sync_direction: SyncDirection::Forward,
             back_sync,
-            genesis_provider,
+            anchor_checkpoint_provider,
             block_verification_pool: BlockVerificationPool::new(controller.clone_arc())?,
             controller,
             sync_manager: SyncManager::default(),
@@ -356,7 +363,7 @@ impl<P: Preset> BlockSyncService<P> {
             if let Some(archiver_to_sync_tx) = self.archiver_to_sync_tx.as_ref() {
                 back_sync.try_to_spawn_state_archiver(
                     self.controller.clone_arc(),
-                    self.genesis_provider.clone(),
+                    self.anchor_checkpoint_provider.clone(),
                     archiver_to_sync_tx.clone(),
                 )?;
             }
@@ -582,6 +589,8 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_back_synced(&mut self, is_back_synced: bool) {
+        features::log!(DebugP2p, "set back synced: {is_back_synced}");
+
         let was_back_synced = self.is_back_synced;
         self.is_back_synced = is_back_synced;
 

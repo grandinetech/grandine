@@ -6,7 +6,7 @@ use bls::PublicKeyBytes;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use helper_functions::{
     accessors, misc, predicates,
     slot_report::{Assignment, Delta, RealSlotReport, SyncAggregateRewards},
@@ -14,6 +14,7 @@ use helper_functions::{
 use itertools::{chain, izip, Itertools as _};
 use serde::{Deserialize, Serialize};
 use std_ext::ArcExt as _;
+use thiserror::Error;
 use transition_functions::{
     altair::{
         EpochDeltasForReport as AltairEpochDeltasForReport, EpochReport as AltairEpochReport,
@@ -50,6 +51,12 @@ use validator::ApiToValidator;
 // We previously stored slot reports in `HashMap`s. The nondeterministic iteration order revealed
 // some bugs in the code we were using to construct test data when we implemented snapshot tests.
 type SlotReports = BTreeMap<Slot, RealSlotReport>;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("genesis info not available")]
+    GenesisNotAvailable,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -369,7 +376,7 @@ pub fn get_beacon_head<P: Preset, W: Wait>(
 #[allow(clippy::too_many_lines)]
 pub async fn get_validator_statistics<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
-    genesis_provider: GenesisProvider<P>,
+    anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     validator_keys: &HashSet<PublicKeyBytes>,
     api_to_validator_tx: UnboundedSender<ApiToValidator<P>>,
     query: EpochRangeWithKeysQuery,
@@ -407,7 +414,12 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
     let mut previous_epoch_slot_reports;
 
     if query.start == GENESIS_EPOCH {
-        state = genesis_provider.state();
+        state = anchor_checkpoint_provider
+            .checkpoint()
+            .genesis()
+            .map(|checkpoint| checkpoint.state)
+            .ok_or(Error::GenesisNotAvailable)?;
+
         previous_epoch_sync_committee_assignments = HashMap::new();
         previous_epoch_sync_aggregates_with_roots = HashMap::new();
         previous_epoch_slot_reports = SlotReports::new();

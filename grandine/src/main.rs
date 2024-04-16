@@ -16,7 +16,7 @@ use eth1_api::Auth;
 use features::Feature;
 use fork_choice_control::{StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
 use http_api::HttpApiConfig;
 use log::{error, info, warn};
@@ -220,7 +220,7 @@ impl Context {
 
         eth1_chain.spawn_unfinalized_blocks_tracker_task()?;
 
-        let genesis_provider = genesis_provider::<P>(
+        let anchor_checkpoint_provider = anchor_checkpoint_provider::<P>(
             &chain_config,
             genesis_state_file,
             predefined_network,
@@ -241,7 +241,7 @@ impl Context {
                 chain_config,
                 storage_config,
                 command,
-                genesis_provider,
+                &anchor_checkpoint_provider,
                 slashing_protection_history_limit,
             );
         }
@@ -257,7 +257,7 @@ impl Context {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
-                genesis_provider: genesis_provider.clone(),
+                anchor_checkpoint_provider: anchor_checkpoint_provider.clone(),
             }
         };
 
@@ -267,7 +267,7 @@ impl Context {
             validator_api_config,
             validator_config,
             network_config,
-            genesis_provider,
+            anchor_checkpoint_provider,
             state_load_strategy,
             eth1_chain,
             eth1_config,
@@ -626,7 +626,7 @@ fn handle_command<P: Preset>(
     chain_config: Arc<ChainConfig>,
     storage_config: StorageConfig,
     command: GrandineCommand,
-    genesis_provider: GenesisProvider<P>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
     slashing_protection_history_limit: u64,
 ) -> Result<()> {
     let StorageConfig {
@@ -666,7 +666,7 @@ fn handle_command<P: Preset>(
                 from,
                 to,
                 &output_dir,
-                &genesis_provider,
+                anchor_checkpoint_provider,
             )?;
 
             info!("state and blocks exported to {output_dir:?}");
@@ -680,7 +680,11 @@ fn handle_command<P: Preset>(
             fork_choice_control::replay_blocks::<P>(&chain_config, &input_dir, from, to)?;
         }
         GrandineCommand::Interchange(interchange_command) => {
-            let genesis_validators_root = genesis_provider.state().genesis_validators_root();
+            let genesis_validators_root = anchor_checkpoint_provider
+                .checkpoint()
+                .value
+                .state
+                .genesis_validators_root();
 
             let mut slashing_protector = SlashingProtector::persistent(
                 directories
@@ -722,7 +726,7 @@ fn handle_command<P: Preset>(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn genesis_provider<P: Preset>(
+async fn anchor_checkpoint_provider<P: Preset>(
     chain_config: &ChainConfig,
     genesis_state_file: Option<PathBuf>,
     predefined_network: Option<PredefinedNetwork>,
@@ -731,16 +735,16 @@ async fn genesis_provider<P: Preset>(
     checkpoint_sync_url: Option<Url>,
     genesis_state_download_url: Option<Url>,
     eth1_chain: &Eth1Chain,
-) -> Result<GenesisProvider<P>> {
+) -> Result<AnchorCheckpointProvider<P>> {
     if let Some(file_path) = genesis_state_file {
         let bytes = fs_err::read(file_path)?;
         let genesis_state = Arc::from_ssz(chain_config, bytes)?;
-        return Ok(GenesisProvider::Custom(genesis_state));
+        return Ok(AnchorCheckpointProvider::custom_from_genesis(genesis_state));
     }
 
     if let Some(predefined_network) = predefined_network {
         return predefined_network
-            .genesis_provider::<P>(
+            .anchor_checkpoint_provider::<P>(
                 client,
                 store_directory.as_path(),
                 checkpoint_sync_url,
@@ -755,7 +759,9 @@ async fn genesis_provider<P: Preset>(
         eth1::wait_for_genesis(chain_config, store_directory, eth1_block_stream, eth1_chain)
             .await?;
 
-    Ok(GenesisProvider::Custom(Arc::new(genesis_state)))
+    Ok(AnchorCheckpointProvider::custom_from_genesis(Arc::new(
+        genesis_state,
+    )))
 }
 
 // Some parts of the application spawn and detach long-running Tokio tasks.

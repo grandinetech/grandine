@@ -3,15 +3,16 @@ use std::sync::Arc;
 use anyhow::Result;
 use arithmetic::U64Ext as _;
 use features::Feature;
-use genesis::GenesisProvider;
+use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::info;
+use log::{info, warn};
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
     combined::SignedBeaconBlock,
-    phase0::{consts::GENESIS_SLOT, primitives::Slot},
+    nonstandard::{FinalizedCheckpoint, WithOrigin},
+    phase0::primitives::Slot,
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -28,12 +29,24 @@ impl<P: Preset> Storage<P> {
         &self,
         start_slot: Slot,
         end_slot: Slot,
-        genesis_provider: GenesisProvider<P>,
+        anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
     ) -> Result<()> {
-        let genesis_root = genesis_provider.block_root();
+        let WithOrigin { value, origin } = anchor_checkpoint_provider.checkpoint();
 
-        let mut state = if start_slot == GENESIS_SLOT {
-            genesis_provider.state()
+        let FinalizedCheckpoint {
+            state: anchor_state,
+            block: anchor_block,
+        } = value;
+
+        let anchor_block_slot = anchor_block.message().slot();
+        let anchor_block_root = anchor_block.message().hash_tree_root();
+
+        let mut state = if start_slot == anchor_block_slot {
+            if origin.is_checkpoint_sync() {
+                warn!("unable to back sync to genesis state as it not available");
+            }
+
+            anchor_state
         } else {
             self.stored_state(start_slot)?.ok_or(Error::StateNotFound {
                 state_slot: start_slot,
@@ -49,8 +62,8 @@ impl<P: Preset> Storage<P> {
             combined::untrusted_state_transition
         };
 
-        if start_slot == GENESIS_SLOT {
-            batch.push(serialize(StateByBlockRoot(genesis_root), &state)?);
+        if start_slot == anchor_block_slot {
+            batch.push(serialize(StateByBlockRoot(anchor_block_root), &state)?);
         }
 
         for slot in (start_slot + 1)..=end_slot {
@@ -113,6 +126,7 @@ mod tests {
     use database::Database;
     use eth2_cache_utils::mainnet;
     use itertools::{EitherOrBoth, Itertools as _};
+    use types::phase0::consts::GENESIS_SLOT;
 
     use super::*;
 
@@ -171,7 +185,11 @@ mod tests {
             );
         }
 
-        storage.archive_back_sync_states(0, 128, GenesisProvider::Custom(genesis_state))?;
+        storage.archive_back_sync_states(
+            0,
+            128,
+            &AnchorCheckpointProvider::custom_from_genesis(genesis_state),
+        )?;
 
         // Assert that the mappings from state root to slot are stored.
         assert_eq!(storage.slot_by_state_root(state_1_root)?, Some(1));
