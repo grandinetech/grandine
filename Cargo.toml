@@ -316,8 +316,7 @@ http = '1.0.0'
 httparse = '1.8.0'
 httpmock = '0.7.0'
 hyper = '0.14.24'
-if-addrs = '0.11.0'
-igd = '0.12.1'
+igd-next = '0.14.3'
 # Possible optimization: fork `im` and make it use `triomphe`.
 # It's easy to do, but the amount of memory it saves is negligible.
 im = '15.1.0'
@@ -331,8 +330,7 @@ jwt-simple = { version = '0.12.6', default-features = false, features = ['pure-r
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw' }
 lazy_static = '1.4.0'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '2d01f3608697eed05357fb847e25ad33ab59d702' }
-# libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'gossipsub', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic'] }
-libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic'] }
+libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
 libp2p-mplex = '0.41.0'
 log = '0.4.20'
 lru = '0.12.2'
@@ -439,6 +437,7 @@ features = { path = 'features' }
 fork_choice_control = { path = 'fork_choice_control' }
 fork_choice_store = { path = 'fork_choice_store' }
 genesis = { path = 'genesis' }
+gossipsub = { path = 'eth2_libp2p/gossipsub', features = ['serde'] }
 grandine_version = { path = 'grandine_version' }
 hashing = { path = 'hashing' }
 helper_functions = { path = 'helper_functions' }

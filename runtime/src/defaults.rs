@@ -20,6 +20,5 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 pub fn default_network_config() -> NetworkConfig {
     let mut config = NetworkConfig::default();
     config.identify_agent_version = Some(APPLICATION_VERSION_WITH_PLATFORM.to_owned());
-    config.enr_udp4_port = Some(DEFAULT_LIBP2P_IPV4_PORT);
     config
 }

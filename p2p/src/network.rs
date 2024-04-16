@@ -162,15 +162,15 @@ impl<P: Preset> Network<P> {
         };
 
         // Box the future to pass `clippy::large_futures`.
-        let (mut service, network_globals) =
+        let (service, network_globals) =
             Box::pin(Service::new(chain_config, executor, context, &logger)).await?;
 
         let mut port_mappings = None;
 
-        if network_config.upnp_enabled {
-            match PortMappings::new(&mut service, network_config) {
+        if network_config.upnp_enabled && !network_config.disable_discovery {
+            match PortMappings::new(network_config) {
                 Ok(mappings) => port_mappings = Some(mappings),
-                Err(error) => warn!("Error while initializing UPnP: {error}"),
+                Err(error) => warn!("error while initializing UPnP: {error}"),
             }
         }
 

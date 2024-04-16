@@ -19,6 +19,7 @@ pub fn initialize_logger(
         .filter_module("dedicated_executor", LevelFilter::Info)
         .filter_module("eth1", LevelFilter::Info)
         .filter_module("eth1_api", LevelFilter::Info)
+        .filter_module("eth2_libp2p", LevelFilter::Info)
         .filter_module("execution_engine", LevelFilter::Info)
         .filter_module("features", LevelFilter::Info)
         .filter_module("fork_choice_control", LevelFilter::Info)

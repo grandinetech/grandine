@@ -24,8 +24,7 @@ fork_choice_store = { workspace = true }
 futures = { workspace = true }
 genesis = { workspace = true }
 helper_functions = { workspace = true }
-if-addrs = { workspace = true }
-igd = { workspace = true }
+igd-next = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 num_cpus = { workspace = true }

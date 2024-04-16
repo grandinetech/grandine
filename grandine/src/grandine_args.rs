@@ -538,6 +538,10 @@ impl NetworkConfigOptions {
         // Set ENR fields of `NetworkConfig` only if the value is specified.
         if let Some(enr_tcp_port) = enr_tcp_port {
             network_config.enr_tcp4_port = Some(enr_tcp_port);
+        } else {
+            // Don't allow discv5 to overwrite ENR port
+            // as it won't be open via Upnp
+            network_config.enr_tcp4_port = Some(libp2p_port);
         }
 
         if let Some(enr_tcp_port_ipv6) = enr_tcp_port_ipv6 {
@@ -1425,7 +1429,7 @@ mod tests {
         );
         assert_eq!(
             config.network_config.enr_udp4_port,
-            Some(DEFAULT_LIBP2P_IPV4_PORT),
+            None,
         );
         assert_eq!(
             config.network_config.network_dir,
