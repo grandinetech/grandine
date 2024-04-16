@@ -725,6 +725,10 @@ struct ValidatorApiOptions {
     /// Validator API timeout in milliseconds
     #[clap(long, default_value_t = ValidatorApiConfig::default().timeout.as_millis().try_into().expect("ValidatorApiConfig default timeout is valid u64"))]
     validator_api_timeout: u64,
+
+    /// Path to a file containing validator API auth token
+    #[clap(long)]
+    validator_api_token_file: Option<PathBuf>,
 }
 
 impl From<ValidatorApiOptions> for ValidatorApiConfig {
@@ -734,6 +738,7 @@ impl From<ValidatorApiOptions> for ValidatorApiConfig {
             validator_api_port,
             validator_api_allowed_origins,
             validator_api_timeout,
+            validator_api_token_file,
             ..
         } = validator_api_options;
 
@@ -748,6 +753,7 @@ impl From<ValidatorApiOptions> for ValidatorApiConfig {
             timeout: Duration::from_millis(validator_api_timeout),
             allow_origin: headers_to_allow_origin(validator_api_allowed_origins)
                 .unwrap_or(allow_origin),
+            token_file: validator_api_token_file,
         }
     }
 }

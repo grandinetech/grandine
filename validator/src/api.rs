@@ -1,11 +1,15 @@
 use core::{
-    fmt::Display,
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
-use std::{error::Error as StdError, path::Path, sync::Arc};
+use std::{
+    error::Error as StdError,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{ensure, Error as AnyhowError, Result};
 use axum::{
     async_trait,
     body::Body,
@@ -18,6 +22,7 @@ use axum::{
     Json, RequestExt as _, RequestPartsExt as _, Router, Server, TypedHeader,
 };
 use bls::PublicKeyBytes;
+use constant_time_eq::constant_time_eq;
 use directories::Directories;
 use educe::Educe;
 use eth1_api::ApiController;
@@ -25,11 +30,6 @@ use fork_choice_control::Wait;
 use helper_functions::{accessors, signing::SignForSingleFork};
 use http_api_utils::ApiMetrics;
 use itertools::Itertools as _;
-use jwt_simple::{
-    algorithms::{HS256Key, MACLike as _},
-    claims::{JWTClaims, NoCustomClaims},
-    reexports::coarsetime::Clock,
-};
 use keymanager::{
     KeyManager, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey, ValidatingPubkey,
 };
@@ -37,6 +37,7 @@ use log::{debug, info};
 use prometheus_metrics::Metrics;
 use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
 use signer::{Signer, SigningMessage};
+use ssz::H256;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
@@ -51,7 +52,6 @@ use types::{
 use zeroize::Zeroizing;
 
 const VALIDATOR_API_TOKEN_PATH: &str = "api-token.txt";
-const VALIDATOR_API_SECRET_PATH: &str = "api-secret.txt";
 const VALIDATOR_API_DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Educe)]
@@ -60,6 +60,7 @@ pub struct ValidatorApiConfig {
     pub address: SocketAddr,
     pub allow_origin: AllowOrigin,
     pub timeout: Duration,
+    pub token_file: Option<PathBuf>,
 }
 
 impl ValidatorApiConfig {
@@ -75,6 +76,7 @@ impl ValidatorApiConfig {
             address,
             allow_origin: AllowOrigin::list([allowed_origin]),
             timeout: VALIDATOR_API_DEFAULT_TIMEOUT,
+            token_file: None,
         }
     }
 }
@@ -90,7 +92,7 @@ enum Error {
     #[error("invalid query string")]
     InvalidQuery(#[source] AnyhowError),
     #[error("authentication error")]
-    Unauthorized(#[source] AnyhowError),
+    Unauthorized,
     #[error("validator {pubkey:?} not found")]
     ValidatorNotFound { pubkey: PublicKeyBytes },
     #[error("validator {pubkey:?} is not managed by validator client")]
@@ -122,7 +124,7 @@ impl Error {
                 StatusCode::NOT_FOUND
             }
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
         }
     }
 
@@ -340,8 +342,8 @@ impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
 struct ValidatorApiState<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     keymanager: Arc<KeyManager>,
-    secret: Arc<Secret>,
     signer: Arc<Signer>,
+    token: Arc<ApiToken>,
 }
 
 impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for ApiController<P, W> {
@@ -356,15 +358,15 @@ impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<KeyManager> {
     }
 }
 
-impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Secret> {
-    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
-        state.secret.clone_arc()
-    }
-}
-
 impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Signer> {
     fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
         state.signer.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<ApiToken> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
+        state.token.clone_arc()
     }
 }
 
@@ -664,15 +666,14 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
 }
 
 async fn authorize_token(
-    State(secret): State<Arc<Secret>>,
+    State(token): State<Arc<ApiToken>>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     request: Request<Body>,
     next: Next<Body>,
 ) -> Result<Response, Error> {
-    secret
-        .key
-        .verify_token::<NoCustomClaims>(auth.token(), None)
-        .map_err(Error::Unauthorized)?;
+    if !token.verify_token(auth.token()) {
+        return Err(Error::Unauthorized);
+    }
 
     let response = next.run(request).await;
     Ok(response)
@@ -687,20 +688,39 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
     signer: Arc<Signer>,
     metrics: Option<Arc<Metrics>>,
 ) -> Result<()> {
-    let Auth { secret, token } = load_or_build_auth_token(&directories)?;
-
     let ValidatorApiConfig {
         address,
         allow_origin,
         timeout,
+        token_file,
     } = validator_api_config;
 
-    info!("Validator API is listening on {address}, authorization token: {token}");
+    let token_file_path = token_file.map(TokenFilePath::User).unwrap_or_else(|| {
+        TokenFilePath::Default(
+            directories
+                .validator_dir
+                .clone()
+                .expect("validator directory must be present to run Validator API")
+                .join(VALIDATOR_API_TOKEN_PATH),
+        )
+    });
+
+    let token = ApiToken::load_or_build_from(&token_file_path).map_err(|error| {
+        TokenLoadError::UnableToLoad {
+            error,
+            token_file_path,
+        }
+    })?;
+
+    info!(
+        "Validator API is listening on {address}, authorization token: {:?}",
+        *Zeroizing::new(hex::encode(&token.bytes)),
+    );
 
     let state = ValidatorApiState {
         controller,
         keymanager,
-        secret: Arc::new(secret),
+        token: Arc::new(token),
         signer,
     };
 
@@ -774,93 +794,92 @@ fn eth_v1_keymanager_routes<P: Preset, W: Wait>() -> Router<ValidatorApiState<P,
         .route("/eth/v1/remotekeys", delete(keymanager_delete_remote_keys))
 }
 
-fn load_or_build_auth_token(directories: &Arc<Directories>) -> Result<Auth> {
-    match directories.validator_dir.clone() {
-        Some(validator_dir) => match Auth::load_from_path(validator_dir.as_path()) {
-            Ok(auth) => Ok(auth),
-            Err(error) => {
-                debug!("Unable to read validator API auth token/secret: {error:?}");
+#[derive(Debug, Error)]
+enum TokenLoadError {
+    #[error("error while loading Validator API token from {token_file_path:?}: {error:?}")]
+    UnableToLoad {
+        error: AnyhowError,
+        token_file_path: TokenFilePath,
+    },
+    #[error("the Validator API token must be at least 256 bits in length")]
+    TokenTooShort,
+}
 
-                let auth = Auth::generate()?;
-                auth.store_on_path(validator_dir.as_path())?;
-                Ok(auth)
+enum TokenFilePath {
+    Default(PathBuf),
+    User(PathBuf),
+}
+
+impl Debug for TokenFilePath {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Default(path) => write!(f, "{path:?}"),
+            Self::User(path) => write!(f, "User specified token file: {path:?}"),
+        }
+    }
+}
+
+#[cfg_attr(test, derive(Debug))]
+struct ApiToken {
+    bytes: Zeroizing<Vec<u8>>,
+}
+
+impl ApiToken {
+    fn load_or_build_from(token_file_path: &TokenFilePath) -> Result<Self> {
+        match token_file_path {
+            TokenFilePath::Default(token_file_path) => {
+                match Self::load(token_file_path.as_path()) {
+                    Ok(auth) => Ok(auth),
+                    Err(error) => {
+                        debug!("unable to read Validator API token from default path: {error:?}");
+
+                        let token = Self::new();
+                        token.store(token_file_path.as_path())?;
+                        Ok(token)
+                    }
+                }
             }
-        },
-        None => Auth::generate(),
-    }
-}
-
-struct Auth {
-    secret: Secret,
-    token: String,
-}
-
-impl Auth {
-    fn load_from_path(validator_dir: &Path) -> Result<Self> {
-        let token = fs_err::read_to_string(validator_dir.join(VALIDATOR_API_TOKEN_PATH))?;
-        let bytes =
-            fs_err::read(validator_dir.join(VALIDATOR_API_SECRET_PATH)).map(Zeroizing::new)?;
-        let secret = Secret::from_hex(bytes.as_slice())?;
-
-        Ok(Self { secret, token })
-    }
-
-    fn generate() -> Result<Self> {
-        let secret = Secret::generate();
-        let now = Some(Clock::now_since_epoch());
-
-        // Use JWTClaims directly as Claims does not have API for non-expiring JWTClaims creation
-        let claims = JWTClaims {
-            issued_at: now,
-            expires_at: None,
-            invalid_before: now,
-            audiences: None,
-            issuer: None,
-            jwt_id: None,
-            subject: None,
-            nonce: None,
-            custom: NoCustomClaims {},
-        };
-
-        let token = secret.key.authenticate(claims)?;
-
-        Ok(Self { secret, token })
-    }
-
-    fn store_on_path(&self, validator_dir: &Path) -> Result<()> {
-        fs_err::write(validator_dir.join(VALIDATOR_API_TOKEN_PATH), &self.token)?;
-        fs_err::write(
-            validator_dir.join(VALIDATOR_API_SECRET_PATH),
-            hex::encode(self.secret.key.to_bytes()),
-        )?;
-
-        Ok(())
-    }
-}
-
-struct Secret {
-    key: HS256Key,
-}
-
-impl Secret {
-    fn generate() -> Self {
-        Self {
-            key: HS256Key::generate(),
+            TokenFilePath::User(token_file_path) => Self::load(token_file_path.as_path()),
         }
     }
 
-    fn from_hex(digits: &[u8]) -> Result<Self> {
-        let bytes = hex::decode(digits).map(Zeroizing::new)?;
-        let key = HS256Key::from_bytes(bytes.as_slice());
+    pub fn new() -> Self {
+        Self {
+            // Initialize token with cryptographically random content
+            // [`H256::random`]: https://docs.rs/ethereum-types/0.14.1/ethereum_types/struct.H256.html#method.random
+            bytes: Zeroizing::new(H256::random().as_bytes().to_vec()),
+        }
+    }
 
-        Ok(Self { key })
+    fn store(&self, token_file_path: &Path) -> Result<()> {
+        fs_err::write(token_file_path, Zeroizing::new(hex::encode(&self.bytes)))?;
+        Ok(())
+    }
+
+    fn load(token_file_path: &Path) -> Result<Self> {
+        let token = fs_err::read_to_string(token_file_path)?;
+
+        ensure!(token.bytes().len() >= 32, TokenLoadError::TokenTooShort);
+
+        let bytes = Zeroizing::new(hex::decode(token)?);
+
+        Ok(Self { bytes })
+    }
+
+    fn verify_token(&self, token: &str) -> bool {
+        constant_time_eq(
+            Zeroizing::new(hex::encode(&self.bytes)).as_bytes(),
+            token.as_bytes(),
+        )
     }
 }
 
 #[allow(clippy::needless_pass_by_value)]
 #[cfg(test)]
 mod tests {
+    use anyhow::Result as AnyhowResult;
     use serde_json::{json, Result, Value};
+    use tempfile::{Builder, NamedTempFile};
     use test_case::test_case;
 
     use super::*;
@@ -875,5 +894,66 @@ mod tests {
         let actual_json = serde_json::to_value(error.body())?;
         assert_eq!(actual_json, expected_json);
         Ok(())
+    }
+
+    #[test]
+    fn test_api_token_load() -> AnyhowResult<()> {
+        let token_file = token_file()?;
+        let bytes = "c41a68e090dd1db0f4e6ffb9177fba2d1c5b6e737c6b2851dbff758fe4d5443e";
+
+        fs_err::write(token_file.path(), bytes)?;
+
+        let token = ApiToken::load(token_file.path())?;
+        assert!(token.verify_token(bytes));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_api_token_load_non_existing_file() {
+        assert_eq!(
+            ApiToken::load(Path::new("nonexisting-token.txt"))
+                .expect_err("opening non-existing file should fail")
+                .to_string(),
+            "failed to open file `nonexisting-token.txt`"
+        )
+    }
+
+    #[test]
+    fn test_api_token_load_token_too_short() -> AnyhowResult<()> {
+        let token_file = token_file()?;
+        let bytes = "c41a68e090dd1db0f4e6";
+
+        fs_err::write(token_file.path(), bytes)?;
+
+        assert_eq!(
+            ApiToken::load(token_file.path())
+                .expect_err("tokens shorter than 256 bits should not be loaded")
+                .to_string(),
+            "the Validator API token must be at least 256 bits in length"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_api_token_load_token_invalid_value() -> AnyhowResult<()> {
+        let token_file = token_file()?;
+        let bytes = "c41a68e090dd1db0f4e6ffb9177fba2d1c5b6e737c6b2851dbff758fe4d5443y";
+
+        fs_err::write(token_file.path(), bytes)?;
+
+        assert_eq!(
+            ApiToken::load(token_file.path())
+                .expect_err("inalid tokens should not be loaded")
+                .to_string(),
+            "Invalid character 'y' at position 63"
+        );
+
+        Ok(())
+    }
+
+    fn token_file() -> AnyhowResult<NamedTempFile> {
+        Ok(Builder::new().tempfile()?)
     }
 }
