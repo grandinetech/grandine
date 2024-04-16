@@ -1427,10 +1427,7 @@ mod tests {
                 .map(|addr| addr.tcp_port),
             Some(DEFAULT_LIBP2P_IPV4_PORT.into()),
         );
-        assert_eq!(
-            config.network_config.enr_udp4_port,
-            None,
-        );
+        assert_eq!(config.network_config.enr_udp4_port, None,);
         assert_eq!(
             config.network_config.network_dir,
             Some(

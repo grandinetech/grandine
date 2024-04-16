@@ -338,7 +338,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                             );
                                             self.payload_id_cache.cache_set((head_root, head_slot), payload_id);
                                         }
-                                        None => warn!("could not prepare execution payload: payload_id is None"),
+                                        // If we have no block at 4th-second mark, we preprocess new state without the block.
+                                        // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
+                                        // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
+                                        None => warn!(
+                                            "could not prepare execution payload: payload_id is None; \
+                                             ensure that multiple consensus clients are not driving the same execution client",
+                                        ),
                                     }
                                 }
                                 Err(error) => warn!("error while preparing execution payload: {error:?}"),
