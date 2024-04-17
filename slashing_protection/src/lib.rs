@@ -976,6 +976,7 @@ fn move_slashing_protection_db_to_validator_dir(
     }
 
     if beacon_db_path.try_exists()? {
+        fs_err::create_dir_all(validator_directory)?;
         fs_err::copy(&beacon_db_path, &validator_db_path)?;
         fs_err::remove_file(&beacon_db_path)?;
 
