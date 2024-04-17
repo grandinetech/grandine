@@ -2042,6 +2042,7 @@ dependencies = [
  "sha3",
  "ssz",
  "tiny-keccak",
+ "types",
 ]
 
 [[package]]
