@@ -8,18 +8,10 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+c-kzg = {workspace = true}
 kzg_utils = { workspace = true }
 kzg = { workspace = true }
 ssz = { workspace = true}
-c-kzg = {workspace = true}
-tiny-keccak = {workspace = true}
 sha3 = {workspace = true}
-sha2 = { workspace = true }
-typenum = { workspace = true }
+tiny-keccak = {workspace = true}
 types = { workspace = true }
-
-[dev-dependencies]
-duplicate = { workspace = true }
-serde = { workspace = true }
-spec_test_utils = { workspace = true }
-test-generator = { workspace = true }

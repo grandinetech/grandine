@@ -2131,7 +2131,6 @@ dependencies = [
  "ssz",
  "test-generator",
  "tiny-keccak",
- "typenum",
  "types",
 ]
 
