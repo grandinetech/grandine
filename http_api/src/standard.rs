@@ -88,7 +88,7 @@ use crate::{
     events::{EventChannels, Topic},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
-    misc::{APIBlock, BackSyncedStatus, SignedAPIBlock, SyncedStatus},
+    misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
     response::{EthResponse, JsonOrSsz},
     state_id::StateId,
     validator_status::{ValidatorId, ValidatorStatus},
@@ -209,18 +209,10 @@ pub struct ExpectedWithdrawalsQuery {
 }
 
 #[derive(Deserialize)]
-#[serde(bound = "", rename_all = "snake_case")]
-pub enum BroadcastValidation {
-    Gossip,
-    Consensus,
-    ConsensusAndEquivocation,
-}
-
-#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct PublishBlockQuery {
-    broadcast_validation: BroadcastValidation,
+    broadcast_validation: Option<BroadcastValidation>,
 }
 
 #[allow(clippy::struct_field_names)]
@@ -1051,7 +1043,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let blob_sidecars =
         misc::construct_blob_sidecars(&signed_beacon_block, blobs.into_iter(), proofs.into_iter())?;
 
-    publish_signed_block(
+    publish_signed_block_v2(
         Arc::new(signed_beacon_block),
         blob_sidecars,
         controller,
@@ -2378,6 +2370,60 @@ async fn publish_signed_block<P: Preset, W: Wait>(
         Err(error) => {
             warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
             StatusCode::ACCEPTED
+        }
+    };
+
+    Ok(status_code)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn publish_signed_block_v2<P: Preset, W: Wait>(
+    block: Arc<SignedBeaconBlock<P>>,
+    blob_sidecars: Vec<BlobSidecar<P>>,
+    controller: ApiController<P, W>,
+    api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
+) -> Result<StatusCode, Error> {
+    let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
+
+    for blob_sidecar in &blob_sidecars {
+        controller.on_api_blob_sidecar(blob_sidecar.clone_arc());
+    }
+
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_block(block.clone_arc(), sender);
+
+    let status_code = match receiver.next().await.transpose() {
+        Ok(Some(accept_or_ignore_status)) => {
+            for blob_sidecar in blob_sidecars {
+                ApiToP2p::PublishBlobSidecar(blob_sidecar).send(&api_to_p2p_tx);
+            }
+
+            ApiToP2p::PublishBeaconBlock(block.clone_arc()).send(&api_to_p2p_tx);
+
+            match accept_or_ignore_status {
+                ValidationOutcome::Accept => StatusCode::OK,
+                ValidationOutcome::Ignore => {
+                    // We log only the root with `info!` because this is not an exceptional case.
+                    // Vouch submits blocks it constructs to all beacon nodes it is connected to.
+                    // The blocks often reach our application through gossip faster than through the API.
+                    let block_root = block.message().hash_tree_root();
+
+                    info!(
+                        "block received through HTTP API was ignored (block root: {block_root:?})"
+                    );
+
+                    StatusCode::ACCEPTED
+                }
+            }
+        }
+        Ok(None) => {
+            warn!("received no block validation response for HTTP API (block: {block:?})");
+            return Err(Error::UnableToValidateSignedBlock);
+        }
+        Err(error) => {
+            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
+            return Err(Error::InvalidBlock(error));
         }
     };
 

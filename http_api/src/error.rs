@@ -123,6 +123,8 @@ pub enum Error {
     UnableToProduceBeaconBlock,
     #[error("unable to produce blinded block")]
     UnableToProduceBlindedBlock,
+    #[error("unable to validate signed beacon block")]
+    UnableToValidateSignedBlock,
     #[error("validator not found")]
     ValidatorNotFound,
     // TODO(Grandine Team): Some API clients do not set `validator_index`.
@@ -213,7 +215,8 @@ impl Error {
             | Self::TaskJoinFailed(_)
             | Self::UnableToProduceAttestation { .. }
             | Self::UnableToProduceBeaconBlock
-            | Self::UnableToProduceBlindedBlock => StatusCode::INTERNAL_SERVER_ERROR,
+            | Self::UnableToProduceBlindedBlock
+            | Self::UnableToValidateSignedBlock => StatusCode::INTERNAL_SERVER_ERROR,
             Self::EndpointNotImplemented => StatusCode::NOT_IMPLEMENTED,
             Self::HeadFarBehind { .. } | Self::HeadIsOptimistic | Self::NodeIsSyncing => {
                 StatusCode::SERVICE_UNAVAILABLE

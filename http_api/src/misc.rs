@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use bls::SignatureBytes;
+use educe::Educe;
 use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
@@ -254,4 +255,14 @@ impl<P: Preset> SszRead<Config> for SignedAPIBlock<P> {
 
         Ok(api_block)
     }
+}
+
+#[derive(Deserialize, Educe)]
+#[educe(Default)]
+#[serde(bound = "", rename_all = "snake_case")]
+pub enum BroadcastValidation {
+    #[educe(Default)]
+    Gossip,
+    Consensus,
+    ConsensusAndEquivocation,
 }
