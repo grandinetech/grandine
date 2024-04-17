@@ -293,6 +293,8 @@ impl<P: Preset> AttestationPacker<P> {
                         choices.push(attestation_choice);
                         values.push(weight);
                         best_weight = weight;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -375,14 +377,13 @@ impl<P: Preset> AttestationPacker<P> {
             att_selected = prev[groups_analyzed][att_selected];
         }
 
+        attestations.truncate(P::MaxAttestations::USIZE);
+
         PackOutcome {
-            attestations: attestations
-                .into_iter()
-                .pipe(ContiguousList::try_from_iter)
-                .expect(
-                    "the call to Iterator::take limits the number \
+            attestations: attestations.try_into().expect(
+                "the call to Vec::truncate limits the number \
                  of attestations to P::MaxAttestations::USIZE",
-                ),
+            ),
             deadline_reached: self.deadline_reached(),
         }
     }
