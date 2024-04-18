@@ -18,7 +18,7 @@ use mime::{APPLICATION_JSON, TEXT_EVENT_STREAM};
 use crate::{error::Error, misc::Direction};
 
 // Don't log states when `Feature::LogHttpBodies` is enabled.
-const ENDPOINTS_WITH_IGNORED_BODIES: &[&str] = &["/eth/v2/debug/beacon/states/"];
+const ENDPOINTS_WITH_IGNORED_BODIES: &[&str] = &["/eth/v2/debug/beacon/states/", "/metrics"];
 
 async fn buffer_and_log<B>(direction: Direction, uri: &Uri, body: B) -> Result<Bytes, Error>
 where
