@@ -1,12 +1,14 @@
 use anyhow::Result;
 use c_kzg::{Blob, Bytes32, Cell, KzgSettings, KzgProof, KzgCommitment};
+use sha3::digest::consts::U0;
 use sha3::{Digest, Sha3_256};
-use ssz::H256;
+use ssz::{MerkleTree, SszHash, H256};
+use types::preset::Preset;
 use std::collections::{HashSet, HashMap};
 use std::path::Path;
 use std::cmp;
 use std::convert::TryInto;
-use types::phase0::containers::SignedBeaconBlockHeader;
+use types::{phase0::containers::{BeaconBlockHeader, SignedBeaconBlockHeader}, deneb::containers::{SignedBeaconBlock}};
 
 
 const DATA_COLUMN_SIDECAR_SUBNET_COUNT: usize = 32;
@@ -31,6 +33,7 @@ type ColumnIndex = usize;
 type NodeId = u64;
 type BlobIndex = usize;
 type ExtendedMatrix = [Cell; MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS];
+type DataColumn = [Cell; MAX_BLOB_COMMITMENTS_PER_BLOCK];
 
 struct DataColumnIdentifier {
     block_root: H256,
@@ -39,11 +42,11 @@ struct DataColumnIdentifier {
 
 struct DataColumnSidecar {
     index: ColumnIndex,
-    // column: DataColumn, // sitas turetu buti, bet nezinau, kas cia gali buti, tai uzkomentuoju
-    kzg_commitments: Vec<KzgCommitment>,
-    kzg_proofs: [KzgProof; MAX_BLOB_COMMITMENTS_PER_BLOCK],
+    column: DataColumn,
+    kzg_commitments: Vec<primitive_types::H384>,
+    kzg_proofs: [[u8; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK],
     signed_block_header: SignedBeaconBlockHeader,
-    kzg_commitments_inclusion_proof: [Bytes32; KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH],
+    kzg_commitments_inclusion_proof: H256,
 }
 
 pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: usize) -> Vec<ColumnIndex> {
@@ -128,4 +131,77 @@ fn recover_matrix(cells_dict: &HashMap<(BlobIndex, CellID), Cell>, blob_count: u
     array.copy_from_slice(&extended_matrix[..]);
 
     Ok(array)
+}
+
+fn get_data_column_sidecars<P: Preset>(
+    signed_block: SignedBeaconBlock<P>,
+    blobs: Vec<Blob>,
+) -> Result<Vec<DataColumnSidecar>> {
+    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
+    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+
+    let block_header = BeaconBlockHeader {
+        slot: signed_block.message.slot,
+        proposer_index: signed_block.message.proposer_index,
+        parent_root: signed_block.message.parent_root,
+        state_root: signed_block.message.state_root,
+        body_root: signed_block.message.body.hash_tree_root(),
+    };
+    let signed_block_header = SignedBeaconBlockHeader {
+        message: block_header,
+        signature: signed_block.signature
+    };
+    // &signed_block.to_header();
+    let block  = signed_block.message;
+    let kzg_commitments_inclusion_proof = block.body.blob_kzg_commitments.clone();
+    let mut bytes_u8: Vec<u8> = Vec::new();
+    for com in kzg_commitments_inclusion_proof.into_iter()
+    {
+        for bt in com.as_bytes().into_iter()
+        {
+            bytes_u8.push(bt.clone());
+        }
+    }
+    // let bytes = kzg_commitments_inclusion_proof.into_iter().map(|a| a.as_bytes().into_iter().collect::<Vec<_>>()).flatten().collect::<Vec<_>>();
+    let kzg_commitments_inclusion_proof = MerkleTree::<U0>::merkleize_bytes(<Vec<u8> as AsRef<[u8]>>::as_ref(&bytes_u8));
+    
+    let mut cells_and_proofs = Vec::new();
+    for blob in &blobs {
+        cells_and_proofs.push(Cell::compute_cells_and_proofs(&blob, &kzg_settings)?);
+    }
+    let blob_count = blobs.len();
+    // let mut cells: Vec<Vec<Cell>> = Vec::new();
+    // let mut proofs: Vec<Vec<KzgProof>> = Vec::new();
+    // for i in 0..blob_count {
+    //     cells.push(cells_and_proofs[i].0.clone());
+    //     proofs.push(cells_and_proofs[i].1.clone());
+    // }
+    let mut sidecars: Vec<DataColumnSidecar> = Vec::new();
+    for column_index in 0..NUMBER_OF_COLUMNS {
+        let mut column_cells: Vec<Cell> = Vec::new();
+        for row_index in 0..blob_count {
+            column_cells.push(cells_and_proofs[row_index].0[column_index].clone());
+        }
+        let kzg_proof_of_column: Vec<_> = (0..blob_count)
+            .map(|row_index| cells_and_proofs[row_index].1[column_index].clone())
+            .collect();
+
+        let mut column_cell_array = [Cell::default(); MAX_BLOB_COMMITMENTS_PER_BLOCK];
+        column_cell_array.copy_from_slice(&column_cells[..]);
+
+        let mut kzg_proofs_array: [[u8; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK] = [[0; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
+        kzg_proofs_array.copy_from_slice(&kzg_proof_of_column[..]);
+
+
+
+        sidecars.push(DataColumnSidecar {
+            index: column_index,
+            column: column_cell_array,
+            kzg_commitments: block.body.blob_kzg_commitments.clone().into_iter().collect::<Vec<_>>(),
+            kzg_proofs: kzg_proofs_array,
+            signed_block_header: signed_block_header,
+            kzg_commitments_inclusion_proof: kzg_commitments_inclusion_proof.clone(),
+        });
+    }
+    Ok(sidecars)
 }

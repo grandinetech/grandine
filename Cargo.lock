@@ -2039,6 +2039,7 @@ dependencies = [
  "c-kzg",
  "kzg",
  "kzg_utils",
+ "primitive-types",
  "sha3",
  "ssz",
  "tiny-keccak",
