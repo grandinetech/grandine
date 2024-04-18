@@ -1032,18 +1032,14 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "1.0.0"
+source = "git+https://github.com/ethereum/c-kzg-4844?branch=das#7027b082ee6a647f44de61646813aa58e955093e"
 dependencies = [
- "bindgen",
  "blst",
  "cc",
- "criterion",
  "glob",
  "hex",
  "libc",
- "rand",
  "serde",
- "serde_json",
- "serde_yaml",
 ]
 
 [[package]]

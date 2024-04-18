@@ -8,7 +8,6 @@ members = [
     'bls',
     'builder_api',
     'clock',
-    'c-kzg',
     'database',
     'deposit_tree',
     'directories',
@@ -425,7 +424,7 @@ arithmetic = { path = 'arithmetic' }
 binary_utils = { path = 'binary_utils' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
-c-kzg = {path = 'c-kzg'}  
+c-kzg = {git = 'https://github.com/ethereum/c-kzg-4844', branch = 'das' }  
 clock = { path = 'clock' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
