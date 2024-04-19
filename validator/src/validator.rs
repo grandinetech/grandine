@@ -990,7 +990,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             blob_kzg_commitments,
                             skip_randao_verification,
                         ) {
-                            let block = ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block);
+                            let block = ValidatorBlindedBlock::BlindedBeaconBlock {
+                                blinded_block,
+                                execution_payload: Box::new(
+                                    beacon_block.value.execution_payload().expect(
+                                        "post-Bellatrix blocks should have execution payload",
+                                    ),
+                                ),
+                            };
 
                             return Ok(Some(WithBlobsAndMev::new(
                                 block,
@@ -1381,15 +1388,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let beacon_block = match validator_blinded_block {
-            ValidatorBlindedBlock::BlindedBeaconBlock(message) => {
+            ValidatorBlindedBlock::BlindedBeaconBlock { blinded_block, .. } => {
                 let Some(signature) = slot_head
-                    .sign_beacon_block(&self.signer, &message, (&message).into(), public_key)
+                    .sign_beacon_block(
+                        &self.signer,
+                        &blinded_block,
+                        (&blinded_block).into(),
+                        public_key,
+                    )
                     .await
                 else {
                     return Ok(());
                 };
 
-                let signed_blinded_block = message.with_signature(signature);
+                let signed_blinded_block = blinded_block.with_signature(signature);
 
                 let builder_api = self.builder_api.as_ref().expect(
                     "Builder API should be present as it was used to query ExecutionPayloadHeader",

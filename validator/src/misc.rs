@@ -4,11 +4,11 @@ use ssz::{BitVector, Size, SszHash, SszSize, SszWrite, WriteError, H256};
 use typenum::U1;
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
-    combined::{BeaconBlock, BlindedBeaconBlock},
+    combined::{BeaconBlock, BlindedBeaconBlock, ExecutionPayload},
     nonstandard::Phase,
     phase0::primitives::{ValidatorIndex, H160},
     preset::Preset,
-    traits::BeaconBlock as _,
+    traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
 };
 
 #[allow(clippy::struct_field_names)]
@@ -35,7 +35,12 @@ pub struct ProposerData {
 #[derive(Clone, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum ValidatorBlindedBlock<P: Preset> {
-    BlindedBeaconBlock(BlindedBeaconBlock<P>),
+    BlindedBeaconBlock {
+        #[serde(flatten)]
+        blinded_block: BlindedBeaconBlock<P>,
+        #[serde(skip)]
+        execution_payload: Box<ExecutionPayload<P>>,
+    },
     BeaconBlock(BeaconBlock<P>),
 }
 
@@ -51,7 +56,7 @@ impl<P: Preset> SszHash for ValidatorBlindedBlock<P> {
 
     fn hash_tree_root(&self) -> H256 {
         match self {
-            Self::BlindedBeaconBlock(block) => block.hash_tree_root(),
+            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.hash_tree_root(),
             Self::BeaconBlock(block) => block.hash_tree_root(),
         }
     }
@@ -60,7 +65,7 @@ impl<P: Preset> SszHash for ValidatorBlindedBlock<P> {
 impl<P: Preset> SszWrite for ValidatorBlindedBlock<P> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         match self {
-            Self::BlindedBeaconBlock(block) => block.write_variable(bytes),
+            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.write_variable(bytes),
             Self::BeaconBlock(block) => block.write_variable(bytes),
         }
     }
@@ -77,24 +82,38 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
             return Self::BeaconBlock(block);
         };
 
+        let execution_payload = block
+            .clone()
+            .execution_payload()
+            .expect("post-Bellatrix blocks should have execution payload");
+
+        let kzg_commitments = block
+            .body()
+            .post_deneb()
+            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+            .cloned();
+
         let payload_header = body.execution_payload().to_header();
         let blinded_block = block
-            .into_blinded(payload_header, None)
+            .into_blinded(payload_header, kzg_commitments)
             .expect("phases should match because payload header was taken from block");
 
-        Self::BlindedBeaconBlock(blinded_block)
+        Self::BlindedBeaconBlock {
+            blinded_block,
+            execution_payload: Box::new(execution_payload),
+        }
     }
 
     #[must_use]
     pub const fn phase(&self) -> Phase {
         match self {
-            Self::BlindedBeaconBlock(block) => block.phase(),
+            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.phase(),
             Self::BeaconBlock(block) => block.phase(),
         }
     }
 
     #[must_use]
     pub const fn is_blinded(&self) -> bool {
-        matches!(self, Self::BlindedBeaconBlock(_))
+        matches!(self, Self::BlindedBeaconBlock { .. })
     }
 }

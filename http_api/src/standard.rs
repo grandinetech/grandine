@@ -55,7 +55,6 @@ use types::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    bellatrix::primitives::Wei,
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{BeaconBlock, BeaconState, SignedBeaconBlock, SignedBlindedBeaconBlock},
     config::Config as ChainConfig,
@@ -65,6 +64,7 @@ use types::{
     },
     nonstandard::{
         Phase, RelativeEpoch, SlashingKind, ValidationOutcome, WithBlobsAndMev, WithStatus,
+        WEI_IN_GWEI,
     },
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
@@ -73,8 +73,8 @@ use types::{
             SignedAggregateAndProof, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
         },
         primitives::{
-            ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, SubnetId, UnixSeconds,
-            ValidatorIndex, Version, H256,
+            ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, SubnetId, Uint256,
+            UnixSeconds, ValidatorIndex, Version, H256,
         },
     },
     preset::Preset,
@@ -1939,21 +1939,33 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let version = validator_block.value.phase();
     let blinded = validator_block.value.is_blinded();
 
-    // 'Uplift' validator block to default signed beacon block for consensus reward calculation
+    // 'Uplift' validator block to signed beacon block for consensus reward calculation
     let signed_beacon_block = match validator_block.value.clone() {
         ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.into(),
-        ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
-            let beacon_block = blinded_block.with_default_execution_payload()?;
+        ValidatorBlindedBlock::BlindedBeaconBlock {
+            blinded_block,
+            execution_payload,
+        } => {
+            let beacon_block = blinded_block
+                .with_execution_payload(*execution_payload)
+                .map_err(AnyhowError::new)?;
+
             beacon_block.into()
         }
     };
 
-    let rewards =
-        calculate_block_rewards(&chain_config, &controller, &Arc::new(signed_beacon_block))?;
+    let consensus_block_value =
+        match calculate_block_rewards(&chain_config, &controller, &Arc::new(signed_beacon_block)) {
+            Ok(rewards) => Some(Uint256::from_u64(rewards.total) * WEI_IN_GWEI),
+            Err(error) => {
+                warn!("unable to calculate block rewards for validator block: {error:?}");
+                None
+            }
+        };
 
     Ok(EthResponse::json_or_ssz(validator_block.into(), &headers)
         .version(version)
-        .consensus_block_value(Wei::from_u64(rewards.total))
+        .consensus_block_value(consensus_block_value)
         .execution_payload_blinded(blinded)
         .execution_payload_value(mev.unwrap_or_default()))
 }

@@ -26,12 +26,14 @@ use crate::{
     },
     phase0::{
         containers::Attestation,
-        primitives::{UnixSeconds, ValidatorIndex, H256},
+        primitives::{Uint256, UnixSeconds, ValidatorIndex, H256},
     },
     preset::Preset,
 };
 
 pub use smallvec::smallvec;
+
+pub const WEI_IN_GWEI: Uint256 = Uint256::from_u64(1_000_000_000);
 
 #[derive(
     Clone,

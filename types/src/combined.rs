@@ -1,4 +1,3 @@
-use anyhow::{bail, Error as AnyhowError, Result as AnyhowResult};
 use bls::SignatureBytes;
 use derive_more::From;
 use duplicate::duplicate_item;
@@ -573,6 +572,17 @@ impl<P: Preset> BeaconBlock<P> {
         }
     }
 
+    pub fn execution_payload(self) -> Option<ExecutionPayload<P>> {
+        match self {
+            Self::Phase0(_) | Self::Altair(_) => None,
+            Self::Bellatrix(block) => {
+                Some(ExecutionPayload::Bellatrix(block.body.execution_payload))
+            }
+            Self::Capella(block) => Some(ExecutionPayload::Capella(block.body.execution_payload)),
+            Self::Deneb(block) => Some(ExecutionPayload::Deneb(block.body.execution_payload)),
+        }
+    }
+
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Phase0(_) => Phase::Phase0,
@@ -764,22 +774,6 @@ impl<P: Preset> BlindedBeaconBlock<P> {
         }
 
         self
-    }
-
-    pub fn with_default_execution_payload(self) -> AnyhowResult<BeaconBlock<P>> {
-        let execution_payload = match self.phase() {
-            Phase::Bellatrix => ExecutionPayload::Bellatrix(BellatrixExecutionPayload::default()),
-            Phase::Capella => ExecutionPayload::Capella(CapellaExecutionPayload::default()),
-            Phase::Deneb => ExecutionPayload::Deneb(DenebExecutionPayload::default()),
-            _ => {
-                bail!(ExecutionPayloadPhaseError {
-                    payload_phase: self.phase(),
-                });
-            }
-        };
-
-        self.with_execution_payload(execution_payload)
-            .map_err(AnyhowError::new)
     }
 
     pub fn with_execution_payload(

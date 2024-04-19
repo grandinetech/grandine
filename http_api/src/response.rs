@@ -102,8 +102,8 @@ impl<T, M, F> EthResponse<T, M, F> {
         self
     }
 
-    pub const fn consensus_block_value(mut self, consensus_block_value: Wei) -> Self {
-        self.consensus_block_value = Some(consensus_block_value);
+    pub const fn consensus_block_value(mut self, consensus_block_value: Option<Wei>) -> Self {
+        self.consensus_block_value = consensus_block_value;
         self
     }
 

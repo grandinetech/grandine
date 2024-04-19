@@ -150,9 +150,13 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
         } = block;
 
         match validator_blinded_block {
-            ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
-                Self::Other(ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block))
-            }
+            ValidatorBlindedBlock::BlindedBeaconBlock {
+                blinded_block,
+                execution_payload,
+            } => Self::Other(ValidatorBlindedBlock::BlindedBeaconBlock {
+                blinded_block,
+                execution_payload,
+            }),
             ValidatorBlindedBlock::BeaconBlock(combined_block) => match combined_block {
                 BeaconBlock::Phase0(block) => {
                     Self::Other(ValidatorBlindedBlock::BeaconBlock(block.into()))
