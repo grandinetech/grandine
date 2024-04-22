@@ -12,11 +12,11 @@ use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
-        containers::{Attestation, Checkpoint, SignedAggregateAndProof},
+        containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, UnixSeconds, H256},
     },
     preset::Preset,

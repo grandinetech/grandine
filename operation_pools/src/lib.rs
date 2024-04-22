@@ -1,5 +1,8 @@
 pub use crate::{
-    attestation_agg_pool::{AttestationPacker, Manager as AttestationAggPool},
+    attestation_agg_pool::{
+        convert_attestation_for_pool, convert_to_electra_attestation, AttestationPacker,
+        Manager as AttestationAggPool,
+    },
     bls_to_execution_change_pool::{
         BlsToExecutionChangePool, Service as BlsToExecutionChangePoolService,
     },
@@ -10,9 +13,11 @@ pub use crate::{
 
 mod attestation_agg_pool {
     pub use attestation_packer::AttestationPacker;
+    pub use conversion::{convert_attestation_for_pool, convert_to_electra_attestation};
     pub use manager::Manager;
 
     mod attestation_packer;
+    mod conversion;
     mod manager;
     mod pool;
     mod tasks;

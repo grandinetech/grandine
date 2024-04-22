@@ -12,7 +12,7 @@ use serde::Serialize;
 use types::{
     nonstandard::{AttestationEpoch, AttestationOutcome, GweiVec, Outcome as _, SlashingKind},
     phase0::{
-        containers::Attestation,
+        containers::AttestationData,
         primitives::{Gwei, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -43,7 +43,8 @@ pub trait SlotReport {
     fn update_performance<P: Preset>(
         &mut self,
         state: &impl BeaconState<P>,
-        attestation: &Attestation<P>,
+        data: AttestationData,
+        attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
     ) -> Result<()>;
 }
 
@@ -87,9 +88,10 @@ impl<D: SlotReport> SlotReport for &mut D {
     fn update_performance<P: Preset>(
         &mut self,
         state: &impl BeaconState<P>,
-        attestation: &Attestation<P>,
+        data: AttestationData,
+        attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
     ) -> Result<()> {
-        (*self).update_performance(state, attestation)
+        (*self).update_performance(state, data, attesting_indices)
     }
 }
 
@@ -121,7 +123,8 @@ impl SlotReport for NullSlotReport {
     fn update_performance<P: Preset>(
         &mut self,
         _state: &impl BeaconState<P>,
-        _attestation: &Attestation<P>,
+        _data: AttestationData,
+        _attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
     ) -> Result<()> {
         Ok(())
     }
@@ -194,14 +197,9 @@ impl SlotReport for RealSlotReport {
     fn update_performance<P: Preset>(
         &mut self,
         state: &impl BeaconState<P>,
-        attestation: &Attestation<P>,
+        data: AttestationData,
+        attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
     ) -> Result<()> {
-        let Attestation {
-            ref aggregation_bits,
-            data,
-            ..
-        } = *attestation;
-
         let attestation_epoch = accessors::attestation_epoch(state, data.target.epoch)?;
 
         let expected_target = accessors::get_block_root(state, attestation_epoch)?;
@@ -218,7 +216,7 @@ impl SlotReport for RealSlotReport {
             .try_into()
             .expect("MIN_ATTESTATION_INCLUSION_DELAY is at least 1 in all presets");
 
-        for validator_index in accessors::get_attesting_indices(state, data, aggregation_bits)? {
+        for validator_index in attesting_indices {
             let assignment = (validator_index, attestation_epoch);
 
             self.sources.insert(assignment, actual_source);

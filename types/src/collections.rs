@@ -12,6 +12,7 @@ use ssz::{PersistentList, PersistentVector, UnhashedBundleSize};
 use crate::{
     altair::primitives::ParticipationFlags,
     capella::containers::HistoricalSummary,
+    electra::containers::{PendingBalanceDeposit, PendingConsolidation, PendingPartialWithdrawal},
     phase0::{
         containers::{Eth1Data, PendingAttestation, Validator},
         primitives::{Gwei, H256},
@@ -52,3 +53,12 @@ pub type InactivityScores<P> =
 
 pub type HistoricalSummaries<P> =
     PersistentList<HistoricalSummary, <P as Preset>::HistoricalRootsLimit>;
+
+pub type PendingBalanceDeposits<P> =
+    PersistentList<PendingBalanceDeposit, <P as Preset>::PendingBalanceDepositsLimit>;
+
+pub type PendingPartialWithdrawals<P> =
+    PersistentList<PendingPartialWithdrawal, <P as Preset>::PendingPartialWithdrawalsLimit>;
+
+pub type PendingConsolidations<P> =
+    PersistentList<PendingConsolidation, <P as Preset>::PendingConsolidationsLimit>;

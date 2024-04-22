@@ -23,7 +23,8 @@ use eth1::Eth1Chain;
 use eth1_api::{ApiController, Eth1ExecutionEngine};
 use eth2_libp2p::GossipId;
 use execution_engine::{
-    ExecutionEngine as _, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadId,
+    ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
+    PayloadAttributesV3, PayloadId,
 };
 use features::Feature;
 use fork_choice_control::{StateCacheError, ValidatorMessage, Wait};
@@ -44,8 +45,8 @@ use keymanager::ProposerConfigs;
 use log::{debug, error, info, log, warn, Level};
 use once_cell::sync::OnceCell;
 use operation_pools::{
-    AttestationAggPool, BlsToExecutionChangePool, Origin, PoolAdditionOutcome, PoolRejectionReason,
-    SyncCommitteeAggPool,
+    convert_to_electra_attestation, AttestationAggPool, BlsToExecutionChangePool, Origin,
+    PoolAdditionOutcome, PoolRejectionReason, SyncCommitteeAggPool,
 };
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
@@ -58,7 +59,7 @@ use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
 use tokio::task::JoinHandle;
-use transition_functions::{capella, combined, unphased};
+use transition_functions::{capella, combined, electra, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -79,7 +80,8 @@ use types::{
         ExecutionPayload as CapellaExecutionPayload, SignedBlsToExecutionChange,
     },
     combined::{
-        BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload, ExecutionPayloadHeader,
+        AggregateAndProof, Attestation, AttesterSlashing, BeaconBlock, BeaconState,
+        BlindedBeaconBlock, ExecutionPayload, ExecutionPayloadHeader, SignedAggregateAndProof,
         SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
@@ -90,16 +92,25 @@ use types::{
         },
         primitives::KzgCommitment,
     },
+    electra::containers::{
+        AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
+        AttesterSlashing as ElectraAttesterSlashing, BeaconBlock as ElectraBeaconBlock,
+        BeaconBlockBody as ElectraBeaconBlockBody, ExecutionPayload as ElectraExecutionPayload,
+        SignedAggregateAndProof as ElectraSignedAggregateAndProof,
+    },
     nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
-            AggregateAndProof, Attestation, AttestationData, AttesterSlashing,
+            AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
+            AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Checkpoint,
-            ProposerSlashing, SignedAggregateAndProof, SignedVoluntaryExit,
+            ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
+            SignedVoluntaryExit,
         },
         primitives::{
-            Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256, ValidatorIndex, H256,
+            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
+            ValidatorIndex, H256,
         },
     },
     preset::Preset,
@@ -309,7 +320,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
-                            .insert_attestation(wait_group, attestation.clone_arc());
+                            .insert_attestation(wait_group, &attestation);
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -360,7 +371,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 slashing = slasher_to_validator_rx.select_next_some() => match slashing {
                     SlasherToValidator::AttesterSlashing(attester_slashing) => {
-                        self.attester_slashings.push(attester_slashing);
+                        self.attester_slashings.push(AttesterSlashing::Phase0(attester_slashing));
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
                         self.proposer_slashings.push(proposer_slashing);
@@ -622,31 +633,57 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &mut self,
         slashing: AttesterSlashing<P>,
     ) -> Result<PoolAdditionOutcome> {
-        let seen_indices = self
+        let mut seen_indices = self
             .attester_slashings
             .iter()
-            .flat_map(accessors::slashable_indices)
-            .collect::<HashSet<_>>();
+            .flat_map(|attester_slashing| match attester_slashing {
+                AttesterSlashing::Phase0(ref attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                }
+                AttesterSlashing::Electra(ref attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                }
+            });
 
-        if accessors::slashable_indices(&slashing).all(|index| seen_indices.contains(&index)) {
+        let all_seen = match slashing {
+            AttesterSlashing::Phase0(ref attester_slashing) => {
+                accessors::slashable_indices(attester_slashing)
+                    .all(|index| seen_indices.contains(&index))
+            }
+            AttesterSlashing::Electra(ref attester_slashing) => {
+                accessors::slashable_indices(attester_slashing)
+                    .all(|index| seen_indices.contains(&index))
+            }
+        };
+
+        if all_seen {
             return Ok(PoolAdditionOutcome::Ignore);
         }
 
         let state = self.controller.preprocessed_state_at_current_slot()?;
 
-        let outcome =
-            match unphased::validate_attester_slashing(&self.chain_config, &state, &slashing) {
-                Ok(_) => {
-                    self.attester_slashings.push(slashing);
-                    PoolAdditionOutcome::Accept
-                }
-                Err(error) => {
-                    debug!(
+        // TODO(feature/electra): implement trait for types::combined::AttesterSlashing
+        let result = match slashing {
+            AttesterSlashing::Phase0(ref attester_slashing) => {
+                unphased::validate_attester_slashing(&self.chain_config, &state, attester_slashing)
+            }
+            AttesterSlashing::Electra(ref attester_slashing) => {
+                unphased::validate_attester_slashing(&self.chain_config, &state, attester_slashing)
+            }
+        };
+
+        let outcome = match result {
+            Ok(_) => {
+                self.attester_slashings.push(slashing);
+                PoolAdditionOutcome::Accept
+            }
+            Err(error) => {
+                debug!(
                     "external attester slashing rejected (error: {error}, slashing: {slashing:?})",
                 );
-                    PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
-                }
-            };
+                PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
+            }
+        };
 
         Ok(outcome)
     }
@@ -1132,7 +1169,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             //                      in an invalid block because a validator can only exit or be
             //                      slashed once. The code below can handle invalid blocks, but it may
             //                      prevent the validator from proposing.
-            let attester_slashings = self.prepare_attester_slashings_for_proposal(slot_head);
             let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
             let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
 
@@ -1147,7 +1183,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         eth1_data,
                         graffiti,
                         proposer_slashings,
-                        attester_slashings,
+                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
                         attestations,
                         deposits,
                         voluntary_exits,
@@ -1163,7 +1199,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         eth1_data,
                         graffiti,
                         proposer_slashings,
-                        attester_slashings,
+                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
                         attestations,
                         deposits,
                         voluntary_exits,
@@ -1180,7 +1216,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         eth1_data,
                         graffiti,
                         proposer_slashings,
-                        attester_slashings,
+                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
                         attestations,
                         deposits,
                         voluntary_exits,
@@ -1198,7 +1234,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         eth1_data,
                         graffiti,
                         proposer_slashings,
-                        attester_slashings,
+                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
                         attestations,
                         deposits,
                         voluntary_exits,
@@ -1217,7 +1253,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         eth1_data,
                         graffiti,
                         proposer_slashings,
-                        attester_slashings,
+                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
                         attestations,
                         deposits,
                         voluntary_exits,
@@ -1227,6 +1263,46 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         blob_kzg_commitments,
                     },
                 }),
+                Phase::Electra => {
+                    // TODO(feature/electra): don't ignore errors
+                    let attestations = attestations
+                        .into_iter()
+                        .filter_map(|attestation| convert_to_electra_attestation(attestation).ok())
+                        .group_by(|attestation| attestation.data);
+
+                    let attestations = attestations
+                        .into_iter()
+                        .filter_map(|(_, attestations)| {
+                            Self::compute_on_chain_aggregate(attestations).ok()
+                        })
+                        .take(P::MaxAttestationsElectra::USIZE);
+
+                    let attestations = ContiguousList::try_from_iter(attestations)?;
+
+                    BeaconBlock::from(ElectraBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body: ElectraBeaconBlockBody {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings,
+                            attester_slashings: self
+                                .prepare_attester_slashings_for_proposal_electra(slot_head),
+                            attestations,
+                            deposits,
+                            voluntary_exits,
+                            sync_aggregate,
+                            execution_payload: ElectraExecutionPayload::default(),
+                            bls_to_execution_changes,
+                            blob_kzg_commitments,
+                            // TODO(feature/electra): implement this
+                            consolidations: ContiguousList::default(),
+                        },
+                    })
+                }
             }
             .with_execution_payload(execution_payload)?;
 
@@ -1268,6 +1344,46 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 blobs,
                 mev,
             )))
+        })
+    }
+
+    pub fn compute_on_chain_aggregate(
+        attestations: impl Iterator<Item = ElectraAttestation<P>>,
+    ) -> Result<ElectraAttestation<P>> {
+        let aggregates = attestations
+            .sorted_by_key(|attestation| {
+                misc::get_committee_indices::<P>(attestation.committee_bits).next()
+            })
+            .collect_vec();
+
+        let data = if let Some(attestation) = aggregates.first() {
+            attestation.data
+        } else {
+            return Err(AnyhowError::msg("no attestations for block aggregate"));
+        };
+
+        let mut signature = AggregateSignature::default();
+        let mut aggregation_bits: Vec<u8> = vec![];
+        let mut committee_bits = BitVector::default();
+
+        for aggregate in aggregates {
+            if let Some(committee_index) =
+                misc::get_committee_indices::<P>(aggregate.committee_bits).next()
+            {
+                committee_bits.set(committee_index.try_into()?, true);
+            }
+
+            let bits = Vec::<u8>::from(aggregate.aggregation_bits);
+            aggregation_bits.extend_from_slice(&bits);
+
+            signature.aggregate_in_place(aggregate.signature.try_into()?);
+        }
+
+        Ok(ElectraAttestation {
+            aggregation_bits: BitList::try_from(aggregation_bits)?,
+            data,
+            committee_bits,
+            signature: signature.into(),
         })
     }
 
@@ -1639,7 +1755,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             } = own_attestation;
 
-            let committee_index = attestation.data.index;
+            let committee_index = committee_index(attestation);
 
             debug!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
@@ -1653,8 +1769,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
 
             let attestation = Arc::new(attestation.clone());
-
-            let subnet_id = slot_head.subnet_id(attestation.data.slot, attestation.data.index)?;
+            let subnet_id = slot_head.subnet_id(attestation.data().slot, committee_index)?;
 
             self.controller.on_own_singular_attestation(
                 wait_group.clone(),
@@ -1666,7 +1781,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .send(&self.p2p_tx);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), attestation);
+                .insert_attestation(wait_group.clone(), &attestation);
         }
 
         prometheus_metrics::stop_and_record(timer);
@@ -1679,10 +1794,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.own_aggregators = accepted_attestations
             .into_iter()
             .filter_map(|own_attestation| {
-                let member = own_members.get(&(
-                    own_attestation.attestation.data.index,
-                    own_attestation.validator_index,
-                ))?;
+                let committee_index = committee_index(&own_attestation.attestation);
+
+                let member =
+                    own_members.get(&(committee_index, own_attestation.validator_index))?;
 
                 let BeaconCommitteeMember {
                     public_key,
@@ -1704,15 +1819,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     selection_proof,
                 })?;
 
-                Some((own_attestation.attestation.data, aggregator))
+                Some((own_attestation.attestation.data(), aggregator))
             })
             .pipe(group_into_btreemap);
 
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&mut self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
+        let phase = config.phase_at_slot::<P>(slot_head.slot());
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -1735,10 +1852,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 return None;
                             }
 
-                            let aggregate_and_proof = AggregateAndProof {
-                                aggregator_index,
-                                aggregate: aggregate.clone(),
-                                selection_proof,
+                            let aggregate_and_proof = if phase < Phase::Electra {
+                                AggregateAndProof::from(Phase0AggregateAndProof {
+                                    aggregator_index,
+                                    aggregate: aggregate.clone(),
+                                    selection_proof,
+                                })
+                            } else {
+                                let aggregate =
+                                    convert_to_electra_attestation(aggregate.clone()).ok()?;
+
+                                AggregateAndProof::from(ElectraAggregateAndProof {
+                                    aggregator_index,
+                                    aggregate,
+                                    selection_proof,
+                                })
                             };
 
                             let triple = SigningTriple {
@@ -1779,9 +1907,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let aggregates_and_proofs = signatures
             .zip(proofs)
             .map(|(signature, message)| {
-                let aggregate_and_proof = SignedAggregateAndProof {
-                    message,
-                    signature: signature.into(),
+                let aggregate_and_proof = match message {
+                    AggregateAndProof::Phase0(message) => {
+                        SignedAggregateAndProof::from(Phase0SignedAggregateAndProof {
+                            message,
+                            signature: signature.into(),
+                        })
+                    }
+                    AggregateAndProof::Electra(message) => {
+                        SignedAggregateAndProof::from(ElectraSignedAggregateAndProof {
+                            message,
+                            signature: signature.into(),
+                        })
+                    }
                 };
 
                 debug!("constructed aggregate and proof: {aggregate_and_proof:?}");
@@ -1798,17 +1936,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             "validators [{}] aggregating in slot {}",
             aggregates_and_proofs
                 .iter()
-                .map(|a| a.message.aggregator_index)
+                .map(SignedAggregateAndProof::aggregator_index)
                 .format(", "),
-            aggregate_and_proof.message.aggregate.data.slot,
+            aggregate_and_proof.slot(),
         );
 
         for aggregate_and_proof in aggregates_and_proofs {
-            let attestation = Arc::new(aggregate_and_proof.message.aggregate.clone());
+            let attestation = Arc::new(aggregate_and_proof.aggregate());
             let aggregate_and_proof = Box::new(aggregate_and_proof);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), attestation);
+                .insert_attestation(wait_group.clone(), &attestation);
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
         }
@@ -2015,6 +2153,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_attestations);
         }
 
+        let phase = self.chain_config.phase_at_slot::<P>(slot_head.slot());
+
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {
                 epoch: slot_head.current_epoch(),
@@ -2027,13 +2167,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_members
                 .iter()
                 .map(|member| {
-                    let data = AttestationData {
+                    let mut data = AttestationData {
                         slot: slot_head.slot(),
                         index: member.committee_index,
                         beacon_block_root: slot_head.beacon_block_root,
                         source: slot_head.beacon_state.current_justified_checkpoint(),
                         target,
                     };
+
+                    if phase >= Phase::Electra {
+                        data.index = 0;
+                    }
 
                     let triple = SigningTriple {
                         message: SigningMessage::<P>::Attestation(data),
@@ -2070,20 +2214,37 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let own_attestations = signatures
                     .zip(other_data)
-                    .map(|(signature, (data, member))| {
-                        let mut aggregation_bits = BitList::with_length(member.committee_size);
+                    .filter_map(|(signature, (data, member))| {
+                        let attestation = if phase < Phase::Electra {
+                            let mut aggregation_bits = BitList::with_length(member.committee_size);
+                            aggregation_bits.set(member.position_in_committee, true);
 
-                        aggregation_bits.set(member.position_in_committee, true);
-
-                        OwnAttestation {
-                            validator_index: member.validator_index,
-                            attestation: Attestation {
+                            Attestation::from(Phase0Attestation {
                                 aggregation_bits,
                                 data,
                                 signature: signature.into(),
-                            },
+                            })
+                        } else {
+                            let mut aggregation_bits = BitList::with_length(member.committee_size);
+                            aggregation_bits.set(member.position_in_committee, true);
+
+                            // TODO(feature/electra: don't hide error?)
+                            let mut committee_bits = BitVector::default();
+                            committee_bits.set(member.committee_index.try_into().ok()?, true);
+
+                            Attestation::from(ElectraAttestation {
+                                aggregation_bits,
+                                data,
+                                committee_bits,
+                                signature: signature.into(),
+                            })
+                        };
+
+                        Some(OwnAttestation {
+                            validator_index: member.validator_index,
+                            attestation,
                             signature,
-                        }
+                        })
                     })
                     .collect();
 
@@ -2303,7 +2464,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     beacon_block_root,
                     slot,
                     ..
-                } = own_attestation.attestation.data;
+                } = own_attestation.attestation.data();
 
                 let vote = ValidatorVote {
                     validator_index: own_attestation.validator_index,
@@ -2322,18 +2483,33 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn discard_old_attester_slashings(&mut self, current_epoch: Epoch) {
         let finalized_state = self.controller.last_finalized_state().value;
 
-        self.attester_slashings.retain(|slashing| {
-            accessors::slashable_indices(slashing).any(|attester_index| {
-                let attester = match finalized_state.validators().get(attester_index) {
-                    Ok(attester) => attester,
-                    Err(error) => {
-                        debug!("attester slashing is too recent to discard: {error}");
-                        return true;
-                    }
-                };
+        self.attester_slashings.retain(|slashing| match slashing {
+            AttesterSlashing::Phase0(attester_slashing) => {
+                accessors::slashable_indices(attester_slashing).any(|attester_index| {
+                    let attester = match finalized_state.validators().get(attester_index) {
+                        Ok(attester) => attester,
+                        Err(error) => {
+                            debug!("attester slashing is too recent to discard: {error}");
+                            return true;
+                        }
+                    };
 
-                predicates::is_slashable_validator(attester, current_epoch)
-            })
+                    predicates::is_slashable_validator(attester, current_epoch)
+                })
+            }
+            AttesterSlashing::Electra(attester_slashing) => {
+                accessors::slashable_indices(attester_slashing).any(|attester_index| {
+                    let attester = match finalized_state.validators().get(attester_index) {
+                        Ok(attester) => attester,
+                        Err(error) => {
+                            debug!("attester slashing is too recent to discard: {error}");
+                            return true;
+                        }
+                    };
+
+                    predicates::is_slashable_validator(attester, current_epoch)
+                })
+            }
         });
     }
 
@@ -2682,28 +2858,84 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn prepare_attester_slashings_for_proposal(
         &mut self,
         slot_head: &SlotHead<P>,
-    ) -> ContiguousList<AttesterSlashing<P>, P::MaxAttesterSlashings> {
+    ) -> ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
         let _timer = self
             .metrics
             .as_ref()
             .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
 
         let split_index = itertools::partition(&mut self.attester_slashings, |slashing| {
-            unphased::validate_attester_slashing(
-                &slot_head.config,
-                &slot_head.beacon_state,
-                slashing,
-            )
+            match slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &slot_head.config,
+                        &slot_head.beacon_state,
+                        attester_slashing,
+                    )
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &slot_head.config,
+                        &slot_head.beacon_state,
+                        attester_slashing,
+                    )
+                }
+            }
             .is_ok()
         });
 
         let attester_slashings = ContiguousList::try_from_iter(
             self.attester_slashings
-                .drain(0..split_index.min(P::MaxAttesterSlashings::USIZE)),
+                .drain(0..split_index.min(P::MaxAttesterSlashings::USIZE))
+                .filter_map(AttesterSlashing::pre_electra),
         )
         .expect(
             "the call to Vec::drain above limits the \
              iterator to P::MaxAttesterSlashings::USIZE elements",
+        );
+
+        debug!("attester slashings for proposal: {attester_slashings:?}");
+
+        attester_slashings
+    }
+
+    fn prepare_attester_slashings_for_proposal_electra(
+        &mut self,
+        slot_head: &SlotHead<P>,
+    ) -> ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        let _timer = self
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
+
+        let split_index = itertools::partition(&mut self.attester_slashings, |slashing| {
+            match slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &slot_head.config,
+                        &slot_head.beacon_state,
+                        attester_slashing,
+                    )
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &slot_head.config,
+                        &slot_head.beacon_state,
+                        attester_slashing,
+                    )
+                }
+            }
+            .is_ok()
+        });
+
+        let attester_slashings = ContiguousList::try_from_iter(
+            self.attester_slashings
+                .drain(0..split_index.min(P::MaxAttesterSlashingsElectra::USIZE))
+                .filter_map(AttesterSlashing::post_electra),
+        )
+        .expect(
+            "the call to Vec::drain above limits the \
+             iterator to P::MaxAttesterSlashingsElectra::USIZE elements",
         );
 
         debug!("attester slashings for proposal: {attester_slashings:?}");
@@ -2767,25 +2999,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let payload_attributes = match state {
             BeaconState::Phase0(_) | BeaconState::Altair(_) => return Ok(None),
-            BeaconState::Bellatrix(_) => PayloadAttributesV1 {
+            BeaconState::Bellatrix(_) => PayloadAttributes::Bellatrix(PayloadAttributesV1 {
                 timestamp,
                 prev_randao,
                 suggested_fee_recipient,
-            }
-            .into(),
+            }),
             BeaconState::Capella(state) => {
                 let withdrawals = capella::get_expected_withdrawals(state)?
                     .into_iter()
                     .map_into()
                     .pipe(ContiguousList::try_from_iter)?;
 
-                PayloadAttributesV2 {
+                PayloadAttributes::Capella(PayloadAttributesV2 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,
                     withdrawals,
-                }
-                .into()
+                })
             }
             BeaconState::Deneb(state) => {
                 let withdrawals = capella::get_expected_withdrawals(state)?
@@ -2796,14 +3026,32 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 let parent_beacon_block_root =
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
-                PayloadAttributesV3 {
+                PayloadAttributes::Deneb(PayloadAttributesV3 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,
                     withdrawals,
                     parent_beacon_block_root,
-                }
-                .into()
+                })
+            }
+            BeaconState::Electra(state) => {
+                let (withdrawals, _) = electra::get_expected_withdrawals(state)?;
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
+                PayloadAttributes::Electra(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
             }
         };
 
@@ -3252,5 +3500,16 @@ async fn update_beacon_committee_subscriptions(
 
     if let Err(error) = receiver.await {
         warn!("failed to update beacon committee subscriptions: {error:?}");
+    }
+}
+
+fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeIndex {
+    match attestation {
+        Attestation::Phase0(attestation) => attestation.data.index,
+        Attestation::Electra(attestation) => {
+            misc::get_committee_indices::<P>(attestation.committee_bits)
+                .next()
+                .unwrap_or_default()
+        }
     }
 }

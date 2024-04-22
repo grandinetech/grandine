@@ -2,11 +2,11 @@ use anyhow::{ensure, Result};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
-        attestation_epoch, get_current_epoch, get_indexed_attestation, get_randao_mix,
-        initialize_shuffled_indices,
+        attestation_epoch, get_current_epoch, get_randao_mix, initialize_shuffled_indices,
     },
     error::SignatureKind,
     misc::{compute_epoch_at_slot, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
+    phase0::get_indexed_attestation,
     predicates::validate_constructed_indexed_attestation,
     slot_report::{NullSlotReport, SlotReport},
     verifier::{Triple, Verifier},
@@ -28,7 +28,9 @@ use types::{
         primitives::H256,
     },
     preset::Preset,
-    traits::{BeaconState, PostCapellaBeaconBlockBody, PostCapellaBeaconState},
+    traits::{
+        BeaconState, PostCapellaBeaconBlockBody, PostCapellaBeaconState, PreElectraBeaconBlockBody,
+    },
 };
 
 use crate::{
@@ -191,7 +193,7 @@ fn process_execution_payload<P: Preset>(
 pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     state: &mut impl PostCapellaBeaconState<P>,
-    body: &impl PostCapellaBeaconBlockBody<P>,
+    body: &(impl PostCapellaBeaconBlockBody<P> + PreElectraBeaconBlockBody<P>),
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -306,7 +308,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     ensure!(
         target.epoch == compute_epoch_at_slot::<P>(attestation_slot),
         Error::AttestationTargetsWrongEpoch {
-            attestation: attestation.clone(),
+            attestation: attestation.clone().into(),
         },
     );
 
@@ -350,7 +352,7 @@ mod spec_tests {
     use test_generator::test_resources;
     use types::{
         deneb::containers::ExecutionPayload,
-        phase0::containers::{Attestation, Deposit},
+        phase0::containers::{Attestation, AttesterSlashing, Deposit},
         preset::{Mainnet, Minimal},
     };
 
@@ -448,7 +450,7 @@ mod spec_tests {
 
     processing_tests! {
         process_attester_slashing,
-        |config, state, attester_slashing, _| {
+        |config, state, attester_slashing: AttesterSlashing<P>, _| {
             bellatrix::process_attester_slashing(
                 config,
                 state,
@@ -557,7 +559,7 @@ mod spec_tests {
 
     validation_tests! {
         validate_attester_slashing,
-        |config, state, attester_slashing| {
+        |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",

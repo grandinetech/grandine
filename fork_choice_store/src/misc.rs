@@ -11,17 +11,18 @@ use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
-use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{
+        Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     deneb::containers::BlobSidecar,
     nonstandard::{PayloadStatus, ValidationOutcome},
     phase0::{
-        containers::{Attestation, AttestationData, Checkpoint, SignedAggregateAndProof},
+        containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -497,7 +498,7 @@ pub enum BlockAction<P: Preset> {
 pub enum AggregateAndProofAction<P: Preset> {
     Accept {
         aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
-        attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
+        attesting_indices: AttestingIndices<P>,
         is_superset: bool,
     },
     Ignore,
@@ -509,7 +510,7 @@ pub enum AggregateAndProofAction<P: Preset> {
 pub enum AttestationAction<P: Preset> {
     Accept {
         attestation: Arc<Attestation<P>>,
-        attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
+        attesting_indices: AttestingIndices<P>,
     },
     Ignore,
     DelayUntilBlock(Arc<Attestation<P>>, H256),
@@ -539,7 +540,7 @@ pub enum PartialAttestationAction {
 #[derive(Clone)]
 pub struct ValidAttestation<P: Preset> {
     pub data: AttestationData,
-    pub attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
+    pub attesting_indices: AttestingIndices<P>,
     pub is_from_block: bool,
 }
 

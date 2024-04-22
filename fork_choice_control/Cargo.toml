@@ -29,6 +29,7 @@ itertools = { workspace = true }
 log = { workspace = true }
 mime = { workspace = true }
 nonzero_ext = { workspace = true }
+num-traits = { workspace = true }
 num_cpus = { workspace = true }
 panics = { workspace = true }
 parking_lot = { workspace = true }

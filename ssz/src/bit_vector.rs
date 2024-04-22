@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[derive(Educe, Serialize)]
-#[educe(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[educe(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[serde(transparent)]
 pub struct BitVector<N: BitVectorBits> {
     // There's maybe a dozen crates that implement bit arrays, but none of them have what we need.

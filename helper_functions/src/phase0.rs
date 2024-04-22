@@ -1,17 +1,79 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
+use ssz::{BitList, ContiguousList};
+use tap::Pipe as _;
+use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
     nonstandard::SlashingKind,
-    phase0::{beacon_state::BeaconState as Phase0BeaconState, primitives::ValidatorIndex},
+    phase0::{
+        beacon_state::BeaconState as Phase0BeaconState,
+        consts::FAR_FUTURE_EPOCH,
+        containers::{Attestation, AttestationData, IndexedAttestation, Validator},
+        primitives::ValidatorIndex,
+    },
     preset::Preset,
+    traits::BeaconState,
 };
 
 use crate::{
-    accessors::{get_beacon_proposer_index, get_current_epoch},
+    accessors::{beacon_committee, get_beacon_proposer_index, get_current_epoch},
+    error::Error,
     mutators::{balance, decrease_balance, increase_balance, initiate_validator_exit},
     slot_report::SlotReport,
 };
+
+pub fn get_indexed_attestation<P: Preset>(
+    state: &impl BeaconState<P>,
+    attestation: &Attestation<P>,
+) -> Result<IndexedAttestation<P>> {
+    let attesting_indices_iter =
+        get_attesting_indices(state, attestation.data, &attestation.aggregation_bits)?;
+
+    let mut attesting_indices = ContiguousList::try_from_iter(attesting_indices_iter).expect(
+        "Attestation.aggregation_bits and IndexedAttestation.attesting_indices \
+         have the same maximum length",
+    );
+
+    // Sorting a slice is faster than building a `BTreeMap`.
+    attesting_indices.sort_unstable();
+
+    Ok(IndexedAttestation {
+        attesting_indices,
+        data: attestation.data,
+        signature: attestation.signature,
+    })
+}
+
+pub fn get_attesting_indices<'all, P: Preset>(
+    state: &'all impl BeaconState<P>,
+    attestation_data: AttestationData,
+    aggregation_bits: &'all BitList<P::MaxValidatorsPerCommittee>,
+) -> Result<impl Iterator<Item = ValidatorIndex> + 'all> {
+    let committee = beacon_committee(state, attestation_data.slot, attestation_data.index)?;
+
+    ensure!(
+        committee.len() == aggregation_bits.len(),
+        Error::CommitteeLengthMismatch,
+    );
+
+    // `Itertools::zip_eq` is slower than `Iterator::zip` when iterating over packed indices.
+    // That may be due to the internal traits `core::iter::Zip` implements.
+    // `bitvec::slice::BitSlice::iter_ones` with `Iterator::filter_map` is even slower.
+    aggregation_bits
+        .iter()
+        .by_vals()
+        .zip(committee)
+        .filter_map(|(present, validator_index)| present.then_some(validator_index))
+        .pipe(Ok)
+}
+
+// > Check if ``validator`` is eligible to be placed into the activation queue.
+#[must_use]
+pub const fn is_eligible_for_activation_queue<P: Preset>(validator: &Validator) -> bool {
+    validator.activation_eligibility_epoch == FAR_FUTURE_EPOCH
+        && validator.effective_balance == P::MAX_EFFECTIVE_BALANCE
+}
 
 pub fn slash_validator<P: Preset>(
     config: &Config,

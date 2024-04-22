@@ -9,11 +9,12 @@ use operation_pools::PoolAdditionOutcome;
 use types::{
     altair::containers::SignedContributionAndProof,
     combined::{
-        BeaconBlock, BeaconState, ExecutionPayload, SignedBeaconBlock, SignedBlindedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconBlock, BeaconState, ExecutionPayload,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     nonstandard::WithBlobsAndMev,
     phase0::{
-        containers::{Attestation, AttesterSlashing, ProposerSlashing, SignedVoluntaryExit},
+        containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, Slot, H256},
     },
     preset::Preset,

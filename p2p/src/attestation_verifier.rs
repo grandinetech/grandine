@@ -11,24 +11,21 @@ use futures::{
     select, StreamExt,
 };
 use helper_functions::{
-    accessors,
+    accessors, electra,
     error::SignatureKind,
-    predicates,
+    phase0, predicates,
     signing::SignForSingleFork,
     verifier::{MultiVerifier, Triple, Verifier},
 };
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState,
+    combined::{Attestation, BeaconState, SignedAggregateAndProof},
     config::Config,
-    phase0::{
-        containers::{AggregateAndProof, Attestation, SignedAggregateAndProof},
-        primitives::SubnetId,
-    },
+    phase0::primitives::SubnetId,
     preset::Preset,
 };
 
@@ -266,41 +263,30 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
         verifier.reserve(aggregates_wo.len() * 3);
 
         for aggregate_wo in aggregates_wo {
-            let SignedAggregateAndProof {
-                ref message,
-                signature,
-            } = *aggregate_wo.aggregate;
-
-            let AggregateAndProof {
-                aggregator_index,
-                ref aggregate,
-                selection_proof,
-            } = *message;
-
-            let public_key = accessors::public_key(state, aggregator_index)?;
+            let message = aggregate_wo.aggregate.message();
+            let public_key = accessors::public_key(state, message.aggregator_index())?;
 
             verifier.verify_singular(
-                aggregate.data.slot.signing_root(config, state),
-                selection_proof,
+                message.aggregate().data().slot.signing_root(config, state),
+                message.selection_proof(),
                 public_key,
                 SignatureKind::SelectionProof,
             )?;
 
             verifier.verify_singular(
                 message.signing_root(config, state),
-                signature,
+                aggregate_wo.aggregate.signature(),
                 public_key,
                 SignatureKind::AggregateAndProof,
             )?;
         }
 
-        let attestation_triples = attestation_batch_triples(
-            config,
-            aggregates_wo
-                .iter()
-                .map(|aggregate_wo| &aggregate_wo.aggregate.message.aggregate),
-            state,
-        )?;
+        let aggregates = aggregates_wo
+            .iter()
+            .map(|aggregate_wo| aggregate_wo.aggregate.message().aggregate())
+            .collect_vec();
+
+        let attestation_triples = attestation_batch_triples(config, aggregates.iter(), state)?;
 
         verifier.extend(attestation_triples, SignatureKind::Attestation)?;
 
@@ -437,16 +423,36 @@ fn attestation_batch_triples<'a, P: Preset>(
         .into_iter()
         .par_bridge()
         .map(|attestation| {
-            let indexed_attestation = accessors::get_indexed_attestation(state, attestation)?;
+            let triple = match attestation {
+                Attestation::Phase0(attestation) => {
+                    let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
 
-            let mut triple = Triple::default();
+                    let mut triple = Triple::default();
 
-            predicates::validate_constructed_indexed_attestation(
-                config,
-                state,
-                &indexed_attestation,
-                &mut triple,
-            )?;
+                    predicates::validate_constructed_indexed_attestation(
+                        config,
+                        state,
+                        &indexed_attestation,
+                        &mut triple,
+                    )?;
+
+                    triple
+                }
+                Attestation::Electra(attestation) => {
+                    let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    let mut triple = Triple::default();
+
+                    predicates::validate_constructed_indexed_attestation(
+                        config,
+                        state,
+                        &indexed_attestation,
+                        &mut triple,
+                    )?;
+
+                    triple
+                }
+            };
 
             Ok(triple)
         })

@@ -16,10 +16,10 @@ use log::debug;
 use serde::Serialize;
 use tap::Pipe as _;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
     phase0::{
-        containers::{Attestation, Checkpoint},
+        containers::Checkpoint,
         primitives::{
             DepositIndex, Epoch, ExecutionBlockHash, Slot, SubnetId, ValidatorIndex, H256,
         },

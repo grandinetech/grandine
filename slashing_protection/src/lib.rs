@@ -591,7 +591,7 @@ impl SlashingProtector {
             .into_iter()
             .map(|(own_attestation, pubkey)| {
                 let OwnAttestation { attestation, .. } = own_attestation;
-                let data = attestation.data;
+                let data = attestation.data();
                 let proposal = AttestationProposal {
                     source_epoch: data.source.epoch,
                     target_epoch: data.target.epoch,
@@ -996,7 +996,10 @@ mod tests {
     use tempfile::{Builder, TempDir};
     use test_case::test_case;
     use test_generator::test_resources;
-    use types::{phase0::containers::Attestation, preset::Minimal, traits::BeaconState as _};
+    use types::{
+        combined::Attestation, phase0::containers::Attestation as Phase0Attestation,
+        preset::Minimal, traits::BeaconState as _,
+    };
 
     use super::*;
 
@@ -1064,12 +1067,13 @@ mod tests {
     }
 
     fn build_own_attestation<P: Preset>(source: Epoch, target: Epoch) -> OwnAttestation<P> {
-        let mut attestation = Attestation::default();
+        let mut attestation = Phase0Attestation::default();
+
         attestation.data.source.epoch = source;
         attestation.data.target.epoch = target;
 
         OwnAttestation {
-            attestation,
+            attestation: Attestation::from(attestation),
             signature: Signature::default(),
             validator_index: 1,
         }

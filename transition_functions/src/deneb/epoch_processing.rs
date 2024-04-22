@@ -4,9 +4,8 @@ use helper_functions::{
     accessors::{get_current_epoch, get_next_epoch, get_validator_activation_churn_limit},
     misc::{compute_activation_exit_epoch, vec_of_default},
     mutators::initiate_validator_exit,
-    predicates::{
-        is_active_validator, is_eligible_for_activation, is_eligible_for_activation_queue,
-    },
+    phase0::is_eligible_for_activation_queue,
+    predicates::{is_active_validator, is_eligible_for_activation},
 };
 use itertools::Itertools as _;
 use prometheus_metrics::METRICS;
