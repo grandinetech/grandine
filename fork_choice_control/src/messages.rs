@@ -17,10 +17,10 @@ use log::debug;
 use serde::Serialize;
 use tap::Pipe as _;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
     phase0::{
-        containers::{Attestation, Checkpoint, SignedAggregateAndProof},
+        containers::Checkpoint,
         primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -38,6 +38,26 @@ use core::fmt::Debug;
 
 #[cfg(test)]
 use derivative::Derivative;
+
+pub enum AttestationVerifierMessage<P: Preset, W> {
+    AggregateAndProof {
+        wait_group: W,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
+    },
+    Attestation {
+        wait_group: W,
+        attestation: AttestationItem<P, GossipId>,
+    },
+}
+
+impl<P: Preset, W> AttestationVerifierMessage<P, W> {
+    pub fn send(self, tx: &impl UnboundedSink<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to attestation verifier failed because the receiver was dropped");
+        }
+    }
+}
 
 pub enum AttestationVerifierMessage<P: Preset, W> {
     AggregateAndProof {

@@ -8,37 +8,40 @@ use arithmetic::{U64Ext as _, UsizeExt as _};
 use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
 use itertools::{izip, Itertools as _};
-use ssz::{BitVector, ContiguousVector, MerkleElements, MerkleTree, SszHash};
+use ssz::{BitVector, ContiguousVector, MerkleTree, SszHash};
 use tap::{Pipe as _, TryConv as _};
 use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
     cache::PackedIndices,
-    combined::SignedBeaconBlock,
+    combined::{Attestation, SignedBeaconBlock},
     config::Config,
     deneb::{
-        consts::{BlobSidecarSubnetCount, VERSIONED_HASH_VERSION_KZG},
+        consts::{BlobCommitmentTreeDepth, BlobSidecarSubnetCount, VERSIONED_HASH_VERSION_KZG},
         containers::BlobSidecar,
-        primitives::{Blob, BlobIndex, KzgCommitment, KzgProof, VersionedHash},
+        primitives::{
+            Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
+        },
     },
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
             GENESIS_EPOCH, GENESIS_SLOT,
         },
-        containers::{ForkData, SigningData},
+        containers::{ForkData, SigningData, Validator},
         primitives::{
-            CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, NodeId, Slot,
-            SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
+            CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, NodeId,
+            Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{
-        BeaconState, PostAltairBeaconState, PostDenebBeaconBlockBody, SignedBeaconBlock as _,
+        BeaconState, PostAltairBeaconState, PostDenebBeaconBlockBody, PostElectraBeaconBlockBody,
+        SignedBeaconBlock as _,
     },
 };
 
-use crate::{accessors, error::Error};
+use crate::{accessors, error::Error, predicates};
 
 #[must_use]
 pub fn compute_epoch_at_slot<P: Preset>(slot: Slot) -> Epoch {
@@ -297,7 +300,7 @@ pub fn committee_count_from_active_validator_count<P: Preset>(active_validator_c
     active_validator_count
         .div_typenum::<P::SlotsPerEpoch>()
         .div(P::TARGET_COMMITTEE_SIZE)
-        .clamp(1, P::MAX_COMMITTEES_PER_SLOT.get())
+        .clamp(1, P::MaxCommitteesPerSlot::U64)
 }
 
 // <https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/phase0/validator.md#bls_withdrawal_prefix>
@@ -345,19 +348,14 @@ pub fn kzg_commitment_to_versioned_hash(kzg_commitment: KzgCommitment) -> Versio
     versioned_hash
 }
 
-// TODO(feature/deneb): Consider extracting a type alias for the inclusion proof.
-pub fn kzg_commitment_inclusion_proof<P: Preset>(
+pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
     commitment_index: BlobIndex,
-) -> Result<ContiguousVector<H256, P::KzgCommitmentInclusionProofDepth>> {
+) -> Result<BlobCommitmentInclusionProof<P>> {
     let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
-
-    // TODO(feature/deneb): Try to break this up into something more readable.
-    let mut merkle_tree = MerkleTree::<
-        <P::MaxBlobCommitmentsPerBlock as MerkleElements<KzgCommitment>>::UnpackedMerkleTreeDepth,
-    >::default();
+    let mut merkle_tree = MerkleTree::<BlobCommitmentTreeDepth<P>>::default();
 
     let chunks = body
         .blob_kzg_commitments()
@@ -395,10 +393,66 @@ pub fn kzg_commitment_inclusion_proof<P: Preset>(
             hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
         ),
         hashing::hash_256_256(
+            hashing::hash_256_256(body.attester_slashings_root(), body.attestations_root()),
             hashing::hash_256_256(
-                body.attester_slashings().hash_tree_root(),
-                body.attestations().hash_tree_root(),
+                body.deposits().hash_tree_root(),
+                body.voluntary_exits().hash_tree_root(),
             ),
+        ),
+    );
+
+    Ok(proof)
+}
+
+pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
+    body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
+    commitment_index: BlobIndex,
+) -> Result<BlobCommitmentInclusionProof<P>> {
+    let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
+
+    let mut proof = ContiguousVector::default();
+    let mut merkle_tree = MerkleTree::<BlobCommitmentTreeDepth<P>>::default();
+
+    let chunks = body
+        .blob_kzg_commitments()
+        .iter()
+        .map(SszHash::hash_tree_root);
+
+    let commitment_indices = 0..body.blob_kzg_commitments().len();
+    let proof_indices = commitment_index.try_into()?..(commitment_index + 1).try_into()?;
+
+    let subproof = merkle_tree
+        .extend_and_construct_proofs(chunks, commitment_indices, proof_indices)
+        .exactly_one()
+        .ok()
+        .expect("exactly one proof is requested");
+
+    // The first 13 or 5 nodes are computed from other elements of `body.blob_kzg_commitments`.
+    proof[..depth - 4].copy_from_slice(subproof.as_slice());
+
+    // The last 4 nodes are computed from other fields of `body`.
+    proof[depth - 4] = body.bls_to_execution_changes().hash_tree_root();
+
+    proof[depth - 3] = hashing::hash_256_256(
+        body.sync_aggregate().hash_tree_root(),
+        body.execution_payload().hash_tree_root(),
+    );
+
+    proof[depth - 2] = hashing::hash_256_256(
+        hashing::hash_256_256(body.consolidations().hash_tree_root(), ZERO_HASHES[0]),
+        ZERO_HASHES[1],
+    );
+
+    proof[depth - 1] = hashing::hash_256_256(
+        hashing::hash_256_256(
+            hashing::hash_256_256(
+                body.randao_reveal().hash_tree_root(),
+                body.eth1_data().hash_tree_root(),
+            ),
+            hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
+        ),
+        hashing::hash_256_256(
+            hashing::hash_256_256(body.attester_slashings_root(), body.attestations_root()),
             hashing::hash_256_256(
                 body.deposits().hash_tree_root(),
                 body.voluntary_exits().hash_tree_root(),
@@ -422,32 +476,63 @@ pub fn blob_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> 
 }
 
 pub fn construct_blob_sidecars<P: Preset>(
-    signed_block: &SignedBeaconBlock<P>,
-    blobs: impl Iterator<Item = Blob<P>>,
-    proofs: impl Iterator<Item = KzgProof>,
+    block: &SignedBeaconBlock<P>,
+    blobs: impl IntoIterator<Item = Blob<P>>,
+    proofs: impl IntoIterator<Item = KzgProof>,
 ) -> Result<Vec<BlobSidecar<P>>> {
-    if let Some(post_deneb_block_body) = signed_block.message().body().post_deneb() {
-        let commitments = post_deneb_block_body.blob_kzg_commitments();
-        let signed_block_header = signed_block.to_header();
+    let Some(body) = block.message().body().post_deneb() else {
+        return Ok(vec![]);
+    };
 
-        return izip!(0.., blobs, proofs, commitments)
-            .map(|(index, blob, kzg_proof, kzg_commitment)| {
-                Ok(BlobSidecar::<P> {
-                    index,
-                    blob,
-                    kzg_commitment: *kzg_commitment,
-                    kzg_proof,
-                    signed_block_header,
-                    kzg_commitment_inclusion_proof: kzg_commitment_inclusion_proof(
-                        post_deneb_block_body,
-                        index,
-                    )?,
-                })
+    let commitments = body.blob_kzg_commitments().into_iter().copied();
+    let signed_block_header = block.to_header();
+
+    izip!(0.., blobs, proofs, commitments)
+        .map(|(index, blob, kzg_proof, kzg_commitment)| {
+            let kzg_commitment_inclusion_proof = match block.message().body().post_electra() {
+                Some(body) => electra_kzg_commitment_inclusion_proof(body, index)?,
+                None => deneb_kzg_commitment_inclusion_proof(body, index)?,
+            };
+
+            Ok(BlobSidecar {
+                index,
+                blob,
+                kzg_commitment,
+                kzg_proof,
+                signed_block_header,
+                kzg_commitment_inclusion_proof,
             })
-            .collect();
-    }
+        })
+        .collect()
+}
 
-    Ok(vec![])
+#[must_use]
+pub fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeIndex {
+    match attestation {
+        Attestation::Phase0(attestation) => attestation.data.index,
+        Attestation::Electra(attestation) => get_committee_indices::<P>(attestation.committee_bits)
+            .next()
+            .unwrap_or_default(),
+    }
+}
+
+pub fn get_committee_indices<P: Preset>(
+    committee_bits: BitVector<P::MaxCommitteesPerSlot>,
+) -> impl Iterator<Item = CommitteeIndex> {
+    committee_bits
+        .into_iter()
+        .zip(0..)
+        .filter_map(|(present, committee_index)| present.then_some(committee_index))
+}
+
+// > Get max effective balance for ``validator``.
+#[must_use]
+pub fn get_validator_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
+    if predicates::has_compounding_withdrawal_credential(validator) {
+        P::MAX_EFFECTIVE_BALANCE_ELECTRA
+    } else {
+        P::MIN_ACTIVATION_BALANCE
+    }
 }
 
 #[cfg(test)]

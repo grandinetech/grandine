@@ -14,7 +14,7 @@ use good_lp::{
 };
 use helper_functions::{
     accessors::{self, get_base_reward, get_base_reward_per_increment},
-    misc,
+    misc, phase0,
 };
 use itertools::Itertools as _;
 use rayon::iter::{
@@ -714,11 +714,8 @@ impl<P: Preset> AttestationPacker<P> {
         &'a self,
         attestation: &'a Attestation<P>,
     ) -> Result<impl Iterator<Item = ValidatorIndex> + 'a> {
-        accessors::get_attesting_indices(
-            &self.state,
-            attestation.data,
-            &attestation.aggregation_bits,
-        )
+        // TODO(feature/electra): use electra::get_attesting_indices for electra attestations
+        phase0::get_attesting_indices(&self.state, attestation.data, &attestation.aggregation_bits)
     }
 }
 
@@ -762,8 +759,9 @@ fn translate_participation<'attestations, P: Preset>(
             ..
         } = *attestation;
 
+        // TODO(feature/electra): use electra::get_attesting_indices for electra attestations
         let attesting_indices =
-            accessors::get_attesting_indices(state, data, aggregation_bits)?.collect_vec();
+            phase0::get_attesting_indices(state, data, aggregation_bits)?.collect_vec();
 
         // > Translate attestation inclusion info to flag indices
         let participation_flags =

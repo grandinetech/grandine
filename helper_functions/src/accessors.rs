@@ -6,6 +6,7 @@ use core::{
 use std::sync::Arc;
 
 use anyhow::{bail, ensure, Result};
+use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::{AggregatePublicKey, CachedPublicKey, PublicKeyBytes};
 use im::HashMap;
@@ -13,7 +14,7 @@ use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;
 use prometheus_metrics::METRICS;
 use rc_box::ArcBox;
-use ssz::{BitList, ContiguousList, ContiguousVector, FitsInU64, Hc, SszHash as _};
+use ssz::{ContiguousVector, FitsInU64, Hc, SszHash as _};
 use std_ext::CopyExt as _;
 use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
@@ -32,13 +33,16 @@ use types::{
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER, GENESIS_EPOCH},
-        containers::{Attestation, AttestationData, AttesterSlashing, IndexedAttestation},
+        containers::AttestationData,
         primitives::{
             CommitteeIndex, DomainType, Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H256,
         },
     },
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
-    traits::{BeaconState, PostAltairBeaconState},
+    traits::{
+        Attestation, AttesterSlashing, BeaconState, IndexedAttestation as _, PostAltairBeaconState,
+        PostElectraBeaconState,
+    },
 };
 
 use crate::{error::Error, misc, predicates};
@@ -337,7 +341,8 @@ pub fn active_validator_count_usize<P: Preset>(
     active_validator_indices_ordered(state, relative_epoch).len()
 }
 
-fn active_validator_count_u64<P: Preset>(
+#[must_use]
+pub fn active_validator_count_u64<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
 ) -> u64
@@ -509,51 +514,6 @@ pub fn get_domain<P: Preset>(
         Some(fork_version),
         Some(state.genesis_validators_root()),
     )
-}
-
-pub fn get_indexed_attestation<P: Preset>(
-    state: &impl BeaconState<P>,
-    attestation: &Attestation<P>,
-) -> Result<IndexedAttestation<P>> {
-    let attesting_indices_iter =
-        get_attesting_indices(state, attestation.data, &attestation.aggregation_bits)?;
-
-    let mut attesting_indices = ContiguousList::try_from_iter(attesting_indices_iter).expect(
-        "Attestation.aggregation_bits and IndexedAttestation.attesting_indices \
-         have the same maximum length",
-    );
-
-    // Sorting a slice is faster than building a `BTreeMap`.
-    attesting_indices.sort_unstable();
-
-    Ok(IndexedAttestation {
-        attesting_indices,
-        data: attestation.data,
-        signature: attestation.signature,
-    })
-}
-
-pub fn get_attesting_indices<'all, P: Preset>(
-    state: &'all impl BeaconState<P>,
-    attestation_data: AttestationData,
-    aggregation_bits: &'all BitList<P::MaxValidatorsPerCommittee>,
-) -> Result<impl Iterator<Item = ValidatorIndex> + 'all> {
-    let committee = beacon_committee(state, attestation_data.slot, attestation_data.index)?;
-
-    ensure!(
-        committee.len() == aggregation_bits.len(),
-        Error::CommitteeLengthMismatch,
-    );
-
-    // `Itertools::zip_eq` is slower than `Iterator::zip` when iterating over packed indices.
-    // That may be due to the internal traits `core::iter::Zip` implements.
-    // `bitvec::slice::BitSlice::iter_ones` with `Iterator::filter_map` is even slower.
-    aggregation_bits
-        .iter()
-        .by_vals()
-        .zip(committee)
-        .filter_map(|(present, validator_index)| present.then_some(validator_index))
-        .pipe(Ok)
 }
 
 pub fn total_active_balance<P: Preset>(state: &impl BeaconState<P>) -> Gwei {
@@ -750,20 +710,11 @@ pub fn get_sync_subcommittee_pubkeys<P: Preset>(
     Ok(&sync_committee.pubkeys[offset..offset + size])
 }
 
-pub fn slashable_indices(
-    attester_slashing: &AttesterSlashing<impl Preset>,
+pub fn slashable_indices<P: Preset>(
+    attester_slashing: &impl AttesterSlashing<P>,
 ) -> impl Iterator<Item = ValidatorIndex> + '_ {
-    let attesting_indices_1 = attester_slashing
-        .attestation_1
-        .attesting_indices
-        .iter()
-        .copied();
-
-    let attesting_indices_2 = attester_slashing
-        .attestation_2
-        .attesting_indices
-        .iter()
-        .copied();
+    let attesting_indices_1 = attester_slashing.attestation_1().attesting_indices();
+    let attesting_indices_2 = attester_slashing.attestation_2().attesting_indices();
 
     attesting_indices_1
         .merge_join_by(attesting_indices_2, Ord::cmp)
@@ -796,7 +747,7 @@ pub fn combined_participation<P: Preset>(
 /// them unable to do any other work.
 pub fn initialize_shuffled_indices<'attestations, P: Preset>(
     state: &impl BeaconState<P>,
-    attestations: impl IntoIterator<Item = &'attestations Attestation<P>>,
+    attestations: impl IntoIterator<Item = &'attestations (impl Attestation<P> + 'attestations)>,
 ) -> Result<()> {
     let shuffled = &state.cache().active_validator_indices_shuffled;
     let have_previous = shuffled[RelativeEpoch::Previous].get().is_some();
@@ -810,7 +761,7 @@ pub fn initialize_shuffled_indices<'attestations, P: Preset>(
     let mut need_current = false;
 
     for attestation in attestations {
-        match attestation_epoch(state, attestation.data.target.epoch)? {
+        match attestation_epoch(state, attestation.data().target.epoch)? {
             AttestationEpoch::Previous => need_previous = true,
             AttestationEpoch::Current => need_current = true,
         }
@@ -836,6 +787,64 @@ pub fn initialize_shuffled_indices<'attestations, P: Preset>(
     }
 
     Ok(())
+}
+
+/// [`get_balance_churn_limit`](https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.0/specs/electra/beacon-chain.md#new-get_balance_churn_limit)
+///
+/// > Return the churn limit for the current epoch.
+#[must_use]
+pub fn get_balance_churn_limit<P: Preset>(config: &Config, state: &impl BeaconState<P>) -> Gwei {
+    let churn = total_active_balance(state)
+        .div(config.churn_limit_quotient)
+        .max(config.min_per_epoch_churn_limit_electra);
+
+    churn.prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
+}
+
+/// [`get_activation_exit_churn_limit`](https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.0/specs/electra/beacon-chain.md#new-get_activation_exit_churn_limit)
+///
+/// > Return the churn limit for the current epoch dedicated to activations and exits.
+#[must_use]
+pub fn get_activation_exit_churn_limit<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+) -> Gwei {
+    get_balance_churn_limit(config, state).min(config.max_per_epoch_activation_exit_churn_limit)
+}
+
+#[must_use]
+pub fn get_consolidation_churn_limit<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+) -> Gwei {
+    get_balance_churn_limit(config, state) - get_activation_exit_churn_limit(config, state)
+}
+
+pub fn get_active_balance<P: Preset>(
+    state: &impl BeaconState<P>,
+    validator_index: ValidatorIndex,
+) -> Result<Gwei> {
+    let max_effective_balance =
+        misc::get_validator_max_effective_balance::<P>(state.validators().get(validator_index)?);
+
+    core::cmp::min(
+        state.balances().get(validator_index).copied()?,
+        max_effective_balance,
+    )
+    .pipe(Ok)
+}
+
+#[must_use]
+pub fn get_pending_balance_to_withdraw<P: Preset>(
+    state: &impl PostElectraBeaconState<P>,
+    validator_index: ValidatorIndex,
+) -> Gwei {
+    state
+        .pending_partial_withdrawals()
+        .into_iter()
+        .filter(|withdrawal| withdrawal.index == validator_index)
+        .map(|withdrawal| withdrawal.amount)
+        .sum()
 }
 
 #[cfg(test)]

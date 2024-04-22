@@ -2,12 +2,13 @@ use anyhow::{ensure, Result};
 use bls::CachedPublicKey;
 use helper_functions::{
     accessors::{
-        attestation_epoch, get_beacon_proposer_index, get_current_epoch, get_indexed_attestation,
-        get_randao_mix, index_of_public_key, slashable_indices,
+        attestation_epoch, get_beacon_proposer_index, get_current_epoch, get_randao_mix,
+        index_of_public_key, slashable_indices,
     },
     error::SignatureKind,
     misc::compute_epoch_at_slot,
     mutators::initiate_validator_exit,
+    phase0::get_indexed_attestation,
     predicates::{
         is_active_validator, is_slashable_attestation_data, is_slashable_validator,
         is_valid_merkle_branch, validate_constructed_indexed_attestation,
@@ -26,13 +27,15 @@ use types::{
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
-            Attestation, AttestationData, AttesterSlashing, BeaconBlockHeader, Deposit,
-            DepositData, DepositMessage, ProposerSlashing, SignedVoluntaryExit,
+            Attestation, AttestationData, BeaconBlockHeader, Deposit, DepositData, DepositMessage,
+            ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{DepositIndex, ValidatorIndex, H256},
     },
     preset::{Preset, SlotsPerEth1VotingPeriod},
-    traits::{BeaconBlock, BeaconBlockBody, BeaconState},
+    traits::{
+        AttesterSlashing, BeaconBlock, BeaconBlockBody, BeaconState, IndexedAttestation as _,
+    },
 };
 
 use crate::unphased::Error;
@@ -45,6 +48,7 @@ pub enum CombinedDeposit {
     },
     TopUp {
         validator_index: ValidatorIndex,
+        withdrawal_credentials: Vec<H256>,
         amounts: GweiVec,
     },
 }
@@ -252,7 +256,7 @@ pub fn validate_proposer_slashing_with_verifier<P: Preset>(
 pub fn validate_attester_slashing<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-    attester_slashing: &AttesterSlashing<P>,
+    attester_slashing: &impl AttesterSlashing<P>,
 ) -> Result<Vec<ValidatorIndex>> {
     validate_attester_slashing_with_verifier(config, state, attester_slashing, SingleVerifier)
 }
@@ -260,14 +264,14 @@ pub fn validate_attester_slashing<P: Preset>(
 pub fn validate_attester_slashing_with_verifier<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-    attester_slashing: &AttesterSlashing<P>,
+    attester_slashing: &impl AttesterSlashing<P>,
     mut verifier: impl Verifier,
 ) -> Result<Vec<ValidatorIndex>> {
-    let attestation_1 = &attester_slashing.attestation_1;
-    let attestation_2 = &attester_slashing.attestation_2;
+    let attestation_1 = attester_slashing.attestation_1();
+    let attestation_2 = attester_slashing.attestation_2();
 
-    let data_1 = attestation_1.data;
-    let data_2 = attestation_2.data;
+    let data_1 = attestation_1.data();
+    let data_2 = attestation_2.data();
 
     ensure!(
         is_slashable_attestation_data(data_1, data_2),
@@ -330,7 +334,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     ensure!(
         target.epoch == compute_epoch_at_slot::<P>(attestation_slot),
         Error::AttestationTargetsWrongEpoch {
-            attestation: attestation.clone(),
+            attestation: attestation.clone().into(),
         },
     );
 
@@ -369,6 +373,23 @@ pub fn validate_deposits<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     deposits: impl IntoIterator<Item = Deposit>,
+) -> Result<impl Iterator<Item = CombinedDeposit>> {
+    validate_deposits_internal(config, state, deposits, true)
+}
+
+pub fn validate_deposits_without_verifying_merkle_branch<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    deposits: impl IntoIterator<Item = Deposit>,
+) -> Result<impl Iterator<Item = CombinedDeposit>> {
+    validate_deposits_internal(config, state, deposits, false)
+}
+
+fn validate_deposits_internal<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    deposits: impl IntoIterator<Item = Deposit>,
+    verify_merkle_branch: bool,
 ) -> Result<impl Iterator<Item = CombinedDeposit>> {
     let deposits_by_pubkey = (0..)
         .zip(deposits)
@@ -415,25 +436,28 @@ pub fn validate_deposits<P: Preset>(
     let mut combined_deposits = deposits_by_pubkey
         .into_par_iter()
         .map(|(existing_validator_index, cached_public_key, deposits)| {
-            for (position, deposit) in deposits.iter().copied() {
-                // > Verify the Merkle branch
-                verify_deposit_merkle_branch(
-                    state,
-                    state.eth1_deposit_index() + position,
-                    deposit,
-                )?;
+            if verify_merkle_branch {
+                for (position, deposit) in deposits.iter().copied() {
+                    // > Verify the Merkle branch
+                    verify_deposit_merkle_branch(
+                        state,
+                        state.eth1_deposit_index() + position,
+                        deposit,
+                    )?;
+                }
             }
 
             let (first_position, _) = deposits[0];
 
             if let Some(validator_index) = existing_validator_index {
-                let amounts = deposits
+                let (amounts, withdrawal_credentials) = deposits
                     .into_iter()
-                    .map(|(_, deposit)| deposit.data.amount)
-                    .collect();
+                    .map(|(_, deposit)| (deposit.data.amount, deposit.data.withdrawal_credentials))
+                    .unzip();
 
                 let combined_deposit = CombinedDeposit::TopUp {
                     validator_index,
+                    withdrawal_credentials,
                     amounts,
                 };
 
@@ -527,7 +551,7 @@ pub fn validate_voluntary_exit<P: Preset>(
     validate_voluntary_exit_with_verifier(config, state, signed_voluntary_exit, SingleVerifier)
 }
 
-fn validate_voluntary_exit_with_verifier<P: Preset>(
+pub fn validate_voluntary_exit_with_verifier<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     signed_voluntary_exit: SignedVoluntaryExit,

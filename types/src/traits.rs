@@ -12,7 +12,7 @@
 use core::fmt::Debug;
 use std::sync::Arc;
 
-use bls::SignatureBytes;
+use bls::{AggregateSignatureBytes, SignatureBytes};
 use duplicate::duplicate_item;
 use ssz::{BitVector, ContiguousList, Hc, SszHash};
 use std_ext::{ArcExt as _, DefaultExt as _};
@@ -51,9 +51,11 @@ use crate::{
     },
     collections::{
         Balances, EpochParticipation, Eth1DataVotes, HistoricalRoots, InactivityScores,
-        RandaoMixes, RecentRoots, Slashings, Validators,
+        PendingBalanceDeposits, PendingConsolidations, PendingPartialWithdrawals, RandaoMixes,
+        RecentRoots, Slashings, Validators,
     },
     combined::{
+        Attestation as CombinedAtteststation, AttesterSlashing as CombinedAttesterSlashing,
         BeaconBlock as CombinedBeaconBlock, BeaconState as CombinedBeaconState,
         BlindedBeaconBlock as CombinedBlindedBeaconBlock,
         ExecutionPayloadHeader as CombinedExecutionPayloadHeader,
@@ -71,16 +73,32 @@ use crate::{
         },
         primitives::KzgCommitment,
     },
+    electra::{
+        beacon_state::BeaconState as ElectraBeaconState,
+        containers::{
+            Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
+            BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
+            BlindedBeaconBlock as ElectraBlindedBeaconBlock,
+            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, DepositReceipt,
+            ExecutionLayerWithdrawalRequest, ExecutionPayload as ElectraExecutionPayload,
+            ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
+            IndexedAttestation as ElectraIndexedAttestation, SignedConsolidation,
+        },
+    },
     nonstandard::Phase,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::JustificationBitsLength,
         containers::{
-            Attestation, AttesterSlashing, BeaconBlock as Phase0BeaconBlock,
+            Attestation as Phase0Attestation, AttestationData,
+            AttesterSlashing as Phase0AttesterSlashing, BeaconBlock as Phase0BeaconBlock,
             BeaconBlockBody as Phase0BeaconBlockBody, BeaconBlockHeader, Checkpoint, Deposit,
-            Eth1Data, Fork, ProposerSlashing, SignedVoluntaryExit,
+            Eth1Data, Fork, IndexedAttestation as Phase0IndexedAttestation, ProposerSlashing,
+            SignedVoluntaryExit,
         },
-        primitives::{DepositIndex, ExecutionBlockHash, Slot, UnixSeconds, ValidatorIndex, H256},
+        primitives::{
+            DepositIndex, Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, ValidatorIndex, H256,
+        },
     },
     preset::Preset,
 };
@@ -212,6 +230,15 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [true];
 
     [P: Preset]
+    [ElectraBeaconState<P>]
+    [self.field]
+    [&self.field]
+    [&mut self.field]
+    [(&mut self.validators, &self.balances)]
+    [(&mut self.balances, &self.slashings)]
+    [true];
+
+    [P: Preset]
     [CombinedBeaconState<P>]
     [
         match self {
@@ -220,6 +247,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
             Self::Bellatrix(state) => state.field,
             Self::Capella(state) => state.field,
             Self::Deneb(state) => state.field,
+            Self::Electra(state) => state.field,
         }
     ]
     [
@@ -229,6 +257,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
             Self::Bellatrix(state) => &state.field,
             Self::Capella(state) => &state.field,
             Self::Deneb(state) => &state.field,
+            Self::Electra(state) => &state.field,
         }
     ]
     [
@@ -238,6 +267,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
             Self::Bellatrix(state) => &mut state.field,
             Self::Capella(state) => &mut state.field,
             Self::Deneb(state) => &mut state.field,
+            Self::Electra(state) => &mut state.field,
         }
     ]
     [
@@ -247,6 +277,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
             Self::Bellatrix(state) => state.validators_mut_with_balances(),
             Self::Capella(state) => state.validators_mut_with_balances(),
             Self::Deneb(state) => state.validators_mut_with_balances(),
+            Self::Electra(state) => state.validators_mut_with_balances(),
         }
     ]
     [
@@ -256,6 +287,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
             Self::Bellatrix(state) => state.balances_mut_with_slashings(),
             Self::Capella(state) => state.balances_mut_with_slashings(),
             Self::Deneb(state) => state.balances_mut_with_slashings(),
+            Self::Electra(state) => state.balances_mut_with_slashings(),
         }
     ]
     [
@@ -379,6 +411,11 @@ pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
     [DenebBeaconState<P>]
     [&self.field]
     [&mut self.field];
+
+    [P: Preset]
+    [ElectraBeaconState<P>]
+    [&self.field]
+    [&mut self.field];
 )]
 impl<parameters> PostAltairBeaconState<P> for implementor {
     #[duplicate_item(
@@ -450,6 +487,16 @@ impl<P: Preset> PostBellatrixBeaconState<P> for DenebBeaconState<P> {
     }
 }
 
+impl<P: Preset> PostBellatrixBeaconState<P> for ElectraBeaconState<P> {
+    fn latest_execution_payload_header(&self) -> &dyn ExecutionPayload<P> {
+        &self.latest_execution_payload_header
+    }
+
+    fn latest_execution_payload_header_mut(&mut self) -> &mut dyn ExecutionPayload<P> {
+        &mut self.latest_execution_payload_header
+    }
+}
+
 pub trait PostCapellaBeaconState<P: Preset>: PostBellatrixBeaconState<P> {
     fn next_withdrawal_index(&self) -> WithdrawalIndex;
     fn next_withdrawal_index_mut(&mut self) -> &mut WithdrawalIndex;
@@ -512,6 +559,106 @@ impl<P: Preset> PostCapellaBeaconState<P> for DenebBeaconState<P> {
     }
 }
 
+impl<P: Preset> PostCapellaBeaconState<P> for ElectraBeaconState<P> {
+    fn next_withdrawal_index(&self) -> WithdrawalIndex {
+        self.next_withdrawal_index
+    }
+
+    fn next_withdrawal_index_mut(&mut self) -> &mut WithdrawalIndex {
+        &mut self.next_withdrawal_index
+    }
+
+    fn next_withdrawal_validator_index(&self) -> ValidatorIndex {
+        self.next_withdrawal_validator_index
+    }
+
+    fn next_withdrawal_validator_index_mut(&mut self) -> &mut ValidatorIndex {
+        &mut self.next_withdrawal_validator_index
+    }
+}
+
+pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
+    fn deposit_receipts_start_index(&self) -> u64;
+    fn deposit_balance_to_consume(&self) -> Gwei;
+    fn exit_balance_to_consume(&self) -> Gwei;
+    fn earliest_exit_epoch(&self) -> Epoch;
+    fn consolidation_balance_to_consume(&self) -> Gwei;
+    fn earliest_consolidation_epoch(&self) -> Epoch;
+    fn pending_balance_deposits(&self) -> &PendingBalanceDeposits<P>;
+    fn pending_partial_withdrawals(&self) -> &PendingPartialWithdrawals<P>;
+    fn pending_consolidations(&self) -> &PendingConsolidations<P>;
+
+    fn deposit_receipts_start_index_mut(&mut self) -> &mut u64;
+    fn deposit_balance_to_consume_mut(&mut self) -> &mut Gwei;
+    fn exit_balance_to_consume_mut(&mut self) -> &mut Gwei;
+    fn earliest_exit_epoch_mut(&mut self) -> &mut Epoch;
+    fn consolidation_balance_to_consume_mut(&mut self) -> &mut Gwei;
+    fn earliest_consolidation_epoch_mut(&mut self) -> &mut Epoch;
+    fn pending_balance_deposits_mut(&mut self) -> &mut PendingBalanceDeposits<P>;
+    fn pending_partial_withdrawals_mut(&mut self) -> &mut PendingPartialWithdrawals<P>;
+    fn pending_consolidations_mut(&mut self) -> &mut PendingConsolidations<P>;
+}
+
+#[duplicate_item(
+    parameters
+    implementor
+    get_copy(field)
+    get_ref(field)
+    get_ref_mut(field, method);
+
+    [P: Preset, S: PostElectraBeaconState<P>]
+    [Hc<S>]
+    [self.as_ref().field()]
+    [self.as_ref().field()]
+    [self.as_mut().method()];
+
+    [P: Preset]
+    [ElectraBeaconState<P>]
+    [self.field]
+    [&self.field]
+    [&mut self.field];
+)]
+impl<parameters> PostElectraBeaconState<P> for implementor {
+    #[duplicate_item(
+        field                           return_type;
+        [deposit_receipts_start_index]     [u64];
+        [deposit_balance_to_consume]       [Gwei];
+        [exit_balance_to_consume]          [Gwei];
+        [earliest_exit_epoch]              [Epoch];
+        [consolidation_balance_to_consume] [Gwei];
+        [earliest_consolidation_epoch]     [Epoch];
+    )]
+    fn field(&self) -> return_type {
+        get_copy([field])
+    }
+
+    #[duplicate_item(
+        field              return_type;
+        [pending_balance_deposits]    [PendingBalanceDeposits<P>];
+        [pending_partial_withdrawals] [PendingPartialWithdrawals<P>];
+        [pending_consolidations]      [PendingConsolidations<P>];
+    )]
+    fn field(&self) -> &return_type {
+        get_ref([field])
+    }
+
+    #[duplicate_item(
+        field                              method                                 return_type;
+        [deposit_receipts_start_index]     [deposit_receipts_start_index_mut]     [u64];
+        [deposit_balance_to_consume]       [deposit_balance_to_consume_mut]       [Gwei];
+        [exit_balance_to_consume]          [exit_balance_to_consume_mut]          [Gwei];
+        [earliest_exit_epoch]              [earliest_exit_epoch_mut]              [Epoch];
+        [consolidation_balance_to_consume] [consolidation_balance_to_consume_mut] [Gwei];
+        [earliest_consolidation_epoch]     [earliest_consolidation_epoch_mut]     [Epoch];
+        [pending_balance_deposits]         [pending_balance_deposits_mut]         [PendingBalanceDeposits<P>];
+        [pending_partial_withdrawals]      [pending_partial_withdrawals_mut]      [PendingPartialWithdrawals<P>];
+        [pending_consolidations]           [pending_consolidations_mut]           [PendingConsolidations<P>];
+    )]
+    fn method(&mut self) -> &mut return_type {
+        get_ref_mut([field], [method])
+    }
+}
+
 pub trait SignedBeaconBlock<P: Preset>: Debug + Send + Sync {
     type Message: BeaconBlock<P> + ?Sized;
 
@@ -541,6 +688,7 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBeaconBlock<P> {
             Self::Bellatrix(block) => &block.message,
             Self::Capella(block) => &block.message,
             Self::Deneb(block) => &block.message,
+            Self::Electra(block) => &block.message,
         }
     }
 
@@ -551,6 +699,7 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBeaconBlock<P> {
             Self::Bellatrix(block) => block.signature,
             Self::Capella(block) => block.signature,
             Self::Deneb(block) => block.signature,
+            Self::Electra(block) => block.signature,
         }
     }
 }
@@ -563,6 +712,7 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBlindedBeaconBlock<P> {
             Self::Bellatrix(block) => &block.message,
             Self::Capella(block) => &block.message,
             Self::Deneb(block) => &block.message,
+            Self::Electra(block) => &block.message,
         }
     }
 
@@ -571,6 +721,7 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBlindedBeaconBlock<P> {
             Self::Bellatrix(block) => block.signature,
             Self::Capella(block) => block.signature,
             Self::Deneb(block) => block.signature,
+            Self::Electra(block) => block.signature,
         }
     }
 }
@@ -601,10 +752,12 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
     [BellatrixBeaconBlock<P>]        [self.field]    [&self.field];
     [CapellaBeaconBlock<P>]          [self.field]    [&self.field];
     [DenebBeaconBlock<P>]            [self.field]    [&self.field];
+    [ElectraBeaconBlock<P>]          [self.field]    [&self.field];
 
     [BellatrixBlindedBeaconBlock<P>] [self.field]    [&self.field];
     [CapellaBlindedBeaconBlock<P>]   [self.field]    [&self.field];
     [DenebBlindedBeaconBlock<P>]     [self.field]    [&self.field];
+    [ElectraBlindedBeaconBlock<P>]   [self.field]    [&self.field];
 
     [CombinedBeaconBlock<P>]
     [
@@ -614,6 +767,7 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
             Self::Bellatrix(block) => block.field,
             Self::Capella(block) => block.field,
             Self::Deneb(block) => block.field,
+            Self::Electra(block) => block.field,
         }
     ]
     [
@@ -623,6 +777,7 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
             Self::Bellatrix(block) => &block.field,
             Self::Capella(block) => &block.field,
             Self::Deneb(block) => &block.field,
+            Self::Electra(block) => &block.field,
         }
     ];
 
@@ -632,6 +787,7 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
             Self::Bellatrix(block) => block.field,
             Self::Capella(block) => block.field,
             Self::Deneb(block) => block.field,
+            Self::Electra(block) => block.field,
         }
     ]
     [
@@ -639,6 +795,7 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
             Self::Bellatrix(block) => &block.field,
             Self::Capella(block) => &block.field,
             Self::Deneb(block) => &block.field,
+            Self::Electra(block) => &block.field,
         }
     ];
 )]
@@ -669,30 +826,44 @@ pub trait BeaconBlockBody<P: Preset>: SszHash<PackingFactor = U1> {
     fn eth1_data(&self) -> Eth1Data;
     fn graffiti(&self) -> H256;
     fn proposer_slashings(&self) -> &ContiguousList<ProposerSlashing, P::MaxProposerSlashings>;
-    fn attester_slashings(&self) -> &ContiguousList<AttesterSlashing<P>, P::MaxAttesterSlashings>;
-    fn attestations(&self) -> &ContiguousList<Attestation<P>, P::MaxAttestations>;
     fn deposits(&self) -> &ContiguousList<Deposit, P::MaxDeposits>;
     fn voluntary_exits(&self) -> &ContiguousList<SignedVoluntaryExit, P::MaxVoluntaryExits>;
+
+    fn attester_slashings_len(&self) -> usize;
+    fn attester_slashings_root(&self) -> H256;
+    fn attestations_len(&self) -> usize;
+    fn attestations_root(&self) -> H256;
+
+    fn pre_electra(&self) -> Option<&dyn PreElectraBeaconBlockBody<P>>;
 
     fn post_altair(&self) -> Option<&dyn PostAltairBeaconBlockBody<P>>;
     fn post_bellatrix(&self) -> Option<&dyn PostBellatrixBeaconBlockBody<P>>;
     fn post_deneb(&self) -> Option<&dyn PostDenebBeaconBlockBody<P>>;
+    fn post_electra(&self) -> Option<&dyn PostElectraBeaconBlockBody<P>>;
+
+    fn combined_attester_slashings(
+        &self,
+    ) -> Box<dyn Iterator<Item = CombinedAttesterSlashing<P>> + '_>;
+
+    fn combined_attestations(&self) -> Box<dyn Iterator<Item = CombinedAtteststation<P>> + '_>;
 }
 
 #[duplicate_item(
-    implementor                          post_altair_body post_bellatrix_body post_deneb_body;
+    implementor                          pre_electra_body post_altair_body post_bellatrix_body post_deneb_body post_electra_body;
 
-    [Phase0BeaconBlockBody<P>]           [None]           [None]              [None];
-    [AltairBeaconBlockBody<P>]           [Some(self)]     [None]              [None];
-    [BellatrixBeaconBlockBody<P>]        [Some(self)]     [Some(self)]        [None];
-    [CapellaBeaconBlockBody<P>]          [Some(self)]     [Some(self)]        [None];
-    [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]        [Some(self)];
+    [Phase0BeaconBlockBody<P>]           [Some(self)]     [None]           [None]              [None]          [None];
+    [AltairBeaconBlockBody<P>]           [Some(self)]     [Some(self)]     [None]              [None]          [None];
+    [BellatrixBeaconBlockBody<P>]        [Some(self)]     [Some(self)]     [Some(self)]        [None]          [None];
+    [CapellaBeaconBlockBody<P>]          [Some(self)]     [Some(self)]     [Some(self)]        [None]          [None];
+    [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]     [Some(self)]        [Some(self)]    [None];
+    [ElectraBeaconBlockBody<P>]          [None]           [Some(self)]     [Some(self)]        [Some(self)]    [Some(self)];
 
     // `BlindedBeaconBlockBody` does not implement `PostBellatrixBeaconBlockBody`
     // because it does not have an `execution_payload` field.
-    [BellatrixBlindedBeaconBlockBody<P>] [Some(self)]     [None]              [None];
-    [CapellaBlindedBeaconBlockBody<P>]   [Some(self)]     [None]              [None];
-    [DenebBlindedBeaconBlockBody<P>]     [Some(self)]     [None]              [Some(self)];
+    [BellatrixBlindedBeaconBlockBody<P>] [Some(self)]     [Some(self)]     [None]              [None]          [None];
+    [CapellaBlindedBeaconBlockBody<P>]   [Some(self)]     [Some(self)]     [None]              [None]          [None];
+    [DenebBlindedBeaconBlockBody<P>]     [Some(self)]     [Some(self)]     [None]              [Some(self)]    [None];
+    [ElectraBlindedBeaconBlockBody<P>]   [None]           [Some(self)]     [None]              [Some(self)]    [Some(self)];
 )]
 impl<P: Preset> BeaconBlockBody<P> for implementor {
     fn randao_reveal(&self) -> SignatureBytes {
@@ -711,20 +882,32 @@ impl<P: Preset> BeaconBlockBody<P> for implementor {
         &self.proposer_slashings
     }
 
-    fn attester_slashings(&self) -> &ContiguousList<AttesterSlashing<P>, P::MaxAttesterSlashings> {
-        &self.attester_slashings
-    }
-
-    fn attestations(&self) -> &ContiguousList<Attestation<P>, P::MaxAttestations> {
-        &self.attestations
-    }
-
     fn deposits(&self) -> &ContiguousList<Deposit, P::MaxDeposits> {
         &self.deposits
     }
 
     fn voluntary_exits(&self) -> &ContiguousList<SignedVoluntaryExit, P::MaxVoluntaryExits> {
         &self.voluntary_exits
+    }
+
+    fn attester_slashings_len(&self) -> usize {
+        self.attester_slashings.len()
+    }
+
+    fn attester_slashings_root(&self) -> H256 {
+        self.attester_slashings.hash_tree_root()
+    }
+
+    fn attestations_len(&self) -> usize {
+        self.attestations.len()
+    }
+
+    fn attestations_root(&self) -> H256 {
+        self.attestations.hash_tree_root()
+    }
+
+    fn pre_electra(&self) -> Option<&dyn PreElectraBeaconBlockBody<P>> {
+        pre_electra_body
     }
 
     fn post_altair(&self) -> Option<&dyn PostAltairBeaconBlockBody<P>> {
@@ -737,6 +920,124 @@ impl<P: Preset> BeaconBlockBody<P> for implementor {
 
     fn post_deneb(&self) -> Option<&dyn PostDenebBeaconBlockBody<P>> {
         post_deneb_body
+    }
+
+    fn post_electra(&self) -> Option<&dyn PostElectraBeaconBlockBody<P>> {
+        post_electra_body
+    }
+
+    fn combined_attester_slashings(
+        &self,
+    ) -> Box<dyn Iterator<Item = CombinedAttesterSlashing<P>> + '_> {
+        Box::new(self.attester_slashings.iter().cloned().map(Into::into))
+    }
+
+    // TODO(feature/electra): avoid clone
+    fn combined_attestations(&self) -> Box<dyn Iterator<Item = CombinedAtteststation<P>> + '_> {
+        Box::new(self.attestations.iter().cloned().map(Into::into))
+    }
+}
+
+pub trait PreElectraBeaconBlockBody<P: Preset>: BeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations>;
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings>;
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for Phase0BeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for AltairBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for BellatrixBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for CapellaBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for DenebBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for BellatrixBlindedBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for CapellaBlindedBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> PreElectraBeaconBlockBody<P> for DenebBlindedBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<Phase0Attestation<P>, P::MaxAttestations> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
+        &self.attester_slashings
     }
 }
 
@@ -768,6 +1069,12 @@ impl<P: Preset> PostAltairBeaconBlockBody<P> for DenebBeaconBlockBody<P> {
     }
 }
 
+impl<P: Preset> PostAltairBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
+    fn sync_aggregate(&self) -> SyncAggregate<P> {
+        self.sync_aggregate
+    }
+}
+
 impl<P: Preset> PostAltairBeaconBlockBody<P> for BellatrixBlindedBeaconBlockBody<P> {
     fn sync_aggregate(&self) -> SyncAggregate<P> {
         self.sync_aggregate
@@ -781,6 +1088,12 @@ impl<P: Preset> PostAltairBeaconBlockBody<P> for CapellaBlindedBeaconBlockBody<P
 }
 
 impl<P: Preset> PostAltairBeaconBlockBody<P> for DenebBlindedBeaconBlockBody<P> {
+    fn sync_aggregate(&self) -> SyncAggregate<P> {
+        self.sync_aggregate
+    }
+}
+
+impl<P: Preset> PostAltairBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
     fn sync_aggregate(&self) -> SyncAggregate<P> {
         self.sync_aggregate
     }
@@ -815,6 +1128,18 @@ impl<P: Preset> PostBellatrixBeaconBlockBody<P> for DenebBeaconBlockBody<P> {
 }
 
 impl<P: Preset> PostBellatrixBeaconBlockBody<P> for DenebBlindedBeaconBlockBody<P> {
+    fn execution_payload(&self) -> &dyn ExecutionPayload<P> {
+        &self.execution_payload_header
+    }
+}
+
+impl<P: Preset> PostBellatrixBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
+    fn execution_payload(&self) -> &dyn ExecutionPayload<P> {
+        &self.execution_payload
+    }
+}
+
+impl<P: Preset> PostBellatrixBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
     fn execution_payload(&self) -> &dyn ExecutionPayload<P> {
         &self.execution_payload_header
     }
@@ -858,6 +1183,22 @@ impl<P: Preset> PostCapellaBeaconBlockBody<P> for DenebBlindedBeaconBlockBody<P>
     }
 }
 
+impl<P: Preset> PostCapellaBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
+    fn bls_to_execution_changes(
+        &self,
+    ) -> &ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges> {
+        &self.bls_to_execution_changes
+    }
+}
+
+impl<P: Preset> PostCapellaBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
+    fn bls_to_execution_changes(
+        &self,
+    ) -> &ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges> {
+        &self.bls_to_execution_changes
+    }
+}
+
 pub trait PostDenebBeaconBlockBody<P: Preset>: PostCapellaBeaconBlockBody<P> {
     // TODO(feature/deneb): method for state is_post_deneb
     fn blob_kzg_commitments(&self)
@@ -877,6 +1218,62 @@ impl<P: Preset> PostDenebBeaconBlockBody<P> for DenebBlindedBeaconBlockBody<P> {
         &self,
     ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
         &self.blob_kzg_commitments
+    }
+}
+
+impl<P: Preset> PostDenebBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
+    fn blob_kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+        &self.blob_kzg_commitments
+    }
+}
+
+impl<P: Preset> PostDenebBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
+    fn blob_kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+        &self.blob_kzg_commitments
+    }
+}
+
+pub trait PostElectraBeaconBlockBody<P: Preset>: PostDenebBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra>;
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
+    fn consolidations(&self) -> &ContiguousList<SignedConsolidation, P::MaxConsolidations>;
+}
+
+impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        &self.attester_slashings
+    }
+
+    fn consolidations(&self) -> &ContiguousList<SignedConsolidation, P::MaxConsolidations> {
+        &self.consolidations
+    }
+}
+
+impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        &self.attester_slashings
+    }
+
+    fn consolidations(&self) -> &ContiguousList<SignedConsolidation, P::MaxConsolidations> {
+        &self.consolidations
     }
 }
 
@@ -996,6 +1393,42 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayloadHeader<P> {
     }
 }
 
+impl<P: Preset> ExecutionPayload<P> for ElectraExecutionPayload<P> {
+    fn block_hash(&self) -> ExecutionBlockHash {
+        self.block_hash
+    }
+
+    fn parent_hash(&self) -> ExecutionBlockHash {
+        self.parent_hash
+    }
+
+    fn is_default_payload(&self) -> bool {
+        self.is_default()
+    }
+
+    fn to_header(&self) -> CombinedExecutionPayloadHeader<P> {
+        ElectraExecutionPayloadHeader::from(self).into()
+    }
+}
+
+impl<P: Preset> ExecutionPayload<P> for ElectraExecutionPayloadHeader<P> {
+    fn block_hash(&self) -> ExecutionBlockHash {
+        self.block_hash
+    }
+
+    fn parent_hash(&self) -> ExecutionBlockHash {
+        self.parent_hash
+    }
+
+    fn is_default_payload(&self) -> bool {
+        self.is_default()
+    }
+
+    fn to_header(&self) -> CombinedExecutionPayloadHeader<P> {
+        self.clone().into()
+    }
+}
+
 pub trait PostCapellaExecutionPayload<P: Preset>: ExecutionPayload<P> {
     fn withdrawals(&self) -> &ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>;
 }
@@ -1007,6 +1440,12 @@ impl<P: Preset> PostCapellaExecutionPayload<P> for CapellaExecutionPayload<P> {
 }
 
 impl<P: Preset> PostCapellaExecutionPayload<P> for DenebExecutionPayload<P> {
+    fn withdrawals(&self) -> &ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload> {
+        &self.withdrawals
+    }
+}
+
+impl<P: Preset> PostCapellaExecutionPayload<P> for ElectraExecutionPayload<P> {
     fn withdrawals(&self) -> &ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload> {
         &self.withdrawals
     }
@@ -1025,5 +1464,131 @@ impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for CapellaExecutionPayload
 impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for DenebExecutionPayloadHeader<P> {
     fn withdrawals_root(&self) -> H256 {
         self.withdrawals_root
+    }
+}
+
+impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for ElectraExecutionPayloadHeader<P> {
+    fn withdrawals_root(&self) -> H256 {
+        self.withdrawals_root
+    }
+}
+
+pub trait PostElectraExecutionPayload<P: Preset>: PostCapellaExecutionPayload<P> {
+    fn deposit_receipts(&self) -> &ContiguousList<DepositReceipt, P::MaxDepositReceiptsPerPayload>;
+    fn withdrawal_requests(
+        &self,
+    ) -> &ContiguousList<ExecutionLayerWithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>;
+}
+
+impl<P: Preset> PostElectraExecutionPayload<P> for ElectraExecutionPayload<P> {
+    fn deposit_receipts(&self) -> &ContiguousList<DepositReceipt, P::MaxDepositReceiptsPerPayload> {
+        &self.deposit_receipts
+    }
+
+    fn withdrawal_requests(
+        &self,
+    ) -> &ContiguousList<ExecutionLayerWithdrawalRequest, P::MaxWithdrawalRequestsPerPayload> {
+        &self.withdrawal_requests
+    }
+}
+
+pub trait PostElectraExecutionPayloadHeader<P: Preset>:
+    PostCapellaExecutionPayloadHeader<P>
+{
+    fn deposit_receipts_root(&self) -> H256;
+    fn withdrawal_requests_root(&self) -> H256;
+}
+
+impl<P: Preset> PostElectraExecutionPayloadHeader<P> for ElectraExecutionPayloadHeader<P> {
+    fn deposit_receipts_root(&self) -> H256 {
+        self.deposit_receipts_root
+    }
+
+    fn withdrawal_requests_root(&self) -> H256 {
+        self.withdrawal_requests_root
+    }
+}
+
+pub trait Attestation<P: Preset> {
+    fn data(&self) -> AttestationData;
+    fn signature(&self) -> AggregateSignatureBytes;
+}
+
+impl<P: Preset> Attestation<P> for Phase0Attestation<P> {
+    fn data(&self) -> AttestationData {
+        self.data
+    }
+
+    fn signature(&self) -> AggregateSignatureBytes {
+        self.signature
+    }
+}
+
+impl<P: Preset> Attestation<P> for ElectraAttestation<P> {
+    fn data(&self) -> AttestationData {
+        self.data
+    }
+
+    fn signature(&self) -> AggregateSignatureBytes {
+        self.signature
+    }
+}
+
+pub trait AttesterSlashing<P: Preset> {
+    fn attestation_1(&self) -> &impl IndexedAttestation<P>;
+    fn attestation_2(&self) -> &impl IndexedAttestation<P>;
+}
+
+impl<P: Preset> AttesterSlashing<P> for Phase0AttesterSlashing<P> {
+    fn attestation_1(&self) -> &impl IndexedAttestation<P> {
+        &self.attestation_1
+    }
+
+    fn attestation_2(&self) -> &impl IndexedAttestation<P> {
+        &self.attestation_2
+    }
+}
+
+impl<P: Preset> AttesterSlashing<P> for ElectraAttesterSlashing<P> {
+    fn attestation_1(&self) -> &impl IndexedAttestation<P> {
+        &self.attestation_1
+    }
+
+    fn attestation_2(&self) -> &impl IndexedAttestation<P> {
+        &self.attestation_2
+    }
+}
+
+pub trait IndexedAttestation<P: Preset> {
+    fn attesting_indices(&self) -> impl Iterator<Item = ValidatorIndex> + Send;
+    fn data(&self) -> AttestationData;
+    fn signature(&self) -> AggregateSignatureBytes;
+}
+
+impl<P: Preset> IndexedAttestation<P> for Phase0IndexedAttestation<P> {
+    fn attesting_indices(&self) -> impl Iterator<Item = ValidatorIndex> + Send {
+        self.attesting_indices.iter().copied()
+    }
+
+    fn data(&self) -> AttestationData {
+        self.data
+    }
+
+    fn signature(&self) -> AggregateSignatureBytes {
+        self.signature
+    }
+}
+
+impl<P: Preset> IndexedAttestation<P> for ElectraIndexedAttestation<P> {
+    fn attesting_indices(&self) -> impl Iterator<Item = ValidatorIndex> + Send {
+        self.attesting_indices.iter().copied()
+    }
+
+    fn data(&self) -> AttestationData {
+        self.data
+    }
+
+    fn signature(&self) -> AggregateSignatureBytes {
+        self.signature
     }
 }

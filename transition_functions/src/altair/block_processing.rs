@@ -3,14 +3,14 @@ use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
-        self, attestation_epoch, get_attestation_participation_flags, get_attesting_indices,
-        get_base_reward, get_base_reward_per_increment, get_beacon_proposer_index,
-        get_block_root_at_slot, index_of_public_key, initialize_shuffled_indices,
-        total_active_balance,
+        self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
+        get_base_reward_per_increment, get_beacon_proposer_index, get_block_root_at_slot,
+        index_of_public_key, initialize_shuffled_indices, total_active_balance,
     },
     altair::slash_validator,
     error::SignatureKind,
     mutators::{balance, decrease_balance, increase_balance},
+    phase0::get_attesting_indices,
     signing::{SignForAllForks as _, SignForSingleFork as _, SignForSingleForkAtSlot as _},
     slot_report::{Delta, NullSlotReport, SlotReport, SyncAggregateRewards},
     verifier::{SingleVerifier, Triple, Verifier},
@@ -318,7 +318,11 @@ pub fn apply_attestation<P: Preset>(
     increase_balance(balance(state, proposer_index)?, proposer_reward);
 
     slot_report.add_attestation_reward(proposer_reward);
-    slot_report.update_performance(state, attestation)?;
+    slot_report.update_performance(
+        state,
+        attestation.data,
+        get_attesting_indices(state, data, aggregation_bits)?,
+    )?;
 
     Ok(())
 }
@@ -345,6 +349,7 @@ pub fn process_deposit_data<P: Preset>(
     if let Some(validator_index) = index_of_public_key(state, pubkey) {
         let combined_deposit = CombinedDeposit::TopUp {
             validator_index,
+            withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
         };
 
@@ -441,6 +446,7 @@ pub fn apply_deposits<P: Preset>(
             CombinedDeposit::TopUp {
                 validator_index,
                 amounts,
+                ..
             } => {
                 let total_amount = amounts.iter().sum();
 
@@ -683,7 +689,7 @@ mod spec_tests {
 
     processing_tests! {
         process_attestation,
-        |config, state, attestation, bls_setting| {
+        |config, state, attestation: Attestation<P>, bls_setting| {
             process_attestation(
                 config,
                 state,
@@ -761,7 +767,7 @@ mod spec_tests {
 
     validation_tests! {
         validate_attester_slashing,
-        |config, state, attester_slashing| {
+        |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",

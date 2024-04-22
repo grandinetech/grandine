@@ -12,18 +12,19 @@ use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
 use serde::{Serialize, Serializer};
-use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
 use thiserror::Error;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{
+        Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     deneb::containers::BlobSidecar,
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
-        containers::{Attestation, AttestationData, Checkpoint, SignedAggregateAndProof},
+        containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -338,7 +339,7 @@ impl<P: Preset, I> AttestationItem<P, I> {
 
     #[must_use]
     pub fn data(&self) -> AttestationData {
-        self.item.data
+        self.item.data()
     }
 
     #[must_use]
@@ -546,7 +547,7 @@ pub enum BlockAction<P: Preset> {
 pub enum AggregateAndProofAction<P: Preset> {
     Accept {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
-        attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
+        attesting_indices: AttestingIndices<P>,
         is_superset: bool,
     },
     Ignore,
@@ -558,7 +559,7 @@ pub enum AggregateAndProofAction<P: Preset> {
 pub enum AttestationAction<P: Preset, I> {
     Accept {
         attestation: AttestationItem<P, I>,
-        attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
+        attesting_indices: AttestingIndices<P>,
     },
     Ignore(AttestationItem<P, I>),
     DelayUntilBlock(AttestationItem<P, I>, H256),
@@ -611,7 +612,7 @@ pub enum PartialAttestationAction {
 #[derive(Clone)]
 pub struct ValidAttestation<P: Preset> {
     pub data: AttestationData,
-    pub attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
+    pub attesting_indices: AttestingIndices<P>,
     pub is_from_block: bool,
 }
 

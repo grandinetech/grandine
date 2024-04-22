@@ -5,7 +5,7 @@ use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors,
     error::SignatureKind,
-    misc, predicates,
+    misc, phase0, predicates,
     signing::{RandaoEpoch, SignForAllForksWithGenesis as _, SignForSingleFork as _},
     slot_report::SlotReport,
     verifier::{NullVerifier, Triple, Verifier, VerifierOption},
@@ -170,7 +170,7 @@ pub fn verify_signatures<P: Preset>(
         let triples = attestations
             .par_iter()
             .map(|attestation| {
-                let indexed_attestation = accessors::get_indexed_attestation(state, attestation)?;
+                let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
 
                 let mut triple = Triple::default();
 

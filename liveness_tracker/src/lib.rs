@@ -5,17 +5,16 @@ use bitvec::vec::BitVec;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::{channel::mpsc::UnboundedReceiver, select, StreamExt as _};
-use helper_functions::{accessors, misc};
+use helper_functions::{electra, misc, phase0};
 use itertools::Itertools as _;
 use log::{debug, warn};
 use operation_pools::PoolToLivenessMessage;
 use prometheus_metrics::Metrics;
 use types::{
     altair::containers::SyncCommitteeMessage,
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, SignedBeaconBlock},
     phase0::{
         consts::GENESIS_EPOCH,
-        containers::Attestation,
         primitives::{Epoch, ValidatorIndex},
     },
     preset::Preset,
@@ -139,13 +138,24 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
         attestation: &Attestation<P>,
         state: &BeaconState<P>,
     ) -> Result<()> {
-        let epoch = attestation.data.target.epoch;
+        let epoch = attestation.data().target.epoch;
 
         if self.is_epoch_allowed(epoch) {
-            let indexed_attestation = accessors::get_indexed_attestation(state, attestation)?;
+            match attestation {
+                Attestation::Phase0(attestation) => {
+                    let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
 
-            for validator_index in indexed_attestation.attesting_indices {
-                self.set(epoch, validator_index)?;
+                    for validator_index in indexed_attestation.attesting_indices {
+                        self.set(epoch, validator_index)?;
+                    }
+                }
+                Attestation::Electra(attestation) => {
+                    let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    for validator_index in indexed_attestation.attesting_indices {
+                        self.set(epoch, validator_index)?;
+                    }
+                }
             }
         }
 
@@ -163,8 +173,8 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
             let validator_index = block.message().proposer_index();
             self.set(epoch, validator_index)?;
 
-            for attestation in block.message().body().attestations() {
-                self.process_attestation(attestation, state)?;
+            for attestation in block.message().body().combined_attestations() {
+                self.process_attestation(&attestation, state)?;
             }
         }
 

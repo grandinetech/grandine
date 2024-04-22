@@ -30,14 +30,13 @@ use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     nonstandard::ValidationOutcome,
-    phase0::{
-        containers::{Attestation, AttesterSlashing, SignedAggregateAndProof},
-        primitives::{ExecutionBlockHash, Slot, SubnetId},
-    },
+    phase0::primitives::{ExecutionBlockHash, Slot, SubnetId},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };

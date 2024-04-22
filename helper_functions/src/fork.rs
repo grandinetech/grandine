@@ -20,15 +20,21 @@ use types::{
         beacon_state::BeaconState as DenebBeaconState,
         containers::ExecutionPayloadHeader as DenebExecutionPayloadHeader,
     },
+    electra::{
+        beacon_state::BeaconState as ElectraBeaconState,
+        consts::UNSET_DEPOSIT_RECEIPTS_START_INDEX,
+        containers::ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
+    },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
+        consts::FAR_FUTURE_EPOCH,
         containers::{Fork, PendingAttestation},
         primitives::H256,
     },
     preset::Preset,
 };
 
-use crate::accessors;
+use crate::{accessors, misc, mutators, phase0, predicates};
 
 pub fn upgrade_to_altair<P: Preset>(
     config: &Config,
@@ -135,7 +141,7 @@ fn translate_participation<'attestations, P: Preset>(
         } = *attestation;
 
         let attesting_indices =
-            accessors::get_attesting_indices(state, data, aggregation_bits)?.collect_vec();
+            phase0::get_attesting_indices(state, data, aggregation_bits)?.collect_vec();
 
         // > Translate attestation inclusion info to flag indices
         let participation_flags =
@@ -494,6 +500,190 @@ pub fn upgrade_to_deneb<P: Preset>(
     }
 }
 
+#[allow(clippy::too_many_lines)]
+pub fn upgrade_to_electra<P: Preset>(
+    config: &Config,
+    pre: DenebBeaconState<P>,
+) -> Result<ElectraBeaconState<P>> {
+    let epoch = accessors::get_current_epoch(&pre);
+
+    let DenebBeaconState {
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        validators,
+        balances,
+        randao_mixes,
+        slashings,
+        previous_epoch_participation,
+        current_epoch_participation,
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        inactivity_scores,
+        current_sync_committee,
+        next_sync_committee,
+        latest_execution_payload_header,
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        historical_summaries,
+        cache,
+    } = pre;
+
+    let fork = Fork {
+        previous_version: fork.current_version,
+        current_version: config.electra_fork_version,
+        epoch,
+    };
+
+    let DenebExecutionPayloadHeader {
+        parent_hash,
+        fee_recipient,
+        state_root,
+        receipts_root,
+        logs_bloom,
+        prev_randao,
+        block_number,
+        gas_limit,
+        gas_used,
+        timestamp,
+        extra_data,
+        base_fee_per_gas,
+        block_hash,
+        transactions_root,
+        withdrawals_root,
+        blob_gas_used,
+        excess_blob_gas,
+    } = latest_execution_payload_header;
+
+    let latest_execution_payload_header = ElectraExecutionPayloadHeader {
+        parent_hash,
+        fee_recipient,
+        state_root,
+        receipts_root,
+        logs_bloom,
+        prev_randao,
+        block_number,
+        gas_limit,
+        gas_used,
+        timestamp,
+        extra_data,
+        base_fee_per_gas,
+        block_hash,
+        transactions_root,
+        withdrawals_root,
+        blob_gas_used,
+        excess_blob_gas,
+        // > [New in Electra:EIP6110]
+        deposit_receipts_root: H256::default(),
+        // > [New in Electra:EIP7002]
+        withdrawal_requests_root: H256::default(),
+    };
+
+    let earliest_exit_epoch = validators
+        .into_iter()
+        .map(|validator| validator.exit_epoch)
+        .filter(|exit_epoch| *exit_epoch != FAR_FUTURE_EPOCH)
+        .max()
+        .unwrap_or(epoch)
+        + 1;
+
+    let mut post = ElectraBeaconState {
+        // > Versioning
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        // > History
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        // > Eth1
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        // > Registry
+        validators,
+        balances,
+        // > Randomness
+        randao_mixes,
+        // > Slashings
+        slashings,
+        // > Participation
+        previous_epoch_participation,
+        current_epoch_participation,
+        // > Finality
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        // > Inactivity
+        inactivity_scores,
+        // > Sync
+        current_sync_committee,
+        next_sync_committee,
+        // > Execution-layer
+        latest_execution_payload_header,
+        // > Withdrawals
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        // > Deep history valid from Capella onwards
+        historical_summaries,
+        deposit_receipts_start_index: UNSET_DEPOSIT_RECEIPTS_START_INDEX,
+        deposit_balance_to_consume: 0,
+        exit_balance_to_consume: 0,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume: 0,
+        earliest_consolidation_epoch: misc::compute_activation_exit_epoch::<P>(epoch),
+        pending_balance_deposits: PersistentList::default(),
+        pending_partial_withdrawals: PersistentList::default(),
+        pending_consolidations: PersistentList::default(),
+        // Cache
+        cache,
+    };
+
+    post.exit_balance_to_consume = accessors::get_activation_exit_churn_limit(config, &post);
+    post.consolidation_balance_to_consume = accessors::get_consolidation_churn_limit(config, &post);
+
+    // > [New in Electra:EIP7251]
+    // > add validators that are not yet active to pending balance deposits
+    let pre_activation = post
+        .validators
+        .into_iter()
+        .zip(0..)
+        .filter(|(validator, _)| validator.activation_epoch == FAR_FUTURE_EPOCH)
+        .map(|(validator, index)| (validator.activation_eligibility_epoch, index))
+        .sorted()
+        .map(|(_, index)| index);
+
+    for index in pre_activation {
+        mutators::queue_entire_balance_and_reset_validator(&mut post, index)?;
+    }
+
+    for index in post
+        .validators
+        .into_iter()
+        .zip(0..)
+        .filter(|(validator, _)| predicates::has_compounding_withdrawal_credential(validator))
+        .map(|(_, index)| index)
+        .collect_vec()
+    {
+        mutators::queue_excess_active_balance(&mut post, index)?;
+    }
+
+    Ok(post)
+}
+
 #[cfg(test)]
 mod spec_tests {
     use spec_test_utils::Case;
@@ -542,6 +732,16 @@ mod spec_tests {
         run_deneb_case::<Minimal>(case);
     }
 
+    #[test_resources("consensus-spec-tests/tests/mainnet/electra/fork/*/*/*")]
+    fn electra_mainnet(case: Case) {
+        run_electra_case::<Mainnet>(case);
+    }
+
+    #[test_resources("consensus-spec-tests/tests/minimal/electra/fork/*/*/*")]
+    fn electra_minimal(case: Case) {
+        run_electra_case::<Minimal>(case);
+    }
+
     fn run_altair_case<P: Preset>(case: Case) {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
@@ -575,6 +775,16 @@ mod spec_tests {
         let expected_post = case.ssz_default("post");
 
         let actual_post = upgrade_to_deneb::<P>(&P::default_config(), pre);
+
+        assert_eq!(actual_post, expected_post);
+    }
+
+    fn run_electra_case<P: Preset>(case: Case) {
+        let pre = case.ssz_default("pre");
+        let expected_post = case.ssz_default("post");
+
+        let actual_post = upgrade_to_electra::<P>(&P::default_config(), pre)
+            .expect("upgrade from Deneb to Electra to should succeed");
 
         assert_eq!(actual_post, expected_post);
     }

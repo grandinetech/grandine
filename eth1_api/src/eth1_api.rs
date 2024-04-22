@@ -7,8 +7,9 @@ use enum_iterator::Sequence as _;
 use ethereum_types::H64;
 use execution_engine::{
     EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
+    EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
+    PayloadStatusV1,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
 use log::warn;
@@ -246,6 +247,21 @@ impl Eth1Api {
                 )
                 .await
             }
+            (
+                ExecutionPayload::Electra(payload),
+                Some(ExecutionPayloadParams::Deneb {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                }),
+            ) => {
+                let payload_v4 = ExecutionPayloadV4::from(payload);
+                let params = vec![
+                    serde_json::to_value(payload_v4)?,
+                    serde_json::to_value(versioned_hashes)?,
+                    serde_json::to_value(parent_beacon_block_root)?,
+                ];
+                self.execute("engine_newPayloadV4", params).await
+            }
             _ => bail!(Error::InvalidParameters),
         }
     }
@@ -310,10 +326,18 @@ impl Eth1Api {
                 )
                 .await?
             }
+            Phase::Electra => {
+                self.execute(
+                    "engine_forkchoiceUpdatedV3",
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                )
+                .await?
+            }
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 5);
+                const_assert_eq!(Phase::CARDINALITY, 6);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -323,10 +347,11 @@ impl Eth1Api {
             Phase::Bellatrix => payload_id.map(PayloadId::Bellatrix),
             Phase::Capella => payload_id.map(PayloadId::Capella),
             Phase::Deneb => payload_id.map(PayloadId::Deneb),
+            Phase::Electra => payload_id.map(PayloadId::Electra),
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 5);
+                const_assert_eq!(Phase::CARDINALITY, 6);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -383,6 +408,13 @@ impl Eth1Api {
                 )
                 .await
                 .map(Into::into)
+            }
+            PayloadId::Electra(payload_id) => {
+                let params = vec![serde_json::to_value(payload_id)?];
+
+                self.execute::<EngineGetPayloadV4Response<P>>("engine_getPayloadV4", params)
+                    .await
+                    .map(Into::into)
             }
         }
     }

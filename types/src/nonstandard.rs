@@ -19,15 +19,12 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
-    phase0::{
-        containers::Attestation,
-        primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
-    },
+    phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
 
@@ -60,6 +57,7 @@ pub enum Phase {
     Bellatrix,
     Capella,
     Deneb,
+    Electra,
 }
 
 /// Like [`Option`], but with [`None`] greater than any [`Some`].
@@ -502,6 +500,7 @@ mod tests {
             Phase::Bellatrix,
             Phase::Capella,
             Phase::Deneb,
+            Phase::Electra,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);

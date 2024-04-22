@@ -57,7 +57,6 @@ types = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-factory = { workspace = true }
 interop = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }

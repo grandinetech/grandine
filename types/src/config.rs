@@ -64,6 +64,9 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub deneb_fork_epoch: Epoch,
     pub deneb_fork_version: Version,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub electra_fork_epoch: Epoch,
+    pub electra_fork_version: Version,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -90,6 +93,10 @@ pub struct Config {
     pub min_per_epoch_churn_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_per_epoch_activation_churn_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub min_per_epoch_churn_limit_electra: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_per_epoch_activation_exit_churn_limit: Gwei,
 
     // Fork choice
     #[serde(with = "serde_utils::string_or_native")]
@@ -172,6 +179,8 @@ impl Default for Config {
             capella_fork_version: H32(hex!("03000000")),
             deneb_fork_epoch: FAR_FUTURE_EPOCH,
             deneb_fork_version: H32(hex!("04000000")),
+            electra_fork_epoch: FAR_FUTURE_EPOCH,
+            electra_fork_version: H32(hex!("05000000")),
 
             // Time parameters
             eth1_follow_distance: 2048,
@@ -187,6 +196,8 @@ impl Default for Config {
             inactivity_score_recovery_rate: 16,
             max_per_epoch_activation_churn_limit: 8,
             min_per_epoch_churn_limit: 4,
+            min_per_epoch_churn_limit_electra: 128_000_000_000,
+            max_per_epoch_activation_exit_churn_limit: 256_000_000_000,
 
             // Fork choice
             proposer_score_boost: 40,
@@ -278,6 +289,7 @@ impl Config {
             bellatrix_fork_version: H32(hex!("02000001")),
             capella_fork_version: H32(hex!("03000001")),
             deneb_fork_version: H32(hex!("04000001")),
+            electra_fork_version: H32(hex!("05000001")),
 
             // Time parameters
             eth1_follow_distance: 16,
@@ -288,6 +300,8 @@ impl Config {
             churn_limit_quotient: nonzero!(32_u64),
             max_per_epoch_activation_churn_limit: 4,
             min_per_epoch_churn_limit: 2,
+            min_per_epoch_churn_limit_electra: 64_000_000_000,
+            max_per_epoch_activation_exit_churn_limit: 128_000_000_000,
 
             // Deposit contract
             deposit_chain_id: 5,
@@ -620,6 +634,7 @@ impl Config {
             Phase::Bellatrix => self.bellatrix_fork_version,
             Phase::Capella => self.capella_fork_version,
             Phase::Deneb => self.deneb_fork_version,
+            Phase::Electra => self.electra_fork_version,
         }
     }
 
@@ -632,6 +647,7 @@ impl Config {
             Phase::Bellatrix => self.bellatrix_fork_epoch,
             Phase::Capella => self.capella_fork_epoch,
             Phase::Deneb => self.deneb_fork_epoch,
+            Phase::Electra => self.electra_fork_epoch,
         }
     }
 
@@ -683,6 +699,7 @@ impl Config {
             self.bellatrix_fork_epoch,
             self.capella_fork_epoch,
             self.deneb_fork_epoch,
+            self.electra_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -696,6 +713,7 @@ impl Config {
             &mut self.bellatrix_fork_epoch,
             &mut self.capella_fork_epoch,
             &mut self.deneb_fork_epoch,
+            &mut self.electra_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)

@@ -209,6 +209,7 @@ impl Metrics {
             system_used_memory: IntGauge::new("SYSTEM_USED_MEMORY", "Node memory usage")?,
             system_total_memory: IntGauge::new("SYSTEM_TOTAL_MEMORY", "Total node mmeory")?,
 
+
             // Collection Lengths
             collection_lengths: IntGaugeVec::new(
                 opts!("COLLECTION_LENGTHS", "Number of items in each collection"),
@@ -306,6 +307,14 @@ impl Metrics {
                 "ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
                 "Attestation verifier active task count",
             )?,
+
+            // attestation_verifier_active_task_count: IntGaugeVec::new(
+            //     opts!(
+            //         "ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
+            //         "Attestation verifier active task count",
+            //     ),
+            //     &["type"],
+            // )?,
 
             attestation_verifier_process_attestation_batch_times: Histogram::with_opts(
                 histogram_opts!(

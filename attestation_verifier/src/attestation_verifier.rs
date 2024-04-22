@@ -15,9 +15,9 @@ use futures::{
     select, StreamExt,
 };
 use helper_functions::{
-    accessors,
+    accessors, electra,
     error::SignatureKind,
-    predicates,
+    phase0, predicates,
     signing::SignForSingleFork,
     verifier::{MultiVerifier, Triple, Verifier},
 };
@@ -27,9 +27,8 @@ use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState,
+    combined::{Attestation, BeaconState, SignedAggregateAndProof},
     config::Config,
-    phase0::containers::{AggregateAndProof, Attestation, SignedAggregateAndProof},
     preset::Preset,
 };
 
@@ -286,21 +285,16 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                 ..
             }) = result
             {
-                let SignedAggregateAndProof {
-                    ref message,
-                    signature,
-                } = **aggregate_and_proof;
+                let message = aggregate_and_proof.message();
+                let signature = aggregate_and_proof.signature();
 
-                let AggregateAndProof {
-                    aggregator_index,
-                    ref aggregate,
-                    selection_proof,
-                } = *message;
+                let aggregator_index = message.aggregator_index();
+                let selection_proof = message.selection_proof();
 
                 let public_key = accessors::public_key(state, aggregator_index)?;
 
                 verifier.verify_singular(
-                    aggregate.data.slot.signing_root(config, state),
+                    message.slot().signing_root(config, state),
                     selection_proof,
                     public_key,
                     SignatureKind::SelectionProof,
@@ -313,11 +307,11 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                     SignatureKind::AggregateAndProof,
                 )?;
 
-                messages.push(&aggregate_and_proof.message.aggregate);
+                messages.push(message.aggregate());
             }
         }
 
-        let attestation_triples = attestation_batch_triples(config, messages, state)?;
+        let attestation_triples = attestation_batch_triples(config, messages.iter(), state)?;
 
         verifier.extend(attestation_triples, SignatureKind::Attestation)?;
 
@@ -448,16 +442,36 @@ fn attestation_batch_triples<'a, P: Preset>(
         .into_iter()
         .par_bridge()
         .map(|attestation| {
-            let indexed_attestation = accessors::get_indexed_attestation(state, attestation)?;
+            let triple = match attestation {
+                Attestation::Phase0(attestation) => {
+                    let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
 
-            let mut triple = Triple::default();
+                    let mut triple = Triple::default();
 
-            predicates::validate_constructed_indexed_attestation(
-                config,
-                state,
-                &indexed_attestation,
-                &mut triple,
-            )?;
+                    predicates::validate_constructed_indexed_attestation(
+                        config,
+                        state,
+                        &indexed_attestation,
+                        &mut triple,
+                    )?;
+
+                    triple
+                }
+                Attestation::Electra(attestation) => {
+                    let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    let mut triple = Triple::default();
+
+                    predicates::validate_constructed_indexed_attestation(
+                        config,
+                        state,
+                        &indexed_attestation,
+                        &mut triple,
+                    )?;
+
+                    triple
+                }
+            };
 
             Ok(triple)
         })

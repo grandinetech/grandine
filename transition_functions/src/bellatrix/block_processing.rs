@@ -24,12 +24,9 @@ use types::{
     },
     config::Config,
     nonstandard::SlashingKind,
-    phase0::{
-        containers::{AttesterSlashing, ProposerSlashing},
-        primitives::H256,
-    },
+    phase0::{containers::ProposerSlashing, primitives::H256},
     preset::Preset,
-    traits::{BeaconBlockBody, PostBellatrixBeaconState},
+    traits::{AttesterSlashing, PostBellatrixBeaconState, PreElectraBeaconBlockBody},
 };
 
 use crate::{
@@ -199,7 +196,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
 pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     state: &mut impl PostBellatrixBeaconState<P>,
-    body: &impl BeaconBlockBody<P>,
+    body: &impl PreElectraBeaconBlockBody<P>,
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -315,7 +312,7 @@ pub fn process_proposer_slashing<P: Preset>(
 pub fn process_attester_slashing<P: Preset>(
     config: &Config,
     state: &mut impl PostBellatrixBeaconState<P>,
-    attester_slashing: &AttesterSlashing<P>,
+    attester_slashing: &impl AttesterSlashing<P>,
     verifier: impl Verifier,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -354,7 +351,7 @@ mod spec_tests {
     use ssz::SszReadDefault;
     use test_generator::test_resources;
     use types::{
-        phase0::containers::{Attestation, Deposit},
+        phase0::containers::{Attestation, AttesterSlashing, Deposit},
         preset::{Mainnet, Minimal},
     };
 
@@ -450,7 +447,7 @@ mod spec_tests {
 
     processing_tests! {
         process_attester_slashing,
-        |config, state, attester_slashing, _| {
+        |config, state, attester_slashing: AttesterSlashing<P>, _| {
             process_attester_slashing(
                 config,
                 state,
@@ -544,7 +541,7 @@ mod spec_tests {
 
     validation_tests! {
         validate_attester_slashing,
-        |config, state, attester_slashing| {
+        |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",

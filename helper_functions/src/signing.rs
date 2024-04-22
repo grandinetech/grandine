@@ -17,17 +17,27 @@ use types::{
         consts::DOMAIN_BLS_TO_EXECUTION_CHANGE,
         containers::{BeaconBlock as CapellaBeaconBlock, BlsToExecutionChange},
     },
-    combined::{BeaconBlock as CombinedBeaconBlock, BlindedBeaconBlock},
+    combined::{
+        AggregateAndProof as CombinedAggregateAndProof, BeaconBlock as CombinedBeaconBlock,
+        BlindedBeaconBlock,
+    },
     config::Config,
     deneb::containers::BeaconBlock as DenebBeaconBlock,
+    electra::{
+        consts::DOMAIN_CONSOLIDATION,
+        containers::{
+            AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
+            Consolidation,
+        },
+    },
     phase0::{
         consts::{
             DOMAIN_AGGREGATE_AND_PROOF, DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER,
             DOMAIN_DEPOSIT, DOMAIN_RANDAO, DOMAIN_SELECTION_PROOF, DOMAIN_VOLUNTARY_EXIT,
         },
         containers::{
-            AggregateAndProof, AttestationData, BeaconBlock as Phase0BeaconBlock,
-            BeaconBlockHeader, DepositMessage, VoluntaryExit,
+            AggregateAndProof as Phase0AggregateAndProof, AttestationData,
+            BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, DepositMessage, VoluntaryExit,
         },
         primitives::{DomainType, Epoch, Slot, H256},
     },
@@ -208,12 +218,31 @@ impl<P: Preset> SignForAllForksWithGenesis<P> for BlsToExecutionChange {
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/99934ee16c7e990c8c39bc66e1aa58845057faa01/specs/phase0/validator.md#broadcast-aggregate>
-impl<P: Preset> SignForSingleFork<P> for AggregateAndProof<P> {
+impl<P: Preset> SignForSingleFork<P> for Phase0AggregateAndProof<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_AGGREGATE_AND_PROOF;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::AggregateAndProof;
 
     fn epoch(&self) -> Epoch {
         misc::compute_epoch_at_slot::<P>(self.aggregate.data.slot)
+    }
+}
+
+/// <https://github.com/ethereum/consensus-specs/blob/99934ee16c7e990c8c39bc66e1aa58845057faa01/specs/phase0/validator.md#broadcast-aggregate>
+impl<P: Preset> SignForSingleFork<P> for ElectraAggregateAndProof<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_AGGREGATE_AND_PROOF;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::AggregateAndProof;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.aggregate.data.slot)
+    }
+}
+
+impl<P: Preset> SignForSingleFork<P> for CombinedAggregateAndProof<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_AGGREGATE_AND_PROOF;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::AggregateAndProof;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot())
     }
 }
 
@@ -277,6 +306,16 @@ impl<P: Preset> SignForSingleFork<P> for DenebBeaconBlock<P> {
     }
 }
 
+/// <https://github.com/ethereum/consensus-specs/blob/99934ee16c7e990c8c39bc66e1aa58845057faa0/specs/phase0/validator.md#signature>
+impl<P: Preset> SignForSingleFork<P> for ElectraBeaconBlock<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+}
+
 impl<P: Preset> SignForSingleFork<P> for CombinedBeaconBlock<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
@@ -312,6 +351,12 @@ impl<P: Preset> SignForSingleFork<P> for BlindedBeaconBlock<P> {
     fn epoch(&self) -> Epoch {
         misc::compute_epoch_at_slot::<P>(self.slot())
     }
+}
+
+// <https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.1/specs/electra/beacon-chain.md#new-process_consolidation>
+impl<P: Preset> SignForAllForksWithGenesis<P> for Consolidation {
+    const DOMAIN_TYPE: DomainType = DOMAIN_CONSOLIDATION;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Consolidation;
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
@@ -366,8 +411,11 @@ impl<P: Preset> SignForSingleFork<P> for VoluntaryExit {
 
     fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
         let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
+        let current_fork_version = beacon_state.fork().current_version;
 
-        let domain = if beacon_state.fork().current_version == config.deneb_fork_version {
+        let domain = if current_fork_version == config.deneb_fork_version
+            || current_fork_version == config.electra_fork_version
+        {
             let fork_version = Some(config.capella_fork_version);
             let genesis_validators_root = Some(beacon_state.genesis_validators_root());
             misc::compute_domain(config, domain_type, fork_version, genesis_validators_root)

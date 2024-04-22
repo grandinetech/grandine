@@ -11,11 +11,12 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use features::Feature;
 use fork_choice_control::Wait;
+use log::warn;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState,
+    combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
     phase0::{
         containers::{Attestation, AttestationData},
@@ -35,6 +36,8 @@ use crate::{
     },
     misc::PoolTask,
 };
+
+use super::conversion::convert_attestation_for_pool;
 
 pub struct Manager<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
@@ -129,13 +132,20 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
-    pub fn insert_attestation(&self, wait_group: W, attestation: Arc<Attestation<P>>) {
-        self.spawn_detached(InsertAttestationTask {
-            wait_group,
-            pool: self.pool.clone_arc(),
-            attestation,
-            metrics: self.metrics.clone(),
-        });
+    pub fn insert_attestation(&self, wait_group: W, attestation: &CombinedAttestation<P>) {
+        match convert_attestation_for_pool((*attestation).clone()) {
+            Ok(attestation) => {
+                self.spawn_detached(InsertAttestationTask {
+                    wait_group,
+                    pool: self.pool.clone_arc(),
+                    attestation: Arc::new(attestation),
+                    metrics: self.metrics.clone(),
+                });
+            }
+            Err(error) => {
+                warn!("Failed to insert attestation to pool: {error:?}");
+            }
+        }
     }
 
     pub async fn has_registered_validators_proposing_in_slots(

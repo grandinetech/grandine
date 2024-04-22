@@ -1,6 +1,8 @@
 pub mod accessors;
 pub mod altair;
 pub mod bellatrix;
+pub mod capella;
+pub mod electra;
 pub mod error;
 pub mod fork;
 pub mod misc;

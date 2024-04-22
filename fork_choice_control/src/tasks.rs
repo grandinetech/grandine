@@ -20,11 +20,11 @@ use helper_functions::{
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
-        containers::{AttesterSlashing, Checkpoint, SignedAggregateAndProof},
+        containers::Checkpoint,
         primitives::{Slot, H256},
     },
     preset::Preset,
@@ -262,14 +262,10 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
         let results = block
             .message()
             .body()
-            .attestations()
-            .iter()
+            .combined_attestations()
             .map(|attestation| {
                 store_snapshot.validate_attestation(
-                    AttestationItem::verified(
-                        Arc::new(attestation.clone()),
-                        AttestationOrigin::Block,
-                    ),
+                    AttestationItem::verified(Arc::new(attestation), AttestationOrigin::Block),
                     true,
                 )
             })
@@ -307,7 +303,7 @@ impl<P: Preset, W> Run for AttesterSlashingTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_attester_slashing_task_times.start_timer());
 
-        let result = store_snapshot.validate_attester_slashing(&attester_slashing, origin);
+        let result = store_snapshot.validate_attester_slashing(&*attester_slashing, origin);
 
         MutatorMessage::AttesterSlashing {
             wait_group,

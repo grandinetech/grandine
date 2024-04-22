@@ -10,14 +10,14 @@ use futures::{
     select,
     stream::StreamExt,
 };
-use helper_functions::{accessors, misc};
+use helper_functions::{misc, phase0};
 use log::{debug, info, warn};
 use p2p::P2pToSlasher;
 use thiserror::Error;
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{Attestation, AttesterSlashing as CombinedAttesterSlashing, SignedBeaconBlock},
     phase0::{
-        containers::{Attestation, AttesterSlashing, IndexedAttestation, ProposerSlashing},
+        containers::{AttesterSlashing, IndexedAttestation, ProposerSlashing},
         primitives::{Epoch, Version},
     },
     preset::Preset,
@@ -148,6 +148,11 @@ impl<P: Preset> Slasher<P> {
     }
 
     fn process_attestation(&self, attestation: &Attestation<P>) -> Result<()> {
+        let attestation = match attestation {
+            Attestation::Phase0(attestation) => attestation,
+            Attestation::Electra(_) => return Ok(()),
+        };
+
         let target = attestation.data.target;
         let slot = misc::compute_start_slot_at_epoch::<P>(target.epoch);
 
@@ -159,8 +164,8 @@ impl<P: Preset> Slasher<P> {
 
         if let Some(target_state) = target_state {
             let current_epoch = self.controller.finalized_epoch();
-            let indexed_attestation =
-                accessors::get_indexed_attestation(&target_state, attestation)?;
+            // TODO(feature/electra): use electra::get_indexed_attestation for electra attestations
+            let indexed_attestation = phase0::get_indexed_attestation(&target_state, attestation)?;
 
             debug!(
                 "processing attestation record \
@@ -233,7 +238,9 @@ impl<P: Preset> Slasher<P> {
 
     fn process_attester_slashing(&self, attester_slashing: AttesterSlashing<P>) {
         self.controller
-            .on_own_attester_slashing(Box::new(attester_slashing.clone()));
+            .on_own_attester_slashing(Box::new(CombinedAttesterSlashing::Phase0(
+                attester_slashing.clone(),
+            )));
 
         SlasherToValidator::AttesterSlashing(attester_slashing).send(&self.slasher_to_validator_tx);
     }

@@ -16,7 +16,7 @@ use crate::{
         consts::ExecutionPayloadIndex,
         containers::{SignedBlsToExecutionChange, Withdrawal},
     },
-    deneb::primitives::{Blob, BlobIndex, KzgCommitment, KzgProof},
+    deneb::primitives::{Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof},
     phase0::{
         containers::{
             Attestation, AttesterSlashing, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
@@ -109,7 +109,7 @@ pub struct BlobSidecar<P: Preset> {
     pub kzg_commitment: KzgCommitment,
     pub kzg_proof: KzgProof,
     pub signed_block_header: SignedBeaconBlockHeader,
-    pub kzg_commitment_inclusion_proof: ContiguousVector<H256, P::KzgCommitmentInclusionProofDepth>,
+    pub kzg_commitment_inclusion_proof: BlobCommitmentInclusionProof<P>,
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

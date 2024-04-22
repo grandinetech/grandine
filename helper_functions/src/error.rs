@@ -11,8 +11,11 @@ pub(crate) enum Error {
     AttestingIndicesNotSortedAndUnique,
     #[error("commitee index is out of bounds")]
     CommitteeIndexOutOfBounds,
-    #[error("aggregation bitlist length does not match committee length")]
-    CommitteeLengthMismatch,
+    #[error("aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}")]
+    CommitteeLengthMismatch {
+        aggregation_bitlist_length: usize,
+        committee_length: usize,
+    },
     #[error("epoch is after next one relative to state")]
     EpochAfterNext,
     #[error("epoch is before previous one relative to state")]
@@ -25,6 +28,11 @@ pub(crate) enum Error {
     FailedToSelectProposer,
     #[error("no validators are active")]
     NoActiveValidators,
+    #[error("aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}")]
+    ParticipantsCountMismatch {
+        aggregation_bitlist_length: usize,
+        participants_count: usize,
+    },
     #[error("permutated prefix maximum overflowed")]
     PermutatedPrefixMaximumOverflow,
     #[error("{0} is invalid")]
@@ -51,6 +59,8 @@ pub enum SignatureKind {
     BlsToExecutionChange,
     #[display("builder signature")]
     Builder,
+    #[display("consolidation signature")]
+    Consolidation,
     #[display("sync committee contribution and proof signature")]
     ContributionAndProof,
     #[display("deposit signature")]

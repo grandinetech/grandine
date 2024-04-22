@@ -11,12 +11,12 @@ use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use std_ext::ArcExt as _;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
-        containers::{Attestation, AttesterSlashing, Checkpoint},
+        containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Slot, UnixSeconds, ValidatorIndex, H256},
     },
     preset::{Minimal, Preset},

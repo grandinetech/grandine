@@ -28,6 +28,7 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
+use axum_extra::extract::{Query, QueryRejection};
 use bls::PublicKeyBytes;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;
@@ -630,7 +631,7 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
     EthPath(pubkey): EthPath<PublicKeyBytes>,
     EthQuery(query): EthQuery<CreateVoluntaryExitQuery>,
 ) -> Result<EthResponse<SignedVoluntaryExit>, Error> {
-    let state = controller.head_state().value;
+    let state = controller.preprocessed_state_at_current_slot()?;
 
     let epoch = query
         .epoch

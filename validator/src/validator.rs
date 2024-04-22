@@ -39,7 +39,10 @@ use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
 use log::{debug, error, info, log, warn, Level};
 use once_cell::sync::OnceCell;
-use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
+use operation_pools::{
+    convert_to_electra_attestation, AttestationAggPool, Origin, PoolAdditionOutcome,
+    PoolAdditionOutcome, SyncCommitteeAggPool,
+};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
@@ -76,6 +79,7 @@ use crate::{
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
     validator_config::ValidatorConfig,
+    PayloadIdEntry,
 };
 
 const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
@@ -258,7 +262,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
-                            .insert_attestation(wait_group, attestation.clone_arc());
+                            .insert_attestation(wait_group, &attestation);
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -933,7 +937,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             } = own_attestation;
 
-            let committee_index = attestation.data.index;
+            let committee_index = misc::committee_index(attestation);
 
             debug!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
@@ -947,8 +951,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
 
             let attestation = Arc::new(attestation.clone());
-
-            let subnet_id = slot_head.subnet_id(attestation.data.slot, attestation.data.index)?;
+            let subnet_id = slot_head.subnet_id(attestation.data().slot, committee_index)?;
 
             self.controller
                 .on_singular_attestation(AttestationItem::unverified(
@@ -960,7 +963,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .send(&self.p2p_tx);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), attestation);
+                .insert_attestation(wait_group.clone(), &attestation);
         }
 
         prometheus_metrics::stop_and_record(timer);
@@ -973,10 +976,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.own_aggregators = own_singular_attestations
             .iter()
             .filter_map(|own_attestation| {
-                let member = own_members.get(&(
-                    own_attestation.attestation.data.index,
-                    own_attestation.validator_index,
-                ))?;
+                let committee_index = misc::committee_index(&own_attestation.attestation);
+
+                let member =
+                    own_members.get(&(committee_index, own_attestation.validator_index))?;
 
                 let BeaconCommitteeMember {
                     public_key,
@@ -998,7 +1001,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     selection_proof,
                 })?;
 
-                Some((own_attestation.attestation.data, aggregator))
+                Some((own_attestation.attestation.data(), aggregator))
             })
             .pipe(group_into_btreemap);
 
@@ -1007,6 +1010,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
+        let phase = slot_head.phase();
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -1029,10 +1033,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 return None;
                             }
 
-                            let aggregate_and_proof = AggregateAndProof {
-                                aggregator_index,
-                                aggregate: aggregate.clone(),
-                                selection_proof,
+                            let aggregate_and_proof = if phase < Phase::Electra {
+                                AggregateAndProof::from(Phase0AggregateAndProof {
+                                    aggregator_index,
+                                    aggregate: aggregate.clone(),
+                                    selection_proof,
+                                })
+                            } else {
+                                let aggregate =
+                                    convert_to_electra_attestation(aggregate.clone()).ok()?;
+
+                                AggregateAndProof::from(ElectraAggregateAndProof {
+                                    aggregator_index,
+                                    aggregate,
+                                    selection_proof,
+                                })
                             };
 
                             let triple = SigningTriple {
@@ -1076,9 +1091,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let aggregates_and_proofs = signatures
             .zip(proofs)
             .map(|(signature, message)| {
-                let aggregate_and_proof = SignedAggregateAndProof {
-                    message,
-                    signature: signature.into(),
+                let aggregate_and_proof = match message {
+                    AggregateAndProof::Phase0(message) => {
+                        SignedAggregateAndProof::from(Phase0SignedAggregateAndProof {
+                            message,
+                            signature: signature.into(),
+                        })
+                    }
+                    AggregateAndProof::Electra(message) => {
+                        SignedAggregateAndProof::from(ElectraSignedAggregateAndProof {
+                            message,
+                            signature: signature.into(),
+                        })
+                    }
                 };
 
                 debug!("constructed aggregate and proof: {aggregate_and_proof:?}");
@@ -1095,17 +1120,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             "validators [{}] aggregating in slot {}",
             aggregates_and_proofs
                 .iter()
-                .map(|a| a.message.aggregator_index)
+                .map(SignedAggregateAndProof::aggregator_index)
                 .format(", "),
-            aggregate_and_proof.message.aggregate.data.slot,
+            aggregate_and_proof.slot(),
         );
 
         for aggregate_and_proof in aggregates_and_proofs {
-            let attestation = Arc::new(aggregate_and_proof.message.aggregate.clone());
+            let attestation = Arc::new(aggregate_and_proof.aggregate());
             let aggregate_and_proof = Arc::new(aggregate_and_proof);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), attestation);
+                .insert_attestation(wait_group.clone(), &attestation);
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
         }
@@ -1265,6 +1290,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_attestations);
         }
 
+        let phase = slot_head.phase();
+
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {
                 epoch: slot_head.current_epoch(),
@@ -1304,6 +1331,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         source: slot_head.beacon_state.current_justified_checkpoint(),
                         target,
                     };
+
+                    if phase >= Phase::Electra {
+                        data.index = 0;
+                    }
 
                     let triple = SigningTriple {
                         message: SigningMessage::<P>::Attestation(data),
@@ -1345,17 +1376,34 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 let own_attestations = signatures
                     .zip(other_data)
                     .filter_map(|(signature, (data, member))| {
-                        let mut aggregation_bits = BitList::with_length(member.committee_size);
+                        let attestation = if phase < Phase::Electra {
+                            let mut aggregation_bits = BitList::with_length(member.committee_size);
+                            aggregation_bits.set(member.position_in_committee, true);
 
-                        aggregation_bits.set(member.position_in_committee, true);
-
-                        signature.map(|signature| OwnAttestation {
-                            validator_index: member.validator_index,
-                            attestation: Attestation {
+                            Attestation::from(Phase0Attestation {
                                 aggregation_bits,
                                 data,
                                 signature: signature.into(),
-                            },
+                            })
+                        } else {
+                            let mut aggregation_bits = BitList::with_length(member.committee_size);
+                            aggregation_bits.set(member.position_in_committee, true);
+
+                            // TODO(feature/electra: don't hide error?)
+                            let mut committee_bits = BitVector::default();
+                            committee_bits.set(member.committee_index.try_into().ok()?, true);
+
+                            Attestation::from(ElectraAttestation {
+                                aggregation_bits,
+                                data,
+                                committee_bits,
+                                signature: signature.into(),
+                            })
+                        };
+
+                        Some(OwnAttestation {
+                            validator_index: member.validator_index,
+                            attestation,
                             signature,
                         })
                     })
@@ -1580,7 +1628,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     beacon_block_root,
                     slot,
                     ..
-                } = own_attestation.attestation.data;
+                } = own_attestation.attestation.data();
 
                 let vote = ValidatorVote {
                     validator_index: own_attestation.validator_index,

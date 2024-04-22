@@ -10,15 +10,19 @@ use types::{
     bellatrix::containers::BeaconBlock as BellatrixBeaconBlock,
     capella::containers::BeaconBlock as CapellaBeaconBlock,
     combined::{
-        BeaconBlock as CombinedBeaconBlock, BlindedBeaconBlock as CombinedBlindedBeaconBlock,
+        AggregateAndProof, BeaconBlock as CombinedBeaconBlock,
+        BlindedBeaconBlock as CombinedBlindedBeaconBlock,
     },
     deneb::containers::{
         BeaconBlock as DenebBeaconBlock, BlindedBeaconBlock as DenebBlindedBeaconBlock,
     },
+    electra::containers::{
+        BeaconBlock as ElectraBeaconBlock, BlindedBeaconBlock as ElectraBlindedBeaconBlock,
+    },
     phase0::{
         containers::{
-            AggregateAndProof, AttestationData, BeaconBlock as Phase0BeaconBlock,
-            BeaconBlockHeader, Fork, VoluntaryExit,
+            AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
+            VoluntaryExit,
         },
         primitives::{Epoch, Slot, H256},
     },
@@ -116,6 +120,20 @@ impl<P: Preset> From<&DenebBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
     }
 }
 
+impl<P: Preset> From<&ElectraBeaconBlock<P>> for SigningMessage<'_, P> {
+    fn from(block: &ElectraBeaconBlock<P>) -> Self {
+        let block_header = block.to_header();
+        Self::BeaconBlock(SigningBlock::Electra { block_header })
+    }
+}
+
+impl<P: Preset> From<&ElectraBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
+    fn from(blinded_block: &ElectraBlindedBeaconBlock<P>) -> Self {
+        let block_header = blinded_block.to_header();
+        Self::BeaconBlock(SigningBlock::Electra { block_header })
+    }
+}
+
 impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<'block, P> {
     fn from(block: &'block CombinedBeaconBlock<P>) -> Self {
         match block {
@@ -124,6 +142,7 @@ impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<
             CombinedBeaconBlock::Bellatrix(block) => block.into(),
             CombinedBeaconBlock::Capella(block) => block.into(),
             CombinedBeaconBlock::Deneb(block) => block.into(),
+            CombinedBeaconBlock::Electra(block) => block.into(),
         }
     }
 }
@@ -143,6 +162,10 @@ impl<P: Preset> From<&CombinedBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
                 let block_header = blinded_block.to_header();
                 Self::BeaconBlock(SigningBlock::Deneb { block_header })
             }
+            CombinedBlindedBeaconBlock::Electra(blinded_block) => {
+                let block_header = blinded_block.to_header();
+                Self::BeaconBlock(SigningBlock::Electra { block_header })
+            }
         }
     }
 }
@@ -160,6 +183,7 @@ pub enum SigningBlock<'block, P: Preset> {
     Bellatrix { block_header: BeaconBlockHeader },
     Capella { block_header: BeaconBlockHeader },
     Deneb { block_header: BeaconBlockHeader },
+    Electra { block_header: BeaconBlockHeader },
 }
 
 impl<'block, P: Preset> SigningBlock<'block, P> {

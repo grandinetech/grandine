@@ -19,9 +19,9 @@ use ssz::{
 };
 use strum::{Display, EnumString};
 use typenum::{
-    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, True, Unsigned, B1, U1048576, U1073741824,
-    U1099511627776, U128, U16, U16777216, U17, U2, U2048, U256, U32, U4, U4096, U512, U6, U64,
-    U65536, U8, U8192, U9,
+    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, True, Unsigned, B1, U1, U1048576, U1073741824,
+    U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144, U32, U4,
+    U4096, U512, U6, U64, U65536, U8, U8192, U9,
 };
 
 use crate::{
@@ -32,6 +32,11 @@ use crate::{
     deneb::{
         consts::BytesPerFieldElement,
         primitives::{Blob, KzgCommitment, KzgProof},
+    },
+    electra::containers::{
+        Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
+        DepositReceipt, ExecutionLayerWithdrawalRequest, PendingBalanceDeposit,
+        PendingConsolidation, PendingPartialWithdrawal, SignedConsolidation,
     },
     phase0::{
         containers::{
@@ -77,6 +82,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
     type MaxAttesterSlashings: MerkleElements<AttesterSlashing<Self>> + Eq + Debug + Send + Sync;
+    type MaxCommitteesPerSlot: BitVectorBits + MerkleBits + NonZero + Eq + Ord + Debug + Send + Sync;
     type MaxDeposits: MerkleElements<Deposit> + Eq + Debug + Send + Sync;
     type MaxProposerSlashings: MerkleElements<ProposerSlashing> + Eq + Debug + Send + Sync;
     type MaxValidatorsPerCommittee: MerkleElements<ValidatorIndex>
@@ -139,6 +145,32 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
 
+    // Electra
+    type MaxAttestationsElectra: MerkleElements<ElectraAttestation<Self>> + Eq + Debug + Send + Sync;
+    type MaxAttesterSlashingsElectra: MerkleElements<ElectraAttesterSlashing<Self>>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+    type MaxConsolidations: MerkleElements<SignedConsolidation> + Eq + Debug + Send + Sync;
+    type MaxDepositReceiptsPerPayload: MerkleElements<DepositReceipt> + Eq + Debug + Send + Sync;
+    type MaxWithdrawalRequestsPerPayload: MerkleElements<ExecutionLayerWithdrawalRequest>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+    type PendingBalanceDepositsLimit: MerkleElements<PendingBalanceDeposit>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+    type PendingConsolidationsLimit: MerkleElements<PendingConsolidation> + Eq + Debug + Send + Sync;
+    type PendingPartialWithdrawalsLimit: MerkleElements<PendingPartialWithdrawal>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+
     // Meta
     const NAME: PresetName;
 
@@ -149,7 +181,6 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     const HYSTERESIS_QUOTIENT: NonZeroU64 = nonzero!(4_u64);
     const HYSTERESIS_UPWARD_MULTIPLIER: u64 = 5;
     const INACTIVITY_PENALTY_QUOTIENT: NonZeroU64 = nonzero!(1_u64 << 26);
-    const MAX_COMMITTEES_PER_SLOT: NonZeroU64 = nonzero!(64_u64);
     const MAX_EFFECTIVE_BALANCE: Gwei = 32_000_000_000;
     const MAX_SEED_LOOKAHEAD: u64 = 4;
     const MIN_ATTESTATION_INCLUSION_DELAY: NonZeroU64 = NonZeroU64::MIN;
@@ -180,6 +211,13 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     // Capella
     const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 1 << 14;
 
+    // Electra
+    const MAX_EFFECTIVE_BALANCE_ELECTRA: Gwei = 2_048_000_000_000;
+    const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 8;
+    const MIN_ACTIVATION_BALANCE: Gwei = 32_000_000_000;
+    const MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
+    const WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
+
     /// Returns the default configuration associated with a preset.
     ///
     /// This should only be used in tests and benchmarks.
@@ -206,6 +244,7 @@ impl Preset for Mainnet {
     type HistoricalRootsLimit = U16777216;
     type MaxAttestations = U128;
     type MaxAttesterSlashings = U2;
+    type MaxCommitteesPerSlot = U64;
     type MaxDeposits = U16;
     type MaxProposerSlashings = U16;
     type MaxValidatorsPerCommittee = U2048;
@@ -231,6 +270,16 @@ impl Preset for Mainnet {
     type MaxBlobCommitmentsPerBlock = U4096;
     type MaxBlobsPerBlock = U6;
     type KzgCommitmentInclusionProofDepth = U17;
+
+    // Electra
+    type MaxAttestationsElectra = U8;
+    type MaxAttesterSlashingsElectra = U1;
+    type MaxConsolidations = U1;
+    type MaxDepositReceiptsPerPayload = U8192;
+    type MaxWithdrawalRequestsPerPayload = U16;
+    type PendingBalanceDepositsLimit = U134217728;
+    type PendingConsolidationsLimit = U262144;
+    type PendingPartialWithdrawalsLimit = U134217728;
 
     // Meta
     const NAME: PresetName = PresetName::Mainnet;
@@ -286,6 +335,12 @@ impl Preset for Minimal {
         // Deneb
         type FieldElementsPerBlob;
         type MaxBlobsPerBlock;
+
+        // Electra
+        type MaxAttestationsElectra;
+        type MaxAttesterSlashingsElectra;
+        type MaxConsolidations;
+        type PendingBalanceDepositsLimit;
     }
 
     // Phase 0
@@ -293,6 +348,7 @@ impl Preset for Minimal {
     type EpochsPerHistoricalRoot = U8;
     type EpochsPerHistoricalVector = U64;
     type EpochsPerSlashingsVector = U64;
+    type MaxCommitteesPerSlot = U4;
     type SlotsPerEpoch = U8;
 
     // Altair
@@ -305,12 +361,17 @@ impl Preset for Minimal {
     type MaxBlobCommitmentsPerBlock = U16;
     type KzgCommitmentInclusionProofDepth = U9;
 
+    // Electra
+    type MaxDepositReceiptsPerPayload = U4;
+    type MaxWithdrawalRequestsPerPayload = U2;
+    type PendingConsolidationsLimit = U64;
+    type PendingPartialWithdrawalsLimit = U64;
+
     // Meta
     const NAME: PresetName = PresetName::Minimal;
 
     // Phase 0
     const INACTIVITY_PENALTY_QUOTIENT: NonZeroU64 = nonzero!(1_u64 << 25);
-    const MAX_COMMITTEES_PER_SLOT: NonZeroU64 = nonzero!(4_u64);
     const MIN_SLASHING_PENALTY_QUOTIENT: NonZeroU64 = nonzero!(64_u64);
     const PROPORTIONAL_SLASHING_MULTIPLIER: u64 = 2;
     const SHUFFLE_ROUND_COUNT: u8 = 10;
@@ -321,6 +382,9 @@ impl Preset for Minimal {
 
     // Capella
     const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 16;
+
+    // Electra
+    const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 1;
 }
 
 /// [Medalla preset](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/medalla/config.yaml).
@@ -340,6 +404,7 @@ impl Preset for Medalla {
         type HistoricalRootsLimit;
         type MaxAttestations;
         type MaxAttesterSlashings;
+        type MaxCommitteesPerSlot;
         type MaxDeposits;
         type MaxProposerSlashings;
         type MaxValidatorsPerCommittee;
@@ -365,6 +430,16 @@ impl Preset for Medalla {
         type MaxBlobCommitmentsPerBlock;
         type MaxBlobsPerBlock;
         type KzgCommitmentInclusionProofDepth;
+
+        // Electra
+        type MaxAttestationsElectra;
+        type MaxAttesterSlashingsElectra;
+        type MaxConsolidations;
+        type MaxDepositReceiptsPerPayload;
+        type MaxWithdrawalRequestsPerPayload;
+        type PendingBalanceDepositsLimit;
+        type PendingConsolidationsLimit;
+        type PendingPartialWithdrawalsLimit;
     }
 
     // Phase 0
@@ -447,6 +522,15 @@ impl PresetName {
             Self::Mainnet => DenebPreset::new::<Mainnet>(),
             Self::Minimal => DenebPreset::new::<Minimal>(),
             Self::Medalla => DenebPreset::new::<Medalla>(),
+        }
+    }
+
+    #[must_use]
+    pub const fn electra_preset(self) -> ElectraPreset {
+        match self {
+            Self::Mainnet => ElectraPreset::new::<Mainnet>(),
+            Self::Minimal => ElectraPreset::new::<Minimal>(),
+            Self::Medalla => ElectraPreset::new::<Medalla>(),
         }
     }
 
@@ -547,7 +631,7 @@ impl Phase0Preset {
             hysteresis_downward_multiplier: P::HYSTERESIS_DOWNWARD_MULTIPLIER,
             hysteresis_quotient: P::HYSTERESIS_QUOTIENT,
             hysteresis_upward_multiplier: P::HYSTERESIS_UPWARD_MULTIPLIER,
-            max_committees_per_slot: P::MAX_COMMITTEES_PER_SLOT,
+            max_committees_per_slot: P::MaxCommitteesPerSlot::non_zero(),
             max_validators_per_committee: P::MaxValidatorsPerCommittee::non_zero(),
             shuffle_round_count: P::SHUFFLE_ROUND_COUNT,
             target_committee_size: P::TARGET_COMMITTEE_SIZE,
@@ -744,6 +828,44 @@ impl DenebPreset {
     }
 }
 
+// TODO: (feature/electra): review for NonZeroU64 types
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct ElectraPreset {
+    #[serde(with = "serde_utils::string_or_native")]
+    max_attestations_electra: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_attester_slashings_electra: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_consolidations: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_deposit_receipts_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_withdrawal_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pending_balance_deposits_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pending_consolidations_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pending_partial_withdrawals_limit: u64,
+}
+
+impl ElectraPreset {
+    #[must_use]
+    pub const fn new<P: Preset>() -> Self {
+        Self {
+            max_attestations_electra: P::MaxAttestationsElectra::U64,
+            max_attester_slashings_electra: P::MaxAttesterSlashingsElectra::U64,
+            max_consolidations: P::MaxConsolidations::U64,
+            max_deposit_receipts_per_payload: P::MaxDepositReceiptsPerPayload::U64,
+            max_withdrawal_requests_per_payload: P::MaxWithdrawalRequestsPerPayload::U64,
+            pending_balance_deposits_limit: P::PendingBalanceDepositsLimit::U64,
+            pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
+            pending_partial_withdrawals_limit: P::PendingPartialWithdrawalsLimit::U64,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::ops::Deref;
@@ -797,6 +919,7 @@ mod tests {
                 &preset_name.bellatrix_preset(),
                 &preset_name.capella_preset(),
                 &preset_name.deneb_preset(),
+                &preset_name.electra_preset(),
             ];
         }
     }

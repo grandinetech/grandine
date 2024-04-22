@@ -42,7 +42,7 @@ pub mod unphased {
 
     pub use block_processing::{
         validate_attestation, validate_attester_slashing, validate_attester_slashing_with_verifier,
-        validate_proposer_slashing, validate_voluntary_exit,
+        validate_proposer_slashing, validate_voluntary_exit, validate_voluntary_exit_with_verifier,
     };
     pub use epoch_intermediates::EpochDeltas;
     pub use slot_processing::{process_slot, ProcessSlots};
@@ -51,6 +51,7 @@ pub mod unphased {
     pub(crate) use block_processing::{
         process_block_header, process_block_header_for_gossip, process_eth1_data, process_randao,
         process_voluntary_exit, validate_attestation_with_verifier, validate_deposits,
+        validate_deposits_without_verifying_merkle_branch,
         validate_proposer_slashing_with_verifier, CombinedDeposit,
     };
     pub(crate) use epoch_intermediates::ValidatorSummary;
@@ -173,6 +174,22 @@ pub mod capella {
 pub mod deneb {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
+    pub(crate) use epoch_processing::{epoch_report, process_epoch};
+    pub(crate) use slot_processing::process_slots;
+    pub(crate) use state_transition::{state_transition, verify_signatures};
+
+    mod blinded_block_processing;
+    mod block_processing;
+    mod epoch_intermediates;
+    mod epoch_processing;
+    mod slot_processing;
+    mod state_transition;
+}
+
+pub mod electra {
+    pub(crate) use blinded_block_processing::custom_process_blinded_block;
+    pub use block_processing::get_expected_withdrawals;
+    pub(crate) use block_processing::{process_block, process_deposit_data};
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};

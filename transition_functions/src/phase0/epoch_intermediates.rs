@@ -3,11 +3,12 @@ use core::num::NonZeroU64;
 use anyhow::Result;
 use helper_functions::{
     accessors::{
-        get_attesting_indices, get_block_root, get_block_root_at_slot, get_current_epoch,
-        get_finality_delay, get_previous_epoch,
+        get_block_root, get_block_root_at_slot, get_current_epoch, get_finality_delay,
+        get_previous_epoch,
     },
     misc::vec_of_default,
     mutators::clamp_balance,
+    phase0::get_attesting_indices,
     predicates::{is_active_validator, is_eligible_for_penalties, is_in_inactivity_leak},
 };
 use itertools::{izip, Itertools as _};

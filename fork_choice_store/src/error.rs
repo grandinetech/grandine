@@ -4,17 +4,18 @@ use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::containers::PowBlock,
-    combined::SignedBeaconBlock,
+    combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    phase0::{
-        containers::{Attestation, SignedAggregateAndProof},
-        primitives::{Slot, SubnetId, ValidatorIndex},
-    },
+    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
 #[derive(Debug, Error)]
 pub enum Error<P: Preset> {
+    #[error("attestation data should have index as zero")]
+    AttestationDataIndexNotZero { attestation: Arc<Attestation<P>> },
+    #[error("attestation with multiple committee bits")]
+    AttestationFromMultipleCommittees { attestation: Arc<Attestation<P>> },
     #[error("aggregate attestation has no aggregation bits set: {aggregate_and_proof:?}")]
     AggregateAttestationHasNoAggregationBitsSet {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,

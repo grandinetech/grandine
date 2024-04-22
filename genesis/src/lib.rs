@@ -32,6 +32,12 @@ use types::{
         beacon_state::BeaconState as DenebBeaconState,
         containers::{BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody},
     },
+    electra::{
+        beacon_state::BeaconState as ElectraBeaconState,
+        containers::{
+            BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
+        },
+    },
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
@@ -72,6 +78,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
             Phase::Bellatrix => BellatrixBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Capella => CapellaBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Deneb => DenebBeaconBlockBody::<P>::default().hash_tree_root(),
+            Phase::Electra => ElectraBeaconBlockBody::<P>::default().hash_tree_root(),
         };
 
         let latest_block_header = BeaconBlockHeader {
@@ -114,6 +121,13 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 fork,
                 latest_block_header,
                 ..DenebBeaconState::default()
+            }
+            .into(),
+            Phase::Electra => ElectraBeaconState {
+                slot,
+                fork,
+                latest_block_header,
+                ..ElectraBeaconState::default()
             }
             .into(),
         };
@@ -269,6 +283,7 @@ fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBea
         Phase::Bellatrix => BeaconBlock::from(BellatrixBeaconBlock::default()),
         Phase::Capella => BeaconBlock::from(CapellaBeaconBlock::default()),
         Phase::Deneb => BeaconBlock::from(DenebBeaconBlock::default()),
+        Phase::Electra => BeaconBlock::from(ElectraBeaconBlock::default()),
     }
     .with_state_root(state_root)
     .with_zero_signature()
@@ -341,6 +356,7 @@ mod spec_tests {
         ["consensus-spec-tests/tests/*/bellatrix/genesis/initialization/*/*"] [bellatrix_initialization] [Bellatrix];
         ["consensus-spec-tests/tests/*/capella/genesis/initialization/*/*"]   [capella_initialization]   [Capella];
         ["consensus-spec-tests/tests/*/deneb/genesis/initialization/*/*"]     [deneb_initialization]     [Deneb];
+        ["consensus-spec-tests/tests/*/electra/genesis/initialization/*/*"]   [electra_initialization]   [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -354,6 +370,7 @@ mod spec_tests {
         ["consensus-spec-tests/tests/*/bellatrix/genesis/validity/*/*"] [bellatrix_validity] [Bellatrix];
         ["consensus-spec-tests/tests/*/capella/genesis/validity/*/*"]   [capella_validity]   [Capella];
         ["consensus-spec-tests/tests/*/deneb/genesis/validity/*/*"]     [deneb_validity]     [Deneb];
+        ["consensus-spec-tests/tests/*/electra/genesis/validity/*/*"]   [electra_validity]   [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -387,6 +404,9 @@ mod spec_tests {
             Phase::Deneb => case
                 .try_ssz_default("execution_payload_header")
                 .map(ExecutionPayloadHeader::Deneb),
+            Phase::Electra => case
+                .try_ssz_default("execution_payload_header")
+                .map(ExecutionPayloadHeader::Electra),
         };
 
         assert_eq!(

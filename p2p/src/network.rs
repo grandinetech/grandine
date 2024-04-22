@@ -42,15 +42,12 @@ use thiserror::Error;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
-    combined::SignedBeaconBlock,
+    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{Phase, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
-        containers::{
-            Attestation, AttesterSlashing, ProposerSlashing, SignedAggregateAndProof,
-            SignedVoluntaryExit,
-        },
+        containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, NodeId, Slot, SubnetId, H256},
     },
     preset::Preset,
@@ -543,10 +540,10 @@ impl<P: Preset> Network<P> {
     }
 
     fn publish_singular_attestation(&self, attestation: Arc<Attestation<P>>, subnet_id: SubnetId) {
-        if attestation.aggregation_bits.count_ones() != 1 {
+        if attestation.count_aggregation_bits() != 1 {
             error!(
                 "attempted to publish singular attestation \
-                     with invalid number of participants: {attestation:?}",
+                 with invalid number of participants: {attestation:?}",
             );
 
             return;
@@ -561,14 +558,14 @@ impl<P: Preset> Network<P> {
 
     fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
         if aggregate_and_proof
-            .message
-            .aggregate
-            .aggregation_bits
-            .not_any()
+            .message()
+            .aggregate()
+            .count_aggregation_bits()
+            == 0
         {
             error!(
                 "attempted to publish aggregate and proof with no participants: \
-                    {aggregate_and_proof:?}",
+                 {aggregate_and_proof:?}",
             );
 
             return;
@@ -1331,7 +1328,7 @@ impl<P: Preset> Network<P> {
                 );
 
                 if let Some(network_to_slasher_tx) = &self.channels.network_to_slasher_tx {
-                    let attestation = Arc::new(aggregate_and_proof.message.aggregate.clone());
+                    let attestation = Arc::new(aggregate_and_proof.message().aggregate());
                     P2pToSlasher::Attestation(attestation).send(network_to_slasher_tx);
                 }
 

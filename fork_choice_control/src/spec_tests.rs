@@ -4,7 +4,6 @@ use clock::Tick;
 use duplicate::duplicate_item;
 use execution_engine::PayloadStatusWithBlockHash;
 use helper_functions::misc;
-use itertools::izip;
 use serde::Deserialize;
 use spec_test_utils::Case;
 use ssz::ContiguousList;
@@ -12,19 +11,16 @@ use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use test_generator::test_resources;
 use types::{
-    combined::{BeaconBlock, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
     config::Config,
-    deneb::{
-        containers::BlobSidecar,
-        primitives::{Blob, KzgProof},
-    },
+    deneb::primitives::{Blob, KzgProof},
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
         primitives::{Slot, UnixSeconds, H256},
     },
     preset::{Mainnet, Minimal, Preset},
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconState as _, PostDenebBeaconBlockBody, SignedBeaconBlock as _},
 };
 
 use crate::helpers::Context;
@@ -127,6 +123,16 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/withholding/*/*"]        [deneb_minimal_withholding]        [Minimal] [Deneb];
     ["consensus-spec-tests/tests/mainnet/deneb/sync/*/*/*"]                         [deneb_sync_mainnet]               [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/sync/*/*/*"]                         [deneb_sync_minimal]               [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/ex_ante/*/*"]          [electra_mainnet_ex_ante]          [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/get_head/*/*"]         [electra_mainnet_get_head]         [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/on_block/*/*"]         [electra_mainnet_on_block]         [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/ex_ante/*/*"]          [electra_minimal_ex_ante]          [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/get_head/*/*"]         [electra_minimal_get_head]         [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/on_block/*/*"]         [electra_minimal_on_block]         [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/reorg/*/*"]            [electra_minimal_reorg]            [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/withholding/*/*"]      [electra_minimal_withholding]      [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/sync/*/*/*"]                       [electra_sync_mainnet]             [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/sync/*/*/*"]                       [electra_sync_minimal]             [Minimal] [Electra];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case) {
@@ -159,7 +165,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 context.on_tick(tick);
             }
             Step::Attestation { attestation } => {
-                let attestation = case.ssz_default(attestation);
+                let attestation = case.ssz::<_, Attestation<P>>(config, attestation);
                 context.on_test_attestation(attestation);
             }
             Step::Block {
@@ -168,43 +174,34 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 proofs,
                 valid,
             } => {
-                let mut expected_blob_count = 0;
+                type BlobBundle<P> = ContiguousList<Blob<P>, <P as Preset>::MaxBlobsPerBlock>;
 
                 let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
 
-                if let Some(body) = block.message().body().post_deneb() {
-                    type BlobBundle<P> = ContiguousList<Blob<P>, <P as Preset>::MaxBlobsPerBlock>;
+                let blobs = blobs
+                    .map(|path| case.ssz_default::<BlobBundle<P>>(path))
+                    .into_iter()
+                    .flatten();
 
-                    let blobs = blobs.map(|path| case.ssz_default::<BlobBundle<P>>(path));
-                    let signed_block_header = block.to_header();
+                let proofs = proofs.into_iter().flatten();
 
-                    for (index, blob, kzg_proof, kzg_commitment) in izip!(
-                        0..,
-                        blobs.unwrap_or_default(),
-                        proofs.unwrap_or_default(),
-                        body.blob_kzg_commitments().iter().copied(),
-                    ) {
-                        // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
-                        //                      Consider mocking `retrieve_blobs_and_proofs`
-                        //                      from `consensus-specs` using something like
-                        //                      `TestExecutionEngine`.
-                        let kzg_commitment_inclusion_proof =
-                            misc::kzg_commitment_inclusion_proof(body, index)
-                                .expect("inclusion proof should be constructed successfully");
+                // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
+                //                      Consider mocking `retrieve_blobs_and_proofs`
+                //                      from `consensus-specs` using something like
+                //                      `TestExecutionEngine`.
+                let blob_sidecars = misc::construct_blob_sidecars(&block, blobs, proofs)
+                    .expect("blob sidecars should be constructed successfully");
 
-                        let blob_sidecar = BlobSidecar {
-                            index,
-                            blob,
-                            kzg_commitment,
-                            kzg_proof,
-                            signed_block_header,
-                            kzg_commitment_inclusion_proof,
-                        };
+                let expected_blob_count = block
+                    .message()
+                    .body()
+                    .post_deneb()
+                    .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+                    .map(|contiguous_list| contiguous_list.len())
+                    .unwrap_or_default();
 
-                        context.on_blob_sidecar(blob_sidecar);
-                    }
-
-                    expected_blob_count = body.blob_kzg_commitments().len();
+                for blob_sidecar in blob_sidecars {
+                    context.on_blob_sidecar(blob_sidecar);
                 }
 
                 if !valid && expected_blob_count > 0 {
@@ -239,8 +236,18 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
             }) => {
                 context.on_notified_new_payload(block_hash, payload_status.into());
             }
-            Step::AttesterSlashing { attester_slashing } => {
-                let attester_slashing = case.ssz_default(attester_slashing);
+            Step::AttesterSlashing {
+                attester_slashing: file_name,
+            } => {
+                let attester_slashing = match config.genesis_phase() {
+                    Phase::Phase0
+                    | Phase::Altair
+                    | Phase::Bellatrix
+                    | Phase::Capella
+                    | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
+                    Phase::Electra => AttesterSlashing::Electra(case.ssz(config, file_name)),
+                };
+
                 context.on_attester_slashing(attester_slashing);
             }
             Step::Checks { checks } => {

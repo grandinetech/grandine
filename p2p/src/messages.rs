@@ -14,14 +14,11 @@ use operation_pools::PoolRejectionReason;
 use serde::Serialize;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
-    combined::SignedBeaconBlock,
+    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::Phase,
     phase0::{
-        containers::{
-            Attestation, AttesterSlashing, ProposerSlashing, SignedAggregateAndProof,
-            SignedVoluntaryExit,
-        },
+        containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,

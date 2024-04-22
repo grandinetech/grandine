@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use derive_more::From;
+use bls::{PublicKeyBytes, SignatureBytes};
 use ethereum_types::H64;
 use serde::{Deserialize, Serialize};
 use ssz::{ByteList, ByteVector, ContiguousList};
@@ -17,6 +17,10 @@ use types::{
     deneb::{
         containers::ExecutionPayload as DenebExecutionPayload,
         primitives::{Blob, KzgCommitment, KzgProof},
+    },
+    electra::containers::{
+        DepositReceipt, ExecutionLayerWithdrawalRequest,
+        ExecutionPayload as ElectraExecutionPayload,
     },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
@@ -359,6 +363,237 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
+/// [`ExecutionPayloadV4`](https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#ExecutionPayloadV4)
+#[derive(Deserialize, Serialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct ExecutionPayloadV4<P: Preset> {
+    pub parent_hash: ExecutionBlockHash,
+    pub fee_recipient: ExecutionAddress,
+    pub state_root: H256,
+    pub receipts_root: H256,
+    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
+    pub prev_randao: H256,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub block_number: ExecutionBlockNumber,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub gas_limit: Gas,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub gas_used: Gas,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub timestamp: UnixSeconds,
+    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub base_fee_per_gas: Wei,
+    pub block_hash: ExecutionBlockHash,
+    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub blob_gas_used: Gas,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub excess_blob_gas: Gas,
+    #[serde(rename = "depositRequests")]
+    pub deposit_receipts: ContiguousList<DepositReceiptV1, P::MaxDepositReceiptsPerPayload>,
+    pub withdrawal_requests:
+        ContiguousList<WithdrawalRequestV1, P::MaxWithdrawalRequestsPerPayload>,
+}
+
+impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
+    fn from(payload: ElectraExecutionPayload<P>) -> Self {
+        let ElectraExecutionPayload {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+            deposit_receipts,
+            withdrawal_requests,
+        } = payload;
+
+        let withdrawals = withdrawals.map(Into::into);
+        let deposit_receipts = deposit_receipts.map(Into::into);
+        let withdrawal_requests = withdrawal_requests.map(Into::into);
+
+        Self {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+            deposit_receipts,
+            withdrawal_requests,
+        }
+    }
+}
+
+impl<P: Preset> From<ExecutionPayloadV4<P>> for ElectraExecutionPayload<P> {
+    fn from(payload: ExecutionPayloadV4<P>) -> Self {
+        let ExecutionPayloadV4 {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+            deposit_receipts,
+            withdrawal_requests,
+        } = payload;
+
+        let withdrawals = withdrawals.map(Into::into);
+        let deposit_receipts = deposit_receipts.map(Into::into);
+        let withdrawal_requests = withdrawal_requests.map(Into::into);
+
+        Self {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+            deposit_receipts,
+            withdrawal_requests,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct DepositReceiptV1 {
+    pub pubkey: PublicKeyBytes,
+    pub withdrawal_credentials: H256,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub amount: Gwei,
+    pub signature: SignatureBytes,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub index: u64,
+}
+
+impl From<DepositReceipt> for DepositReceiptV1 {
+    fn from(deposit_receipt: DepositReceipt) -> Self {
+        let DepositReceipt {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            index,
+        } = deposit_receipt;
+
+        Self {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            index,
+        }
+    }
+}
+
+impl From<DepositReceiptV1> for DepositReceipt {
+    fn from(deposit_receipt: DepositReceiptV1) -> Self {
+        let DepositReceiptV1 {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            index,
+        } = deposit_receipt;
+
+        Self {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            index,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct WithdrawalRequestV1 {
+    pub source_address: ExecutionAddress,
+    pub validator_public_key: PublicKeyBytes,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub amount: Gwei,
+}
+
+impl From<ExecutionLayerWithdrawalRequest> for WithdrawalRequestV1 {
+    fn from(execution_layer_withdrawal_request: ExecutionLayerWithdrawalRequest) -> Self {
+        let ExecutionLayerWithdrawalRequest {
+            source_address,
+            validator_pubkey,
+            amount,
+        } = execution_layer_withdrawal_request;
+
+        Self {
+            source_address,
+            validator_public_key: validator_pubkey,
+            amount,
+        }
+    }
+}
+
+impl From<WithdrawalRequestV1> for ExecutionLayerWithdrawalRequest {
+    fn from(withdrawal_request: WithdrawalRequestV1) -> Self {
+        let WithdrawalRequestV1 {
+            source_address,
+            validator_public_key,
+            amount,
+        } = withdrawal_request;
+
+        Self {
+            source_address,
+            validator_pubkey: validator_public_key,
+            amount,
+        }
+    }
+}
+
 /// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
 #[derive(Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
@@ -490,12 +725,50 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(From, Serialize)]
+#[derive(Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct EngineGetPayloadV4Response<P: Preset> {
+    pub execution_payload: ExecutionPayloadV4<P>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub block_value: Wei,
+    pub blobs_bundle: BlobsBundleV1<P>,
+    pub should_override_builder: bool,
+}
+
+impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<ExecutionPayload<P>, P> {
+    fn from(response: EngineGetPayloadV4Response<P>) -> Self {
+        let EngineGetPayloadV4Response {
+            execution_payload,
+            block_value,
+            blobs_bundle,
+            ..
+        } = response;
+
+        let execution_payload = ExecutionPayload::Electra(execution_payload.into());
+
+        let BlobsBundleV1 {
+            commitments,
+            proofs,
+            blobs,
+        } = blobs_bundle;
+
+        Self::new(
+            execution_payload,
+            Some(commitments),
+            Some(proofs),
+            Some(blobs),
+            Some(block_value),
+        )
+    }
+}
+
+#[derive(Serialize)]
 #[serde(untagged, bound = "")]
 pub enum PayloadAttributes<P: Preset> {
     Bellatrix(PayloadAttributesV1),
     Capella(PayloadAttributesV2<P>),
     Deneb(PayloadAttributesV3<P>),
+    Electra(PayloadAttributesV3<P>),
 }
 
 impl<P: Preset> PayloadAttributes<P> {
@@ -505,6 +778,7 @@ impl<P: Preset> PayloadAttributes<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 }
@@ -608,6 +882,40 @@ pub enum PayloadId {
     Bellatrix(H64),
     Capella(H64),
     Deneb(H64),
+    Electra(H64),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadStatusWithBlockHash {
+    pub block_hash: ExecutionBlockHash,
+    pub payload_status: PayloadStatus,
+}
+
+// `PayloadStatusV1` is deserialized from data containing keys in `camelCase`,
+// whereas `consensus-spec-tests` and `grandine-snapshot-tests` use `snake_case`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadStatus {
+    status: PayloadValidationStatus,
+    latest_valid_hash: Option<ExecutionBlockHash>,
+    validation_error: Option<String>,
+}
+
+impl From<PayloadStatus> for PayloadStatusV1 {
+    fn from(payload_status: PayloadStatus) -> Self {
+        let PayloadStatus {
+            status,
+            latest_valid_hash,
+            validation_error,
+        } = payload_status;
+
+        Self {
+            status,
+            latest_valid_hash,
+            validation_error,
+        }
+    }
 }
 
 #[derive(Deserialize)]

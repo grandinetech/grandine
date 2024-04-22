@@ -16,15 +16,18 @@ use types::{
     combined::BeaconState as CombinedBeaconState,
     config::Config,
     deneb::{containers::BlobSidecar, primitives::BlobIndex},
+    electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
     phase0::{
         consts::{
             ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TARGET_AGGREGATORS_PER_COMMITTEE,
         },
-        containers::{AttestationData, IndexedAttestation, Validator},
-        primitives::{CommitteeIndex, Epoch, Gwei, Slot, H256},
+        containers::{AttestationData, Validator},
+        primitives::{CommitteeIndex, Epoch, Slot, H256},
     },
     preset::Preset,
-    traits::{BeaconState, PostBellatrixBeaconBlockBody, PostBellatrixBeaconState},
+    traits::{
+        BeaconState, IndexedAttestation, PostBellatrixBeaconBlockBody, PostBellatrixBeaconState,
+    },
 };
 
 use crate::{
@@ -39,13 +42,6 @@ use crate::{
 #[must_use]
 pub const fn is_active_validator(validator: &Validator, epoch: Epoch) -> bool {
     validator.activation_epoch <= epoch && epoch < validator.exit_epoch
-}
-
-// > Check if ``validator`` is eligible to be placed into the activation queue.
-#[must_use]
-pub const fn is_eligible_for_activation_queue<P: Preset>(validator: &Validator) -> bool {
-    validator.activation_eligibility_epoch == FAR_FUTURE_EPOCH
-        && validator.effective_balance == P::MAX_EFFECTIVE_BALANCE
 }
 
 // > Check if ``validator`` is eligible for activation.
@@ -89,7 +85,7 @@ pub fn is_slashable_attestation_data(data_1: AttestationData, data_2: Attestatio
 pub fn validate_constructed_indexed_attestation<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-    indexed_attestation: &IndexedAttestation<P>,
+    indexed_attestation: &impl IndexedAttestation<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
     validate_indexed_attestation(config, state, indexed_attestation, verifier, false)
@@ -98,7 +94,7 @@ pub fn validate_constructed_indexed_attestation<P: Preset>(
 pub fn validate_received_indexed_attestation<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-    indexed_attestation: &IndexedAttestation<P>,
+    indexed_attestation: &impl IndexedAttestation<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
     validate_indexed_attestation(config, state, indexed_attestation, verifier, true)
@@ -107,33 +103,39 @@ pub fn validate_received_indexed_attestation<P: Preset>(
 fn validate_indexed_attestation<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-    indexed_attestation: &IndexedAttestation<P>,
+    indexed_attestation: &impl IndexedAttestation<P>,
     mut verifier: impl Verifier,
     validate_indices_sorted_and_unique: bool,
 ) -> Result<()> {
-    let indices = &indexed_attestation.attesting_indices;
-
-    ensure!(!indices.is_empty(), Error::AttestationHasNoAttestingIndices);
+    ensure!(
+        indexed_attestation.attesting_indices().next().is_some(),
+        Error::AttestationHasNoAttestingIndices
+    );
 
     if validate_indices_sorted_and_unique {
         // > Verify indices are sorted and unique
         ensure!(
-            indices.iter().tuple_windows().all(|(a, b)| a < b),
+            indexed_attestation
+                .attesting_indices()
+                .tuple_windows()
+                .all(|(a, b)| a < b),
             Error::AttestingIndicesNotSortedAndUnique,
         );
     }
 
     // > Verify aggregate signature
     itertools::process_results(
-        indices.iter().copied().map(|validator_index| {
-            accessors::public_key(state, validator_index)?
-                .decompress()
-                .map_err(AnyhowError::new)
-        }),
+        indexed_attestation
+            .attesting_indices()
+            .map(|validator_index| {
+                accessors::public_key(state, validator_index)?
+                    .decompress()
+                    .map_err(AnyhowError::new)
+            }),
         |public_keys| {
             verifier.verify_aggregate(
-                indexed_attestation.data.signing_root(config, state),
-                indexed_attestation.signature,
+                indexed_attestation.data().signing_root(config, state),
+                indexed_attestation.signature(),
                 public_keys,
                 SignatureKind::Attestation,
             )
@@ -273,27 +275,6 @@ pub fn has_eth1_withdrawal_credential(validator: &Validator) -> bool {
         .starts_with(ETH1_ADDRESS_WITHDRAWAL_PREFIX)
 }
 
-/// [`is_fully_withdrawable_validator`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#is_fully_withdrawable_validator)
-///
-/// > Check if ``validator`` is fully withdrawable.
-pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epoch: Epoch) -> bool {
-    has_eth1_withdrawal_credential(validator)
-        && validator.withdrawable_epoch <= epoch
-        && balance > 0
-}
-
-/// [`is_partially_withdrawable_validator`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#is_partially_withdrawable_validator)
-///
-/// > Check if ``validator`` is partially withdrawable.
-pub fn is_partially_withdrawable_validator<P: Preset>(
-    validator: &Validator,
-    balance: Gwei,
-) -> bool {
-    let has_max_effective_balance = validator.effective_balance == P::MAX_EFFECTIVE_BALANCE;
-    let has_excess_balance = balance > P::MAX_EFFECTIVE_BALANCE;
-    has_eth1_withdrawal_credential(validator) && has_max_effective_balance && has_excess_balance
-}
-
 const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
     // When using the minimal preset, `commitment_index` should be in the range `0..16`.
     // 16 is the value of `MAX_BLOB_COMMITMENTS_PER_BLOCK`.
@@ -360,6 +341,25 @@ const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u6
     let indices_per_field_with_length = 2 * indices_per_field_without_length;
     let index_of_commitment_0 = fields_before_blob_kzg_commitments * indices_per_field_with_length;
     index_of_commitment_0 + commitment_index
+}
+
+#[must_use]
+pub fn is_compounding_withdrawal_credential(withdrawal_credentials: H256) -> bool {
+    withdrawal_credentials
+        .as_bytes()
+        .starts_with(COMPOUNDING_WITHDRAWAL_PREFIX)
+}
+
+// > Check if ``validator`` has an 0x02 prefixed "compounding" withdrawal credential.
+#[must_use]
+pub fn has_compounding_withdrawal_credential(validator: &Validator) -> bool {
+    is_compounding_withdrawal_credential(validator.withdrawal_credentials)
+}
+
+// > Check if ``validator`` has a 0x01 or 0x02 prefixed withdrawal credential.
+#[must_use]
+pub fn has_execution_withdrawal_credential(validator: &Validator) -> bool {
+    has_compounding_withdrawal_credential(validator) || has_eth1_withdrawal_credential(validator)
 }
 
 #[cfg(test)]
@@ -457,7 +457,7 @@ mod spec_tests {
                 .expect("blob sidecar should be constructed successfully")
         ));
 
-        let proof = misc::kzg_commitment_inclusion_proof(&block_body, commitment_index)
+        let proof = misc::deneb_kzg_commitment_inclusion_proof(&block_body, commitment_index)
             .expect("inclusion proof should be constructed successfully");
 
         // > If the implementation supports generating merkle proofs, check that the
@@ -523,8 +523,9 @@ mod extra_tests {
     use tap::Conv as _;
     use types::{
         phase0::{
-            beacon_state::BeaconState as Phase0BeaconState, consts::FAR_FUTURE_EPOCH,
-            containers::Checkpoint,
+            beacon_state::BeaconState as Phase0BeaconState,
+            consts::FAR_FUTURE_EPOCH,
+            containers::{Checkpoint, IndexedAttestation},
         },
         preset::Mainnet,
     };

@@ -40,6 +40,7 @@ use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSe
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
 use itertools::{Either, Itertools as _};
 use log::{debug, error, info, warn};
+use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
@@ -647,7 +648,7 @@ where
                 );
 
                 if origin.send_to_validator() {
-                    let attestation = Arc::new(aggregate_and_proof.message.aggregate.clone());
+                    let attestation = Arc::new(aggregate_and_proof.message().aggregate());
 
                     ValidatorMessage::ValidAttestation(wait_group.clone(), attestation)
                         .send(&self.validator_tx);
@@ -666,7 +667,7 @@ where
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
                 let valid_attestation = ValidAttestation {
-                    data: aggregate_and_proof.message.aggregate.data,
+                    data: aggregate_and_proof.message().aggregate().data(),
                     attesting_indices,
                     is_from_block: false,
                 };
@@ -726,7 +727,7 @@ where
                     metrics.register_mutator_aggregate_and_proof(&["delayed_until_state"]);
                 }
 
-                let checkpoint = aggregate_and_proof.message.aggregate.data.target;
+                let checkpoint = aggregate_and_proof.message().aggregate().data().target;
 
                 let pending_aggregate_and_proof = PendingAggregateAndProof {
                     aggregate_and_proof,
@@ -828,7 +829,7 @@ where
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
                 let valid_attestation = ValidAttestation {
-                    data: attestation.data,
+                    data: attestation.data(),
                     attesting_indices,
                     is_from_block,
                 };
@@ -1813,9 +1814,9 @@ where
     ) {
         let slot = pending_aggregate_and_proof
             .aggregate_and_proof
-            .message
-            .aggregate
-            .data
+            .message()
+            .aggregate()
+            .data()
             .slot;
 
         if slot <= self.store.slot() {
@@ -2054,9 +2055,9 @@ where
                     .drain_filter(|pending| {
                         let epoch = pending
                             .aggregate_and_proof
-                            .message
-                            .aggregate
-                            .data
+                            .message()
+                            .aggregate()
+                            .data()
                             .target
                             .epoch;
 
@@ -2156,7 +2157,7 @@ where
     ) {
         // `BlockAttestationsTask`s have a surprisingly large amount of overhead.
         // Avoid spawning them if possible.
-        if block.message().body().attestations().is_empty() {
+        if block.message().body().attestations_len().is_zero() {
             return;
         }
 

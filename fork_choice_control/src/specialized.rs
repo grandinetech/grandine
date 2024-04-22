@@ -31,7 +31,7 @@ use std::sync::Mutex;
 use ::{
     execution_engine::MockExecutionEngine,
     fork_choice_store::{AttestationItem, AttestationOrigin},
-    types::phase0::containers::Attestation,
+    types::combined::Attestation,
 };
 
 #[cfg(test)]
