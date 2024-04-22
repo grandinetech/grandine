@@ -79,8 +79,8 @@ pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> usiz
     let body = block.body();
 
     1 + 2 * body.proposer_slashings().len()
-        + 2 * body.attester_slashings().len()
-        + body.attestations().len()
+        + 2 * body.attester_slashings_len()
+        + body.attestations_len()
         + body.voluntary_exits().len()
 }
 
@@ -271,6 +271,7 @@ pub fn process_deposit_data<P: Preset>(
     if let Some(validator_index) = index_of_public_key(state, pubkey) {
         let combined_deposit = CombinedDeposit::TopUp {
             validator_index,
+            withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
         };
 
@@ -364,6 +365,7 @@ fn apply_deposits<P: Preset>(
             CombinedDeposit::TopUp {
                 validator_index,
                 amounts,
+                ..
             } => {
                 let total_amount = amounts.iter().sum();
 
@@ -547,7 +549,7 @@ mod spec_tests {
 
     validation_tests! {
         validate_attester_slashing,
-        |config, state, attester_slashing| {
+        |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",

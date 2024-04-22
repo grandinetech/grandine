@@ -9,9 +9,8 @@ use helper_functions::{
     },
     misc::compute_activation_exit_epoch,
     mutators::{decrease_balance, increase_balance, initiate_validator_exit},
-    predicates::{
-        is_active_validator, is_eligible_for_activation, is_eligible_for_activation_queue,
-    },
+    phase0::is_eligible_for_activation_queue,
+    predicates::{is_active_validator, is_eligible_for_activation},
 };
 use itertools::Itertools as _;
 use ssz::{PersistentList, SszHash as _};

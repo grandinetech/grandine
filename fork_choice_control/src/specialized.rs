@@ -29,7 +29,7 @@ use std::sync::Mutex;
 #[cfg(test)]
 use ::{
     execution_engine::MockExecutionEngine, fork_choice_store::AttestationOrigin,
-    types::phase0::containers::Attestation,
+    types::combined::Attestation,
 };
 
 #[cfg(test)]

@@ -64,6 +64,17 @@ pub mod deneb {
     mod spec_tests;
 }
 
+pub mod electra {
+    pub mod beacon_state;
+    pub mod consts;
+    pub mod containers;
+
+    mod container_impls;
+
+    #[cfg(test)]
+    mod spec_tests;
+}
+
 mod collections;
 
 mod unphased {

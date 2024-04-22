@@ -6,18 +6,18 @@
 use core::ops::Range;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use bls::AggregateSignature;
 use deposit_tree::DepositTree;
 use helper_functions::{
     accessors, misc,
     signing::{RandaoEpoch, SignForSingleFork as _, SignForSingleForkAtSlot as _},
 };
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use transition_functions::{capella, combined};
-use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     altair::containers::{
         BeaconBlock as AltairBeaconBlock, BeaconBlockBody as AltairBeaconBlockBody, SyncAggregate,
@@ -30,17 +30,21 @@ use types::{
         BeaconBlock as CapellaBeaconBlock, BeaconBlockBody as CapellaBeaconBlockBody,
         ExecutionPayload as CapellaExecutionPayload,
     },
-    combined::{BeaconBlock, BeaconState, ExecutionPayload, SignedBeaconBlock},
+    combined::{Attestation, BeaconBlock, BeaconState, ExecutionPayload, SignedBeaconBlock},
     config::Config,
     deneb::containers::{
         BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody,
         ExecutionPayload as DenebExecutionPayload,
     },
+    electra::containers::{
+        Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock,
+        BeaconBlockBody as ElectraBeaconBlockBody, ExecutionPayload as ElectraExecutionPayload,
+    },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
-            Attestation, AttestationData, BeaconBlock as Phase0BeaconBlock,
+            Attestation as Phase0Attestation, AttestationData, BeaconBlock as Phase0BeaconBlock,
             BeaconBlockBody as Phase0BeaconBlockBody, Checkpoint, Deposit, Eth1Data,
         },
         primitives::{Epoch, ExecutionBlockHash, Slot, SubnetId, ValidatorIndex, H256},
@@ -69,7 +73,7 @@ pub fn empty_block<P: Preset>(
 ) -> Result<BlockWithState<P>> {
     let advanced_state = advance_state(config, pre_state, slot)?;
     let eth1_data = advanced_state.eth1_data();
-    let attestations = ContiguousList::default();
+    let attestations = core::iter::empty();
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
     let execution_payload = None;
@@ -96,7 +100,7 @@ pub fn block_justifying_previous_epoch<P: Preset>(
     let advanced_state = advance_state(config, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::slots_in_epoch::<P>(epoch - 1);
-    let attestations = full_aggregate_attestations(config, &advanced_state, attestation_slots)?;
+    let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
     let execution_payload = None;
@@ -124,7 +128,7 @@ pub fn block_justifying_current_epoch<P: Preset>(
     let advanced_state = advance_state(config, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::compute_start_slot_at_epoch::<P>(epoch)..block_slot;
-    let attestations = full_aggregate_attestations(config, &advanced_state, attestation_slots)?;
+    let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
 
@@ -149,7 +153,7 @@ pub fn block_with_deposits<P: Preset>(
     let advanced_state = advance_state(config, pre_state, slot)?;
     let eth1_data = advanced_state.eth1_data();
     let graffiti = H256::zero();
-    let attestations = ContiguousList::default();
+    let attestations = core::iter::empty();
     let sync_aggregate = SyncAggregate::empty();
     let execution_payload = None;
 
@@ -174,7 +178,7 @@ pub fn block_with_eth1_vote_and_deposits<P: Preset>(
 ) -> Result<BlockWithState<P>> {
     let advanced_state = advance_state(config, pre_state, slot)?;
     let graffiti = H256::zero();
-    let attestations = ContiguousList::default();
+    let attestations = core::iter::empty();
     let sync_aggregate = SyncAggregate::empty();
     let execution_payload = None;
 
@@ -199,7 +203,7 @@ pub fn block_with_payload<P: Preset>(
 ) -> Result<BlockWithState<P>> {
     let advanced_state = advance_state(config, pre_state, slot)?;
     let eth1_data = advanced_state.eth1_data();
-    let attestations = ContiguousList::default();
+    let attestations = core::iter::empty();
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
     let execution_payload = Some(execution_payload);
@@ -232,7 +236,7 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
         let advanced_state = advance_state(config, pre_state, slot)?;
         let eth1_data = advanced_state.eth1_data();
         let graffiti = H256::zero();
-        let attestations = full_aggregate_attestations(config, &advanced_state, (slot - 1)..slot)?;
+        let attestations = full_block_attestations(config, &advanced_state, (slot - 1)..slot)?;
         let deposits = ContiguousList::default();
         let sync_aggregate = full_sync_aggregate(config, &advanced_state);
         let execution_payload = None;
@@ -267,23 +271,24 @@ pub fn singular_attestation<P: Preset>(
     for slot in misc::slots_in_epoch::<P>(epoch) {
         let committees = accessors::beacon_committees(&state_in_epoch, slot)?;
 
-        for (committee, index) in committees.zip(0..) {
+        for (committee, committee_index) in committees.zip(0..) {
             let committees_per_slot =
                 accessors::get_committee_count_per_slot(&state_in_epoch, RelativeEpoch::Current);
 
-            let subnet_id =
-                misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, index)?;
+            let subnet_id = misc::compute_subnet_for_attestation::<P>(
+                committees_per_slot,
+                slot,
+                committee_index,
+            )?;
 
             if let Some(position) = committee
                 .into_iter()
                 .position(|index| index == validator_index)
             {
+                let pre_electra = state_in_epoch.phase() < Phase::Electra;
+                let index = pre_electra.then_some(committee_index).unwrap_or_default();
                 let beacon_block_root = accessors::latest_block_root(&state_in_epoch);
                 let root = accessors::epoch_boundary_block_root(&state_in_epoch, beacon_block_root);
-
-                let mut aggregation_bits = BitList::with_length(committee.len());
-
-                aggregation_bits.set(position, true);
 
                 let data = AttestationData {
                     slot,
@@ -294,11 +299,30 @@ pub fn singular_attestation<P: Preset>(
                 };
 
                 let secret_key = interop::secret_key(validator_index);
+                let signature = data.sign(config, &state_in_epoch, &secret_key).into();
 
-                let attestation = Attestation {
-                    aggregation_bits,
-                    data,
-                    signature: data.sign(config, &state_in_epoch, &secret_key).into(),
+                let attestation = if pre_electra {
+                    let mut aggregation_bits = BitList::with_length(committee.len());
+                    aggregation_bits.set(position, true);
+
+                    Attestation::from(Phase0Attestation {
+                        aggregation_bits,
+                        data,
+                        signature,
+                    })
+                } else {
+                    let mut aggregation_bits = BitList::with_length(committee.len());
+                    aggregation_bits.set(position, true);
+
+                    let mut committee_bits = BitVector::default();
+                    committee_bits.set(committee_index.try_into()?, true);
+
+                    Attestation::from(ElectraAttestation {
+                        aggregation_bits,
+                        data,
+                        committee_bits,
+                        signature,
+                    })
                 };
 
                 return Ok((attestation, subnet_id));
@@ -357,7 +381,17 @@ pub fn execution_payload<P: Preset>(
             prev_randao,
             timestamp,
             block_hash,
+            withdrawals,
             ..DenebExecutionPayload::default()
+        }
+        .into(),
+        Phase::Electra => ElectraExecutionPayload {
+            parent_hash,
+            prev_randao,
+            timestamp,
+            block_hash,
+            withdrawals,
+            ..ElectraExecutionPayload::default()
         }
         .into(),
     };
@@ -366,12 +400,13 @@ pub fn execution_payload<P: Preset>(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn block<P: Preset>(
     config: &Config,
     advanced_state: Arc<BeaconState<P>>,
     eth1_data: Eth1Data,
     graffiti: H256,
-    attestations: ContiguousList<Attestation<P>, P::MaxAttestations>,
+    attestations: impl IntoIterator<Item = Attestation<P>>,
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
     sync_aggregate: SyncAggregate<P>,
     mut execution_payload: Option<ExecutionPayload<P>>,
@@ -384,6 +419,22 @@ fn block<P: Preset>(
     let randao_reveal = RandaoEpoch::from(accessors::get_current_epoch(&advanced_state))
         .sign(config, &advanced_state, &secret_key)
         .into();
+
+    let (phase0_attestations, electra_attestations): (Vec<_>, Vec<_>) = attestations
+        .into_iter()
+        .partition_map(|attestation| match attestation {
+            Attestation::Phase0(attestation) => Either::Left(attestation),
+            Attestation::Electra(attestation) => Either::Right(attestation),
+        });
+
+    ensure!(
+        phase0_attestations.is_empty() || advanced_state.phase() < Phase::Electra,
+        "post-Electra block cannot contain Phase 0 attestations",
+    );
+    ensure!(
+        electra_attestations.is_empty() || advanced_state.phase() >= Phase::Electra,
+        "pre-Electra block cannot contain Electra attestations",
+    );
 
     // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
     if advanced_state.phase() >= Phase::Capella && execution_payload.is_none() {
@@ -405,7 +456,7 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations,
+                attestations: phase0_attestations.try_into()?,
                 deposits,
                 ..Phase0BeaconBlockBody::default()
             },
@@ -419,7 +470,7 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations,
+                attestations: phase0_attestations.try_into()?,
                 deposits,
                 sync_aggregate,
                 ..AltairBeaconBlockBody::default()
@@ -434,7 +485,7 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations,
+                attestations: phase0_attestations.try_into()?,
                 deposits,
                 sync_aggregate,
                 ..BellatrixBeaconBlockBody::default()
@@ -449,7 +500,8 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations,
+                attestations: phase0_attestations.try_into()?,
+                deposits,
                 sync_aggregate,
                 ..CapellaBeaconBlockBody::default()
             },
@@ -463,9 +515,25 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations,
+                attestations: phase0_attestations.try_into()?,
+                deposits,
                 sync_aggregate,
                 ..DenebBeaconBlockBody::default()
+            },
+        }),
+        Phase::Electra => BeaconBlock::from(ElectraBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            state_root: H256::zero(),
+            body: ElectraBeaconBlockBody {
+                randao_reveal,
+                eth1_data,
+                graffiti,
+                attestations: electra_attestations.try_into()?,
+                deposits,
+                sync_aggregate,
+                ..ElectraBeaconBlockBody::default()
             },
         }),
     }
@@ -484,37 +552,45 @@ fn block<P: Preset>(
 
 // `advanced_state` is the one for the block being constructed,
 // not the one that the attestations would be constructed with.
-fn full_aggregate_attestations<P: Preset>(
+//
+// Starting with Electra, attestations in blocks contain bits for all committees in the slot.
+// Despite that they are represented by the same type as attestations outside blocks.
+//
+// See [`compute_on_chain_aggregate`] in the Electra Honest Validator specification.
+//
+// [`compute_on_chain_aggregate`]: https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.0/specs/electra/validator.md#attestations
+fn full_block_attestations<P: Preset>(
     config: &Config,
     advanced_state: &BeaconState<P>,
     slots: Range<Slot>,
-) -> Result<ContiguousList<Attestation<P>, P::MaxAttestations>> {
-    let attestations = slots
-        .into_iter()
-        .map(|slot| -> Result<_> {
-            // `accessors::latest_block_root` would be incorrect in some cases,
-            // though we currently don't have any tests that can demonstrate that.
-            // `rapid_upgrade_blocks` includes the attestations as early as possible.
-            // `fork_choice_control::extra_tests` don't need validators to attest perfectly.
-            let beacon_block_root = accessors::get_block_root_at_slot(advanced_state, slot)?;
-            let epoch = misc::compute_epoch_at_slot::<P>(slot);
-            let attestation_epoch = accessors::attestation_epoch(advanced_state, epoch)?;
+) -> Result<Vec<Attestation<P>>> {
+    let mut attestations = vec![];
 
-            let source = match attestation_epoch {
-                AttestationEpoch::Previous => advanced_state.previous_justified_checkpoint(),
-                AttestationEpoch::Current => advanced_state.current_justified_checkpoint(),
-            };
+    for slot in slots {
+        // `accessors::latest_block_root` would be incorrect in some cases,
+        // though we currently don't have any tests that can demonstrate that.
+        // `rapid_upgrade_blocks` includes the attestations as early as possible.
+        // `fork_choice_control::extra_tests` don't need validators to attest perfectly.
+        let beacon_block_root = accessors::get_block_root_at_slot(advanced_state, slot)?;
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let attestation_epoch = accessors::attestation_epoch(advanced_state, epoch)?;
 
-            let target = Checkpoint {
-                epoch,
-                // `accessors::epoch_boundary_block_root` would be incorrect because
-                // `advanced_state` may be in a different epoch than the attestations.
-                root: accessors::get_block_root(advanced_state, attestation_epoch)?,
-            };
+        let source = match attestation_epoch {
+            AttestationEpoch::Previous => advanced_state.previous_justified_checkpoint(),
+            AttestationEpoch::Current => advanced_state.current_justified_checkpoint(),
+        };
 
-            let committees = accessors::beacon_committees(advanced_state, slot)?;
+        let target = Checkpoint {
+            epoch,
+            // `accessors::epoch_boundary_block_root` would be incorrect because
+            // `advanced_state` may be in a different epoch than the attestations.
+            root: accessors::get_block_root(advanced_state, attestation_epoch)?,
+        };
 
-            let attestations = committees.zip(0..).map(move |(committee, index)| {
+        let committees = accessors::beacon_committees(advanced_state, slot)?;
+
+        if advanced_state.phase() < Phase::Electra {
+            for (committee, index) in committees.zip(0..) {
                 let data = AttestationData {
                     slot,
                     index,
@@ -532,21 +608,65 @@ fn full_aggregate_attestations<P: Preset>(
                     .unwrap_or_default()
                     .into();
 
-                Attestation {
+                attestations.push(Attestation::from(Phase0Attestation {
                     aggregation_bits: BitList::new(true, committee.len()),
                     data,
                     signature,
-                }
-            });
+                }));
+            }
+        } else {
+            let relative_epoch = attestation_epoch.into();
 
-            Ok(attestations)
-        })
-        .flatten_ok();
+            let committees_per_slot =
+                accessors::get_committee_count_per_slot(advanced_state, relative_epoch);
 
-    itertools::process_results(attestations, |attestations| {
-        ContiguousList::try_from_iter(attestations)
-    })?
-    .map_err(Into::into)
+            let validator_count =
+                accessors::active_validator_count_u64(advanced_state, relative_epoch);
+
+            let committees_in_epoch = committees_per_slot * P::SlotsPerEpoch::U64;
+            let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
+            let committees_before_slot = slots_since_epoch_start * committees_per_slot;
+            let committees_including_slot = committees_before_slot + committees_per_slot - 1;
+            let start = validator_count * committees_before_slot / committees_in_epoch;
+            let end = validator_count * (committees_including_slot + 1) / committees_in_epoch;
+            let active_validators_in_slot = (end - start).try_into()?;
+
+            let aggregation_bits = BitList::new(true, active_validators_in_slot);
+
+            let data = AttestationData {
+                slot,
+                index: 0,
+                beacon_block_root,
+                source,
+                target,
+            };
+
+            let mut committee_bits = BitVector::default();
+
+            for committee_index in 0..committees_per_slot {
+                let index = committee_index.try_into()?;
+                committee_bits.set(index, true);
+            }
+
+            let signing_root = data.signing_root(config, advanced_state);
+
+            let signature = committees
+                .flatten()
+                .map(|validator_index| interop::secret_key(validator_index).sign(signing_root))
+                .reduce(AggregateSignature::aggregate)
+                .unwrap_or_default()
+                .into();
+
+            attestations.push(Attestation::from(ElectraAttestation {
+                aggregation_bits,
+                data,
+                committee_bits,
+                signature,
+            }));
+        }
+    }
+
+    Ok(attestations)
 }
 
 fn full_sync_aggregate<P: Preset>(

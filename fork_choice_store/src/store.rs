@@ -12,9 +12,9 @@ use execution_engine::ExecutionEngine;
 use features::Feature;
 use hash_hasher::HashedMap;
 use helper_functions::{
-    accessors,
+    accessors, electra,
     error::SignatureKind,
-    misc, predicates,
+    misc, phase0, predicates,
     signing::SignForSingleFork as _,
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier},
@@ -23,7 +23,7 @@ use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use log::{error, warn};
 use prometheus_metrics::Metrics;
-use ssz::{ContiguousList, SszHash as _};
+use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use transition_functions::{
@@ -33,7 +33,10 @@ use transition_functions::{
 use typenum::Unsigned as _;
 use types::{
     bellatrix::containers::PowBlock,
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{
+        Attestation as CombinedAttestation, AttesterSlashing as CombinedAttesterSlashing,
+        AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
@@ -42,10 +45,7 @@ use types::{
     nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
-        containers::{
-            AggregateAndProof, Attestation, AttestationData, AttesterSlashing, Checkpoint,
-            SignedAggregateAndProof,
-        },
+        containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -66,7 +66,7 @@ use crate::{
     segment::{Position, Segment},
     state_cache::StateCache,
     store_config::StoreConfig,
-    supersets::AggregateAndProofSets as AggregateAndProofSupersets,
+    supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -999,13 +999,14 @@ impl<P: Preset> Store<P> {
             return Ok(BlockAction::DelayUntilBlobs(block));
         }
 
+        let beacon_block_body = block.message().body();
+
         let attester_slashing_results = block
             .message()
             .body()
-            .attester_slashings()
-            .iter()
+            .combined_attester_slashings()
             .map(|attester_slashing| {
-                self.validate_attester_slashing(attester_slashing, AttesterSlashingOrigin::Block)
+                self.validate_attester_slashing(&attester_slashing, AttesterSlashingOrigin::Block)
             })
             .collect();
 
@@ -1168,18 +1169,13 @@ impl<P: Preset> Store<P> {
         aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
         origin: &AggregateAndProofOrigin<I>,
     ) -> Result<AggregateAndProofAction<P>> {
-        let SignedAggregateAndProof {
-            ref message,
-            signature,
-        } = *aggregate_and_proof;
+        let signature = aggregate_and_proof.signature();
+        let message = aggregate_and_proof.message();
+        let aggregator_index = message.aggregator_index();
+        let selection_proof = message.selection_proof();
+        let aggregate = message.aggregate();
 
-        let AggregateAndProof {
-            aggregator_index,
-            ref aggregate,
-            selection_proof,
-        } = *message;
-
-        match self.validate_attestation_internal(aggregate, false)? {
+        match self.validate_attestation_internal(&aggregate, false)? {
             PartialAttestationAction::Accept => {}
             PartialAttestationAction::Ignore => {
                 return Ok(AggregateAndProofAction::Ignore);
@@ -1200,7 +1196,7 @@ impl<P: Preset> Store<P> {
             index,
             target,
             ..
-        } = aggregate.data;
+        } = aggregate.data();
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.
@@ -1223,7 +1219,7 @@ impl<P: Preset> Store<P> {
 
         // > The attestation has participants
         ensure!(
-            aggregate.aggregation_bits.count_ones() > 0,
+            aggregate.count_aggregation_bits() > 0,
             Error::AggregateAttestationHasNoAggregationBitsSet {
                 aggregate_and_proof,
             }
@@ -1307,10 +1303,10 @@ impl<P: Preset> Store<P> {
         }
 
         let attesting_indices =
-            self.attesting_indices(&target_state, aggregate, origin.verify_signatures())?;
+            self.attesting_indices(&target_state, &aggregate, origin.verify_signatures())?;
 
         // https://github.com/ethereum/consensus-specs/pull/2847
-        let is_superset = self.aggregate_and_proof_supersets.check(aggregate);
+        let is_superset = self.aggregate_and_proof_supersets.check(&aggregate);
 
         Ok(AggregateAndProofAction::Accept {
             aggregate_and_proof,
@@ -1321,7 +1317,7 @@ impl<P: Preset> Store<P> {
 
     pub fn validate_attestation<I>(
         &self,
-        attestation: Arc<Attestation<P>>,
+        attestation: Arc<CombinedAttestation<P>>,
         origin: &AttestationOrigin<I>,
     ) -> Result<AttestationAction<P>> {
         match self.validate_attestation_internal(&attestation, origin.is_from_block())? {
@@ -1342,7 +1338,7 @@ impl<P: Preset> Store<P> {
             index,
             target,
             ..
-        } = attestation.data;
+        } = attestation.data();
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.
@@ -1366,7 +1362,7 @@ impl<P: Preset> Store<P> {
         if origin.must_be_singular() {
             // > The attestation is unaggregated
             ensure!(
-                attestation.aggregation_bits.count_ones() == 1,
+                attestation.count_aggregation_bits() == 1,
                 Error::SingularAttestationHasMultipleAggregationBitsSet { attestation },
             );
         }
@@ -1433,15 +1429,16 @@ impl<P: Preset> Store<P> {
     /// [`validate_on_attestation`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#validate_on_attestation
     fn validate_attestation_internal(
         &self,
-        attestation: &Attestation<P>,
+        attestation: &CombinedAttestation<P>,
         is_from_block: bool,
     ) -> Result<PartialAttestationAction> {
         let AttestationData {
             slot,
             beacon_block_root,
             target,
+            index,
             ..
-        } = attestation.data;
+        } = attestation.data();
 
         // > If the given attestation is not from a beacon block message,
         // > we have to check the target epoch scope.
@@ -1462,6 +1459,30 @@ impl<P: Preset> Store<P> {
                 if self.previous_epoch() != epoch && self.current_epoch() != epoch {
                     return Ok(PartialAttestationAction::Ignore);
                 }
+            }
+
+            if self.phase() >= Phase::Electra {
+                ensure!(
+                    index == 0,
+                    Error::AttestationDataIndexNotZero {
+                        attestation: Arc::new(attestation.clone())
+                    }
+                );
+
+                // TODO(feature/electra): clone should not be necessary
+                let committee_indices = misc::get_committee_indices::<P>(
+                    *attestation
+                        .committee_bits()
+                        .expect("post-Electra attestation must contain committee_bits field"),
+                )
+                .collect_vec();
+
+                ensure!(
+                    committee_indices.len() == 1,
+                    Error::AttestationFromMultipleCommittees {
+                        attestation: Arc::new(attestation.clone())
+                    }
+                );
             }
 
             // > Attestations must be from the current or previous epoch
@@ -1546,41 +1567,85 @@ impl<P: Preset> Store<P> {
     fn attesting_indices(
         &self,
         target_state: &BeaconState<P>,
-        attestation: &Attestation<P>,
+        attestation: &CombinedAttestation<P>,
         validate_indexed: bool,
-    ) -> Result<ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>> {
-        let indexed_attestation = accessors::get_indexed_attestation(target_state, attestation)?;
+    ) -> Result<AttestingIndices<P>> {
+        match attestation {
+            CombinedAttestation::Phase0(attestation) => {
+                let indexed_attestation =
+                    phase0::get_indexed_attestation(target_state, attestation)?;
 
-        if validate_indexed {
-            predicates::validate_constructed_indexed_attestation(
-                &self.chain_config,
-                target_state,
-                &indexed_attestation,
-                SingleVerifier,
-            )?;
+                if validate_indexed {
+                    predicates::validate_constructed_indexed_attestation(
+                        &self.chain_config,
+                        target_state,
+                        &indexed_attestation,
+                        SingleVerifier,
+                    )?;
+                }
+
+                Ok(AttestingIndices::Phase0(
+                    indexed_attestation.attesting_indices,
+                ))
+            }
+            CombinedAttestation::Electra(attestation) => {
+                let indexed_attestation =
+                    electra::get_indexed_attestation(target_state, attestation)?;
+
+                if validate_indexed {
+                    predicates::validate_constructed_indexed_attestation(
+                        &self.chain_config,
+                        target_state,
+                        &indexed_attestation,
+                        SingleVerifier,
+                    )?;
+                }
+
+                Ok(AttestingIndices::Electra(
+                    indexed_attestation.attesting_indices,
+                ))
+            }
         }
-
-        Ok(indexed_attestation.attesting_indices)
     }
 
     pub fn validate_attester_slashing(
         &self,
-        attester_slashing: &AttesterSlashing<P>,
+        attester_slashing: &CombinedAttesterSlashing<P>,
         origin: AttesterSlashingOrigin,
     ) -> Result<Vec<ValidatorIndex>> {
-        if origin.verify_signatures() {
-            unphased::validate_attester_slashing(
-                &self.chain_config,
-                self.justified_state(),
-                attester_slashing,
-            )
-        } else {
-            unphased::validate_attester_slashing_with_verifier(
-                &self.chain_config,
-                self.justified_state(),
-                attester_slashing,
-                NullVerifier,
-            )
+        match attester_slashing {
+            CombinedAttesterSlashing::Phase0(attester_slashing) => {
+                if origin.verify_signatures() {
+                    unphased::validate_attester_slashing(
+                        &self.chain_config,
+                        self.justified_state(),
+                        attester_slashing,
+                    )
+                } else {
+                    unphased::validate_attester_slashing_with_verifier(
+                        &self.chain_config,
+                        self.justified_state(),
+                        attester_slashing,
+                        NullVerifier,
+                    )
+                }
+            }
+            CombinedAttesterSlashing::Electra(attester_slashing) => {
+                if origin.verify_signatures() {
+                    unphased::validate_attester_slashing(
+                        &self.chain_config,
+                        self.justified_state(),
+                        attester_slashing,
+                    )
+                } else {
+                    unphased::validate_attester_slashing_with_verifier(
+                        &self.chain_config,
+                        self.justified_state(),
+                        attester_slashing,
+                        NullVerifier,
+                    )
+                }
+            }
         }
     }
 
@@ -2426,7 +2491,7 @@ impl<P: Preset> Store<P> {
             // The indices must be filtered here rather than in a task to avoid race conditions.
             // The filtering is not covered by `consensus-spec-tests` as of version 1.3.0.
             let attesting_indices = attesting_indices
-                .iter()
+                .into_iter()
                 .copied()
                 .filter(|index| !self.equivocating_indices.contains(index));
 

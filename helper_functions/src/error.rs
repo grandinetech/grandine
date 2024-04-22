@@ -25,6 +25,8 @@ pub(crate) enum Error {
     FailedToSelectProposer,
     #[error("no validators are active")]
     NoActiveValidators,
+    #[error("aggregation bitlist length does not match participants count")]
+    ParticipantsCountMismatch,
     #[error("permutated prefix maximum overflowed")]
     PermutatedPrefixMaximumOverflow,
     #[error("{0} is invalid")]
@@ -51,6 +53,8 @@ pub enum SignatureKind {
     BlsToExecutionChange,
     #[display("builder signature")]
     Builder,
+    #[display("consolidation signature")]
+    Consolidation,
     #[display("sync committee contribution and proof signature")]
     ContributionAndProof,
     #[display("deposit signature")]

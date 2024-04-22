@@ -22,9 +22,9 @@ use once_cell::unsync::Lazy;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{Attestation, SignedBeaconBlock},
     config::Config,
-    phase0::{containers::Attestation, primitives::Slot},
+    phase0::primitives::Slot,
     preset::{Mainnet, Preset},
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
@@ -81,7 +81,10 @@ impl Criterion {
                     }
 
                     for attestation in holesky::aggregate_attestations_by_slot(slot) {
-                        process_attestation(&mut store, Arc::new(attestation))?;
+                        process_attestation(
+                            &mut store,
+                            Arc::new(Attestation::Phase0(attestation)),
+                        )?;
                     }
                 }
 
@@ -190,7 +193,7 @@ fn process_attestation<P: Preset>(
     store: &mut Store<P>,
     attestation: Arc<Attestation<P>>,
 ) -> Result<()> {
-    let slot = attestation.data.slot;
+    let slot = attestation.data().slot;
     let origin = AttestationOrigin::<Never>::Test;
     let attestation_action = store.validate_attestation(attestation, &origin)?;
 
@@ -203,7 +206,7 @@ fn process_attestation<P: Preset>(
     };
 
     let valid_attestation = ValidAttestation {
-        data: attestation.data,
+        data: attestation.data(),
         attesting_indices,
         is_from_block: false,
     };

@@ -26,10 +26,10 @@ use types::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
             GENESIS_EPOCH, GENESIS_SLOT,
         },
-        containers::{ForkData, SigningData},
+        containers::{ForkData, SigningData, Validator},
         primitives::{
-            CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, NodeId, Slot,
-            SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
+            CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, NodeId,
+            Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
         },
     },
     preset::Preset,
@@ -38,7 +38,7 @@ use types::{
     },
 };
 
-use crate::{accessors, error::Error};
+use crate::{accessors, error::Error, predicates};
 
 #[must_use]
 pub fn compute_epoch_at_slot<P: Preset>(slot: Slot) -> Epoch {
@@ -297,7 +297,7 @@ pub fn committee_count_from_active_validator_count<P: Preset>(active_validator_c
     active_validator_count
         .div_typenum::<P::SlotsPerEpoch>()
         .div(P::TARGET_COMMITTEE_SIZE)
-        .clamp(1, P::MAX_COMMITTEES_PER_SLOT.get())
+        .clamp(1, P::MaxCommitteesPerSlot::U64)
 }
 
 // <https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/phase0/validator.md#bls_withdrawal_prefix>
@@ -395,10 +395,7 @@ pub fn kzg_commitment_inclusion_proof<P: Preset>(
             hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
         ),
         hashing::hash_256_256(
-            hashing::hash_256_256(
-                body.attester_slashings().hash_tree_root(),
-                body.attestations().hash_tree_root(),
-            ),
+            hashing::hash_256_256(body.attester_slashings_root(), body.attestations_root()),
             hashing::hash_256_256(
                 body.deposits().hash_tree_root(),
                 body.voluntary_exits().hash_tree_root(),
@@ -448,6 +445,26 @@ pub fn construct_blob_sidecars<P: Preset>(
     }
 
     Ok(vec![])
+}
+
+#[must_use]
+pub fn get_committee_indices<P: Preset>(
+    committee_bits: BitVector<P::MaxCommitteesPerSlot>,
+) -> impl Iterator<Item = CommitteeIndex> {
+    committee_bits
+        .into_iter()
+        .zip(0..)
+        .filter_map(|(present, committee_index)| present.then_some(committee_index))
+}
+
+// > Get max effective balance for ``validator``.
+#[must_use]
+pub fn get_validator_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
+    if predicates::has_compounding_withdrawal_credential(validator) {
+        P::MAX_EFFECTIVE_BALANCE_ELECTRA
+    } else {
+        P::MIN_ACTIVATION_BALANCE
+    }
 }
 
 #[cfg(test)]

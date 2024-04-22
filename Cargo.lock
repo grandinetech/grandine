@@ -2474,7 +2474,7 @@ name = "execution_engine"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "derive_more",
+ "bls",
  "either",
  "ethereum-types",
  "futures",
@@ -2509,7 +2509,7 @@ dependencies = [
  "ssz",
  "std_ext",
  "transition_functions",
- "try_from_iterator",
+ "typenum",
  "types",
 ]
 
@@ -2636,6 +2636,7 @@ dependencies = [
  "log",
  "mime",
  "nonzero_ext",
+ "num-traits",
  "num_cpus",
  "panics",
  "parking_lot 0.12.1",
@@ -3094,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "grandine_version"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "const_format",
  "git-version",
@@ -5280,6 +5281,7 @@ dependencies = [
  "std_ext",
  "strum",
  "tap",
+ "thiserror",
  "tokio",
  "transition_functions",
  "try_from_iterator",
@@ -7996,6 +7998,7 @@ dependencies = [
  "tap",
  "test-generator",
  "thiserror",
+ "try_from_iterator",
  "typenum",
  "types",
  "unwrap_none",

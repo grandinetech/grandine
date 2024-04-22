@@ -34,7 +34,8 @@ use itertools::{izip, Either, Itertools as _};
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
 use operation_pools::{
-    AttestationAggPool, BlsToExecutionChangePool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool,
+    convert_to_electra_attestation, AttestationAggPool, BlsToExecutionChangePool, Origin,
+    PoolAdditionOutcome, SyncCommitteeAggPool,
 };
 use p2p::{
     ApiToP2p, BeaconCommitteeSubscription, NetworkConfig, NodeIdentity, NodePeer, NodePeerCount,
@@ -56,7 +57,10 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
-    combined::{BeaconBlock, BeaconState, SignedBeaconBlock, SignedBlindedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedAggregateAndProof,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
+    },
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
@@ -69,8 +73,8 @@ use types::{
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
-            Attestation, AttestationData, AttesterSlashing, Checkpoint, Fork, ProposerSlashing,
-            SignedAggregateAndProof, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
+            AttestationData, Checkpoint, Fork, ProposerSlashing, SignedBeaconBlockHeader,
+            SignedVoluntaryExit, Validator,
         },
         primitives::{
             ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, SubnetId, Uint256,
@@ -970,10 +974,9 @@ pub async fn block_attestations<P: Preset, W: Wait>(
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
-    block
-        .message()
-        .body()
-        .attestations()
+    let attestations = block.message().body().combined_attestations().collect_vec();
+
+    attestations
         .pipe(EthResponse::json)
         .execution_optimistic(optimistic)
         .finalized(finalized)
@@ -1177,6 +1180,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/beacon/pool/attestations`
 pub async fn pool_attestations<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
     EthQuery(query): EthQuery<PoolAttestationQuery>,
 ) -> Result<EthResponse<Vec<Attestation<P>>>, Error> {
@@ -1185,6 +1189,7 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
         committee_index,
     } = query;
 
+    let phase = chain_config.phase_at_slot::<P>(slot);
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
     let aggregates = attestation_agg_pool
@@ -1201,6 +1206,15 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
         .filter(|attestation| attestation.data.index == committee_index)
         .filter(|attestation| attestation.data.slot == slot)
         .cloned()
+        .filter_map(|attestation| {
+            if phase < Phase::Electra {
+                Some(Attestation::Phase0(attestation))
+            } else {
+                convert_to_electra_attestation(attestation)
+                    .map(Attestation::Electra)
+                    .ok()
+            }
+        })
         .collect();
 
     Ok(EthResponse::json(attestations))
@@ -1302,7 +1316,7 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     let grouped_by_target = attestations
         .into_iter()
         .enumerate()
-        .group_by(|(_, attestation)| attestation.data.target);
+        .group_by(|(_, attestation)| attestation.data().target);
 
     let (targets, target_attestations): (Vec<_>, Vec<_>) = grouped_by_target
         .into_iter()
@@ -1851,6 +1865,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/validator/aggregate_attestation`
 pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
     EthQuery(query): EthQuery<AggregateAttestationQuery>,
 ) -> Result<EthResponse<Attestation<P>>, Error> {
@@ -1859,12 +1874,20 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
         slot,
     } = query;
 
+    let phase = chain_config.phase_at_slot::<P>(slot);
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
     let attestation = attestation_agg_pool
         .best_aggregate_attestation_by_data_root(attestation_data_root, epoch)
         .await
         .ok_or(Error::AttestationNotFound)?;
+
+    // TODO: feature/electra - abstract or refactor
+    let attestation = if phase < Phase::Electra {
+        Attestation::Phase0(attestation)
+    } else {
+        convert_to_electra_attestation(attestation).map(Attestation::Electra)?
+    };
 
     Ok(EthResponse::json(attestation))
 }
@@ -2503,7 +2526,7 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
             beacon_block_root,
             target,
             ..
-        } = attestation.data;
+        } = attestation.data();
 
         ensure!(
             controller.block_by_root(beacon_block_root)?.is_some(),
@@ -2547,19 +2570,19 @@ mod tests {
     use serde::de::DeserializeOwned;
     use serde_json::json;
     use ssz::BitList;
-    use types::preset::Mainnet;
+    use types::{phase0::containers::Attestation as Phase0Attestation, preset::Mainnet};
 
     use super::*;
 
     #[tokio::test]
     async fn test_deserialize_for_attestation() -> Result<()> {
-        let attestations = [Attestation {
+        let attestations = [Phase0Attestation {
             aggregation_bits: BitList::full(true),
-            ..Attestation::default()
+            ..Phase0Attestation::default()
         }];
 
         assert_eq!(
-            extract_body::<Vec<Attestation<Mainnet>>>(&attestations).await?,
+            extract_body::<Vec<Phase0Attestation<Mainnet>>>(&attestations).await?,
             attestations,
         );
 
@@ -2573,7 +2596,7 @@ mod tests {
         // <https://github.com/ethereum/consensus-specs/blob/d8e74090cf33864f1956a1ee12ba5a94d21a6ac4/ssz/simple-serialize.md#bitlistn>
         // The same applies to JSON and YAML, though for a slightly different reason.
         assert_eq!(
-            extract_body::<Vec<Attestation<Mainnet>>>(&attestations).await?[0]
+            extract_body::<Vec<Phase0Attestation<Mainnet>>>(&attestations).await?[0]
                 .aggregation_bits
                 .count_ones(),
             1,

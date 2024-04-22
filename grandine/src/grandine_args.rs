@@ -140,6 +140,10 @@ struct ChainOptions {
     #[clap(long, value_name = "YAML_FILE")]
     verify_deneb_preset_file: Option<PathBuf>,
 
+    /// Verify that Electra variables in preset match YAML_FILE
+    #[clap(long, value_name = "YAML_FILE")]
+    verify_electra_preset_file: Option<PathBuf>,
+
     /// Verify that configuration matches YAML_FILE
     #[clap(long, value_name = "YAML_FILE")]
     verify_configuration_file: Option<PathBuf>,
@@ -825,6 +829,7 @@ impl GrandineArgs {
             verify_bellatrix_preset_file,
             verify_capella_preset_file,
             verify_deneb_preset_file,
+            verify_electra_preset_file,
             verify_configuration_file,
             terminal_total_difficulty_override,
             terminal_block_hash_override,
@@ -1017,6 +1022,13 @@ impl GrandineArgs {
             &chain_config.preset_base.deneb_preset(),
             verify_deneb_preset_file,
             Phase::Deneb,
+        )?;
+
+        verify_preset(
+            &chain_config,
+            &chain_config.preset_base.electra_preset(),
+            verify_electra_preset_file,
+            Phase::Electra,
         )?;
 
         verify_config(&chain_config, verify_configuration_file)?;

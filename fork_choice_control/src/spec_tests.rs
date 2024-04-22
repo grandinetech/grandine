@@ -12,7 +12,7 @@ use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use test_generator::test_resources;
 use types::{
-    combined::{BeaconBlock, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::{
         containers::BlobSidecar,
@@ -156,6 +156,16 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/withholding/*/*"]        [deneb_minimal_withholding]        [Minimal] [Deneb];
     ["consensus-spec-tests/tests/mainnet/deneb/sync/*/*/*"]                         [deneb_sync_mainnet]               [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/sync/*/*/*"]                         [deneb_sync_minimal]               [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/ex_ante/*/*"]          [electra_mainnet_ex_ante]          [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/get_head/*/*"]         [electra_mainnet_get_head]         [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/on_block/*/*"]         [electra_mainnet_on_block]         [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/ex_ante/*/*"]          [electra_minimal_ex_ante]          [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/get_head/*/*"]         [electra_minimal_get_head]         [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/on_block/*/*"]         [electra_minimal_on_block]         [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/reorg/*/*"]            [electra_minimal_reorg]            [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/withholding/*/*"]      [electra_minimal_withholding]      [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/sync/*/*/*"]                       [electra_sync_mainnet]             [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/sync/*/*/*"]                       [electra_sync_minimal]             [Minimal] [Electra];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case) {
@@ -188,7 +198,10 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 context.on_tick(tick);
             }
             Step::Attestation { attestation } => {
-                let attestation = case.ssz_default(attestation);
+                let attestation = case
+                    .try_ssz::<_, Attestation<P>>(config, attestation)
+                    .expect("test attestation is available");
+
                 context.on_test_attestation(attestation);
             }
             Step::Block {
@@ -269,7 +282,10 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 context.on_notified_new_payload(block_hash, payload_status.into());
             }
             Step::AttesterSlashing { attester_slashing } => {
-                let attester_slashing = case.ssz_default(attester_slashing);
+                let attester_slashing = case
+                    .try_ssz::<_, AttesterSlashing<P>>(config, attester_slashing)
+                    .expect("test attester_slashing is available");
+
                 context.on_attester_slashing(attester_slashing);
             }
             Step::Checks { checks } => {

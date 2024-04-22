@@ -1,29 +1,20 @@
 use crossbeam_skiplist::SkipMap;
 use ssz::{BitList, SszHash as _, H256};
 use types::{
-    phase0::{containers::Attestation, primitives::Epoch},
+    combined::Attestation,
+    phase0::{containers::AttestationData, primitives::Epoch},
     preset::Preset,
 };
 
-type AggregateEpochSupersets<P> = SkipMap<H256, BitList<<P as Preset>::MaxValidatorsPerCommittee>>;
+type AggregateEpochSupersets<N> = SkipMap<H256, BitList<N>>;
 
 #[derive(Default)]
-pub struct AggregateAndProofSets<P: Preset> {
-    supersets: SkipMap<Epoch, AggregateEpochSupersets<P>>,
+pub struct AggregateAndProofSets<N> {
+    supersets: SkipMap<Epoch, AggregateEpochSupersets<N>>,
 }
 
-impl<P: Preset> AggregateAndProofSets<P> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn check(&self, aggregate: &Attestation<P>) -> bool {
-        let Attestation {
-            aggregation_bits,
-            data,
-            ..
-        } = aggregate;
-
+impl<N: Send + Sync + 'static> AggregateAndProofSets<N> {
+    pub fn check(&self, data: &AttestationData, aggregation_bits: &BitList<N>) -> bool {
         let attestation_data_root = data.hash_tree_root();
         let supersets = self
             .supersets
@@ -57,6 +48,39 @@ impl<P: Preset> AggregateAndProofSets<P> {
     }
 }
 
+#[derive(Default)]
+pub struct MultiPhaseAggregateAndProofSets<P: Preset> {
+    phase0_supersets: AggregateAndProofSets<P::MaxValidatorsPerCommittee>,
+    electra_supersets: AggregateAndProofSets<P::MaxAggregatorsPerSlot>,
+}
+
+impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn prune(&self, finalized_epoch: Epoch) {
+        self.phase0_supersets.prune(finalized_epoch);
+        self.electra_supersets.prune(finalized_epoch);
+    }
+
+    pub fn check(&self, attestation: &Attestation<P>) -> bool {
+        match attestation {
+            Attestation::Phase0(attestation) => self
+                .phase0_supersets
+                .check(&attestation.data, &attestation.aggregation_bits),
+            Attestation::Electra(attestation) => self
+                .electra_supersets
+                .check(&attestation.data, &attestation.aggregation_bits),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.phase0_supersets.len() + self.electra_supersets.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,7 +88,7 @@ mod tests {
 
     #[test]
     fn check_first_insert_is_superset() {
-        let supersets = AggregateAndProofSets::<Minimal>::new();
+        let supersets = MultiPhaseAggregateAndProofSets::<Minimal>::new();
         assert_eq!(supersets.len(), 0);
 
         // 1 0 1 1

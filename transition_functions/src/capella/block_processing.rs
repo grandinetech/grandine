@@ -4,10 +4,10 @@ use anyhow::{ensure, Result};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{get_current_epoch, get_randao_mix, initialize_shuffled_indices},
+    capella::{is_fully_withdrawable_validator, is_partially_withdrawable_validator},
     error::SignatureKind,
     misc::{self, compute_timestamp_at_slot},
     mutators::{balance, decrease_balance},
-    predicates::{is_fully_withdrawable_validator, is_partially_withdrawable_validator},
     signing::SignForAllForksWithGenesis as _,
     slot_report::{NullSlotReport, SlotReport},
     verifier::{SingleVerifier, Triple, Verifier},
@@ -29,7 +29,10 @@ use types::{
     config::Config,
     phase0::primitives::{ExecutionAddress, H256},
     preset::Preset,
-    traits::{PostCapellaBeaconBlockBody, PostCapellaBeaconState, PostCapellaExecutionPayload},
+    traits::{
+        PostCapellaBeaconBlockBody, PostCapellaBeaconState, PostCapellaExecutionPayload,
+        PreElectraBeaconBlockBody,
+    },
 };
 
 use crate::{
@@ -170,7 +173,7 @@ fn process_execution_payload<P: Preset>(
 pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     state: &mut impl PostCapellaBeaconState<P>,
-    body: &impl PostCapellaBeaconBlockBody<P>,
+    body: &(impl PostCapellaBeaconBlockBody<P> + PreElectraBeaconBlockBody<P>),
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -474,7 +477,7 @@ mod spec_tests {
     use test_generator::test_resources;
     use types::{
         capella::containers::ExecutionPayload,
-        phase0::containers::{Attestation, Deposit},
+        phase0::containers::{Attestation, AttesterSlashing, Deposit},
         preset::{Mainnet, Minimal},
     };
 
@@ -570,7 +573,7 @@ mod spec_tests {
 
     processing_tests! {
         process_attester_slashing,
-        |config, state, attester_slashing, _| {
+        |config, state, attester_slashing: AttesterSlashing<P>, _| {
             bellatrix::process_attester_slashing(
                 config,
                 state,
@@ -679,7 +682,7 @@ mod spec_tests {
 
     validation_tests! {
         validate_attester_slashing,
-        |config, state, attester_slashing| {
+        |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",

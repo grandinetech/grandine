@@ -3,18 +3,23 @@ use core::cmp::Ordering;
 use anyhow::Result;
 use types::{
     config::Config,
+    electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingBalanceDeposit},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
-        primitives::{Gwei, ValidatorIndex},
+        primitives::{Epoch, Gwei, ValidatorIndex},
     },
     preset::Preset,
-    traits::BeaconState,
+    traits::{BeaconState, PostElectraBeaconState},
 };
 
 use crate::{
-    accessors::{get_current_epoch, get_validator_churn_limit},
+    accessors::{
+        get_activation_exit_churn_limit, get_consolidation_churn_limit, get_current_epoch,
+        get_validator_churn_limit,
+    },
     error::Error,
     misc::compute_activation_exit_epoch,
+    predicates::has_eth1_withdrawal_credential,
 };
 
 pub fn balance<P: Preset>(
@@ -92,6 +97,140 @@ pub fn initiate_validator_exit<P: Preset>(
         .ok_or(Error::EpochOverflow)?;
 
     Ok(())
+}
+
+pub fn switch_to_compounding_validator<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+    index: ValidatorIndex,
+) -> Result<()> {
+    let validator = state.validators_mut().get_mut(index)?;
+
+    if has_eth1_withdrawal_credential(validator) {
+        validator.withdrawal_credentials[..COMPOUNDING_WITHDRAWAL_PREFIX.len()]
+            .copy_from_slice(COMPOUNDING_WITHDRAWAL_PREFIX);
+
+        queue_excess_active_balance(state, index)?;
+    }
+
+    Ok(())
+}
+
+pub fn queue_excess_active_balance<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+    index: ValidatorIndex,
+) -> Result<()> {
+    let balance = *state.balances().get(index)?;
+
+    if balance > P::MIN_ACTIVATION_BALANCE {
+        let excess_balance = balance - P::MIN_ACTIVATION_BALANCE;
+
+        *state.balances_mut().get_mut(index)? = P::MIN_ACTIVATION_BALANCE;
+
+        state
+            .pending_balance_deposits_mut()
+            .push(PendingBalanceDeposit {
+                index,
+                amount: excess_balance,
+            })?;
+    }
+
+    Ok(())
+}
+
+pub fn queue_entire_balance_and_reset_validator<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+    index: ValidatorIndex,
+) -> Result<()> {
+    let validator_balance = *balance(state, index)?;
+
+    *balance(state, index)? = 0;
+
+    let validator = state.validators_mut().get_mut(index)?;
+
+    validator.effective_balance = 0;
+    validator.activation_eligibility_epoch = FAR_FUTURE_EPOCH;
+
+    state
+        .pending_balance_deposits_mut()
+        .push(PendingBalanceDeposit {
+            index,
+            amount: validator_balance,
+        })?;
+
+    Ok(())
+}
+
+pub fn compute_exit_epoch_and_update_churn<P: Preset>(
+    config: &Config,
+    state: &mut impl PostElectraBeaconState<P>,
+    exit_balance: Gwei,
+) -> Epoch {
+    let mut earliest_exit_epoch = state
+        .earliest_exit_epoch()
+        .max(compute_activation_exit_epoch::<P>(get_current_epoch(state)));
+
+    let per_epoch_churn = get_activation_exit_churn_limit(config, state);
+
+    // > New epoch for exits.
+    let mut exit_balance_to_consume = if state.earliest_exit_epoch() < earliest_exit_epoch {
+        per_epoch_churn
+    } else {
+        state.exit_balance_to_consume()
+    };
+
+    // > Exit doesn't fit in the current earliest epoch.
+    if exit_balance > exit_balance_to_consume {
+        let balance_to_process = exit_balance - exit_balance_to_consume;
+        let additional_epochs = (balance_to_process - 1) / per_epoch_churn + 1;
+
+        earliest_exit_epoch += additional_epochs;
+        exit_balance_to_consume += additional_epochs * per_epoch_churn;
+    }
+
+    // > Consume the balance and update state variables.
+    *state.exit_balance_to_consume_mut() = exit_balance_to_consume - exit_balance;
+    *state.earliest_exit_epoch_mut() = earliest_exit_epoch;
+
+    state.earliest_exit_epoch()
+}
+
+pub fn compute_consolidation_epoch_and_update_churn<P: Preset>(
+    config: &Config,
+    state: &mut impl PostElectraBeaconState<P>,
+    consolidation_balance: Gwei,
+) -> Epoch {
+    let mut earliest_consolidation_epoch = core::cmp::max(
+        state.earliest_consolidation_epoch(),
+        compute_activation_exit_epoch::<P>(get_current_epoch(state)),
+    );
+
+    let per_epoch_consolidation_churn = get_consolidation_churn_limit(config, state);
+
+    // > New epoch for consolidations.
+
+    let mut consolidation_balance_to_consume =
+        if state.earliest_consolidation_epoch() < earliest_consolidation_epoch {
+            per_epoch_consolidation_churn
+        } else {
+            state.consolidation_balance_to_consume()
+        };
+
+    // > Consolidation doesn't fit in the current earliest epoch.
+
+    if consolidation_balance > consolidation_balance_to_consume {
+        let balance_to_process = consolidation_balance - consolidation_balance_to_consume;
+        let additional_epochs = (balance_to_process - 1) / per_epoch_consolidation_churn + 1;
+        earliest_consolidation_epoch += additional_epochs;
+        consolidation_balance_to_consume += additional_epochs * per_epoch_consolidation_churn;
+    }
+
+    // > Consume the balance and update state variables.
+
+    *state.consolidation_balance_to_consume_mut() =
+        consolidation_balance_to_consume - consolidation_balance;
+    *state.earliest_consolidation_epoch_mut() = earliest_consolidation_epoch;
+
+    state.earliest_consolidation_epoch()
 }
 
 #[cfg(test)]

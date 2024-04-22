@@ -18,6 +18,7 @@ use types::{
         containers::SignedBeaconBlock as DenebSignedBeaconBlock,
         primitives::{Blob, KzgProof},
     },
+    electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::Slot},
     preset::Preset,
@@ -86,6 +87,14 @@ pub struct SignedDenebBlockWithBlobs<P: Preset> {
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
 }
 
+#[derive(Deserialize, Ssz)]
+#[serde(bound = "")]
+pub struct SignedElectraBlockWithBlobs<P: Preset> {
+    pub signed_block: ElectraSignedBeaconBlock<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+}
+
 #[derive(Serialize, Ssz)]
 #[serde(bound = "")]
 #[ssz(derive_read = false, derive_hash = false)]
@@ -134,6 +143,11 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
                 kzg_proofs: proofs.unwrap_or_default(),
                 blobs: blobs.unwrap_or_default(),
             }),
+            BeaconBlock::Electra(block) => Self::WithBlobs(BlockWithBlobs {
+                block: block.into(),
+                kzg_proofs: proofs.unwrap_or_default(),
+                blobs: blobs.unwrap_or_default(),
+            }),
         }
     }
 }
@@ -175,6 +189,11 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                     kzg_proofs: proofs.unwrap_or_default(),
                     blobs: blobs.unwrap_or_default(),
                 }),
+                BeaconBlock::Electra(block) => Self::WithBlobs(BlockWithBlobs {
+                    block: ValidatorBlindedBlock::BeaconBlock(block.into()),
+                    kzg_proofs: proofs.unwrap_or_default(),
+                    blobs: blobs.unwrap_or_default(),
+                }),
             },
         }
     }
@@ -188,6 +207,7 @@ pub enum SignedAPIBlock<P: Preset> {
     Bellatrix(BellatrixSignedBeaconBlock<P>),
     Capella(CapellaSignedBeaconBlock<P>),
     Deneb(SignedDenebBlockWithBlobs<P>),
+    Electra(SignedElectraBlockWithBlobs<P>),
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
@@ -222,6 +242,15 @@ impl<P: Preset> SignedAPIBlock<P> {
 
                 (signed_block.into(), kzg_proofs, blobs)
             }
+            Self::Electra(block) => {
+                let SignedElectraBlockWithBlobs {
+                    signed_block,
+                    kzg_proofs,
+                    blobs,
+                } = block;
+
+                (signed_block.into(), kzg_proofs, blobs)
+            }
         }
     }
 }
@@ -235,6 +264,7 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
         BellatrixSignedBeaconBlock::<P>::SIZE,
         CapellaSignedBeaconBlock::<P>::SIZE,
         SignedDenebBlockWithBlobs::<P>::SIZE,
+        SignedElectraBlockWithBlobs::<P>::SIZE,
     ]);
 }
 
@@ -252,6 +282,7 @@ impl<P: Preset> SszRead<Config> for SignedAPIBlock<P> {
             Phase::Bellatrix => Self::Bellatrix(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         // TODO(feature/deneb)

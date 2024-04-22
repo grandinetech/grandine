@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-derive_more = { workspace = true }
+bls = { workspace = true }
 either = { workspace = true }
 ethereum-types = { workspace = true }
 futures = { workspace = true }
