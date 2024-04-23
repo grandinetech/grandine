@@ -16,6 +16,18 @@ jobs:
     # The `ubuntu-22.04` image already includes Rustup:
     # <https://github.com/actions/runner-images/blob/ubuntu22/20240401.4/images/ubuntu/Ubuntu2204-Readme.md#rust-tools>
     # Running `rustc` or Cargo should automatically install the toolchain specified in `rust-toolchain.toml`.
+    - name: Build x86_64-unknown-linux-gnu 
+      uses: actions-rs/cargo@v1
+      with:
+        use-cross: true
+        command: build
+        args: --bin grandine --target x86_64-unknown-linux-gnu --features default-networks --profile release # --profile compact
+    - name: Build aarch64-unknown-linux-gnu
+      uses: actions-rs/cargo@v1
+      with:
+        use-cross: true
+        command: build
+        args: --bin grandine --target aarch64-unknown-linux-gnu --features default-networks --profile release # --profile compact
     - uses: Swatinem/rust-cache@v2
     - name: Check if code is formatted
       run: cargo fmt --check

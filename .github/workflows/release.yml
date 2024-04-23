@@ -1,0 +1,24 @@
+name: Release
+
+on: 
+  push:
+    tags:
+      - 'release*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        lfs: true
+    # There should be no need to install Rustup or a Rust toolchain explicitly.
+    # The `ubuntu-22.04` image already includes Rustup:
+    # <https://github.com/actions/runner-images/blob/ubuntu22/20240401.4/images/ubuntu/Ubuntu2204-Readme.md#rust-tools>
+    # Running `rustc` or Cargo should automatically install the toolchain specified in `rust-toolchain.toml`.
+    - uses: Swatinem/rust-cache@v2
+    - name: Build x86_64-unknown-linux-gnu 
+      run: cross build --bin grandine --target x86_64-unknown-linux-gnu --features default-networks --profile release # --profile compact
+    - name: Build x86_64-unknown-linux-gnu 
+      run: cross build --bin grandine --target aarch64-unknown-linux-gnu --features default-networks --profile release # --profile compact
