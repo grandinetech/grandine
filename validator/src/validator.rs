@@ -649,6 +649,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if let Some(metrics) = self.metrics.as_ref() {
             if tick.is_start_of_interval() {
                 let tick_delay = tick.delay(&self.chain_config, self.controller.genesis_time())?;
+                debug!("tick_delay: {tick_delay:?} for {tick:?}");
                 metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
             }
         }
