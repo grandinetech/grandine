@@ -8245,6 +8245,7 @@ dependencies = [
  "itertools 0.12.1",
  "keymanager",
  "log",
+ "nonzero_ext",
  "once_cell",
  "operation_pools",
  "p2p",

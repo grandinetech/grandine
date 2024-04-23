@@ -1,4 +1,7 @@
+use core::num::NonZeroU64;
+
 use bls::{PublicKeyBytes, SignatureBytes};
+use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, Size, SszHash, SszSize, SszWrite, WriteError, H256};
 use typenum::U1;
@@ -10,6 +13,8 @@ use types::{
     preset::Preset,
     traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
 };
+
+pub const DEFAULT_BUILDER_BOOST_FACTOR: NonZeroU64 = nonzero!(100_u64);
 
 #[allow(clippy::struct_field_names)]
 pub struct Aggregator {

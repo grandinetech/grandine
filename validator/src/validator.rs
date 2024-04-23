@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::ops::ControlFlow;
+use core::ops::{ControlFlow, Div as _};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     error::Error as StdError,
@@ -98,7 +98,9 @@ use types::{
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Checkpoint,
             ProposerSlashing, SignedAggregateAndProof, SignedVoluntaryExit,
         },
-        primitives::{Epoch, ExecutionAddress, ExecutionBlockHash, Slot, ValidatorIndex, H256},
+        primitives::{
+            Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256, ValidatorIndex, H256,
+        },
     },
     preset::Preset,
     traits::{
@@ -111,7 +113,10 @@ use crate::{
     messages::{
         ApiToValidator, BeaconBlockSender, BlindedBlockSender, ValidatorToApi, ValidatorToLiveness,
     },
-    misc::{Aggregator, ProposerData, SyncCommitteeMember, ValidatorBlindedBlock},
+    misc::{
+        Aggregator, ProposerData, SyncCommitteeMember, ValidatorBlindedBlock,
+        DEFAULT_BUILDER_BOOST_FACTOR,
+    },
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
@@ -413,6 +418,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             randao_reveal,
                             slot,
                             skip_randao_verification,
+                            builder_boost_factor,
                         ) => {
                             self.produce_blinded_beacon_block(
                                 sender,
@@ -420,6 +426,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 randao_reveal,
                                 slot,
                                 skip_randao_verification,
+                                builder_boost_factor,
                             ).await
                         },
                         ApiToValidator::ProposerSlashing(sender, proposer_slashing) => {
@@ -955,6 +962,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .pipe(Some)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build_blinded_beacon_block(
         &mut self,
         slot_head: &SlotHead<P>,
@@ -963,6 +971,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         graffiti: H256,
         execution_payload_header_handle: Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>>,
         skip_randao_verification: bool,
+        builder_boost_factor: u64,
     ) -> Result<Option<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>> {
         let Some(beacon_block) = self
             .build_beacon_block(
@@ -982,7 +991,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 match header_handle.await? {
                     Ok(Some(response)) => {
                         let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
-                        let mev = response.mev();
+                        let builder_mev = response.mev();
 
                         if let Some(blinded_block) = self.blinded_block_from_beacon_block(
                             slot_head,
@@ -991,6 +1000,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             blob_kzg_commitments,
                             skip_randao_verification,
                         ) {
+                            if let Some(local_mev) = beacon_block.mev {
+                                let builder_boost_factor = Uint256::from_u64(builder_boost_factor);
+
+                                let boosted_builder_mev = builder_mev
+                                    .div(DEFAULT_BUILDER_BOOST_FACTOR)
+                                    .saturating_mul(builder_boost_factor);
+
+                                if local_mev >= boosted_builder_mev {
+                                    info!(
+                                        "using more profitable local payload: \
+                                        local MEV: {local_mev}, builder MEV: {builder_mev}, \
+                                        boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
+                                    );
+
+                                    return Ok(Some(
+                                        beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
+                                    ));
+                                }
+                            }
+
                             let block = ValidatorBlindedBlock::BlindedBeaconBlock {
                                 blinded_block,
                                 execution_payload: Box::new(
@@ -1005,7 +1034,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 None,
                                 beacon_block.proofs,
                                 beacon_block.blobs,
-                                Some(mev),
+                                Some(builder_mev),
                             )));
                         }
                     }
@@ -1271,6 +1300,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         randao_reveal: SignatureBytes,
         slot: Slot,
         skip_randao_verification: bool,
+        builder_boost_factor: u64,
     ) -> bool {
         let Some(slot_head) = self.safe_slot_head(slot).await else {
             return sender.send(Ok(None)).is_ok();
@@ -1294,6 +1324,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 graffiti,
                 execution_payload_header_handle,
                 skip_randao_verification,
+                builder_boost_factor,
             )
             .await;
 
@@ -1370,6 +1401,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 graffiti,
                 execution_payload_header_handle,
                 false,
+                DEFAULT_BUILDER_BOOST_FACTOR.get(),
             )
             .await?;
 

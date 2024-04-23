@@ -80,7 +80,10 @@ use types::{
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
-use validator::{ApiToValidator, ValidatorBlindedBlock, ValidatorConfig, ValidatorProposerData};
+use validator::{
+    ApiToValidator, ValidatorBlindedBlock, ValidatorConfig, ValidatorProposerData,
+    DEFAULT_BUILDER_BOOST_FACTOR,
+};
 
 use crate::{
     block_id,
@@ -161,7 +164,7 @@ pub struct PoolAttestationQuery {
 }
 
 #[derive(Deserialize)]
-// Allow custom fields in ValidatorBlockQuery.
+// Allow custom fields in `ValidatorBlockQuery`.
 // This is required for Lodestar interoperability.
 // #[serde(deny_unknown_fields)]
 pub struct ValidatorBlockQuery {
@@ -169,6 +172,18 @@ pub struct ValidatorBlockQuery {
     graffiti: Option<H256>,
     #[serde(default, with = "serde_utils::bool_as_empty_string")]
     skip_randao_verification: bool,
+}
+
+#[derive(Deserialize)]
+// Allow custom fields in `ValidatorBlockQueryV3`.
+// This is required for Lodestar interoperability.
+// #[serde(deny_unknown_fields)]
+pub struct ValidatorBlockQueryV3 {
+    randao_reveal: SignatureBytes,
+    graffiti: Option<H256>,
+    #[serde(default, with = "serde_utils::bool_as_empty_string")]
+    skip_randao_verification: bool,
+    builder_boost_factor: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -1849,6 +1864,7 @@ pub async fn validator_blinded_block<P: Preset>(
         randao_reveal,
         slot,
         skip_randao_verification,
+        DEFAULT_BUILDER_BOOST_FACTOR.get(),
     )
     .send(&api_to_validator_tx);
 
@@ -1908,13 +1924,14 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthPath(slot): EthPath<Slot>,
-    EthQuery(query): EthQuery<ValidatorBlockQuery>,
+    EthQuery(query): EthQuery<ValidatorBlockQueryV3>,
     headers: HeaderMap,
 ) -> Result<EthResponse<APIBlock<ValidatorBlindedBlock<P>, P>, (), JsonOrSsz>, Error> {
-    let ValidatorBlockQuery {
+    let ValidatorBlockQueryV3 {
         randao_reveal,
         graffiti,
         skip_randao_verification,
+        builder_boost_factor,
     } = query;
 
     if skip_randao_verification && !randao_reveal.is_empty() {
@@ -1930,6 +1947,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         randao_reveal,
         slot,
         skip_randao_verification,
+        builder_boost_factor.unwrap_or_else(|| DEFAULT_BUILDER_BOOST_FACTOR.get()),
     )
     .send(&api_to_validator_tx);
 

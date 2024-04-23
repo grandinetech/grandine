@@ -266,6 +266,11 @@ impl Uint256 {
         ]))
     }
 
+    #[must_use]
+    pub fn saturating_mul(self, rhs: Self) -> Self {
+        Self(self.into_raw().saturating_mul(rhs.into_raw()))
+    }
+
     const fn into_raw(self) -> RawUint256 {
         self.0
     }

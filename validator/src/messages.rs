@@ -27,7 +27,7 @@ pub type BlindedBlockSender<P> =
 
 pub enum ApiToValidator<P: Preset> {
     ProduceBeaconBlock(BeaconBlockSender<P>, H256, SignatureBytes, Slot, bool),
-    ProduceBlindedBeaconBlock(BlindedBlockSender<P>, H256, SignatureBytes, Slot, bool),
+    ProduceBlindedBeaconBlock(BlindedBlockSender<P>, H256, SignatureBytes, Slot, bool, u64),
     AttesterSlashing(Sender<PoolAdditionOutcome>, Box<AttesterSlashing<P>>),
     ProposerSlashing(Sender<PoolAdditionOutcome>, Box<ProposerSlashing>),
     PublishSignedBlindedBlock(

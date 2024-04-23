@@ -34,6 +34,7 @@ http_api_utils = { workspace = true }
 itertools = { workspace = true }
 keymanager = { workspace = true }
 log = { workspace = true }
+nonzero_ext = { workspace = true }
 once_cell = { workspace = true }
 operation_pools = { workspace = true }
 p2p = { workspace = true }

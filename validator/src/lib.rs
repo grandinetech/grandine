@@ -1,7 +1,9 @@
 pub use crate::{
     api::{run_validator_api, ValidatorApiConfig},
     messages::{ApiToValidator, ValidatorToApi, ValidatorToLiveness},
-    misc::{ProposerData as ValidatorProposerData, ValidatorBlindedBlock},
+    misc::{
+        ProposerData as ValidatorProposerData, ValidatorBlindedBlock, DEFAULT_BUILDER_BOOST_FACTOR,
+    },
     validator::{Channels as ValidatorChannels, Validator},
     validator_config::ValidatorConfig,
 };
