@@ -949,6 +949,7 @@ fn move_interchange_backup_files_to_validator_dir(
                 let validator_backup_path = validator_directory.as_ref().join(file_name);
 
                 if !validator_backup_path.try_exists()? {
+                    fs_err::create_dir_all(validator_directory.as_ref())?;
                     fs_err::copy(&beacon_backup_path, &validator_backup_path)?;
                     fs_err::remove_file(&beacon_backup_path)?;
 
