@@ -873,6 +873,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let Some(payload_id) = payload_id else {
+            error!(
+                "payload_id from execution layer was not received; This will lead to missed block"
+            );
+
             return Ok(None);
         };
 

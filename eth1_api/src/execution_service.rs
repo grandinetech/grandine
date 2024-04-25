@@ -114,6 +114,8 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
     ) -> Option<ForkChoiceUpdatedResponse> {
+        let payload_id_expected = payload_attributes.as_ref().right().is_some();
+
         let response = self
             .api
             .forkchoice_updated(
@@ -126,6 +128,10 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
 
         match response {
             Ok(response) => {
+                if response.payload_id.is_none() && payload_id_expected {
+                    warn!("payload_id expected but was none: {response:?}");
+                }
+
                 if response.payload_status.status.is_invalid() {
                     warn!(
                         "engine_forkchoiceUpdated returned INVALID status \
