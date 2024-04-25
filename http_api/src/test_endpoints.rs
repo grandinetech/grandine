@@ -5,7 +5,7 @@ use axum::{extract::State, Json};
 use clock::Tick;
 use fork_choice_control::{P2pMessage, SyncMessage};
 use operation_pools::PoolToP2pMessage;
-use p2p::{ApiToP2p, SubnetServiceToP2p, ValidatorToP2p};
+use p2p::{ApiToP2p, ValidatorToP2p};
 use serde::Serialize;
 use types::preset::Preset;
 
@@ -21,7 +21,6 @@ pub struct TakeMessagesResponse<P: Preset> {
     fc_to_p2p: Vec<P2pMessage<P>>,
     fc_to_sync: Vec<SyncMessage<P>>,
     pool_to_p2p: Vec<PoolToP2pMessage>,
-    subnet_service_to_p2p: Vec<SubnetServiceToP2p>,
     validator_to_p2p: Vec<ValidatorToP2p<P>>,
 }
 
@@ -56,7 +55,6 @@ pub async fn post_take_messages<P: Preset>(
         fc_to_p2p_rx,
         fc_to_sync_rx,
         pool_to_p2p_rx,
-        subnet_service_to_p2p_rx,
         validator_to_p2p_rx,
     } = test_state;
 
@@ -65,7 +63,6 @@ pub async fn post_take_messages<P: Preset>(
         fc_to_p2p: take(fc_to_p2p_rx).await,
         fc_to_sync: take(fc_to_sync_rx).await,
         pool_to_p2p: take(pool_to_p2p_rx).await,
-        subnet_service_to_p2p: take(subnet_service_to_p2p_rx).await,
         validator_to_p2p: take(validator_to_p2p_rx).await,
     })
 }

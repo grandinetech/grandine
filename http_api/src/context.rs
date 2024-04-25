@@ -95,7 +95,7 @@ impl<P: Preset> Context<P> {
         let (pool_to_api_tx, pool_to_api_rx) = futures::channel::mpsc::unbounded();
         let (pool_to_liveness_tx, pool_to_liveness_rx) = futures::channel::mpsc::unbounded();
         let (pool_to_p2p_tx, pool_to_p2p_rx) = futures::channel::mpsc::unbounded();
-        let (subnet_service_to_p2p_tx, subnet_service_to_p2p_rx) =
+        let (subnet_service_to_p2p_tx, _subnet_service_to_p2p_rx) =
             futures::channel::mpsc::unbounded();
         let (sync_to_api_tx, sync_to_api_rx) = futures::channel::mpsc::unbounded();
         let (subnet_service_tx, subnet_service_rx) = futures::channel::mpsc::unbounded();
@@ -332,7 +332,6 @@ impl<P: Preset> Context<P> {
             fc_to_p2p_rx: Arc::new(Mutex::new(fc_to_p2p_rx)),
             fc_to_sync_rx: Arc::new(Mutex::new(fc_to_sync_rx)),
             pool_to_p2p_rx: Arc::new(Mutex::new(pool_to_p2p_rx)),
-            subnet_service_to_p2p_rx: Arc::new(Mutex::new(subnet_service_to_p2p_rx)),
             validator_to_p2p_rx: Arc::new(Mutex::new(validator_to_p2p_rx)),
         };
 

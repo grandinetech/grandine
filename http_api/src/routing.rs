@@ -55,7 +55,7 @@ use ::{
     crossbeam_utils::sync::WaitGroup,
     fork_choice_control::{P2pMessage, SyncMessage},
     operation_pools::PoolToP2pMessage,
-    p2p::{SubnetServiceToP2p, ValidatorToP2p},
+    p2p::ValidatorToP2p,
 };
 
 #[cfg(test)]
@@ -201,7 +201,6 @@ pub struct TestState<P: Preset> {
     pub fc_to_p2p_rx: SpyReceiver<P2pMessage<P>>,
     pub fc_to_sync_rx: SpyReceiver<SyncMessage<P>>,
     pub pool_to_p2p_rx: SpyReceiver<PoolToP2pMessage>,
-    pub subnet_service_to_p2p_rx: SpyReceiver<SubnetServiceToP2p>,
     pub validator_to_p2p_rx: SpyReceiver<ValidatorToP2p<P>>,
 }
 
