@@ -1,6 +1,8 @@
-use core::{cmp::Ordering, convert::Infallible as Never, fmt::Display, time::Duration};
+use core::{
+    cell::RefCell, cmp::Ordering, convert::Infallible as Never, fmt::Display, time::Duration,
+};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
     time::Instant,
 };
@@ -30,7 +32,8 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::misc;
-use log::{debug, error, log, warn, Level};
+use itertools::Itertools as _;
+use log::{debug, error, info, log, warn, Level};
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -120,6 +123,7 @@ pub struct Network<P: Preset> {
     target_peers: usize,
     #[allow(dead_code)]
     port_mappings: Option<PortMappings>,
+    gr_subscribed: RefCell<BTreeSet<SubnetId>>,
 }
 
 impl<P: Preset> Network<P> {
@@ -195,6 +199,7 @@ impl<P: Preset> Network<P> {
             shutdown_rx,
             target_peers: network_config.target_peers,
             port_mappings,
+            gr_subscribed: RefCell::new(BTreeSet::new()),
         };
 
         Ok(network)
@@ -695,6 +700,8 @@ impl<P: Preset> Network<P> {
     }
 
     fn update_attestation_subnets(&self, subnet_actions: AttestationSubnetActions) {
+        info!("update_attestation_subnets (actions: {subnet_actions:?}");
+
         let chain_config = self.controller.chain_config();
         let current_slot = self.controller.slot();
 
@@ -736,7 +743,7 @@ impl<P: Preset> Network<P> {
 
             if subscribe {
                 self.log(
-                    Level::Debug,
+                    Level::Info,
                     format_args!("subscribing to attestation subnet (subnet_id: {subnet_id})"),
                 );
 
@@ -751,7 +758,7 @@ impl<P: Preset> Network<P> {
                 }
             } else {
                 self.log(
-                    Level::Debug,
+                    Level::Info,
                     format_args!("unsubscribing from attestation subnet {subnet_id}"),
                 );
 
@@ -766,12 +773,12 @@ impl<P: Preset> Network<P> {
 
             if add_to_enr {
                 self.log(
-                    Level::Debug,
+                    Level::Info,
                     format_args!("adding attestation subnet to ENR (subnet_id: {subnet_id})"),
                 );
             } else {
                 self.log(
-                    Level::Debug,
+                    Level::Info,
                     format_args!("removing attestation subnet from ENR (subnet_id: {subnet_id})"),
                 );
             }
@@ -785,6 +792,8 @@ impl<P: Preset> Network<P> {
         &self,
         actions: BTreeMap<SubnetId, SyncCommitteeSubnetAction>,
     ) {
+        info!("update_sync_committee_subnets (actions: {actions:?}");
+
         let subnet_discoveries = actions
             .iter()
             .filter(|(_, action)| {
@@ -797,7 +806,11 @@ impl<P: Preset> Network<P> {
                 subnet: Subnet::SyncCommittee(*subnet_id),
                 min_ttl: None,
             })
-            .collect();
+            .collect_vec();
+
+        for discovery in &subnet_discoveries {
+            info!("GR SUBNETS: discover peers in subnet {discovery:?}");
+        }
 
         ServiceInboundMessage::DiscoverSubnetPeers(subnet_discoveries)
             .send(&self.network_to_service_tx);
@@ -814,9 +827,12 @@ impl<P: Preset> Network<P> {
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
                     if let Some(topic) = self.subnet_gossip_topic(subnet) {
+                        info!("GR SUBNETS: subscribe to subnet {subnet_id:?}");
+                        self.gr_subscribed.borrow_mut().insert(subnet_id);
                         ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
                     }
 
+                    info!("GR SUBNETS: add {subnet:?} to ENR");
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, true)
                         .send(&self.network_to_service_tx);
                 }
@@ -834,14 +850,22 @@ impl<P: Preset> Network<P> {
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
                     if let Some(topic) = self.subnet_gossip_topic(subnet) {
+                        info!("GR SUBNETS: unsubscribe from subnet {subnet_id:?}");
+                        self.gr_subscribed.borrow_mut().remove(&subnet_id);
                         ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
                     }
 
+                    info!("GR SUBNETS: remove {subnet:?} from ENR");
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, false)
                         .send(&self.network_to_service_tx);
                 }
             }
         }
+
+        info!(
+            "SUBNETS STATS ALL: GR {:?}",
+            self.gr_subscribed.borrow().iter().copied().collect_vec(),
+        );
     }
 
     fn handle_network_event(&mut self, network_event: NetworkEvent<RequestId, P>) {
@@ -1532,9 +1556,9 @@ impl<P: Preset> Network<P> {
                 }
 
                 self.log(
-                    Level::Debug,
+                    Level::Info,
                     format_args!(
-                        "received proposer slashing as gossip: {proposer_slashing:?} from {source}"
+                        "SLASHING received proposer slashing as gossip: {proposer_slashing:?} from {source}"
                     ),
                 );
 
@@ -1549,9 +1573,9 @@ impl<P: Preset> Network<P> {
                 }
 
                 self.log(
-                    Level::Debug,
+                    Level::Info,
                     format_args!(
-                        "received attester slashing as gossip: {attester_slashing:?} from {source}"
+                        "SLASHING received attester slashing as gossip: {attester_slashing:?} from {source}"
                     ),
                 );
 
@@ -1903,9 +1927,16 @@ impl<P: Preset> Network<P> {
     fn subnet_gossip_topic(&self, subnet: Subnet) -> Option<GossipTopic> {
         let current_phase = self.fork_context.current_fork();
 
-        self.fork_context
+        let res = self
+            .fork_context
             .to_context_bytes(current_phase)
-            .map(|digest| GossipTopic::new(subnet.into(), GossipEncoding::default(), digest))
+            .map(|digest| GossipTopic::new(subnet.into(), GossipEncoding::default(), digest));
+
+        if res.is_none() {
+            warn!("SUBNETS subnet topic not found! (subnet: {subnet:?})");
+        }
+
+        res
     }
 
     fn prune_received_blob_sidecars(&mut self, epoch: Epoch) {

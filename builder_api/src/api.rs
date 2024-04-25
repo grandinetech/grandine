@@ -161,7 +161,7 @@ impl Api {
 
         let builder_bid = response.json::<SignedBuilderBid<P>>().await?;
 
-        debug!("get_execution_payload_header response: {builder_bid:?}");
+        info!("get_execution_payload_header response: {builder_bid:?}");
 
         validate_phase(chain_config.phase_at_slot::<P>(slot), builder_bid.phase())?;
 

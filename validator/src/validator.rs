@@ -57,7 +57,7 @@ use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::Instant};
 use transition_functions::{capella, combined, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -292,22 +292,29 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .unwrap_or_else(|| EitherFuture::Right(futures::stream::pending()));
 
             select! {
-                message = self.fork_choice_rx.select_next_some() => match message {
+                message = self.fork_choice_rx.select_next_some() => { let started_at = Instant::now(); match message {
                     ValidatorMessage::Tick(wait_group, tick) => {
+                        info!("start handling ValidatorMessage::Tick");
                         self.handle_tick(wait_group, tick).await?;
+                        info!("finished handling ValidatorMessage::Tick in {} ms", started_at.elapsed().as_millis());
                     }
                     ValidatorMessage::FinalizedEth1Data(finalized_eth1_deposit_index) => {
+                        info!("start handling ValidatorMessage::FinalizedEth1Data");
                         self.eth1_chain.finalize_deposits(finalized_eth1_deposit_index)?;
+                        info!("finished handling ValidatorMessage::FinalizedEth1Data in {} ms", started_at.elapsed().as_millis());
                     },
                     ValidatorMessage::Head(wait_group, head) => {
+                        info!("start handling ValidatorMessage::Head");
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             let state = self.controller.state_by_chain_link(&head);
                             ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
                         }
 
                         self.attest_gossip_block(&wait_group, head).await?;
+                        info!("finished handling ValidatorMessage::Head in {} ms", started_at.elapsed().as_millis());
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
+                        // info!("start handling ValidatorMessage::ValidAttestation");
                         self.attestation_agg_pool
                             .insert_attestation(wait_group, attestation.clone_arc());
 
@@ -315,14 +322,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             ValidatorToLiveness::ValidAttestation(attestation)
                                 .send(validator_to_liveness_tx);
                         }
+                        // info!("finished handling ValidatorMessage::ValidAttestation in {} ms", started_at.elapsed().as_millis());
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
+                        info!("start handling ValidatorMessage::PrepareExecutionPayload");
+
+                        info!("payload_id debug: received ValidatorMessage::PrepareExecutionPayload for {slot} {safe_execution_payload_hash} {finalized_execution_payload_hash}");
+
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
                             let proposer_index = slot_head.proposer_index()?;
                             let head_root = slot_head.beacon_block_root;
                             let head_slot = slot_head.slot();
+
+                            info!("payload_id debug: preparing execution payload");
 
                             let payload_id = self
                                 .prepare_execution_payload(
@@ -338,7 +352,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     match payload_id_option {
                                         Some(payload_id) => {
                                             info!(
-                                                "started work on execution payload with id {payload_id:?} \
+                                                "payload_id debug: started work on execution payload with id {payload_id:?} \
                                                  for head {head_root:?} at slot {head_slot}",
                                             );
                                             self.payload_id_cache.cache_set((head_root, head_slot), payload_id);
@@ -352,50 +366,70 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                         ),
                                     }
                                 }
-                                Err(error) => warn!("error while preparing execution payload: {error:?}"),
-                            }
+                                Err(error) => warn!("payload_id debug: error while preparing execution payload: {error:?}"),
+                            };
                         };
-                    }
-                },
 
-                slashing = slasher_to_validator_rx.select_next_some() => match slashing {
+                        info!("finished handling ValidatorMessage::PrepareExecutionPayload in {} ms", started_at.elapsed().as_millis());
+                    }
+                } },
+
+                slashing = slasher_to_validator_rx.select_next_some() => { let started_at = Instant::now(); match slashing {
                     SlasherToValidator::AttesterSlashing(attester_slashing) => {
+                        info!("start handling SlasherToValidator::AttesterSlashing");
                         self.attester_slashings.push(attester_slashing);
+                        info!("finished handling SlasherToValidator::AttesterSlashing in {} ms", started_at.elapsed().as_millis());
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
+                        info!("start handling SlasherToValidator::ProposerSlashing");
                         self.proposer_slashings.push(proposer_slashing);
+                        info!("finished handling SlasherToValidator::ProposerSlashing in {} ms", started_at.elapsed().as_millis());
                     }
-                },
+                } },
 
-                gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
+                gossip_message = self.p2p_to_validator_rx.select_next_some() => { let started_at = Instant::now(); match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
+                        info!("start handling P2pToValidator::AttesterSlashing");
                         let outcome = self.handle_external_attester_slashing(*slashing)?;
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+                        info!("finished handling P2pToValidator::AttesterSlashing in {} ms", started_at.elapsed().as_millis());
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
+                        info!("start handling P2pToValidator::ProposerSlashing");
                         let outcome = self.handle_external_proposer_slashing(*slashing)?;
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+                        info!("finished handling P2pToValidator::ProposerSlashing in {} ms", started_at.elapsed().as_millis());
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
+                        info!("start handling P2pToValidator::VoluntaryExit");
                         let outcome = self.handle_external_voluntary_exit(voluntary_exit)?;
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+                        info!("finished handling P2pToValidator::VoluntaryExit in {} ms", started_at.elapsed().as_millis());
                     }
-                },
+                } },
 
                 api_message = self.api_to_validator_rx.select_next_some() => {
+                    let started_at = Instant::now();
+
                     let success = match api_message {
                         ApiToValidator::AttesterSlashing(sender, attester_slashing) => {
+                            info!("start handling ApiToValidator::AttesterSlashing");
                             let result = self.handle_external_attester_slashing(*attester_slashing.clone())?;
 
                             if result.is_publishable() {
                                 ValidatorToP2p::PublishAttesterSlashing(attester_slashing).send(&self.p2p_tx);
                             }
 
-                            sender.send(result).is_ok()
+                            let res = sender.send(result).is_ok();
+                            info!("finished handling ApiToValidator::AttesterSlashing in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::PublishSignedBlindedBlock(sender, signed_blinded_block) => {
+                            info!("start handling ApiToValidator::PublishSignedBlindedBlock");
                             let result = self.publish_signed_blinded_block(&signed_blinded_block).await;
-                            sender.send(result).is_ok()
+                            let res = sender.send(result).is_ok();
+                            info!("finished handling ApiToValidator::PublishSignedBlindedBlock in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::ProduceBeaconBlock(
                             sender,
@@ -404,13 +438,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             slot,
                             skip_randao_verification,
                         ) => {
-                            self.produce_beacon_block(
+                            info!("start handling ApiToValidator::ProduceBeaconBlock");
+                            let res = self.produce_beacon_block(
                                 sender,
                                 graffiti,
                                 randao_reveal,
                                 slot,
                                 skip_randao_verification,
-                            ).await
+                            ).await;
+                            info!("finished handling ApiToValidator::ProduceBeaconBlock in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::ProduceBlindedBeaconBlock(
                             sender,
@@ -420,25 +457,32 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             skip_randao_verification,
                             builder_boost_factor,
                         ) => {
-                            self.produce_blinded_beacon_block(
+                            info!("start handling ApiToValidator::ProduceBlindedBeaconBlock");
+                            let res = self.produce_blinded_beacon_block(
                                 sender,
                                 graffiti,
                                 randao_reveal,
                                 slot,
                                 skip_randao_verification,
                                 builder_boost_factor,
-                            ).await
+                            ).await;
+                            info!("finished handling ApiToValidator::ProduceBlindedBeaconBlock in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::ProposerSlashing(sender, proposer_slashing) => {
+                            info!("start handling ApiToValidator::ProposerSlashing");
                             let result = self.handle_external_proposer_slashing(*proposer_slashing)?;
 
                             if result.is_publishable() {
                                 ValidatorToP2p::PublishProposerSlashing(proposer_slashing).send(&self.p2p_tx);
                             }
 
-                            sender.send(result).is_ok()
+                            let res = sender.send(result).is_ok();
+                            info!("finished handling ApiToValidator::ProposerSlashing in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::RegisteredValidators(sender) => {
+                            info!("start handling ApiToValidator::RegisteredValidators");
                             let registered_pubkeys = self
                                 .registered_validators
                                 .values()
@@ -446,18 +490,30 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 .copied()
                                 .collect();
 
-                            sender.send(registered_pubkeys).is_ok()
+                            let res = sender.send(registered_pubkeys).is_ok();
+                            info!("finished handling ApiToValidator::RegisteredValidators in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::RequestAttesterSlashings(sender) => {
-                            sender.send(self.attester_slashings.clone()).is_ok()
+                            info!("start handling ApiToValidator::RequestAttesterSlashings");
+                            let res = sender.send(self.attester_slashings.clone()).is_ok();
+                            info!("finished handling ApiToValidator::RequestAttesterSlashings in {} ms", started_at.elapsed().as_millis());
+                            res
                         }
                         ApiToValidator::RequestProposerSlashings(sender) => {
-                            sender.send(self.proposer_slashings.clone()).is_ok()
+                            info!("start handling ApiToValidator::RequestProposerSlashings");
+                            let res = sender.send(self.proposer_slashings.clone()).is_ok();
+                            info!("finished handling ApiToValidator::RequestProposerSlashings in {} ms", started_at.elapsed().as_millis());
+                            res
                         }
                         ApiToValidator::RequestSignedVoluntaryExits(sender) => {
-                            sender.send(self.voluntary_exits.clone()).is_ok()
+                            info!("start handling ApiToValidator::RequestSignedVoluntaryExits");
+                            let res = sender.send(self.voluntary_exits.clone()).is_ok();
+                            info!("finished handling ApiToValidator::RequestSignedVoluntaryExits in {} ms", started_at.elapsed().as_millis());
+                            res
                         }
                         ApiToValidator::SignedValidatorRegistrations(sender, registrations) => {
+                            info!("start handling ApiToValidator::SignedValidatorRegistrations");
                             let (registered_validators, errors): (Vec<_>, Vec<_>) = registrations
                                 .into_iter()
                                 .enumerate()
@@ -490,18 +546,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     .or_insert(registrations);
                             }
 
-                            sender.send(errors).is_ok()
+                            let res = sender.send(errors).is_ok();
+                            info!("finished handling ApiToValidator::SignedValidatorRegistrations in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::SignedVoluntaryExit(sender, voluntary_exit) => {
+                            info!("start handling ApiToValidator::SignedVoluntaryExit");
                             let result = self.handle_external_voluntary_exit(voluntary_exit.clone())?;
 
                             if result.is_publishable() {
                                 ValidatorToP2p::PublishVoluntaryExit(voluntary_exit).send(&self.p2p_tx);
                             }
 
-                            sender.send(result).is_ok()
+                            let res = sender.send(result).is_ok();
+                            info!("finished handling ApiToValidator::SignedVoluntaryExit in {} ms", started_at.elapsed().as_millis());
+                            res
                         }
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
+                            info!("start handling ApiToValidator::SignedContributionsAndProofs");
                             let current_slot = self.controller.slot();
 
                             let slot_head = self.safe_slot_head(current_slot).await;
@@ -516,14 +578,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 .conv::<OptionFuture<_>>()
                                 .await;
 
-                            sender.send(failures).is_ok()
+                            let res = sender.send(failures).is_ok();
+                            info!("finished handling ApiToValidator::SignedContributionsAndProofs in {} ms", started_at.elapsed().as_millis());
+                            res
                         },
                         ApiToValidator::ValidatorProposerData(proposers) => {
+                            info!("start handling ApiToValidator::ValidatorProposerData");
                             for proposer in proposers {
                                 let ProposerData { validator_index, fee_recipient } = proposer;
                                 self.prepared_proposers.insert(validator_index, fee_recipient);
                             }
 
+                            info!("finished handling ApiToValidator::ValidatorProposerData in {} ms", started_at.elapsed().as_millis());
                             true
                         }
                     };
@@ -596,24 +662,29 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .contains(&slashing.signed_header_1.message.proposer_index);
 
         if index_seen {
+            info!("SLASHING Ignore because index_seen: {slashing:?}");
             return Ok(PoolAdditionOutcome::Ignore);
         }
 
         let state = self.controller.preprocessed_state_at_current_slot()?;
 
-        let outcome =
-            match unphased::validate_proposer_slashing(&self.chain_config, &state, slashing) {
-                Ok(()) => {
-                    self.proposer_slashings.push(slashing);
-                    PoolAdditionOutcome::Accept
-                }
-                Err(error) => {
-                    warn!(
-                    "external proposer slashing rejected (error: {error}, slashing: {slashing:?})",
+        let outcome = match unphased::validate_proposer_slashing(
+            &self.chain_config,
+            &state,
+            slashing,
+        ) {
+            Ok(()) => {
+                info!("SLASHING Accept: {slashing:?}");
+                self.proposer_slashings.push(slashing);
+                PoolAdditionOutcome::Accept
+            }
+            Err(error) => {
+                warn!(
+                    "SLASHING external proposer slashing rejected (error: {error}, slashing: {slashing:?})",
                 );
-                    PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidProposerSlashing, error)
-                }
-            };
+                PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidProposerSlashing, error)
+            }
+        };
 
         Ok(outcome)
     }
@@ -629,34 +700,43 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .collect::<HashSet<_>>();
 
         if accessors::slashable_indices(&slashing).all(|index| seen_indices.contains(&index)) {
+            info!("SLASHING Ignore because index_seen: {slashing:?}");
             return Ok(PoolAdditionOutcome::Ignore);
         }
 
         let state = self.controller.preprocessed_state_at_current_slot()?;
 
-        let outcome =
-            match unphased::validate_attester_slashing(&self.chain_config, &state, &slashing) {
-                Ok(_) => {
-                    self.attester_slashings.push(slashing);
-                    PoolAdditionOutcome::Accept
-                }
-                Err(error) => {
-                    warn!(
-                    "external attester slashing rejected (error: {error}, slashing: {slashing:?})",
+        let outcome = match unphased::validate_attester_slashing(
+            &self.chain_config,
+            &state,
+            &slashing,
+        ) {
+            Ok(_) => {
+                info!("SLASHING Accept: {slashing:?}");
+                self.attester_slashings.push(slashing);
+                PoolAdditionOutcome::Accept
+            }
+            Err(error) => {
+                warn!(
+                    "SLASHING external attester slashing rejected (error: {error}, slashing: {slashing:?})",
                 );
-                    PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
-                }
-            };
+                PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
+            }
+        };
 
         Ok(outcome)
     }
 
     #[allow(clippy::too_many_lines)]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
+        let started_at = Instant::now();
+
+        info!("handle_tick: start");
+
         if let Some(metrics) = self.metrics.as_ref() {
             if tick.is_start_of_interval() {
                 let tick_delay = tick.delay(&self.chain_config, self.controller.genesis_time())?;
-                debug!("tick_delay: {tick_delay:?} for {tick:?}");
+                info!("tick_delay: {tick_delay:?} for {tick:?}");
                 metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
             }
         }
@@ -664,6 +744,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let Tick { slot, kind } = tick;
 
         let no_validators = self.signer.load().no_keys() && self.registered_validators.is_empty();
+
+        info!(
+            "handle_tick: checked signer keys @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         log!(
             if no_validators {
@@ -682,7 +767,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .as_ref()
                 .map(|metrics| metrics.validator_epoch_processing_times.start_timer());
 
+            info!(
+                "handle_tick: will register validators @ {} ms",
+                started_at.elapsed().as_millis(),
+            );
+
             self.register_validators(current_epoch);
+
+            info!(
+                "handle_tick: spawned register_validators @ {} ms",
+                started_at.elapsed().as_millis(),
+            );
 
             if let Some(validator_to_slasher_tx) = &self.validator_to_slasher_tx {
                 ValidatorToSlasher::Epoch(current_epoch).send(validator_to_slasher_tx);
@@ -692,7 +787,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ValidatorToLiveness::Epoch(current_epoch).send(validator_to_liveness_tx);
             }
 
+            info!(
+                "handle_tick: will process validator votes @ {} ms",
+                started_at.elapsed().as_millis(),
+            );
+
             self.process_validator_votes(current_epoch)?;
+
+            info!(
+                "handle_tick: processed validator votes @ {} ms",
+                started_at.elapsed().as_millis(),
+            );
+
             self.discard_old_proposer_slashings(current_epoch);
             self.discard_old_registered_validators(current_epoch);
             self.discard_old_attester_slashings(current_epoch);
@@ -701,6 +807,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .discard_old_bls_to_execution_changes();
             self.own_sync_committee_subscriptions
                 .discard_old_subscriptions(current_epoch);
+
+            info!(
+                "handle_tick: discarded old data @ {} ms",
+                started_at.elapsed().as_millis(),
+            );
         }
 
         if self.last_registration_epoch.is_none() {
@@ -708,7 +819,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         self.attestation_agg_pool.on_tick(tick).await;
+
+        info!(
+            "handle_tick: agg pool on tick @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
+
         self.track_collection_metrics();
+
+        info!(
+            "handle_tick: printed debug info @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         let slot_head = if no_validators {
             None
@@ -719,11 +841,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
+        info!(
+            "handle_tick: got slot_head @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
+
         self.update_subnet_subscriptions(&wait_group, slot_head.as_ref());
+
+        info!(
+            "handle_tick: updated subnet subscriptions @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
             self.refresh_signer_keys();
         }
+
+        info!(
+            "handle_tick: spawned refresh signer keys task @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         let Some(slot_head) = slot_head else {
             return Ok(());
@@ -731,6 +868,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         self.attestation_agg_pool
             .compute_proposer_indices(slot_head.beacon_state.clone_arc());
+
+        info!(
+            "handle_tick: computed proposer indices @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         if let Some(state) = slot_head.beacon_state.post_altair() {
             if misc::is_epoch_start::<P>(state.slot() + 1) {
@@ -746,6 +888,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             })?;
         }
 
+        info!(
+            "handle_tick: computed own sync committee members @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
+
         match kind {
             TickKind::Propose => {
                 let _timer = self
@@ -754,10 +901,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .map(|metrics| metrics.validator_propose_tick_times.start_timer());
 
                 self.discard_previous_slot_attestations();
+
+                info!(
+                    "handle_tick: Propose duty: discarded previous slot attestations @ {} ms",
+                    started_at.elapsed().as_millis(),
+                );
+
                 self.propose(wait_group, &slot_head).await?;
                 // Sync committee messages and contributions for the previous slot are sometimes
                 // constructed while proposing a block. They must be discarded before the time to
                 // publish new ones comes.
+
+                info!(
+                    "handle_tick: Propose duty: after propose @ {} ms",
+                    started_at.elapsed().as_millis(),
+                );
+
                 self.sync_committee_agg_pool.on_slot(slot_head.slot());
                 self.published_own_sync_committee_messages = false;
             }
@@ -767,11 +926,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
-                self.attest_and_start_aggregating(&wait_group, &slot_head)
+                self.attest_and_start_aggregating(&wait_group, &slot_head, &started_at)
                     .await?;
 
-                self.publish_sync_committee_messages(&wait_group, &slot_head)
+                info!(
+                    "handle_tick: Attest duty: finished attest_and_start_aggregating @ {} ms",
+                    started_at.elapsed().as_millis(),
+                );
+
+                self.publish_sync_committee_messages(&wait_group, &slot_head, &started_at)
                     .await?;
+
+                info!(
+                    "handle_tick: Attest duty: finished publish_sync_committee_messages @ {} ms",
+                    started_at.elapsed().as_millis(),
+                );
             }
             TickKind::Aggregate => {
                 let _timer = self
@@ -782,17 +951,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.publish_aggregates_and_proofs(&wait_group, &slot_head)
                     .await;
 
+                info!(
+                    "handle_tick: Aggregate duty: published aggregates and proofs @ {} ms",
+                    started_at.elapsed().as_millis(),
+                );
+
                 self.publish_contributions_and_proofs(&slot_head).await;
+
+                info!(
+                    "handle_tick: Aggregate duty: published contributions and proofs @ {} ms",
+                    started_at.elapsed().as_millis(),
+                );
 
                 if misc::is_epoch_start::<P>(slot) {
                     let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
                     self.spawn_slashing_protection_pruning(current_epoch);
+                    info!(
+                        "handle_tick: Aggregate duty: spawned slashing protection prunning @ {} ms",
+                        started_at.elapsed().as_millis(),
+                    );
                 }
             }
             _ => {}
         }
 
         self.last_tick = Some(tick);
+
+        info!(
+            "handle_tick: finish @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         Ok(())
     }
@@ -869,7 +1057,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     snapshot.finalized_execution_payload_hash(),
                     proposer_index,
                 )
-                .await?
+                .await?;
+
+            info!("payload_id debug: payload prepared on spot: {payload_id:?}");
         };
 
         let Some(payload_id) = payload_id else {
@@ -877,8 +1067,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 "payload_id from execution layer was not received; This will lead to missed block"
             );
 
+            info!("payload_id debug: local execution payload no result");
             return Ok(None);
         };
+
+        info!("payload_id debug: getting execution payload: {payload_id:?}");
 
         let payload = self
             .execution_engine
@@ -888,6 +1081,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let payload_root = payload.value.hash_tree_root();
 
         self.payload_cache.cache_set(payload_root, payload.clone());
+
+        info!("payload_id debug: setting payload cache {payload_id:?}");
 
         Ok(Some(payload))
     }
@@ -1062,12 +1257,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         graffiti: H256,
         skip_randao_verification: bool,
     ) -> Result<Option<WithBlobsAndMev<BeaconBlock<P>, P>>> {
+        info!("validator build_beacon_block");
+
         let _block_timer = self
             .metrics
             .as_ref()
             .map(|metrics| metrics.build_beacon_block_times.start_timer());
 
         let proposer_index = proposer_index.map_or_else(|| slot_head.proposer_index(), Ok)?;
+
+        info!("validator build_beacon_block got proposer_index");
 
         // TODO(Grandine Team): Move this to a separate task so it prepares the execution payload
         //                      before it is time to propose a block.
@@ -1083,17 +1282,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(|value| value.map(Some))
             .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
 
+        info!("validator build_beacon_block got local execution payload option");
+
         let blob_kzg_commitments = commitments.unwrap_or_default();
         let sync_aggregate = self.process_sync_committee_contributions(slot_head).await?;
+
+        info!("validator build_beacon_block processed sync committee contributions");
 
         let bls_to_execution_changes = self
             .prepare_bls_to_execution_changes_for_proposal(slot_head)
             .await;
 
+        info!("validator build_beacon_block prepared bls to execution changes");
+
         let attestations = self
             .attestation_agg_pool
             .best_proposable_attestations(slot_head.beacon_state.clone_arc())
             .await?;
+
+        info!("validator build_beacon_block prepared best proposable attestations");
 
         tokio::task::block_in_place(|| -> Result<_> {
             let eth1_data = match self.eth1_chain.eth1_vote(
@@ -1108,6 +1315,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
             };
 
+            info!("validator build_beacon_block got eth1 data");
+
             let deposits = match self.eth1_chain.pending_deposits(
                 &slot_head.beacon_state,
                 eth1_data,
@@ -1119,6 +1328,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     return Ok(None);
                 }
             };
+
+            info!("validator build_beacon_block got deposits");
 
             let slot = slot_head.slot();
             let parent_root = slot_head.beacon_block_root;
@@ -1133,8 +1344,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             //                      slashed once. The code below can handle invalid blocks, but it may
             //                      prevent the validator from proposing.
             let attester_slashings = self.prepare_attester_slashings_for_proposal(slot_head);
+
+            info!("validator build_beacon_block prepared attester slashings");
+
             let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
+
+            info!("validator build_beacon_block prepared proposer slashings");
+
             let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
+
+            info!("validator build_beacon_block prepared voluntary exits");
 
             let without_state_root = match slot_head.beacon_state.phase() {
                 Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
@@ -1230,6 +1449,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
             .with_execution_payload(execution_payload)?;
 
+            info!("validator build_beacon_block prepared block without state root");
+
             let mut post_state = slot_head.beacon_state.as_ref().clone();
 
             let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
@@ -1247,6 +1468,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 )
             };
 
+            info!("validator build_beacon_block processed the new block");
+
             if let Err(error) = result {
                 warn!(
                     "constructed invalid beacon block \
@@ -1259,6 +1482,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             // is `true`. The resulting block is invalid either way. The client would have to mix in
             // the real RANDAO reveal and recompute the state root to make it valid.
             let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
+
+            info!("validator build_beacon_block built the new block");
 
             Ok(Some(WithBlobsAndMev::new(
                 beacon_block,
@@ -1280,7 +1505,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         slot: Slot,
         skip_randao_verification: bool,
     ) -> bool {
+        info!("validator start produce_beacon_block");
         let Some(slot_head) = self.safe_slot_head(slot).await else {
+            info!("validator end produce_beacon_block beacause cannot get safe_slot_head");
             return sender.send(Ok(None)).is_ok();
         };
 
@@ -1293,6 +1520,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 skip_randao_verification,
             )
             .await;
+
+        info!("validator produce_beacon_block got the new block");
 
         sender.send(result).is_ok()
     }
@@ -1545,6 +1774,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &mut self,
         wait_group: &W,
         slot_head: &SlotHead<P>,
+        started_at: &Instant,
     ) -> Result<()> {
         // Skip attesting if validators already attested at slot
         if self.attested_in_current_slot() {
@@ -1574,6 +1804,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .get_or_init_at_slot(&slot_head.beacon_state, slot_head.slot())
             .await
         else {
+            warn!(
+                "no own beacon committee members in slot {}",
+                slot_head.slot()
+            );
             return Ok(());
         };
 
@@ -1589,6 +1823,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let own_singular_attestations = self
             .own_singular_attestations(slot_head, &own_members)
             .await?;
+
+        info!(
+            "handle_tick: Attest duty: built own singular attestations @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         if own_singular_attestations.is_empty() {
             prometheus_metrics::stop_and_discard(timer);
@@ -1632,6 +1871,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             )?
         };
 
+        info!(
+            "handle_tick: Attest duty: validated own singular attestations with slashing protector @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
+
         for own_attestation in &accepted_attestations {
             let OwnAttestation {
                 validator_index,
@@ -1670,6 +1914,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         prometheus_metrics::stop_and_record(timer);
+
+        info!(
+            "handle_tick: Attest duty: published own singular attestations @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         let own_members = own_members
             .iter()
@@ -1762,16 +2011,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .flatten()
             .unzip();
 
-        let sign_result = self
-            .signer
-            .load()
+        info!("SIGNER in publish_aggregates_and_proofs: load signer");
+
+        let signer_snapshot = self.signer.load();
+
+        info!("SIGNER in publish_aggregates_and_proofs: loaded signer");
+
+        info!("SIGNER in publish_aggregates_and_proofs: will sign aggregates and proofs (triples len: {})", triples.len());
+
+        let sign_result = signer_snapshot
             .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
             .await;
+
+        info!("SIGNER in publish_aggregates_and_proofs: signed aggregates and proofs");
 
         let signatures = match sign_result {
             Ok(signature) => signature,
             Err(error) => {
-                warn!("failed to sign aggregates and proofs: {error:?}");
+                warn!("SIGNER failed to sign aggregates and proofs: {error:?}");
                 return;
             }
         };
@@ -1819,6 +2076,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &mut self,
         wait_group: &W,
         slot_head: &SlotHead<P>,
+        started_at: &Instant,
     ) -> Result<()> {
         // > To reduce complexity during the Altair fork, sync committees are not expected to
         // > produce signatures for `compute_epoch_at_slot(ALTAIR_FORK_EPOCH) - 1`.
@@ -1842,6 +2100,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let own_messages = self.own_sync_committee_messages(slot_head).await?;
 
+        info!(
+            "handle_tick: Attest duty: built own sync committee messages @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
+
         for (sync_subnet_id, messages) in own_messages {
             for sync_committee_message in &messages {
                 debug!(
@@ -1863,6 +2126,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 slot_head.beacon_state.clone_arc(),
             );
         }
+
+        info!(
+            "handle_tick: Attest duty: aggregated own singular attestations @ {} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         Ok(())
     }
@@ -1954,38 +2222,38 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) -> Result<()> {
-        let Some(last_tick) = self.last_tick else {
-            return Ok(());
-        };
+        // let Some(last_tick) = self.last_tick else {
+        //     return Ok(());
+        // };
 
-        if !(last_tick.slot == head.slot() && last_tick.is_before_attesting_interval()) {
-            return Ok(());
-        }
+        // if !(last_tick.slot == head.slot() && last_tick.is_before_attesting_interval()) {
+        //     return Ok(());
+        // }
 
-        let slot_head = SlotHead {
-            config: self.chain_config.clone_arc(),
-            beacon_block_root: head.block_root,
-            beacon_state: self.controller.state_by_chain_link(&head),
-            // Validator is only notified about new fully validated chain heads
-            // (ValidatorMessage::Head event does not inform validator about optimistic heads)
-            optimistic: false,
-        };
+        // let slot_head = SlotHead {
+        //     config: self.chain_config.clone_arc(),
+        //     beacon_block_root: head.block_root,
+        //     beacon_state: self.controller.state_by_chain_link(&head),
+        //     // Validator is only notified about new fully validated chain heads
+        //     // (ValidatorMessage::Head event does not inform validator about optimistic heads)
+        //     optimistic: false,
+        // };
 
-        // Publish attestations late by default.
-        // This noticeably improves rewards in Goerli.
-        // This is a deviation from the Honest Validator specification.
-        if Feature::PublishAttestationsEarly.is_enabled() {
-            self.attest_and_start_aggregating(wait_group, &slot_head)
-                .await?;
-        }
+        // // Publish attestations late by default.
+        // // This noticeably improves rewards in Goerli.
+        // // This is a deviation from the Honest Validator specification.
+        // if Feature::PublishAttestationsEarly.is_enabled() {
+        //     self.attest_and_start_aggregating(wait_group, &slot_head)
+        //         .await?;
+        // }
 
-        // Publish sync committee messages late by default.
-        // This noticeably improves rewards in Goerli.
-        // This is a deviation from the Honest Validator specification.
-        if Feature::PublishSyncCommitteeMessagesEarly.is_enabled() {
-            self.publish_sync_committee_messages(wait_group, &slot_head)
-                .await?;
-        }
+        // // Publish sync committee messages late by default.
+        // // This noticeably improves rewards in Goerli.
+        // // This is a deviation from the Honest Validator specification.
+        // if Feature::PublishSyncCommitteeMessagesEarly.is_enabled() {
+        //     self.publish_sync_committee_messages(wait_group, &slot_head)
+        //         .await?;
+        // }
 
         Ok(())
     }
@@ -2003,6 +2271,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
+        info!(
+            "SIGNER Web3Signer keys count: {}",
+            self.signer.load().web3signer_keys().count()
+        );
         self.signer.load().keys().copied().collect::<HashSet<_>>()
     }
 
@@ -2047,16 +2319,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .unzip()
         });
 
-        let result = self
-            .signer
-            .load()
+        info!("SIGNER in own_singular_attestations: load signer");
+
+        let signer_snapshot = self.signer.load();
+
+        info!("SIGNER in own_singular_attestations: loaded signer");
+
+        info!("SIGNER in own_singular_attestations: will sign own singular attestations (triples len: {})", triples.len());
+
+        let result = signer_snapshot
             .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
             .await;
+
+        info!("SIGNER in own_singular_attestations: signed own singular attestations");
 
         let signatures = match result {
             Ok(signatures) => signatures,
             Err(error) => {
-                warn!("failed to sign attestations: {error:?}");
+                warn!("SIGNER failed to sign attestations: {error:?}");
                 return Ok(&[]);
             }
         };
@@ -2222,16 +2502,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .unzip()
             .await;
 
-        let result = self
-            .signer
-            .load()
+        info!("SIGNER in own_contributions_and_proofs: load signer");
+
+        let signer_snapshot = self.signer.load();
+
+        info!("SIGNER in own_contributions_and_proofs: loaded signer");
+
+        info!("SIGNER in own_contributions_and_proofs: will sign own contributions and proofs (triples len: {})", triples.len());
+
+        let result = signer_snapshot
             .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
             .await;
+
+        info!("SIGNER in own_contributions_and_proofs: signed own contributions and proofs");
 
         let signatures = match result {
             Ok(signatures) => signatures,
             Err(error) => {
-                warn!("failed to sign contributions and proofs: {error:?}");
+                warn!("SIGNER failed to sign contributions and proofs: {error:?}");
                 return Ok(vec![]);
             }
         };
@@ -3054,7 +3342,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 })
                 .collect_vec();
 
+            info!(
+                "SIGNER in register_validators: will sign registrations (triples len: {})",
+                triples.len()
+            );
+
             let signatures = signer_snapshot.sign_triples(triples, None).await?;
+
+            info!("SIGNER in register_validators: signed registrations");
 
             let signed_registrations = registrations
                 .into_iter()

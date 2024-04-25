@@ -302,6 +302,7 @@ where
     }
 
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
+        info!("handle_tick: start");
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
 
@@ -328,6 +329,8 @@ where
             }
         }
 
+        info!("handle_tick: after new epoch check");
+
         // Query the execution engine for the current status of the head
         // if it is still optimistic 1 second before the next interval.
         if tick.is_end_of_interval() {
@@ -351,28 +354,42 @@ where
                         });
                     }
 
+                    info!("handle_tick: will notify new payload");
+
                     self.execution_engine.notify_new_payload(
                         head.block_root,
                         execution_payload,
                         params,
                         None,
                     )?;
+
+                    info!("handle_tick: will notified new payload");
                 }
             }
         }
 
+        info!("handle_tick: after end of interval check");
+
         let Some(changes) = self.store_mut().apply_tick(tick)? else {
             return Ok(());
         };
+
+        info!("handle_tick: applied tick to store");
 
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
         }
 
+        info!("handle_tick: archived finalized and pruned stuff");
+
         self.update_store_snapshot();
 
+        info!("handle_tick: updated store snapshot");
+
         ValidatorMessage::Tick(wait_group.clone(), tick).send(&self.validator_tx);
+
+        info!("handle_tick: sent tick to validator");
 
         if changes.is_slot_updated() {
             let slot = tick.slot;
@@ -387,6 +404,8 @@ where
             SubnetMessage::Slot(wait_group.clone(), slot).send(&self.subnet_tx);
 
             self.track_collection_metrics();
+
+            info!("handle_tick: recorded and printed debug info");
         }
 
         if changes.is_finalized_checkpoint_updated() {
@@ -419,6 +438,8 @@ where
                 );
             }
         }
+
+        info!("handle_tick: finish");
 
         Ok(())
     }

@@ -31,14 +31,14 @@ enum Error {
     MissingCredentials { public_key: PublicKeyBytes },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum KeyOrigin {
     KeymanagerAPI,
     LocalFileSystem,
     Web3Signer,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum SignMethod {
     SecretKey(Arc<SecretKey>, KeyOrigin),
     Web3Signer(Url),
@@ -78,6 +78,11 @@ impl Signer {
 
             snapshot.save_fetched_keys_from_web3signer(&keys);
 
+            info!(
+                "SIGNER snapshot in update contains {} keys from Web3Signer",
+                snapshot.web3signer_keys().count()
+            );
+
             snapshot
         });
 
@@ -114,7 +119,7 @@ impl Signer {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Snapshot {
     sign_methods: HashMap<PublicKeyBytes, SignMethod>,
     web3signer: Web3Signer,
@@ -196,9 +201,17 @@ impl Snapshot {
         for (url, remote_keys) in keys {
             if let Some(keys) = remote_keys {
                 for public_key in keys {
-                    self.sign_methods
-                        .entry(*public_key)
-                        .or_insert_with(|| SignMethod::Web3Signer(url.clone()));
+                    if self.sign_methods.contains_key(public_key) {
+                        info!(
+                            "SIGNER already contains sign method for {public_key:?}: {:?}",
+                            self.sign_methods.get(public_key)
+                        );
+                    }
+
+                    self.sign_methods.entry(*public_key).or_insert_with(|| {
+                        info!("SIGNER inserting SignMethod::Web3Signer for {public_key:?}");
+                        SignMethod::Web3Signer(url.clone())
+                    });
                 }
 
                 self.web3signer.mark_keys_loaded_from(url.clone());
@@ -251,18 +264,26 @@ impl Snapshot {
         }
 
         let sign_locally_future = tokio::task::spawn_blocking(|| {
-            sign_locally
+            info!("SIGNER will sign locally {} messages", sign_locally.len());
+
+            let res = sign_locally
                 .into_par_iter()
                 .map(|(index, signing_root, secret_key)| {
                     let signature = secret_key.sign(signing_root);
                     (index, signature)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+
+            info!("SIGNER finished signing locally");
+
+            res
         })
         .map_err(Into::into);
 
         let sign_remotely_future = async {
-            sign_remotely
+            info!("SIGNER will sign remotely {} messages", sign_remotely.len());
+
+            let res = sign_remotely
                 .into_iter()
                 .map(|(index, message, signing_root, public_key)| async move {
                     self.sign(message, signing_root, fork_info, public_key)
@@ -271,7 +292,11 @@ impl Snapshot {
                 })
                 .collect::<FuturesUnordered<_>>()
                 .try_collect::<Vec<_>>()
-                .await
+                .await;
+
+            info!("SIGNER finished signing remotely");
+
+            res
         };
 
         let (local, remote) = try_join!(sign_locally_future, sign_remotely_future)?;

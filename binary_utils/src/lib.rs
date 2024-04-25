@@ -40,7 +40,7 @@ pub fn initialize_logger(
         .filter_module("storage", LevelFilter::Info)
         .filter_module("validator", LevelFilter::Info)
         .filter_module("validator_key_cache", LevelFilter::Info)
-        .filter_module("web3", LevelFilter::Info)
+        .filter_module("web3", LevelFilter::Debug)
         .filter_module(module_path!(), LevelFilter::Info)
         .filter_module(module_path, LevelFilter::Info)
         .format(|formatter, record| {

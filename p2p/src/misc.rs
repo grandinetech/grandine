@@ -29,7 +29,7 @@ pub struct SubnetPeerDiscovery {
 // so it doesn't make sense to discover peers while unsubscribed.
 // This is why `Unsubscribe` does not have a `discover_peers` field.
 // `Subscribe` and `DiscoverPeers` are only separate to make log messages more precise.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub enum SyncCommitteeSubnetAction {
     /// Subscribe and discover peers.
     Subscribe,
@@ -52,7 +52,7 @@ pub struct BeaconCommitteeSubscription {
     pub is_aggregator: bool,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyncCommitteeSubscription {
     #[serde(with = "serde_utils::string_or_native")]

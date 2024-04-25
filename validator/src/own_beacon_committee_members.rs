@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
 use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork as _};
-use log::warn;
+use log::{info, warn};
 use p2p::BeaconCommitteeSubscription;
 use signer::{Signer, SigningMessage, SigningTriple};
 use std_ext::ArcExt as _;
@@ -82,14 +82,20 @@ impl OwnBeaconCommitteeMembers {
         state: &BeaconState<P>,
         slot: Slot,
     ) -> Option<Arc<[BeaconCommitteeMember]>> {
+        info!("OwnBeaconCommitteeMembers::get_or_init_at_slot {slot}");
+
         let slot_index = slot_index_from_slot(slot);
+
         let mut slot_members_opt = self.slots[slot_index].lock().await;
 
         if let Some(slot_members) = slot_members_opt.as_ref() {
             if slot_members.slot == slot {
+                info!("OwnBeaconCommitteeMembers::get_or_init_at_slot {slot} return precomputed");
                 return Some(slot_members.members.clone_arc());
             }
         }
+
+        info!("OwnBeaconCommitteeMembers::get_or_init_at_slot {slot} will precompute");
 
         *slot_members_opt = match self.compute_members_at_slot(state, slot).await {
             Ok(members) => members.map(|members| SlotBeaconCommitteeMembers { slot, members }),

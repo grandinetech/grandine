@@ -30,7 +30,7 @@ impl Config {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Web3Signer {
     client: Client,
     config: Config,

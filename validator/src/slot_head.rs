@@ -7,7 +7,7 @@ use helper_functions::{
     accessors, misc, predicates,
     signing::{SignForSingleFork, SignForSingleForkAtSlot as _},
 };
-use log::warn;
+use log::{info, warn};
 use signer::{Signer, SigningMessage, SigningTriple};
 use types::{
     altair::{
@@ -104,10 +104,21 @@ impl<P: Preset> SlotHead<P> {
             })
             .unzip();
 
-        let messages = signer
-            .load()
+        info!("SIGNER in sync_committee_messages: load signer");
+
+        let signer_snapshot = signer.load();
+
+        info!("SIGNER in sync_committee_messages: loaded signer");
+
+        info!("SIGNER in sync_committee_messages: will sign sync committee messages (triples len: {})", triples.len());
+
+        let res = signer_snapshot
             .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
-            .await?
+            .await?;
+
+        info!("SIGNER in selection_proofs: signed sync committee messages");
+
+        let messages = res
             .zip(validator_indices)
             .map(move |(signature, validator_index)| SyncCommitteeMessage {
                 slot,
@@ -123,6 +134,7 @@ impl<P: Preset> SlotHead<P> {
     pub async fn sync_committee_selection_proofs(
         &self,
         subcommittee_indices_with_pubkeys: impl Iterator<Item = (SubcommitteeIndex, PublicKeyBytes)>
+            + Clone
             + Send,
         signer: &Signer,
     ) -> Result<Vec<Option<SignatureBytes>>> {
@@ -139,16 +151,26 @@ impl<P: Preset> SlotHead<P> {
             }
         });
 
-        signer
-            .load()
+        info!("SIGNER in sync_committee_selection_proofs: load signer");
+
+        let signer_snapshot = signer.load();
+
+        info!("SIGNER in sync_committee_selection_proofs: loaded signer");
+
+        info!("SIGNER in sync_committee_selection_proofs: will sign sync committee selection proofs (triples len: {})", triples.clone().count());
+
+        let res = signer_snapshot
             .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
-            .await?
-            .map(|signature| {
-                let selection_proof = signature.into();
-                let aggregator = predicates::is_sync_committee_aggregator::<P>(selection_proof);
-                Ok(aggregator.then_some(selection_proof))
-            })
-            .collect()
+            .await?;
+
+        info!("SIGNER in sync_committee_selection_proofs: signed sync committee selection proofs");
+
+        res.map(|signature| {
+            let selection_proof = signature.into();
+            let aggregator = predicates::is_sync_committee_aggregator::<P>(selection_proof);
+            Ok(aggregator.then_some(selection_proof))
+        })
+        .collect()
     }
 
     pub async fn sign_beacon_block(
