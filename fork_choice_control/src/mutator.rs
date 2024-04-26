@@ -999,7 +999,7 @@ where
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
-            Err(error) => warn!("attester slashing rejected (error: {error}, origin: {origin:?})"),
+            Err(error) => debug!("attester slashing rejected (error: {error}, origin: {origin:?})"),
         }
 
         Ok(())
@@ -1474,7 +1474,7 @@ where
 
                 result
                     .map_err(|error| {
-                        warn!("attester slashing rejected (error: {error}, origin: {origin:?})")
+                        debug!("attester slashing rejected (error: {error}, origin: {origin:?})")
                     })
                     .unwrap_or_default()
             })

@@ -859,7 +859,7 @@ impl<P: Preset> Network<P> {
             }
             NetworkEvent::RPCFailed { peer_id, id, error } => {
                 self.log(
-                    Level::Warn,
+                    Level::Debug,
                     format_args!("request {id:?} to peer {peer_id} failed: {error}"),
                 );
                 P2pToSync::RequestFailed(peer_id).send(&self.channels.p2p_to_sync_tx);

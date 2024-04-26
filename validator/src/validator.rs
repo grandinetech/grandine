@@ -577,7 +577,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 PoolAdditionOutcome::Accept
             }
             Err(error) => {
-                warn!("external voluntary exit rejected (error: {error}, exit: {exit:?})");
+                debug!("external voluntary exit rejected (error: {error}, exit: {exit:?})");
                 PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidVoluntaryExit, error)
             }
         };
@@ -641,7 +641,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     PoolAdditionOutcome::Accept
                 }
                 Err(error) => {
-                    warn!(
+                    debug!(
                     "external attester slashing rejected (error: {error}, slashing: {slashing:?})",
                 );
                     PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
