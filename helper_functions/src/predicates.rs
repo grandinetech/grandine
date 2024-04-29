@@ -294,7 +294,7 @@ pub fn is_partially_withdrawable_validator<P: Preset>(
     has_eth1_withdrawal_credential(validator) && has_max_effective_balance && has_excess_balance
 }
 
-const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
+pub const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
     // When using the minimal preset, `commitment_index` should be in the range `0..16`.
     // 16 is the value of `MAX_BLOB_COMMITMENTS_PER_BLOCK`.
     //

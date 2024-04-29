@@ -2033,12 +2033,15 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "c-kzg",
+ "helper_functions",
  "kzg",
  "kzg_utils",
  "primitive-types",
  "sha3",
  "ssz",
+ "ssz_derive",
  "tiny-keccak",
+ "typenum",
  "types",
 ]
 
@@ -2344,6 +2347,7 @@ dependencies = [
  "delay_map",
  "dirs",
  "discv5",
+ "eip_7594",
  "either",
  "enum-iterator",
  "exit-future",
@@ -5292,6 +5296,7 @@ dependencies = [
  "clock",
  "conv",
  "dedicated_executor",
+ "eip_7594",
  "eth1_api",
  "eth2_cache_utils",
  "eth2_libp2p",

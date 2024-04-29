@@ -1638,6 +1638,7 @@ impl<P: Preset> Network<P> {
                     "received light client optimistic update as gossip",
                 );
             }
+            PubsubMessage::DataColumnSidecar(_) => todo!(),
         }
     }
 
