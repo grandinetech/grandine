@@ -2120,15 +2120,15 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "c-kzg",
- "duplicate",
+ "helper_functions",
  "kzg",
  "kzg_utils",
  "primitive-types",
  "sha3",
- "spec_test_utils",
  "ssz",
- "test-generator",
+ "ssz_derive",
  "tiny-keccak",
+ "typenum",
  "types",
 ]
 
@@ -5690,6 +5690,7 @@ dependencies = [
  "clock",
  "conv",
  "dedicated_executor",
+ "eip_7594",
  "eth1_api",
  "eth2_cache_utils",
  "eth2_libp2p",

@@ -275,7 +275,28 @@ pub fn has_eth1_withdrawal_credential(validator: &Validator) -> bool {
         .starts_with(ETH1_ADDRESS_WITHDRAWAL_PREFIX)
 }
 
-const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
+/// [`is_fully_withdrawable_validator`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#is_fully_withdrawable_validator)
+///
+/// > Check if ``validator`` is fully withdrawable.
+pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epoch: Epoch) -> bool {
+    has_eth1_withdrawal_credential(validator)
+        && validator.withdrawable_epoch <= epoch
+        && balance > 0
+}
+
+/// [`is_partially_withdrawable_validator`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#is_partially_withdrawable_validator)
+///
+/// > Check if ``validator`` is partially withdrawable.
+pub fn is_partially_withdrawable_validator<P: Preset>(
+    validator: &Validator,
+    balance: Gwei,
+) -> bool {
+    let has_max_effective_balance = validator.effective_balance == P::MAX_EFFECTIVE_BALANCE;
+    let has_excess_balance = balance > P::MAX_EFFECTIVE_BALANCE;
+    has_eth1_withdrawal_credential(validator) && has_max_effective_balance && has_excess_balance
+}
+
+pub const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
     // When using the minimal preset, `commitment_index` should be in the range `0..16`.
     // 16 is the value of `MAX_BLOB_COMMITMENTS_PER_BLOCK`.
     //

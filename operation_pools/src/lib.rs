@@ -29,6 +29,7 @@ mod bls_to_execution_change_pool;
 mod manager;
 mod messages;
 mod misc;
+mod sidecar_verification;
 
 mod sync_committee_agg_pool {
     pub use manager::Manager;
