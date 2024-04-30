@@ -2347,7 +2347,6 @@ dependencies = [
  "delay_map",
  "dirs",
  "discv5",
- "eip_7594",
  "either",
  "enum-iterator",
  "exit-future",
@@ -2356,7 +2355,6 @@ dependencies = [
  "futures-ticker",
  "futures-timer",
  "getrandom",
- "gossipsub",
  "grandine_version",
  "helper_functions",
  "hex",
@@ -2699,6 +2697,7 @@ dependencies = [
  "crossbeam-skiplist",
  "derive_more",
  "educe",
+ "eip_7594",
  "eth2_libp2p",
  "execution_engine",
  "features",
@@ -3030,37 +3029,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gossipsub"
-version = "0.5.0"
-dependencies = [
- "async-channel 1.9.0",
- "asynchronous-codec 0.7.0",
- "base64 0.21.7",
- "byteorder",
- "bytes",
- "either",
- "fnv",
- "futures",
- "futures-ticker",
- "futures-timer",
- "getrandom",
- "hex_fmt",
- "instant",
- "libp2p",
- "prometheus-client",
- "quick-protobuf",
- "quick-protobuf-codec 0.3.1",
- "quickcheck",
- "rand",
- "regex",
- "serde",
- "sha2 0.10.8",
- "smallvec",
- "tracing",
- "void",
-]
-
-[[package]]
 name = "grandine"
 version = "0.0.0"
 dependencies = [
@@ -3127,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "grandine_version"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "const_format",
  "git-version",
@@ -3873,9 +3841,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
 dependencies = [
  "cfg-if",
- "js-sys",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -5296,7 +5261,6 @@ dependencies = [
  "clock",
  "conv",
  "dedicated_executor",
- "eip_7594",
  "eth1_api",
  "eth2_cache_utils",
  "eth2_libp2p",

@@ -13,6 +13,7 @@ clock = { workspace = true }
 crossbeam-skiplist = { workspace = true }
 derive_more = { workspace = true }
 educe = { workspace = true }
+eip_7594 = { workspace = true }
 eth2_libp2p = { workspace = true }
 execution_engine = { workspace = true }
 features = { workspace = true }
