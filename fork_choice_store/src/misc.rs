@@ -597,6 +597,12 @@ pub enum BlobSidecarAction<P: Preset> {
     DelayUntilSlot(Arc<BlobSidecar<P>>),
 }
 
+pub enum DataSidecarVerificationResult {
+    Reject,
+    Ignore,
+    Accept,
+}
+
 pub enum PartialBlockAction {
     Accept,
     Ignore,
