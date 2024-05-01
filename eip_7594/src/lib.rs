@@ -1,8 +1,11 @@
 use anyhow::Result;
 use c_kzg::{Blob, Bytes32, Bytes48, Cell, KzgCommitment, KzgProof, KzgSettings};
+use helper_functions::accessors;
+use helper_functions::error::SignatureKind;
 use helper_functions::misc;
 use helper_functions::predicates::index_at_commitment_depth;
 use helper_functions::predicates::is_valid_merkle_branch;
+use helper_functions::signing::SignForSingleFork;
 use sha3::digest::consts::U0;
 use sha3::{Digest, Sha3_256};
 use ssz::ContiguousList;
@@ -13,10 +16,16 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::path::Path;
 use typenum::{U2048, U48, U6};
+use types::config::Config;
+use types::deneb::consts::DOMAIN_BLOB_SIDECAR;
+use types::phase0::primitives::DomainType;
+use types::phase0::primitives::Epoch;
 use types::preset::Preset;
 use types::{
     deneb::containers::SignedBeaconBlock,
+    deneb::primitives::BlobIndex, // galimai is cia reikia ir ktius (KzgCommitment, KzgProof ir pan.)
     phase0::containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
+    traits::BeaconState,
 };
 
 use std::fmt;
@@ -41,9 +50,9 @@ type MaxBlobCommitmentsPerBlock = U6;
 type PolynomialCoeff = [Bytes32; FIELD_ELEMENTS_PER_EXT_BLOB];
 type CellID = u64;
 type RowIndex = u64;
-type ColumnIndex = u64;
+pub type ColumnIndex = u64;
 type NodeId = u64;
-type BlobIndex = usize;
+// type BlobIndex = usize;
 type ExtendedMatrix = [Cell; (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
 type DataColumn = ContiguousList<ContiguousList<u8, U48>, U6>;
 pub type DataColumnSubnetId = usize; // idejau tam, kad kompiliuotusi, nezinau ar reikia.
@@ -76,6 +85,21 @@ impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
         f.debug_struct("DataColumnSidecar")
             .field("index", &self.index)
             .finish()
+    }
+}
+
+// labai gali buti, kad neteisingas
+impl<P: Preset> SignForSingleFork<P> for DataColumnSidecar<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BLOB_SIDECAR;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::BlobSidecar;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.signed_block_header.message.slot)
+    }
+
+    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
+        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, None);
+        misc::compute_signing_root(self, domain)
     }
 }
 
@@ -218,13 +242,13 @@ fn recover_matrix(
     for blob_index in 0..blob_count {
         let mut cell_ids = Vec::new();
         for &(b_index, cell_id) in cells_dict.keys() {
-            if b_index == blob_index {
+            if b_index == blob_index as u64 {
                 cell_ids.push(cell_id);
             }
         }
         let cells: Vec<Cell> = cell_ids
             .iter()
-            .map(|&cell_id| cells_dict[&(blob_index, cell_id)])
+            .map(|&cell_id| cells_dict[&(blob_index as u64, cell_id)])
             .collect();
         let full_polynomial = Cell::recover_polynomial(&cell_ids, &cells, &kzg_settings)?;
         extended_matrix.push(full_polynomial);

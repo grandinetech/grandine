@@ -2708,6 +2708,7 @@ dependencies = [
  "itertools 0.12.1",
  "kzg_utils",
  "log",
+ "primitive-types",
  "prometheus_metrics",
  "ssz",
  "static_assertions",
