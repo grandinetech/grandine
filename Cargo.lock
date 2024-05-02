@@ -2347,6 +2347,7 @@ dependencies = [
  "delay_map",
  "dirs",
  "discv5",
+ "eip_7594",
  "either",
  "enum-iterator",
  "exit-future",

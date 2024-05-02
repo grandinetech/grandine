@@ -25,6 +25,7 @@ use types::{
     deneb::containers::SignedBeaconBlock,
     deneb::primitives::BlobIndex, // galimai is cia reikia ir ktius (KzgCommitment, KzgProof ir pan.)
     phase0::containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
+    phase0::primitives::NodeId,
     traits::BeaconState,
 };
 
@@ -51,7 +52,6 @@ type PolynomialCoeff = [Bytes32; FIELD_ELEMENTS_PER_EXT_BLOB];
 type CellID = u64;
 type RowIndex = u64;
 pub type ColumnIndex = u64;
-type NodeId = u64;
 // type BlobIndex = usize;
 type ExtendedMatrix = [Cell; (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
 type DataColumn = ContiguousList<ContiguousList<u8, U48>, U6>;
@@ -176,7 +176,7 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
     while subnet_ids.len() < custody_subnet_count.try_into().unwrap() {
         // I haven't tested at all, therefor this part likely contains some errors
         let mut hasher = Sha3_256::new();
-        let bytes: [u8; 8] = (node_id + i).to_le_bytes();
+        let bytes: [u8; 32] = (node_id + NodeId::from_u64(i)).hash_tree_root().into();
         hasher.update(bytes);
         let mut output = hasher.finalize();
         let last_8_bytes: &[u8] = &output[output.len() - 8..];
