@@ -1,7 +1,4 @@
-use core::{
-    cmp::Ordering,
-    ops::{AddAssign as _, Bound, SubAssign as _},
-};
+use core::ops::{AddAssign as _, Bound, SubAssign as _};
 use std::{
     backtrace::Backtrace,
     collections::binary_heap::{BinaryHeap, PeekMut},
@@ -2695,35 +2692,12 @@ impl<P: Preset> Store<P> {
 
     #[must_use]
     pub fn latest_archivable_index(&self) -> Option<usize> {
-        // The binary search relies on `Store::set_block_ancestor_payload_statuses`
-        // updating payload statuses of finalized blocks.
-        let first_non_valid_index = self
-            .finalized
-            .binary_search_by(|chain_link| {
-                if chain_link.is_valid() {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            })
-            .expect_err(
-                "Vector::binary_search_by should return Err because \
-                 the comparator never returns Ordering::Equal",
-            );
-
-        // `im::vector::Focus::narrow` panics if the range passed to it is empty.
-        // See <https://github.com/bodil/im-rs/issues/145>.
-        if first_non_valid_index == 0 {
-            return None;
-        }
-
         let next_archivable_epoch = self.anchor_epoch() + 1;
 
         // Restrict the search to valid blocks to avoid archiving optimistic ones.
         // They would be lost because we currently store only valid blocks in the database.
         self.finalized
             .focus()
-            .narrow(..first_non_valid_index)
             .into_iter()
             .enumerate()
             .rev()
