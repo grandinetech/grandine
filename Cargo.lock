@@ -2033,9 +2033,11 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "c-kzg",
+ "hashing",
  "helper_functions",
  "kzg",
  "kzg_utils",
+ "num-bigint",
  "primitive-types",
  "sha3",
  "ssz",
