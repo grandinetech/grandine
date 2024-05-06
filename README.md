@@ -107,7 +107,7 @@ It's best to reach us via [Grandine Discord](https://discord.gg/H9XCdUSyZd) or [
 
 ## Donate
 
-Funding public goods is hard. We appreciate your donations via Ethereum address [0x93b10cc89A3D3b5bb6bBB04EfFe104873EF002A9](0x93b10cc89A3D3b5bb6bBB04EfFe104873EF002A9).
+Funding public goods is hard. We appreciate your donations via Ethereum address [0x93b10cc89A3D3b5bb6bBB04EfFe104873EF002A9](https://etherscan.io/address/0x93b10cc89A3D3b5bb6bBB04EfFe104873EF002A9).
 
 ## Credits
 
