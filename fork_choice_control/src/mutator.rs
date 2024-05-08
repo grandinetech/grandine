@@ -54,6 +54,10 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
+use eip_7594::DataColumnSidecar;
+use fork_choice_store::DataColumnSidecarAction;
+use fork_choice_store::DataColumnSidecarOrigin;
+
 use crate::{
     messages::{MutatorMessage, P2pMessage, SubnetMessage, SyncMessage, ValidatorMessage},
     misc::{
@@ -226,6 +230,19 @@ where
                     checkpoint,
                     checkpoint_state,
                 } => self.handle_checkpoint_state(&wait_group, checkpoint, checkpoint_state)?,
+                MutatorMessage::DataColumnSidecar {
+                    wait_group,
+                    result,
+                    block_seen,
+                    origin,
+                    submission_time,
+                } => self.handle_data_column_sidecar(
+                    wait_group,
+                    result,
+                    block_seen,
+                    origin,
+                    submission_time,
+                ),
                 MutatorMessage::FinishedPersistingBlobSidecars {
                     wait_group,
                     persisted_blob_ids,
@@ -1077,6 +1094,38 @@ where
         }
     }
 
+    fn handle_data_column_sidecar(
+        &mut self,
+        wait_group: W,
+        result: Result<DataColumnSidecarAction<P>>,
+        block_seen: bool,
+        origin: DataColumnSidecarOrigin,
+        submission_time: Instant,
+    ) {
+        match result {
+            Ok(DataColumnSidecarAction::Accept(data_column_sidecar)) => {
+                if let Some(gossip_id) = origin.gossip_id() {
+                    P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                }
+
+                self.accept_data_column_sidecar(&wait_group, data_column_sidecar);
+            }
+            Ok(DataColumnSidecarAction::Ignore) => {
+                if let Some(gossip_id) = origin.gossip_id() {
+                    P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                }
+            }
+            Err(error) => {
+                warn!("data column sidecar rejected (error: {error}, origin: {origin:?})");
+
+                if let Some(gossip_id) = origin.gossip_id() {
+                    P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidBlobSidecar)
+                        .send(&self.p2p_tx);
+                }
+            }
+        }
+    }
+
     fn handle_checkpoint_state(
         &mut self,
         wait_group: &W,
@@ -1585,6 +1634,39 @@ where
         });
 
         self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
+    }
+
+    fn accept_data_column_sidecar(
+        &mut self,
+        wait_group: &W,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    ) {
+        let old_head = self.store.head().clone();
+        let head_was_optimistic = old_head.is_optimistic();
+        let block_root = data_column_sidecar
+            .signed_block_header
+            .message
+            .hash_tree_root();
+
+        todo!();
+        // NESUKODINTAS DALYKAS
+        // self.store_mut().apply_blob_sidecar(blob_sidecar);
+
+        // self.update_store_snapshot();
+
+        // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
+        //     self.retry_block(wait_group.clone(), pending_block.clone());
+        // }
+
+        // self.spawn(PersistBlobSidecarsTask {
+        //     store_snapshot: self.owned_store(),
+        //     storage: self.storage.clone_arc(),
+        //     mutator_tx: self.owned_mutator_tx(),
+        //     wait_group: wait_group.clone(),
+        //     metrics: self.metrics.clone(),
+        // });
+
+        // self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
 
     fn notify_about_finalized_checkpoint(&self) {

@@ -2654,6 +2654,7 @@ dependencies = [
  "drain_filter_polyfill",
  "duplicate",
  "educe",
+ "eip_7594",
  "eth2_cache_utils",
  "eth2_libp2p",
  "execution_engine",

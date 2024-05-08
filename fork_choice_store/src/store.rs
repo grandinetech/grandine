@@ -1,4 +1,4 @@
-use crate::misc::DataSidecarVerificationResult;
+use crate::misc::DataColumnSidecarAction;
 use core::{
     cmp::Ordering,
     ops::{AddAssign as _, Bound, SubAssign as _},
@@ -1766,14 +1766,14 @@ impl<P: Preset> Store<P> {
         Ok(BlobSidecarAction::Accept(blob_sidecar))
     }
 
-    pub fn validate_data_sidecar(
+    pub fn validate_data_column_sidecar(
         &self,
-        sidecar: DataColumnSidecar<P>,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
         subnet_id: u64,
         current_slot: Slot,
         mut verifier: impl Verifier + Send,
-    ) -> Result<DataSidecarVerificationResult> {
-        let block_header = sidecar.signed_block_header.message;
+    ) -> Result<DataColumnSidecarAction<P>> {
+        let block_header = data_column_sidecar.signed_block_header.message;
         let mut state = self
             .preprocessed_states
             .before_or_at_slot(block_header.parent_root, block_header.slot)
@@ -1785,88 +1785,117 @@ impl<P: Preset> Store<P> {
                     .unwrap_or_else(|| self.head().state(self))
             });
         // [REJECT] The sidecar's index is consistent with NUMBER_OF_COLUMNS -- i.e. sidecar.index < NUMBER_OF_COLUMNS.
-        if sidecar.index >= NUMBER_OF_COLUMNS {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            data_column_sidecar.index < NUMBER_OF_COLUMNS,
+            Error::DataColumnSidecarInvalidIndex {
+                data_column_sidecar
+            },
+        );
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
-        if compute_subnet_for_data_column_sidecar(sidecar.index) != (subnet_id as usize) {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        // galimai sitas neveikia su gossipu
+        let expected = compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
+        ensure!(
+            (subnet_id as usize) == expected,
+            Error::DataColumnSidecarOnIncorrectSubnet {
+                data_column_sidecar,
+                expected: expected.try_into().unwrap(),
+                actual: subnet_id,
+            },
+        );
+
         // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot (a client MAY queue future sidecars for processing at the appropriate slot).
-        if sidecar.signed_block_header.message.slot > current_slot {
-            return Ok(DataSidecarVerificationResult::Ignore);
+        if data_column_sidecar.signed_block_header.message.slot > current_slot {
+            return Ok(DataColumnSidecarAction::Ignore);
         }
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
-        if sidecar.signed_block_header.message.slot
+        if data_column_sidecar.signed_block_header.message.slot
             <= misc::compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch)
         {
-            return Ok(DataSidecarVerificationResult::Ignore);
+            return Ok(DataColumnSidecarAction::Ignore);
         }
 
         // [REJECT] The proposer signature of sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         verifier.verify_singular(
-            sidecar.signing_root(&self.chain_config, &state),
-            sidecar.signed_block_header.signature,
+            data_column_sidecar.signing_root(&self.chain_config, &state),
+            data_column_sidecar.signed_block_header.signature,
             accessors::public_key(&state, block_header.proposer_index)?,
             SignatureKind::BlobSidecar,
         )?;
 
         // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
-        if !verify_data_column_sidecar_inclusion_proof(sidecar.clone()) {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            data_column_sidecar.verify_sidecar_inclusion_proof(),
+            Error::DataColumnSidecarInvalidInclusionProof {
+                data_column_sidecar
+            }
+        );
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-        if !verify_data_column_sidecar_kzg_proofs(sidecar.clone()).unwrap_or(false) {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            data_column_sidecar.verify_kzg_proofs().unwrap_or(false),
+            Error::DataColumnSidecarInvalid {
+                data_column_sidecar
+            }
+        );
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 1/2:
         // Since our fork choice store's implementation doesn't preserve invalid blocks,
         // it needs to check this before sidecar's block's parent's presence check
-        if self
-            .rejected_block_roots
-            .contains(&block_header.parent_root)
-        {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            !self
+                .rejected_block_roots
+                .contains(&block_header.parent_root),
+            Error::DataColumnSidecarInvalidParentOfBlock {
+                data_column_sidecar
+            },
+        );
 
         // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
         let Some(parent) = self.chain_link(block_header.parent_root) else {
-            return Ok(DataSidecarVerificationResult::Ignore);
+            return Ok(DataColumnSidecarAction::Ignore);
         };
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 2/2:
-        if parent.is_invalid() {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            !parent.is_invalid(),
+            Error::DataColumnSidecarInvalidParentOfBlock {
+                data_column_sidecar
+            }
+        );
 
         // [REJECT] The sidecar is from a higher slot than the sidecar's block's parent (defined by block_header.parent_root).
         let parent_slot = parent.slot();
 
-        if block_header.slot <= parent_slot {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            block_header.slot > parent_slot,
+            Error::DataColumnSidecarNotNewerThanBlockParent {
+                data_column_sidecar,
+                parent_slot,
+            }
+        );
 
         // [REJECT] The current finalized_checkpoint is an ancestor of the sidecar's block -- i.e. get_checkpoint_block(store, block_header.parent_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root.
         let ancestor_at_finalized_slot = self
             .ancestor(block_header.parent_root, self.finalized_slot())
             .expect("every block in the store should have an ancestor at the last finalized slot");
 
-        if ancestor_at_finalized_slot != self.finalized_checkpoint.root {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            ancestor_at_finalized_slot == self.finalized_checkpoint.root,
+            Error::DataColumnSidecarBlockNotADescendantOfFinalized {
+                data_column_sidecar
+            },
+        );
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
         if self.accepted_data_sidecars.contains(&(
             block_header.slot,
             block_header.proposer_index,
-            sidecar.index,
+            data_column_sidecar.index,
         )) {
-            return Ok(DataSidecarVerificationResult::Ignore);
+            return Ok(DataColumnSidecarAction::Ignore);
         }
 
         // [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the current shuffling (defined by block_header.parent_root/block_header.slot). If the proposer_index cannot immediately be verified against the expected shuffling, the sidecar MAY be queued for later processing while proposers for the block's branch are calculated -- in such a case do not REJECT, instead IGNORE this message.
@@ -1889,11 +1918,15 @@ impl<P: Preset> Store<P> {
 
         let computed = accessors::get_beacon_proposer_index(&state)?;
 
-        if block_header.proposer_index != computed {
-            return Ok(DataSidecarVerificationResult::Reject);
-        }
+        ensure!(
+            block_header.proposer_index == computed,
+            Error::DataColumnSidecarProposerIndexMismatch {
+                data_column_sidecar,
+                computed,
+            }
+        );
 
-        Ok(DataSidecarVerificationResult::Accept)
+        Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
     }
 
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)

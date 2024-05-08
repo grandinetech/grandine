@@ -319,7 +319,6 @@ fn main() -> ExitCode {
 
 #[allow(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
-    let my_cols = get_custody_columns(1, 0);
     binary_utils::initialize_logger(
         module_path!(),
         cfg!(feature = "logger-always-write-style"),

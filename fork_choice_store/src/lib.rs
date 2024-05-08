@@ -79,7 +79,8 @@ pub use crate::{
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction,
-        BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction, ValidAttestation,
+        BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, DataColumnSidecarAction,
+        DataColumnSidecarOrigin, PayloadAction, ValidAttestation,
     },
     segment::Segment,
     store::Store,

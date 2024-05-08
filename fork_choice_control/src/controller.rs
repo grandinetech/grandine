@@ -15,14 +15,16 @@ use std::{
     time::Instant,
 };
 
+use crate::tasks::DataColumnSidecarTask;
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
 use clock::Tick;
+use eip_7594::DataColumnSidecar;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
-    BlockOrigin, Store, StoreConfig,
+    BlockOrigin, DataColumnSidecarOrigin, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -216,6 +218,25 @@ where
         self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::Api)
     }
 
+    // zemiau data_column_sidecar
+
+    pub fn on_own_data_column_sidecar(
+        &self,
+        wait_group: W,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    ) {
+        self.spawn_data_column_sidecar_task_with_wait_group(
+            wait_group,
+            data_column_sidecar,
+            true,
+            DataColumnSidecarOrigin::Own,
+        )
+    }
+
+    pub fn on_api_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+        self.spawn_data_column_sidecar_task(data_column_sidecar, true, DataColumnSidecarOrigin::Api)
+    }
+
     pub fn on_api_block(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
@@ -386,6 +407,20 @@ where
         )
     }
 
+    pub fn on_gossip_data_column_sidecar(
+        &self,
+        blob_sidecar: Arc<DataColumnSidecar<P>>,
+        subnet_id: SubnetId,
+        gossip_id: GossipId,
+        block_seen: bool,
+    ) {
+        self.spawn_data_column_sidecar_task(
+            blob_sidecar,
+            block_seen,
+            DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
+        )
+    }
+
     pub fn on_requested_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
@@ -399,6 +434,24 @@ where
             blob_sidecar,
             block_seen,
             origin: BlobSidecarOrigin::Requested(peer_id),
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    pub fn on_requested_data_column_sidecar(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+        peer_id: PeerId,
+    ) {
+        self.spawn(DataColumnSidecarTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            data_column_sidecar,
+            block_seen,
+            origin: DataColumnSidecarOrigin::Requested(peer_id),
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
@@ -447,6 +500,41 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             blob_sidecar,
+            block_seen,
+            origin,
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    // data_column_sidecar zemiau
+
+    fn spawn_data_column_sidecar_task(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+        origin: DataColumnSidecarOrigin,
+    ) {
+        self.spawn_data_column_sidecar_task_with_wait_group(
+            self.owned_wait_group(),
+            data_column_sidecar,
+            block_seen,
+            origin,
+        )
+    }
+
+    fn spawn_data_column_sidecar_task_with_wait_group(
+        &self,
+        wait_group: W,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+        origin: DataColumnSidecarOrigin,
+    ) {
+        self.spawn(DataColumnSidecarTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            data_column_sidecar,
             block_seen,
             origin,
             submission_time: Instant::now(),

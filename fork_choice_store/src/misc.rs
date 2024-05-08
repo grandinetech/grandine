@@ -7,6 +7,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use derive_more::DebugCustom;
 use educe::Educe;
+use eip_7594::DataColumnSidecar;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
@@ -485,6 +486,41 @@ impl BlobSidecarOrigin {
     }
 }
 
+#[derive(Debug)]
+pub enum DataColumnSidecarOrigin {
+    Api,
+    Gossip(SubnetId, GossipId),
+    Requested(PeerId),
+    Own,
+}
+
+impl DataColumnSidecarOrigin {
+    #[must_use]
+    pub fn gossip_id(self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
+            Self::Api | Self::Own | Self::Requested(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn peer_id(&self) -> Option<PeerId> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id.source),
+            Self::Requested(peer_id) => Some(*peer_id),
+            Self::Api | Self::Own => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn subnet_id(&self) -> Option<SubnetId> {
+        match self {
+            Self::Gossip(subnet_id, _) => Some(*subnet_id),
+            Self::Api | Self::Own | Self::Requested(_) => None,
+        }
+    }
+}
+
 pub enum BlockAction<P: Preset> {
     Accept(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>),
     Ignore,
@@ -524,10 +560,9 @@ pub enum BlobSidecarAction<P: Preset> {
     DelayUntilSlot(Arc<BlobSidecar<P>>),
 }
 
-pub enum DataSidecarVerificationResult {
-    Reject,
+pub enum DataColumnSidecarAction<P: Preset> {
+    Accept(Arc<DataColumnSidecar<P>>),
     Ignore,
-    Accept,
 }
 
 pub enum PartialBlockAction {
