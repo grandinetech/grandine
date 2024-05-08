@@ -1140,6 +1140,28 @@ pub enum LightClientBootstrap<P: Preset> {
     Electra(Box<ElectraLightClientBootstrap<P>>),
 }
 
+impl<P: Preset> LightClientBootstrap<P> {
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
+        }
+    }
+
+    #[must_use]
+    pub const fn slot(&self) -> Slot {
+        match self {
+            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
+        }
+    }
+}
+
 impl<P: Preset> SszSize for LightClientBootstrap<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
@@ -1166,18 +1188,6 @@ impl<P: Preset> SszWrite for LightClientBootstrap<P> {
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
             Self::Electra(update) => update.write_variable(bytes),
-        }
-    }
-}
-
-impl<P: Preset> LightClientBootstrap<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
         }
     }
 }
@@ -1229,7 +1239,17 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
 
 impl<P: Preset> LightClientFinalityUpdate<P> {
     #[must_use]
-    pub fn signature_slot(&self) -> Slot {
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature_slot(&self) -> Slot {
         match self {
             Self::Altair(update) => update.signature_slot,
             Self::Capella(update) => update.signature_slot,
@@ -1639,7 +1659,17 @@ impl<P: Preset> AttesterSlashing<P> {
 
 impl<P: Preset> LightClientOptimisticUpdate<P> {
     #[must_use]
-    pub fn signature_slot(&self) -> Slot {
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature_slot(&self) -> Slot {
         match self {
             Self::Altair(update) => update.signature_slot,
             Self::Capella(update) => update.signature_slot,

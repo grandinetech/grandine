@@ -426,9 +426,9 @@ mod spec_tests {
     }
 
     #[duplicate_item(
-        glob                                                                                              function_name                              preset;
-        ["consensus-spec-tests/tests/mainnet/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"]   [deneb_mainnet_beacon_block_body_proofs]   [Mainnet];
-        ["consensus-spec-tests/tests/minimal/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"]   [deneb_minimal_beacon_block_body_proofs]   [Minimal];
+        glob                                                                                                                  function_name                            preset;
+        ["consensus-spec-tests/tests/mainnet/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"]                       [deneb_mainnet_beacon_block_body_proofs] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"]                       [deneb_minimal_beacon_block_body_proofs] [Minimal];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {

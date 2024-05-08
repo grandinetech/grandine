@@ -640,6 +640,7 @@ impl NetworkConfigOptions {
 
         if Feature::SubscribeToAllAttestationSubnets.is_enabled() {
             network_config.subscribe_all_subnets = true;
+            network_config.subscribe_all_data_column_subnets = true;
         }
 
         // Setting this in the last place to overwrite any changes to table filter from other CLI options

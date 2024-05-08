@@ -29,6 +29,7 @@ use tokio_stream::wrappers::IntervalStream;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
+    eip7594::DataColumnIdentifier,
     phase0::primitives::{Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -419,6 +420,19 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                             }
                         }
+                        P2pToSync::GossipDataColumnSidecar(data_column_sidecar, subnet_id, gossip_id) => {
+                            let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+                            let block_seen = self
+                                .received_block_roots
+                                .contains_key(&data_column_identifier.block_root);
+
+                            self.controller.on_gossip_data_column_sidecar(
+                                data_column_sidecar,
+                                subnet_id,
+                                gossip_id,
+                                block_seen,
+                            );
+                        }
                         P2pToSync::BlobsByRangeRequestFinished(request_id) => {
                             let request_direction = self.sync_manager.request_direction(request_id);
 
@@ -445,6 +459,11 @@ impl<P: Preset> BlockSyncService<P> {
                             }
 
                             self.request_blobs_and_blocks_if_ready()?;
+                        }
+                        P2pToSync::DataColumnsByRangeRequestFinished(request_id) => {
+                            todo!()
+                            // self.sync_manager.blobs_by_range_request_finished(request_id);
+                            // self.request_blobs_and_blocks_if_ready()?;
                         }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
