@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-c-kzg = {workspace = true}
+c-kzg = { workspace = true }
 hashing = {workspace = true}
 helper_functions = {workspace = true}
 kzg_utils = { workspace = true }

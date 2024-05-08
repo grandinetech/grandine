@@ -4093,7 +4093,7 @@ dependencies = [
 [[package]]
 name = "kzg"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git?branch=integration-raw#5e4383c71e8c6d4266a1b4573e3d2ff4c972fe06"
+source = "git+https://github.com/grandinetech/rust-kzg.git?branch=integration-raw-2#7c0810ca0ca36daeeee81b02098e35be5472846f"
 dependencies = [
  "blst",
  "sha2 0.10.8",
@@ -6488,7 +6488,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-blst"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git?branch=integration-raw#5e4383c71e8c6d4266a1b4573e3d2ff4c972fe06"
+source = "git+https://github.com/grandinetech/rust-kzg.git?branch=integration-raw-2#7c0810ca0ca36daeeee81b02098e35be5472846f"
 dependencies = [
  "blst",
  "hex",

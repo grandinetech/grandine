@@ -328,7 +328,7 @@ itertools = '0.12.1'
 jemalloc-ctl = '0.5.4'
 jemallocator = '0.5.4'
 jwt-simple = { version = '0.12.6', default-features = false, features = ['pure-rust'] }
-kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw' }
+kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw-2' }
 lazy_static = '1.4.0'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '2d01f3608697eed05357fb847e25ad33ab59d702' }
 libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
@@ -367,7 +367,7 @@ regex = '1.10.3'
 replace_with = '0.1.7'
 reqwest = { version = '0.11.24', features = ['blocking', 'json', 'native-tls-vendored'] }
 rusqlite = { version = '0.30.0', features = ['bundled'] }
-rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw' }
+rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw-2' }
 scrypt = '0.11.0'
 semver = '1.0.21'
 serde = { version = '1.0.196', features = ['derive', 'rc'] }
@@ -424,7 +424,7 @@ arithmetic = { path = 'arithmetic' }
 binary_utils = { path = 'binary_utils' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
-c-kzg = {git = 'https://github.com/ethereum/c-kzg-4844', branch = 'das' }  
+c-kzg = { git = 'https://github.com/ethereum/c-kzg-4844', branch = 'das' }
 clock = { path = 'clock' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
