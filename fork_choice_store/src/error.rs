@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use eip_7594::DataColumnSidecar;
 use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::containers::PowBlock,
     combined::SignedBeaconBlock,
     deneb::containers::BlobSidecar,
+    eip7594::DataColumnSidecar,
     phase0::{
         containers::{Attestation, SignedAggregateAndProof},
         primitives::{Slot, SubnetId, ValidatorIndex},

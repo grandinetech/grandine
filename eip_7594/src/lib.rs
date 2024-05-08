@@ -1,4 +1,3 @@
-use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -15,12 +14,13 @@ use helper_functions::{
     signing::SignForSingleFork,
 };
 use sha3::{Digest, Sha3_256};
-use ssz::{ContiguousList, ContiguousVector, Ssz, SszHash, SszWrite, H256};
-use typenum::{U2048, U48, U6};
+use ssz::{ContiguousList, SszHash, SszWrite, H256};
+use typenum::U2048;
 use types::preset::Preset;
 use types::{
     config::Config,
     deneb::{consts::DOMAIN_BLOB_SIDECAR, containers::SignedBeaconBlock, primitives::BlobIndex},
+    eip7594::{ColumnIndex, DataColumnSidecar},
     phase0::{
         containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
         primitives::{DomainType, Epoch, NodeId},
@@ -43,117 +43,82 @@ const KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH: usize = 4;
 pub const NUMBER_OF_COLUMNS: u64 = 128;
 const MAX_BLOBS_PER_BLOCK: u64 = 6; //todo!();
 const MAX_BLOB_COMMITMENTS_PER_BLOCK: usize = 6; // todo!();
-type MaxBlobCommitmentsPerBlock = U6;
 
 type PolynomialCoeff = [Bytes32; FIELD_ELEMENTS_PER_EXT_BLOB];
 type CellID = u64;
 type RowIndex = u64;
-pub type ColumnIndex = u64;
 // type BlobIndex = usize;
 type ExtendedMatrix = [Cell; (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
-type DataColumn = ContiguousList<ContiguousList<u8, U48>, U6>;
 pub type DataColumnSubnetId = usize; // idejau tam, kad kompiliuotusi, nezinau ar reikia.
 
-pub struct DataColumnIdentifier {
-    block_root: H256,
-    index: ColumnIndex,
+pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
+    let DataColumnSidecar {
+        index,
+        column,
+        kzg_commitments,
+        kzg_proofs,
+        ..
+    } = data_column_sidecar;
+
+    assert!(*index < NUMBER_OF_COLUMNS);
+    assert!(column.len() == kzg_commitments.len() && column.len() == kzg_proofs.len());
+
+    let mut row_ids = Vec::new();
+    for i in 0..column.len() {
+        row_ids.push(i as u64);
+    }
+
+    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
+    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+
+    let column = column
+        .clone()
+        .into_iter()
+        .map(|a| Cell::from_bytes(&a.into_iter().collect::<Vec<_>>()[..]).unwrap())
+        .collect::<Vec<_>>();
+
+    let commitment = kzg_commitments
+        .iter()
+        .map(|a| Bytes48::from_bytes(a.as_bytes()).unwrap())
+        .collect::<Vec<_>>();
+
+    let kzg_proofs = kzg_proofs
+        .iter()
+        .map(|a| {
+            Bytes48::from_bytes(&a.into_iter().map(|a| a.clone()).collect::<Vec<_>>()[..]).unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    Ok(KzgProof::verify_cell_proof_batch(
+        &commitment[..],
+        &row_ids,
+        &[*index],
+        &column[..],
+        &kzg_proofs,
+        &kzg_settings,
+    )?)
 }
 
-// #[derive(PartialEq)]
-#[derive(Ssz, PartialEq, Clone)]
-pub struct DataColumnSidecar<P: Preset> {
-    pub index: ColumnIndex,
-    pub column: DataColumn,
-    pub kzg_commitments: ContiguousList<primitive_types::H384, P::MaxBlobCommitmentsPerBlock>,
-    pub kzg_proofs: ContiguousList<ContiguousList<u8, U48>, MaxBlobCommitmentsPerBlock>,
-    pub signed_block_header: SignedBeaconBlockHeader,
-    pub kzg_commitments_inclusion_proof:
-        ContiguousVector<H256, P::KzgCommitmentInclusionProofDepth>,
-}
+pub fn verify_sidecar_inclusion_proof<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+) -> bool {
+    let DataColumnSidecar {
+        index,
+        kzg_commitments,
+        signed_block_header,
+        kzg_commitments_inclusion_proof,
+        ..
+    } = data_column_sidecar;
 
-impl<P: Preset> DataColumnSidecar<P> {
-    pub fn slot(&self) -> u64 {
-        self.signed_block_header.message.slot
-    }
+    let index_at_commitment_depth = index_at_commitment_depth::<P>(*index);
 
-    pub fn verify_kzg_proofs(&self) -> Result<bool> {
-        assert!(self.index < NUMBER_OF_COLUMNS);
-        assert!(
-            self.column.len() == self.kzg_commitments.len()
-                && self.column.len() == self.kzg_proofs.len()
-        );
-        let mut row_ids = Vec::new();
-        for i in 0..self.column.len() {
-            row_ids.push(i as u64);
-        }
-
-        let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-        let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
-
-        let column = self
-            .column
-            .clone()
-            .into_iter()
-            .map(|a| Cell::from_bytes(&a.into_iter().collect::<Vec<_>>()[..]).unwrap())
-            .collect::<Vec<_>>();
-        let commitment = self
-            .kzg_commitments
-            .iter()
-            .map(|a| Bytes48::from_bytes(a.as_bytes()).unwrap())
-            .collect::<Vec<_>>();
-        let kzg_proofs = self
-            .kzg_proofs
-            .iter()
-            .map(|a| {
-                Bytes48::from_bytes(&a.into_iter().map(|a| a.clone()).collect::<Vec<_>>()[..])
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        Ok(KzgProof::verify_cell_proof_batch(
-            &commitment[..],
-            &row_ids,
-            &vec![self.index],
-            &column[..],
-            &kzg_proofs,
-            &kzg_settings,
-        )?)
-    }
-
-    pub fn verify_sidecar_inclusion_proof(&self) -> bool {
-        let index_at_commitment_depth = index_at_commitment_depth::<P>(self.index);
-
-        // is_valid_blob_sidecar_inclusion_proof
-        return is_valid_merkle_branch(
-            self.kzg_commitments.hash_tree_root(),
-            self.kzg_commitments_inclusion_proof,
-            index_at_commitment_depth,
-            self.signed_block_header.message.body_root,
-        );
-    }
-}
-
-impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DataColumnSidecar")
-            .field("index", &self.index)
-            .finish()
-    }
-}
-
-// labai gali buti, kad neteisingas
-impl<P: Preset> SignForSingleFork<P> for DataColumnSidecar<P> {
-    const DOMAIN_TYPE: DomainType = DOMAIN_BLOB_SIDECAR;
-    const SIGNATURE_KIND: SignatureKind = SignatureKind::BlobSidecar;
-
-    fn epoch(&self) -> Epoch {
-        misc::compute_epoch_at_slot::<P>(self.signed_block_header.message.slot)
-    }
-
-    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
-        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, None);
-        misc::compute_signing_root(self, domain)
-    }
+    // is_valid_blob_sidecar_inclusion_proof
+    return is_valid_merkle_branch(
+        kzg_commitments.hash_tree_root(),
+        *kzg_commitments_inclusion_proof,
+        index_at_commitment_depth,
+        signed_block_header.message.body_root,
+    );
 }
 
 // source: https://github.com/ethereum/consensus-specs/pull/3574/files/cebf78a83e6fc8fa237daf4264b9ca0fe61473f4#diff-96cf4db15bede3d60f04584fb25339507c35755959159cdbe19d760ca92de109R106
@@ -430,33 +395,4 @@ mod tests {
 
         assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
     }
-
-    // macro_rules! tests_for_type {
-    //     (
-    //         $type: ident $(<_ $bracket: tt)?,
-    //         $mainnet_glob: literal,
-    //         $minimal_glob: literal,
-    //     ) => {
-    //         #[allow(non_snake_case)]
-    //         mod $type {
-    //             use super::*;
-
-    //             #[test_resources($mainnet_glob)]
-    //             fn mainnet(case: Case) {
-    //                 types::unphased::spec_tests::run_spec_test_case::<crate::$type$(<Mainnet $bracket)?>(case);
-    //             }
-
-    //             #[test_resources($minimal_glob)]
-    //             fn minimal(case: Case) {
-    //                 types::unphased::spec_tests::run_spec_test_case::<crate::$type$(<Minimal $bracket)?>(case);
-    //             }
-    //         }
-    //     };
-    // }
-
-    // tests_for_type! {
-    //     DataColumnIdentifier,
-    //     "consensus-spec-tests/tests/mainnet/eip7594/ssz_static/DataColumnIdentifier/*/*",
-    //     "consensus-spec-tests/tests/minimal/eip7594/ssz_static/DataColumnIdentifier/*/*",
-    // }
 }

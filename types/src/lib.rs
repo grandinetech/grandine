@@ -64,6 +64,8 @@ pub mod deneb {
     mod spec_tests;
 }
 
+pub mod eip7594;
+
 mod unphased {
     pub mod consts;
 

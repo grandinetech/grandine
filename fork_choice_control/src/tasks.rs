@@ -22,6 +22,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::SignedBeaconBlock,
     deneb::containers::BlobSidecar,
+    eip7594::DataColumnSidecar,
     nonstandard::RelativeEpoch,
     phase0::{
         containers::{Attestation, AttesterSlashing, Checkpoint, SignedAggregateAndProof},
@@ -37,7 +38,6 @@ use crate::{
     state_cache::StateCache,
     storage::Storage,
 };
-use eip_7594::DataColumnSidecar;
 
 pub trait Run {
     fn run(self);

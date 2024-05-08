@@ -14,8 +14,9 @@ use arithmetic::NonZeroExt as _;
 use clock::Tick;
 use eip_7594::{
     compute_subnet_for_data_column_sidecar, verify_data_column_sidecar_inclusion_proof,
-    verify_data_column_sidecar_kzg_proofs, ColumnIndex, DataColumnSidecar, NUMBER_OF_COLUMNS,
+    verify_data_column_sidecar_kzg_proofs, NUMBER_OF_COLUMNS,
 };
+use eip_7594::{verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
 use hash_hasher::HashedMap;
@@ -48,6 +49,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment},
     },
+    eip7594::{ColumnIndex, DataColumnSidecar},
     nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -1805,7 +1807,7 @@ impl<P: Preset> Store<P> {
         );
 
         // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot (a client MAY queue future sidecars for processing at the appropriate slot).
-        if data_column_sidecar.signed_block_header.message.slot > current_slot {
+        if data_column_sidecar.slot() > current_slot {
             return Ok(DataColumnSidecarAction::Ignore);
         }
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
@@ -1825,7 +1827,7 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
         ensure!(
-            data_column_sidecar.verify_sidecar_inclusion_proof(),
+            verify_sidecar_inclusion_proof(&data_column_sidecar),
             Error::DataColumnSidecarInvalidInclusionProof {
                 data_column_sidecar
             }
@@ -1833,7 +1835,7 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
         ensure!(
-            data_column_sidecar.verify_kzg_proofs().unwrap_or(false),
+            verify_kzg_proofs(&data_column_sidecar).unwrap_or(false),
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar
             }

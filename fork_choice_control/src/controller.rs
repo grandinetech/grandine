@@ -19,7 +19,6 @@ use crate::tasks::DataColumnSidecarTask;
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
 use clock::Tick;
-use eip_7594::DataColumnSidecar;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
@@ -36,6 +35,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     nonstandard::ValidationOutcome,
+    eip7594::DataColumnSidecar,
     phase0::{
         containers::{Attestation, AttesterSlashing, SignedAggregateAndProof},
         primitives::{ExecutionBlockHash, Slot, SubnetId},
