@@ -29,7 +29,7 @@ use types::{
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::DataColumnIdentifier,
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -46,7 +46,6 @@ use crate::{
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
 };
-use eip_7594::DataColumnSidecar;
 
 pub trait Run {
     fn run(self);

@@ -1342,7 +1342,6 @@ impl<P: Preset> Network<P> {
                     app_request_id: {app_request_id:?}",
                 );
             }
-            Response::DataColumnsByRange(_) | Response::DataColumnsByRoot(_) => {}
             Response::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
@@ -1359,6 +1358,18 @@ impl<P: Preset> Network<P> {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
             }
+            // TODO(feature/eip7594)
+            Response::DataColumnsByRange(Some(data_column_sidecar)) => todo!(),
+            Response::DataColumnsByRange(None) => {
+                debug!(
+                    "peer {peer_id} terminated DataColumnsByRange response stream for \
+                    app_request_id: {app_request_id:?}",
+                );
+
+                P2pToSync::DataColumnsByRangeRequestFinished(app_request_id)
+                    .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRoot(_) => todo!(),
         }
     }
 
@@ -1403,7 +1414,24 @@ impl<P: Preset> Network<P> {
                 )
                 .send(&self.channels.p2p_to_sync_tx);
             }
-            PubsubMessage::DataColumnSidecar(_) => {}
+            PubsubMessage::DataColumnSidecar(data) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["data_column_sidecar"]);
+                }
+
+                let (subnet_id, data_column_sidecar) = *data;
+
+                debug!(
+                    "received data column sidecar as gossip in subnet {subnet_id}: {data_column_sidecar:?} from {source}",
+                );
+
+                P2pToSync::GossipDataColumnSidecar(
+                    data_column_sidecar,
+                    subnet_id,
+                    GossipId { source, message_id },
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
                 self.data_dumper
                     .dump_signed_aggregate_and_proof(aggregate_and_proof.clone_arc());
@@ -1568,7 +1596,6 @@ impl<P: Preset> Network<P> {
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug!("received light client optimistic update as gossip");
             }
-            PubsubMessage::DataColumnSidecar(_) => todo!(),
         }
     }
 
