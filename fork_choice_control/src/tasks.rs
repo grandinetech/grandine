@@ -10,7 +10,8 @@ use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockAction, BlockOrigin, StateCacheProcessor, Store,
+    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor, 
+    Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -35,6 +36,7 @@ use crate::{
     block_processor::BlockProcessor, messages::MutatorMessage, misc::VerifyAggregateAndProofResult,
     storage::Storage,
 };
+use eip_7594::DataColumnSidecar;
 
 pub trait Run {
     fn run(self);
@@ -345,6 +347,56 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
         let result = store_snapshot.validate_blob_sidecar(blob_sidecar, block_seen, &origin);
 
         MutatorMessage::BlobSidecar {
+            wait_group,
+            result,
+            block_seen,
+            origin,
+            submission_time,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+// data column sidecar zemiau
+
+pub struct DataColumnSidecarTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub block_seen: bool,
+    pub origin: DataColumnSidecarOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            data_column_sidecar,
+            block_seen,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
+
+        let result = store_snapshot.validate_data_column_sidecar(
+            data_column_sidecar,
+            origin
+                .subnet_id()
+                .expect("It is needed it validation, so I don't know how to get it..."),
+            store_snapshot.slot(),
+            MultiVerifier::default(),
+        );
+
+        MutatorMessage::DataColumnSidecar {
             wait_group,
             result,
             block_seen,

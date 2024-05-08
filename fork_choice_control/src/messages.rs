@@ -10,7 +10,7 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-    ChainLink, Store,
+    ChainLink, DataColumnSidecarOrigin, Store,
 };
 use helper_functions::{accessors, misc};
 use log::debug;
@@ -35,6 +35,7 @@ use crate::{
     storage::Storage,
     unbounded_sink::UnboundedSink,
 };
+use fork_choice_store::DataColumnSidecarAction;
 
 #[cfg(test)]
 use core::fmt::Debug;
@@ -116,6 +117,13 @@ pub enum MutatorMessage<P: Preset, W> {
         // `helper_functions::accessors::latest_block_root`, but the latter may involve hashing.
         checkpoint: Checkpoint,
         checkpoint_state: Option<Arc<BeaconState<P>>>,
+    },
+    DataColumnSidecar {
+        wait_group: W,
+        result: Result<DataColumnSidecarAction<P>>,
+        origin: DataColumnSidecarOrigin,
+        block_seen: bool,
+        submission_time: Instant,
     },
     FinishedPersistingBlobSidecars {
         wait_group: W,
