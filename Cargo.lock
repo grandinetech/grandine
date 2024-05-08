@@ -2123,7 +2123,6 @@ dependencies = [
  "duplicate",
  "hashing",
  "helper_functions",
- "primitive-types",
  "serde",
  "sha3",
  "spec_test_utils",

@@ -66,6 +66,7 @@ pub mod deneb {
 
 pub mod eip7594;
 
+<<<<<<< HEAD
 pub mod electra {
     pub mod beacon_state;
     pub mod consts;
@@ -77,6 +78,8 @@ pub mod electra {
     mod spec_tests;
 }
 
+=======
+>>>>>>> d3cead8 (WIP: move eip7594 types to types crate, add ssz_static tests for containers)
 mod unphased {
     pub mod consts;
 

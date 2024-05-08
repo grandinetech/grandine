@@ -8,7 +8,6 @@ use anyhow::{Error as AnyhowError, Result};
 use derivative::Derivative;
 use derive_more::Debug;
 use educe::Educe;
-use eip_7594::DataColumnSidecar;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
@@ -25,6 +24,7 @@ use types::{
     },
     deneb::containers::BlobSidecar,
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
+    eip7594::DataColumnSidecar,
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},

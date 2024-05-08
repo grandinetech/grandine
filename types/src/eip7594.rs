@@ -1,8 +1,9 @@
 use core::fmt;
 
+use primitive_types::H384;
 use serde::{Deserialize, Serialize};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, SszHash as _, H256};
-use typenum::{Prod, U128, U4, U64};
+use typenum::{Prod, U128, U4, U48, U6, U64};
 
 use crate::{
     deneb::{

@@ -24,6 +24,7 @@ use types::{
     combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     nonstandard::{RelativeEpoch, ValidationOutcome},
+    eip7594::DataColumnSidecar,
     phase0::{
         containers::Checkpoint,
         primitives::{Slot, H256},
@@ -36,7 +37,6 @@ use crate::{
     block_processor::BlockProcessor, messages::MutatorMessage, misc::VerifyAggregateAndProofResult,
     storage::Storage,
 };
-use eip_7594::DataColumnSidecar;
 
 pub trait Run {
     fn run(self);

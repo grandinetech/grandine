@@ -47,6 +47,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::DataColumnSidecar,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -56,7 +57,6 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use eip_7594::DataColumnSidecar;
 use fork_choice_store::DataColumnSidecarAction;
 use fork_choice_store::DataColumnSidecarOrigin;
 
