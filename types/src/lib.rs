@@ -64,11 +64,11 @@ pub mod deneb {
     mod spec_tests;
 }
 
-mod collections;
-
 mod unphased {
     pub mod consts;
 
     #[cfg(test)]
     pub mod spec_tests;
 }
+
+mod collections;

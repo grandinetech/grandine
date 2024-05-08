@@ -1,37 +1,32 @@
-use anyhow::Result;
-use c_kzg::{Blob, Bytes32, Bytes48, Cell, KzgCommitment, KzgProof, KzgSettings};
-use hashing::hash_64;
-use helper_functions::accessors;
-use helper_functions::error::SignatureKind;
-use helper_functions::misc;
-use helper_functions::predicates::index_at_commitment_depth;
-use helper_functions::predicates::is_valid_merkle_branch;
-use helper_functions::signing::SignForSingleFork;
-use sha3::digest::consts::U0;
-use sha3::{Digest, Sha3_256};
-use ssz::ContiguousList;
-use ssz::Ssz;
-use ssz::SszWrite;
-use ssz::{ContiguousVector, MerkleTree, SszHash, H256};
-use std::cmp;
-use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
-use std::path::Path;
-use typenum::{U2048, U48, U6};
-use types::config::Config;
-use types::deneb::consts::DOMAIN_BLOB_SIDECAR;
-use types::phase0::primitives::DomainType;
-use types::phase0::primitives::Epoch;
-use types::preset::Preset;
-use types::{
-    deneb::containers::SignedBeaconBlock,
-    deneb::primitives::BlobIndex, // galimai is cia reikia ir ktius (KzgCommitment, KzgProof ir pan.)
-    phase0::containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
-    phase0::primitives::NodeId,
-    traits::BeaconState,
+use core::fmt;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
 };
 
-use std::fmt;
+use anyhow::Result;
+use c_kzg::{Blob, Bytes32, Bytes48, Cell, KzgProof, KzgSettings};
+use hashing::hash_64;
+use helper_functions::{
+    accessors,
+    error::SignatureKind,
+    misc,
+    predicates::{index_at_commitment_depth, is_valid_merkle_branch},
+    signing::SignForSingleFork,
+};
+use sha3::{Digest, Sha3_256};
+use ssz::{ContiguousList, ContiguousVector, Ssz, SszHash, SszWrite, H256};
+use typenum::{U2048, U48, U6};
+use types::preset::Preset;
+use types::{
+    config::Config,
+    deneb::{consts::DOMAIN_BLOB_SIDECAR, containers::SignedBeaconBlock, primitives::BlobIndex},
+    phase0::{
+        containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
+        primitives::{DomainType, Epoch, NodeId},
+    },
+    traits::BeaconState,
+};
 
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
 const SAMPLES_PER_SLOT: u64 = 8;
@@ -395,89 +390,73 @@ fn get_data_column_sidecars<P: Preset>(
 
 #[cfg(test)]
 mod tests {
+    use duplicate::duplicate_item;
+    use serde::Deserialize;
+    use spec_test_utils::Case;
+    use test_generator::test_resources;
+    use types::{
+        phase0::primitives::NodeId,
+        preset::{Mainnet, Minimal, Preset},
+    };
+
     use crate::{get_custody_columns, ColumnIndex};
-    use ssz::*;
-    use types::phase0::primitives::NodeId;
-    // use ethereum_types::{U256 as RawUint256};
 
-    // use num_traits::ops::bytes::ToBytes;
-    use std::str::FromStr;
-    // use std::str::FromStr;
-
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/tree/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__min_node_id_min_custody_subnet_count
-    fn test_min_min() {
-        let expected: Vec<ColumnIndex> = Vec::new();
-        assert_eq!(get_custody_columns(NodeId::from_u64(0), 0), expected);
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Meta {
+        description: Option<String>,
+        node_id: NodeId,
+        custody_subnet_count: u64,
+        result: Vec<ColumnIndex>,
     }
 
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/tree/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__min_node_id_max_custody_subnet_count
-    fn test_min_max() {
-        let expected: Vec<ColumnIndex> = (0..=127).collect();
-        let node_id = NodeId::from_u64(0);
-        let custody_subnet_count = 32;
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), expected);
+    #[duplicate_item(
+        glob                                                                              function_name                 preset;
+        ["consensus-spec-tests/tests/mainnet/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_mainnet] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_minimal] [Minimal];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        run_case::<preset>(case);
     }
 
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/blob/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__max_node_id_max_custody_subnet_count/meta.yaml
-    fn test_max_min() {
-        let expected: Vec<ColumnIndex> = vec![];
-        let str_node_id =
-            "115792089237316195423570985008687907853269984665640564039457584007913129639935";
-        let node_id = Uint256::from_str(str_node_id).unwrap();
-        let custody_subnet_count = 0;
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), expected);
+    fn run_case<P: Preset>(case: Case) {
+        let Meta {
+            description: _description,
+            node_id,
+            custody_subnet_count,
+            result,
+        } = case.yaml::<Meta>("meta");
+
+        assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
     }
 
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/tree/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__max_node_id_min_custody_subnet_count
-    fn test_max_max() {
-        let expected: Vec<ColumnIndex> = vec![];
-        let str_node_id =
-            "115792089237316195423570985008687907853269984665640564039457584007913129639935";
-        let node_id = Uint256::from_str(str_node_id).unwrap();
-        let custody_subnet_count = 32;
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), expected);
-    }
+    // macro_rules! tests_for_type {
+    //     (
+    //         $type: ident $(<_ $bracket: tt)?,
+    //         $mainnet_glob: literal,
+    //         $minimal_glob: literal,
+    //     ) => {
+    //         #[allow(non_snake_case)]
+    //         mod $type {
+    //             use super::*;
 
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/tree/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__1
-    fn test_case_1() {
-        let expected: Vec<ColumnIndex> = (0..=127).collect();
-        let str_node_id =
-            "51781405571328938149219259614021022118347017557305093857689627172914154745642";
-        let node_id = Uint256::from_str(str_node_id).unwrap();
-        let custody_subnet_count = 32;
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), expected);
-    }
+    //             #[test_resources($mainnet_glob)]
+    //             fn mainnet(case: Case) {
+    //                 types::unphased::spec_tests::run_spec_test_case::<crate::$type$(<Mainnet $bracket)?>(case);
+    //             }
 
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/blob/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__2
-    fn test_case_2() {
-        let expected: Vec<ColumnIndex> = vec![27, 59, 91, 123];
-        let str_node_id =
-            "84065159290331321853352677657753050104170032838956724170714636178275273565505";
-        let node_id = Uint256::from_str(str_node_id).unwrap();
-        let custody_subnet_count = 1;
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), expected);
-    }
+    //             #[test_resources($minimal_glob)]
+    //             fn minimal(case: Case) {
+    //                 types::unphased::spec_tests::run_spec_test_case::<crate::$type$(<Minimal $bracket)?>(case);
+    //             }
+    //         }
+    //     };
+    // }
 
-    #[test]
-    // https://github.com/ethereum/consensus-spec-tests/blob/master/tests/mainnet/eip7594/networking/get_custody_columns/pyspec_tests/get_custody_columns__3/meta.yaml
-    fn test_case_3() {
-        let expected: Vec<ColumnIndex> = vec![
-            1, 2, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 18, 21, 22, 24, 25, 26, 27, 28, 29, 31,
-            33, 34, 36, 38, 39, 40, 41, 42, 44, 45, 46, 47, 48, 50, 53, 54, 56, 57, 58, 59, 60, 61,
-            63, 65, 66, 68, 70, 71, 72, 73, 74, 76, 77, 78, 79, 80, 82, 85, 86, 88, 89, 90, 91, 92,
-            93, 95, 97, 98, 100, 102, 103, 104, 105, 106, 108, 109, 110, 111, 112, 114, 117, 118,
-            120, 121, 122, 123, 124, 125, 127,
-        ];
-        let str_node_id =
-            "62524992026686681062927724650084164361416283301810167550777687366062873585350";
-        let node_id = Uint256::from_str(str_node_id).unwrap();
-        let custody_subnet_count = 23;
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), expected);
-    }
+    // tests_for_type! {
+    //     DataColumnIdentifier,
+    //     "consensus-spec-tests/tests/mainnet/eip7594/ssz_static/DataColumnIdentifier/*/*",
+    //     "consensus-spec-tests/tests/minimal/eip7594/ssz_static/DataColumnIdentifier/*/*",
+    // }
 }

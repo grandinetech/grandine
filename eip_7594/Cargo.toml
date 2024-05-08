@@ -9,15 +9,16 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 c-kzg = { workspace = true }
-hashing = {workspace = true}
-helper_functions = {workspace = true}
-kzg_utils = { workspace = true }
-kzg = { workspace = true }
-num-bigint = {workspace = true}
+hashing = { workspace = true }
+helper_functions = { workspace = true }
 primitive-types = { workspace = true }
 ssz = { workspace = true}
-ssz_derive = { workspace = true}
-sha3 = {workspace = true}
-tiny-keccak = {workspace = true}
+sha3 = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
+
+[dev-dependencies]
+duplicate = { workspace = true }
+serde = { workspace = true }
+spec_test_utils = { workspace = true }
+test-generator = { workspace = true }
