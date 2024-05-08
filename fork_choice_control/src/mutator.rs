@@ -48,7 +48,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::DataColumnIdentifier,
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -58,7 +58,6 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use eip_7594::DataColumnSidecar;
 use fork_choice_store::DataColumnSidecarAction;
 use fork_choice_store::DataColumnSidecarOrigin;
 
@@ -582,63 +581,101 @@ where
                     processing_timings,
                 };
 
-                let block_blob_availability = self.block_blob_availability(
-                    &pending_block.block,
-                    self.delayed_until_state
-                        .get(&(block_root, state.slot()))
-                        .iter()
-                        .flat_map(|delayed| delayed.blob_sidecars.iter())
-                        .map(|pending_blob_sidecar| pending_blob_sidecar.blob_sidecar.as_ref()),
-                );
+                if self
+                    .store
+                    .chain_config()
+                    .is_eip7594_fork(misc::compute_epoch_at_slot::<P>(state.slot()))
+                {
+                    let parent = self
+                        .store
+                        .chain_link(pending_block.block.message().parent_root())
+                        .expect("block data availability check should be done after block parent presence check");
 
-                match block_blob_availability {
-                    BlockBlobAvailability::Complete => {
+                    let missing_column_indices =
+                        self.store.indices_of_missing_data_columns(&parent.block);
+
+                    if missing_column_indices.is_empty() {
                         self.retry_block(wait_group, pending_block);
-                    }
-                    BlockBlobAvailability::CompleteWithPending => {
-                        self.delay_block_until_blobs(block_root, pending_block);
-
-                        self.take_delayed_until_state(block_root, state.slot())
-                            .unwrap_or_default()
-                            .blob_sidecars
-                            .into_iter()
-                            .for_each(|pending_blob| {
-                                self.retry_blob_sidecar(
-                                    wait_group.clone(),
-                                    pending_blob,
-                                    Some(state.clone_arc()),
-                                );
-                            });
-                    }
-                    BlockBlobAvailability::Missing(missing_blob_indices) => {
-                        debug!("block delayed until blobs: {pending_block:?}");
+                    } else {
+                        info!(
+                            "block delayed until parent has sufficient data columns \
+                             (column indices: {missing_column_indices:?}, pending block root: {block_root:?})",
+                        );
 
                         if let Some(gossip_id) = pending_block.origin.gossip_id() {
                             self.send_to_p2p(P2pMessage::Accept(gossip_id));
                         }
 
-                        let pending_block = reply_delayed_block_validation_result(
-                            pending_block,
-                            Ok(ValidationOutcome::Ignore(false)),
-                        );
-
-                        let blob_ids = missing_blob_indices
+                        let column_ids = missing_column_indices
                             .into_iter()
-                            .map(|index| BlobIdentifier { block_root, index })
+                            .map(|index| DataColumnIdentifier { block_root, index })
                             .collect_vec();
 
                         let peer_id = pending_block.origin.peer_id();
 
-                        self.request_blobs_from_execution_engine(
-                            pending_block.block.clone_arc(),
-                            blob_ids,
-                            peer_id,
-                        );
+                        // P2pMessage::DataColumnsNeeded(column_ids, slot, peer_id).send(&self.p2p_tx);
 
                         self.delay_block_until_blobs(block_root, pending_block);
                     }
-                    BlockBlobAvailability::Irrelevant => {
-                        unreachable!("block without blobs should not be delayed until blobs")
+                } else {
+                    let block_blob_availability = self.block_blob_availability(
+                        &pending_block.block,
+                        self.delayed_until_state
+                            .get(&(block_root, state.slot()))
+                            .iter()
+                            .flat_map(|delayed| delayed.blob_sidecars.iter())
+                            .map(|pending_blob_sidecar| pending_blob_sidecar.blob_sidecar.as_ref()),
+                    );
+
+                    match block_blob_availability {
+                        BlockBlobAvailability::Complete => {
+                            self.retry_block(wait_group, pending_block);
+                        }
+                        BlockBlobAvailability::CompleteWithPending => {
+                            self.delay_block_until_blobs(block_root, pending_block);
+
+                            self.take_delayed_until_state(block_root, state.slot())
+                                .unwrap_or_default()
+                                .blob_sidecars
+                                .into_iter()
+                                .for_each(|pending_blob| {
+                                    self.retry_blob_sidecar(
+                                        wait_group.clone(),
+                                        pending_blob,
+                                        Some(state.clone_arc()),
+                                    );
+                                });
+                        }
+                        BlockBlobAvailability::Missing(missing_blob_indices) => {
+                            debug!("block delayed until blobs: {pending_block:?}");
+
+                            if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                                self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                            }
+
+                            let pending_block = reply_delayed_block_validation_result(
+                                pending_block,
+                                Ok(ValidationOutcome::Ignore(false)),
+                            );
+
+                            let blob_ids = missing_blob_indices
+                                .into_iter()
+                                .map(|index| BlobIdentifier { block_root, index })
+                                .collect_vec();
+
+                            let peer_id = pending_block.origin.peer_id();
+
+                            self.request_blobs_from_execution_engine(
+                                pending_block.block.clone_arc(),
+                                blob_ids,
+                                peer_id,
+                            );
+
+                            self.delay_block_until_blobs(block_root, pending_block);
+                        }
+                        BlockBlobAvailability::Irrelevant => {
+                            unreachable!("block without blobs should not be delayed until blobs")
+                        }
                     }
                 }
             }
@@ -1964,11 +2001,13 @@ where
             .message
             .hash_tree_root();
 
-        todo!();
-        // NESUKODINTAS DALYKAS
-        // self.store_mut().apply_blob_sidecar(blob_sidecar);
+        self.store_mut()
+            .apply_data_column_sidecar(data_column_sidecar);
 
-        // self.update_store_snapshot();
+        self.update_store_snapshot();
+
+        todo!();
+        // TODO(feature/eip-7594):
 
         // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
         //     self.retry_block(wait_group.clone(), pending_block.clone());

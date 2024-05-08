@@ -7,7 +7,6 @@ use std::sync::Arc;
 use anyhow::{Error as AnyhowError, Result};
 use derivative::Derivative;
 use derive_more::Debug;
-use eip_7594::DataColumnSidecar;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
@@ -24,6 +23,7 @@ use types::{
         Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
+    eip7594::DataColumnSidecar,
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
