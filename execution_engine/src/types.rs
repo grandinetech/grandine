@@ -391,6 +391,7 @@ pub struct ExecutionPayloadV4<P: Preset> {
     pub blob_gas_used: Gas,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub excess_blob_gas: Gas,
+    #[serde(rename = "depositRequests")]
     pub deposit_receipts: ContiguousList<DepositReceiptV1, P::MaxDepositReceiptsPerPayload>,
     pub withdrawal_requests:
         ContiguousList<WithdrawalRequestV1, P::MaxWithdrawalRequestsPerPayload>,
