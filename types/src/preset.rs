@@ -27,6 +27,7 @@ use crate::{
         consts::BytesPerFieldElement,
         primitives::{Blob, KzgCommitment, KzgProof},
     },
+    eip7594::Cell,
     phase0::{
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
@@ -106,7 +107,14 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + ArrayLengthCopy<H256>
         + Debug
         + Eq;
-    type MaxBlobCommitmentsPerBlock: MerkleElements<KzgCommitment> + Eq + Debug + Send + Sync;
+
+    type MaxBlobCommitmentsPerBlock: MerkleElements<KzgCommitment>
+        + MerkleElements<Cell>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+
     type MaxBlobsPerBlock: MerkleElements<Blob<Self>>
         + MerkleElements<KzgCommitment>
         + MerkleElements<KzgProof>

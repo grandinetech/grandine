@@ -2041,6 +2041,7 @@ dependencies = [
  "spec_test_utils",
  "ssz",
  "test-generator",
+ "try_from_iterator",
  "typenum",
  "types",
 ]

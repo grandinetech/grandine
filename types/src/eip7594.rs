@@ -1,16 +1,29 @@
 use core::fmt;
 
-use primitive_types::H384;
 use serde::{Deserialize, Serialize};
-use ssz::{ContiguousList, ContiguousVector, Ssz, H256};
-use typenum::{U48, U6};
+use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, H256};
+use typenum::{Prod, U4, U64};
 
-use crate::{phase0::containers::SignedBeaconBlockHeader, preset::Preset};
+use crate::{
+    deneb::{
+        consts::BytesPerFieldElement,
+        primitives::{KzgCommitment, KzgProof},
+    },
+    phase0::containers::SignedBeaconBlockHeader,
+    preset::Preset,
+};
+
+type FieldElementsPerCell = U64;
+type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
 pub type ColumnIndex = u64;
+pub type Cell = Box<ByteVector<BytesPerCell>>;
 
-type MaxBlobCommitmentsPerBlock = U6;
-type DataColumn = ContiguousList<ContiguousList<u8, U48>, U6>;
+type DataColumn<P> = ContiguousList<Cell, <P as Preset>::MaxBlobCommitmentsPerBlock>;
+
+// This exists in Preset but value for EIP7594 is different:
+// https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/eip7594/p2p-interface.md#preset
+pub type KzgCommitmentInclusionProofDepth = U4;
 
 #[derive(PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
@@ -25,12 +38,11 @@ pub struct DataColumnIdentifier {
 pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub index: ColumnIndex,
-    pub column: DataColumn,
-    pub kzg_commitments: ContiguousList<H384, P::MaxBlobCommitmentsPerBlock>,
-    pub kzg_proofs: ContiguousList<ContiguousList<u8, U48>, MaxBlobCommitmentsPerBlock>,
+    pub column: DataColumn<P>,
+    pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub signed_block_header: SignedBeaconBlockHeader,
-    pub kzg_commitments_inclusion_proof:
-        ContiguousVector<H256, P::KzgCommitmentInclusionProofDepth>,
+    pub kzg_commitments_inclusion_proof: ContiguousVector<H256, KzgCommitmentInclusionProofDepth>,
 }
 
 impl<P: Preset> DataColumnSidecar<P> {
