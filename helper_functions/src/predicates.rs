@@ -457,7 +457,7 @@ mod spec_tests {
                 .expect("blob sidecar should be constructed successfully")
         ));
 
-        let proof = misc::kzg_commitment_inclusion_proof(&block_body, commitment_index)
+        let proof = misc::deneb_kzg_commitment_inclusion_proof(&block_body, commitment_index)
             .expect("inclusion proof should be constructed successfully");
 
         // > If the implementation supports generating merkle proofs, check that the
