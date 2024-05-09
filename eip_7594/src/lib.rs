@@ -30,7 +30,7 @@ use types::{
     eip7594::{ColumnIndex, DataColumnSidecar, KzgCommitmentInclusionProofDepth},
     phase0::{
         containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
-        primitives::{DomainType, Epoch, NodeId},
+        primitives::{DomainType, Epoch, NodeId, SubnetId},
     },
     traits::{BeaconState, PostDenebBeaconBlockBody},
 };
@@ -57,7 +57,6 @@ type CellID = u64;
 type RowIndex = u64;
 // type BlobIndex = usize;
 type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
-pub type DataColumnSubnetId = usize; // idejau tam, kad kompiliuotusi, nezinau ar reikia.
 
 pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
     let DataColumnSidecar {
@@ -128,7 +127,7 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
 }
 
 // source: https://github.com/ethereum/consensus-specs/pull/3574/files/cebf78a83e6fc8fa237daf4264b9ca0fe61473f4#diff-96cf4db15bede3d60f04584fb25339507c35755959159cdbe19d760ca92de109R106
-pub fn compute_subnet_for_data_column_sidecar(column_index: ColumnIndex) -> DataColumnSubnetId {
+pub fn compute_subnet_for_data_column_sidecar(column_index: ColumnIndex) -> SubnetId {
     (column_index % DATA_COLUMN_SIDECAR_SUBNET_COUNT)
         .try_into()
         .unwrap()

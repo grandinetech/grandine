@@ -64,6 +64,8 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub deneb_fork_epoch: Epoch,
     pub deneb_fork_version: Version,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub eip_7594_fork_epoch: Epoch,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -172,6 +174,7 @@ impl Default for Config {
             capella_fork_version: H32(hex!("03000000")),
             deneb_fork_epoch: FAR_FUTURE_EPOCH,
             deneb_fork_version: H32(hex!("04000000")),
+            eip_7594_fork_epoch: FAR_FUTURE_EPOCH,
 
             // Time parameters
             eth1_follow_distance: 2048,
