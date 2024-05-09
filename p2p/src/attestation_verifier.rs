@@ -4,7 +4,7 @@ use anyhow::Result;
 use dedicated_executor::DedicatedExecutor;
 use eth1_api::RealController;
 use eth2_libp2p::GossipId;
-use fork_choice_control::{VerifyAggregateAndProofResult, VerifyAttestationResult};
+use fork_choice_control::{Snapshot, VerifyAggregateAndProofResult, VerifyAttestationResult, Wait};
 use fork_choice_store::{AggregateAndProofAction, AttestationAction};
 use futures::{
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -217,11 +217,7 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
 
         self.send_results_to_fork_choice(other);
 
-        match self.verify_aggregate_batch_signatures(
-            &accepted_aggregates_wo,
-            &snapshot.head_state(),
-            metrics,
-        ) {
+        match self.verify_aggregate_batch_signatures(&accepted_aggregates_wo, &snapshot, metrics) {
             Ok(()) => {
                 self.send_results_to_fork_choice(accepted);
             }
@@ -245,10 +241,10 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
         self.controller.on_gossip_aggregate_and_proof_batch(results);
     }
 
-    fn verify_aggregate_batch_signatures(
+    fn verify_aggregate_batch_signatures<W: Wait>(
         &self,
         aggregates_wo: &[AggregateWithOrigin<P>],
-        state: &BeaconState<P>,
+        snapshot: &Snapshot<P, W>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<()> {
         let _timer = metrics.map(|metrics| {
@@ -258,6 +254,7 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
         });
 
         let config = self.controller.chain_config().as_ref();
+        let state = &snapshot.preprocessed_state_at_current_slot()?;
         let mut verifier = MultiVerifier::default();
 
         verifier.reserve(aggregates_wo.len() * 3);
@@ -356,9 +353,7 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
 
         self.send_results_to_fork_choice(other);
 
-        match self
-            .verify_attestation_batch_signatures(&accepted_attestations_wo, &snapshot.head_state())
-        {
+        match self.verify_attestation_batch_signatures(&accepted_attestations_wo, &snapshot) {
             Ok(()) => {
                 self.send_results_to_fork_choice(accepted);
             }
@@ -380,14 +375,16 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
         self.controller.on_gossip_attestation_batch(results);
     }
 
-    fn verify_attestation_batch_signatures(
+    fn verify_attestation_batch_signatures<W: Wait>(
         &self,
         attestations_wo: &[AttestationWithOrigin<P>],
-        state: &BeaconState<P>,
+        snapshot: &Snapshot<P, W>,
     ) -> Result<()> {
         let mut verifier = MultiVerifier::default();
 
         verifier.reserve(attestations_wo.len());
+
+        let state = &snapshot.preprocessed_state_at_current_slot()?;
 
         let triples = attestation_batch_triples(
             self.controller.chain_config(),
