@@ -192,7 +192,7 @@ impl Default for Config {
             electra_fork_epoch: FAR_FUTURE_EPOCH,
             electra_fork_version: H32(hex!("05000000")),
             eip7594_fork_epoch: FAR_FUTURE_EPOCH,
-
+            
             // Time parameters
             eth1_follow_distance: 2048,
             min_validator_withdrawability_delay: 256,
@@ -663,7 +663,7 @@ impl Config {
             Phase::Bellatrix => self.bellatrix_fork_epoch,
             Phase::Capella => self.capella_fork_epoch,
             Phase::Deneb => self.deneb_fork_epoch,
-            Phase::Electra => self.electra_fork_epoch,
+Phase::Electra => self.electra_fork_epoch,
         }
     }
 

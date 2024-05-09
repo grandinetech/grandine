@@ -37,6 +37,7 @@ use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
 use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
+use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
@@ -1356,8 +1357,30 @@ impl<P: Preset> Network<P> {
                     block_seen,
                 );
             }
-            PubsubMessage::DataColumnSidecar(_) => {
-                // TODO
+            PubsubMessage::DataColumnSidecar(data) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["data_column_sidecar"]);
+                }
+
+                let (subnet_id, data_column_sidecar) = *data;
+
+                self.log_with_feature(format_args!(
+                    "received data column sidecar as gossip in subnet {subnet_id}: {data_column_sidecar:?} from {source}",
+                ));
+
+                let block_seen = self.received_block_roots.contains_key(
+                    &data_column_sidecar
+                        .signed_block_header
+                        .message
+                        .hash_tree_root(),
+                );
+
+                self.controller.on_gossip_data_column_sidecar(
+                    data_column_sidecar,
+                    subnet_id,
+                    GossipId { source, message_id },
+                    block_seen,
+                );
             }
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1499,7 +1522,6 @@ impl<P: Preset> Network<P> {
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug!("received light client optimistic update as gossip");
             }
-            PubsubMessage::DataColumnSidecar(_) => todo!(),
         }
     }
 

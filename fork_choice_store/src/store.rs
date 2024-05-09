@@ -1885,7 +1885,7 @@ impl<P: Preset> Store<P> {
         // galimai sitas neveikia su gossipu
         let expected = compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
         ensure!(
-            (subnet_id as usize) == expected,
+            subnet_id == expected,
             Error::DataColumnSidecarOnIncorrectSubnet {
                 data_column_sidecar,
                 expected: expected.try_into().unwrap(),

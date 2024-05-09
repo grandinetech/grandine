@@ -36,8 +36,8 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    nonstandard::ValidationOutcome,
     eip7594::DataColumnSidecar,
+    nonstandard::ValidationOutcome,
     phase0::{
         containers::{Attestation, AttesterSlashing, SignedAggregateAndProof},
         primitives::{ExecutionBlockHash, Slot, SubnetId},
