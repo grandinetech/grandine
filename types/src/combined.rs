@@ -141,6 +141,9 @@ impl<P: Preset> SszSize for BeaconState<P> {
 
 impl<P: Preset> SszRead<Config> for BeaconState<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `state.slot`:
+        // - The content of `state.genesis_time`.
+        // - The content of `state.genesis_validators_root`.
         let slot_start = UnixSeconds::SIZE.get() + H256::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -339,6 +342,9 @@ impl<P: Preset> SszSize for SignedBeaconBlock<P> {
 
 impl<P: Preset> SszRead<Config> for SignedBeaconBlock<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `block.message.slot`:
+        // - The offset of `block.message`.
+        // - The content of `block.signature`.
         let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -488,6 +494,7 @@ impl<P: Preset> SszSize for BeaconBlock<P> {
 
 impl<P: Preset> SszRead<Config> for BeaconBlock<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // The offset of `block.slot` is the first fixed part in `block`.
         let slot_start = 0;
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -718,6 +725,9 @@ impl<P: Preset> SszSize for SignedBlindedBeaconBlock<P> {
 
 impl<P: Preset> SszRead<Config> for SignedBlindedBeaconBlock<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `block.message.slot`:
+        // - The offset of `block.message`.
+        // - The content of `block.signature`.
         let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -1301,6 +1311,8 @@ impl<P: Preset> SszSize for Attestation<P> {
 
 impl<P: Preset> SszRead<Config> for Attestation<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There is 1 fixed part before `attestation.data.slot`:
+        // - The offset of `attestation.aggregation_bits`.
         let slot_start = Offset::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -1409,7 +1421,11 @@ impl<P: Preset> AttesterSlashing<P> {
 
 impl<P: Preset> SszRead<Config> for AttesterSlashing<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        let slot_start = Offset::SIZE.get();
+        // There are 3 fixed parts before `attester_slashing.attestation_1.data.slot`:
+        // - The offset of `attester_slashing.attestation_1`.
+        // - The offset of `attester_slashing.attestation_2`.
+        // - The offset of `attester_slashing.attestation_1.attesting_indices`.
+        let slot_start = 3 * Offset::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
         let slot = Slot::from_ssz_default(slot_bytes)?;
