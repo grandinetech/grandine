@@ -1,6 +1,5 @@
 use core::fmt;
 
-use primitive_types::H384;
 use serde::{Deserialize, Serialize};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, SszHash as _, H256};
 use typenum::{Prod, U128, U4, U48, U6, U64};
@@ -19,13 +18,12 @@ type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
 pub type ColumnIndex = u64;
 pub type Cell = Box<ByteVector<BytesPerCell>>;
-pub type NumberOfColumns = U128;
 
 type DataColumn<P> = ContiguousList<Cell, <P as Preset>::MaxBlobCommitmentsPerBlock>;
 
-pub type KzgCommitmentsInclusionProofDepth = U4;
-
-pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
+// This exists in Preset but value for EIP7594 is different:
+// https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/eip7594/p2p-interface.md#preset
+pub type KzgCommitmentInclusionProofDepth = U4;
 
 pub const CUSTODY_REQUIREMENT: u64 = 4;
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 128;
@@ -48,7 +46,7 @@ pub struct DataColumnSidecar<P: Preset> {
     pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub signed_block_header: SignedBeaconBlockHeader,
-    pub kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof,
+    pub kzg_commitments_inclusion_proof: ContiguousVector<H256, KzgCommitmentInclusionProofDepth>,
 }
 
 impl<P: Preset> DataColumnSidecar<P> {

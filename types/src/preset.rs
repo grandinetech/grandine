@@ -137,12 +137,14 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + ArrayLength<H256, ArrayType: Copy>
         + Debug
         + Eq;
+
     type MaxBlobCommitmentsPerBlock: MerkleElements<KzgCommitment>
         + MerkleElements<Cell>
         + Eq
         + Debug
         + Send
         + Sync;
+
     type MaxBlobsPerBlock: MerkleElements<Blob<Self>>
         + MerkleElements<KzgCommitment>
         + MerkleElements<KzgProof>
