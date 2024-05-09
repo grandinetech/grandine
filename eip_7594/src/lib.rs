@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use c_kzg::{Blob, Bytes32, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings};
-use hashing::hash_64;
+use hashing::{hash_64, ZERO_HASHES};
 use helper_functions::{
     accessors,
     error::SignatureKind,
@@ -14,7 +14,10 @@ use helper_functions::{
     signing::SignForSingleFork,
 };
 use sha3::{Digest, Sha3_256};
-use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, SszWrite, H256};
+use ssz::{
+    ByteVector, ContiguousList, ContiguousVector, MerkleElements, MerkleTree, SszHash, SszWrite,
+    H256,
+};
 use try_from_iterator::TryFromIterator as _;
 use typenum::{Unsigned as _, U2048};
 use types::{
@@ -22,14 +25,14 @@ use types::{
     deneb::{
         consts::DOMAIN_BLOB_SIDECAR,
         containers::SignedBeaconBlock,
-        primitives::{BlobIndex, KzgProof},
+        primitives::{BlobIndex, KzgCommitment, KzgProof},
     },
     eip7594::{ColumnIndex, DataColumnSidecar, KzgCommitmentInclusionProofDepth},
     phase0::{
         containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
         primitives::{DomainType, Epoch, NodeId},
     },
-    traits::BeaconState,
+    traits::{BeaconState, PostDenebBeaconBlockBody},
 };
 use types::{eip7594::Cell, preset::Preset};
 
@@ -349,31 +352,95 @@ fn get_data_column_sidecars<P: Preset>(
             kzg_commitments: signed_block.message.body.blob_kzg_commitments.clone(),
             kzg_proofs: ContiguousList::try_from(continuous_proof_vec)?,
             signed_block_header,
-            kzg_commitments_inclusion_proof: todo!(
-                "misc::kzg_commitment_inclusion_proof does not fit eip7594 due to return type and preset overrides"
-            ),
-            // kzg_commitments_inclusion_proof: misc::kzg_commitment_inclusion_proof(
-            //     &signed_block.message.body,
-            //     column_index,
-            // )?
+            kzg_commitments_inclusion_proof: kzg_commitment_inclusion_proof(
+                &signed_block.message.body,
+                column_index,
+            )?,
         });
     }
 
     Ok(sidecars)
 }
 
+fn kzg_commitment_inclusion_proof<P: Preset>(
+    body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
+    commitment_index: BlobIndex,
+) -> Result<ContiguousVector<H256, KzgCommitmentInclusionProofDepth>> {
+    let depth = KzgCommitmentInclusionProofDepth::USIZE;
+
+    let mut proof = ContiguousVector::default();
+
+    // // TODO(feature/deneb): Try to break this up into something more readable.
+    // let mut merkle_tree = MerkleTree::<
+    //     <P::MaxBlobCommitmentsPerBlock as MerkleElements<KzgCommitment>>::UnpackedMerkleTreeDepth,
+    // >::default();
+
+    // let chunks = body
+    //     .blob_kzg_commitments()
+    //     .iter()
+    //     .map(SszHash::hash_tree_root);
+
+    // let commitment_indices = 0..body.blob_kzg_commitments().len();
+    // let proof_indices = commitment_index.try_into()?..(commitment_index + 1).try_into()?;
+
+    // let subproof = merkle_tree
+    //     .extend_and_construct_proofs(chunks, commitment_indices, proof_indices)
+    //     .exactly_one()
+    //     .ok()
+    //     .expect("exactly one proof is requested");
+
+    // // The first 13 or 5 nodes are computed from other elements of `body.blob_kzg_commitments`.
+    // proof[..depth - 4].copy_from_slice(subproof.as_slice());
+
+    // // The last 4 nodes are computed from other fields of `body`.
+    // proof[depth - 4] = body.bls_to_execution_changes().hash_tree_root();
+
+    // proof[depth - 3] = hashing::hash_256_256(
+    //     body.sync_aggregate().hash_tree_root(),
+    //     body.execution_payload().hash_tree_root(),
+    // );
+
+    // proof[depth - 2] = ZERO_HASHES[2];
+
+    // proof[depth - 1] = hashing::hash_256_256(
+    //     hashing::hash_256_256(
+    //         hashing::hash_256_256(
+    //             body.randao_reveal().hash_tree_root(),
+    //             body.eth1_data().hash_tree_root(),
+    //         ),
+    //         hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
+    //     ),
+    //     hashing::hash_256_256(
+    //         hashing::hash_256_256(
+    //             body.attester_slashings().hash_tree_root(),
+    //             body.attestations().hash_tree_root(),
+    //         ),
+    //         hashing::hash_256_256(
+    //             body.deposits().hash_tree_root(),
+    //             body.voluntary_exits().hash_tree_root(),
+    //         ),
+    //     ),
+    // );
+
+    Ok(proof)
+}
+
 #[cfg(test)]
 mod tests {
     use duplicate::duplicate_item;
+    use helper_functions::predicates::{index_at_commitment_depth, is_valid_merkle_branch};
     use serde::Deserialize;
     use spec_test_utils::Case;
+    use ssz::{SszHash as _, H256};
     use test_generator::test_resources;
+    use typenum::Unsigned as _;
     use types::{
+        deneb::containers::BeaconBlockBody as DenebBeaconBlockBody,
         phase0::primitives::NodeId,
         preset::{Mainnet, Minimal, Preset},
     };
 
-    use crate::{get_custody_columns, ColumnIndex};
+    use crate::{get_custody_columns, kzg_commitment_inclusion_proof, ColumnIndex};
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -403,5 +470,60 @@ mod tests {
         } = case.yaml::<Meta>("meta");
 
         assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Proof {
+        leaf: H256,
+        leaf_index: u64,
+        branch: Vec<H256>,
+    }
+
+    #[duplicate_item(
+        glob                                                                                              function_name                            preset;
+        ["consensus-spec-tests/tests/mainnet/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [kzg_commitment_inclusion_proof_mainnet] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [kzg_commitment_inclusion_proof_minimal] [Minimal];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        run_beacon_block_body_proof_case::<preset>(case);
+    }
+
+    fn run_beacon_block_body_proof_case<P: Preset>(case: Case) {
+        let Proof {
+            leaf,
+            leaf_index,
+            branch,
+        } = case.yaml("proof");
+
+        // Unlike the name suggests, `leaf_index` is actually a generalized index.
+        // `is_valid_merkle_branch` expects an index that includes only leaves.
+        let commitment_index = leaf_index % P::MaxBlobCommitmentsPerBlock::U64;
+        let index_at_commitment_depth = index_at_commitment_depth::<P>(commitment_index);
+        // vs
+        // let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
+
+        let block_body: DenebBeaconBlockBody<P> =
+            case.ssz_default::<DenebBeaconBlockBody<P>>("object");
+
+        let root = block_body.hash_tree_root();
+
+        // > Check that `is_valid_merkle_branch` confirms `leaf` at `leaf_index` to verify
+        // > against `has_tree_root(state)` and `proof`.
+        assert!(is_valid_merkle_branch(
+            leaf,
+            branch.iter().copied(),
+            index_at_commitment_depth,
+            root,
+        ));
+
+        // > If the implementation supports generating merkle proofs, check that the
+        // > self-generated proof matches the `proof` provided with the test.
+        //
+        let proof = kzg_commitment_inclusion_proof(&block_body, commitment_index)
+            .expect("inclusion proof should be constructed successfully");
+
+        assert_eq!(proof.as_slice(), branch);
     }
 }
