@@ -19,7 +19,9 @@ use types::{
     deneb::{
         consts::{BlobCommitmentTreeDepth, BlobSidecarSubnetCount, VERSIONED_HASH_VERSION_KZG},
         containers::BlobSidecar,
-        primitives::{Blob, BlobIndex, KzgCommitment, KzgProof, VersionedHash},
+        primitives::{
+            Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
+        },
     },
     phase0::{
         consts::{
@@ -346,11 +348,10 @@ pub fn kzg_commitment_to_versioned_hash(kzg_commitment: KzgCommitment) -> Versio
     versioned_hash
 }
 
-// TODO(feature/deneb): Consider extracting a type alias for the inclusion proof.
 pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
     commitment_index: BlobIndex,
-) -> Result<ContiguousVector<H256, P::KzgCommitmentInclusionProofDepth>> {
+) -> Result<BlobCommitmentInclusionProof<P>> {
     let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
@@ -406,7 +407,7 @@ pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
 pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
     commitment_index: BlobIndex,
-) -> Result<ContiguousVector<H256, P::KzgCommitmentInclusionProofDepth>> {
+) -> Result<BlobCommitmentInclusionProof<P>> {
     let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
