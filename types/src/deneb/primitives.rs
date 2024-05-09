@@ -1,5 +1,5 @@
 use primitive_types::H384;
-use ssz::ByteVector;
+use ssz::{ByteVector, ContiguousVector};
 
 use crate::{phase0::primitives::H256, preset::Preset};
 
@@ -14,3 +14,6 @@ pub type BlobIndex = u64;
 pub type KzgCommitment = H384;
 pub type KzgProof = H384;
 pub type VersionedHash = H256;
+
+pub type BlobCommitmentInclusionProof<P> =
+    ContiguousVector<H256, <P as Preset>::KzgCommitmentInclusionProofDepth>;
