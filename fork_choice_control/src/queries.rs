@@ -460,11 +460,7 @@ where
     }
 
     pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
-        let store = self.store_snapshot();
-        let head = store.head();
-
-        self.state_cache()
-            .state_at_slot(head.block_root, store.slot())
+        self.snapshot().preprocessed_state_at_current_slot()
     }
 
     pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
@@ -840,6 +836,13 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         };
 
         Ok(None)
+    }
+
+    pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
+        let store = &self.store_snapshot;
+
+        self.state_cache
+            .state_at_slot(store.head().block_root, store.slot())
     }
 
     // This returns blocks ordered oldest to newest, as mandated for `BeaconBlocksByRange`.
