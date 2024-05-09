@@ -630,7 +630,7 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
     EthPath(pubkey): EthPath<PublicKeyBytes>,
     EthQuery(query): EthQuery<CreateVoluntaryExitQuery>,
 ) -> Result<EthResponse<SignedVoluntaryExit>, Error> {
-    let state = controller.head_state().value;
+    let state = controller.preprocessed_state_at_current_slot()?;
 
     let epoch = query
         .epoch
