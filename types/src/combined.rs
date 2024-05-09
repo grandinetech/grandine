@@ -1392,33 +1392,6 @@ pub enum AttesterSlashing<P: Preset> {
     Electra(ElectraAttesterSlashing<P>),
 }
 
-impl<P: Preset> AttesterSlashing<P> {
-    #[must_use]
-    pub fn pre_electra(self) -> Option<Phase0AttesterSlashing<P>> {
-        match self {
-            Self::Phase0(attester_slashing) => Some(attester_slashing),
-            Self::Electra(_) => None,
-        }
-    }
-
-    #[must_use]
-    pub fn post_electra(self) -> Option<ElectraAttesterSlashing<P>> {
-        match self {
-            Self::Phase0(_) => None,
-            Self::Electra(attester_slashing) => Some(attester_slashing),
-        }
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub const fn phase(&self) -> Phase {
-        match self {
-            Self::Phase0(_) => Phase::Phase0,
-            Self::Electra(_) => Phase::Electra,
-        }
-    }
-}
-
 impl<P: Preset> SszRead<Config> for AttesterSlashing<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
         // There are 3 fixed parts before `attester_slashing.attestation_1.data.slot`:
@@ -1469,6 +1442,33 @@ impl<P: Preset> SszHash for AttesterSlashing<P> {
         match self {
             Self::Phase0(attester_slashing) => attester_slashing.hash_tree_root(),
             Self::Electra(attester_slashing) => attester_slashing.hash_tree_root(),
+        }
+    }
+}
+
+impl<P: Preset> AttesterSlashing<P> {
+    #[must_use]
+    pub fn pre_electra(self) -> Option<Phase0AttesterSlashing<P>> {
+        match self {
+            Self::Phase0(attester_slashing) => Some(attester_slashing),
+            Self::Electra(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn post_electra(self) -> Option<ElectraAttesterSlashing<P>> {
+        match self {
+            Self::Phase0(_) => None,
+            Self::Electra(attester_slashing) => Some(attester_slashing),
+        }
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Phase0(_) => Phase::Phase0,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 }
