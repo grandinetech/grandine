@@ -1,8 +1,9 @@
 use ethereum_types::H32;
 use hex_literal::hex;
+use ssz::MerkleElements;
 use typenum::{U32, U6};
 
-use crate::phase0::primitives::DomainType;
+use crate::{deneb::primitives::KzgCommitment, phase0::primitives::DomainType, preset::Preset};
 
 // TODO(feature/deneb): Remove `DOMAIN_BLOB_SIDECAR` and everything that uses it.
 //                      Blob sidecars are no longer signed starting with v1.4.0-beta.5.
@@ -13,3 +14,7 @@ pub const VERSIONED_HASH_VERSION_KZG: &[u8] = &hex!("01");
 //                      It's never used as a type even in `eth2_libp2p`.
 pub type BlobSidecarSubnetCount = U6;
 pub type BytesPerFieldElement = U32;
+
+pub type BlobCommitmentTreeDepth<P> = <
+    <P as Preset>::MaxBlobCommitmentsPerBlock as MerkleElements<KzgCommitment>
+>::UnpackedMerkleTreeDepth;
