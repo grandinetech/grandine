@@ -2357,6 +2357,7 @@ dependencies = [
  "futures-ticker",
  "futures-timer",
  "getrandom",
+ "gossipsub",
  "grandine_version",
  "helper_functions",
  "hex",
@@ -3030,6 +3031,37 @@ checksum = "fa124423ded10046a849fa0ae9747c541895557f1af177e0890b09879e7e9e7d"
 dependencies = [
  "fnv",
  "highs",
+]
+
+[[package]]
+name = "gossipsub"
+version = "0.5.0"
+dependencies = [
+ "async-channel 1.9.0",
+ "asynchronous-codec 0.7.0",
+ "base64 0.21.7",
+ "byteorder",
+ "bytes",
+ "either",
+ "fnv",
+ "futures",
+ "futures-ticker",
+ "futures-timer",
+ "getrandom",
+ "hex_fmt",
+ "instant",
+ "libp2p",
+ "prometheus-client",
+ "quick-protobuf",
+ "quick-protobuf-codec 0.3.1",
+ "quickcheck",
+ "rand",
+ "regex",
+ "serde",
+ "sha2 0.10.8",
+ "smallvec",
+ "tracing",
+ "void",
 ]
 
 [[package]]
@@ -3845,6 +3877,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
 dependencies = [
  "cfg-if",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
