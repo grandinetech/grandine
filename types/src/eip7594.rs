@@ -25,6 +25,8 @@ pub type KzgCommitmentsInclusionProofDepth = U4;
 
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
+pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
+
 #[derive(PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct DataColumnIdentifier {
