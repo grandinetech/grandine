@@ -1648,11 +1648,13 @@ where
             .message
             .hash_tree_root();
 
-        todo!();
-        // NESUKODINTAS DALYKAS
-        // self.store_mut().apply_blob_sidecar(blob_sidecar);
+        self.store_mut()
+            .apply_data_column_sidecar(data_column_sidecar);
 
-        // self.update_store_snapshot();
+        self.update_store_snapshot();
+
+        todo!();
+        // TODO(feature/eip-7594):
 
         // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
         //     self.retry_block(wait_group.clone(), pending_block.clone());

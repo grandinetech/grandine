@@ -661,6 +661,11 @@ impl Config {
             .map(|(phase, _)| phase)
     }
 
+    #[must_use]
+    pub const fn is_eip7594_fork(&self, epoch: Epoch) -> bool {
+        epoch >= self.eip7594_fork_epoch
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }

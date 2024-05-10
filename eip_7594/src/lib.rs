@@ -34,7 +34,10 @@ use types::{
     },
     traits::{BeaconState, PostDenebBeaconBlockBody},
 };
-use types::{eip7594::{Cell, DATA_COLUMN_SIDECAR_SUBNET_COUNT}, preset::Preset};
+use types::{
+    eip7594::{Cell, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
+    preset::Preset,
+};
 
 const SAMPLES_PER_SLOT: u64 = 8;
 const CUSTODY_REQUIREMENT: u64 = 1;

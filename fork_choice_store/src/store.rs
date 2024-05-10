@@ -1,4 +1,3 @@
-use crate::misc::DataColumnSidecarAction;
 use core::{
     cmp::Ordering,
     ops::{AddAssign as _, Bound, SubAssign as _},
@@ -49,7 +48,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment},
     },
-    eip7594::{ColumnIndex, DataColumnSidecar},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -70,9 +69,10 @@ use crate::{
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction,
-        BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, Difference, DifferenceAtLocation,
-        DissolvedDifference, LatestMessage, Location, PartialAttestationAction, PartialBlockAction,
-        PayloadAction, Score, SegmentId, UnfinalizedBlock, ValidAttestation,
+        BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, DataColumnSidecarAction,
+        Difference, DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
+        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId,
+        UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache::StateCache,
@@ -214,8 +214,12 @@ pub struct Store<P: Preset> {
     aggregate_and_proof_supersets: Arc<AggregateAndProofSupersets<P>>,
     accepted_blob_sidecars:
         HashMap<(Slot, ValidatorIndex, BlobIndex), HashMap<H256, KzgCommitment>>,
-    accepted_data_sidecars: HashSet<(Slot, ValidatorIndex, ColumnIndex)>,
+    accepted_data_column_sidecars: HashMap<
+        (Slot, ValidatorIndex, ColumnIndex),
+        HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
+    >,
     blob_cache: BlobCache<P>,
+    data_column_cache: HashMap<DataColumnIdentifier, (Arc<DataColumnSidecar<P>>, Slot)>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
 }
@@ -283,8 +287,9 @@ impl<P: Preset> Store<P> {
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
             accepted_blob_sidecars: HashMap::default(),
-            accepted_data_sidecars: HashSet::default(),
+            accepted_data_column_sidecars: HashMap::default(),
             blob_cache: BlobCache::default(),
+            data_column_cache: HashMap::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
         }
@@ -1008,8 +1013,19 @@ impl<P: Preset> Store<P> {
             NullSlotReport,
         )?;
 
-        if !self.indices_of_missing_blobs(&block).is_empty() {
-            return Ok(BlockAction::DelayUntilBlobs(block));
+        if self
+            .chain_config
+            .is_eip7594_fork(accessors::get_current_epoch(&state))
+        {
+            let missing_indices = self.indices_of_missing_data_columns(&block);
+
+            if missing_indices.len() * 2 >= NUMBER_OF_COLUMNS.try_into()? {
+                return Ok(BlockAction::DelayUntilBlobs(block));
+            }
+        } else {
+            if !self.indices_of_missing_blobs(&block).is_empty() {
+                return Ok(BlockAction::DelayUntilBlobs(block));
+            }
         }
 
         let attester_slashing_results = block
@@ -1892,7 +1908,7 @@ impl<P: Preset> Store<P> {
         );
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
-        if self.accepted_data_sidecars.contains(&(
+        if self.accepted_data_column_sidecars.contains_key(&(
             block_header.slot,
             block_header.proposer_index,
             data_column_sidecar.index,
@@ -2241,15 +2257,25 @@ impl<P: Preset> Store<P> {
         self.blob_cache.insert(blob_sidecar);
     }
 
-    pub fn apply_data_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
+    pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
         let block_header = data_sidecar.signed_block_header.message;
         let block_root = block_header.hash_tree_root();
 
-        let commitments = self.accepted_data_sidecars.insert((
-            block_header.slot,
-            block_header.proposer_index,
-            data_sidecar.index,
-        ));
+        let commitments = self
+            .accepted_data_column_sidecars
+            .entry((
+                block_header.slot,
+                block_header.proposer_index,
+                data_sidecar.index,
+            ))
+            .or_default();
+
+        commitments.insert(block_root, data_sidecar.kzg_commitments.clone());
+
+        let identifier = data_sidecar.as_ref().into();
+
+        self.data_column_cache
+            .insert(identifier, (data_sidecar, block_header.slot));
     }
 
     fn insert_block(&mut self, chain_link: ChainLink<P>) -> Result<()> {
@@ -3134,6 +3160,34 @@ impl<P: Preset> Store<P> {
                     })
             })
             .map(|(_, index)| index)
+            .collect()
+    }
+
+    pub fn indices_of_missing_data_columns(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+    ) -> Vec<ColumnIndex> {
+        let block = block.message();
+
+        let Some(body) = block.body().post_deneb() else {
+            return vec![];
+        };
+
+        if body.blob_kzg_commitments().is_empty() {
+            return vec![];
+        }
+
+        let block_root = block.hash_tree_root();
+
+        (0..NUMBER_OF_COLUMNS)
+            .filter(|index| {
+                !self
+                    .accepted_data_column_sidecars
+                    .get(&(block.slot(), block.proposer_index(), *index))
+                    .is_some_and(|kzg_commitments| {
+                        kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
+                    })
+            })
             .collect()
     }
 

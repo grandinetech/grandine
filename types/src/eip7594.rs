@@ -1,7 +1,7 @@
 use core::fmt;
 
 use serde::{Deserialize, Serialize};
-use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, H256};
+use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, SszHash as _, H256};
 use typenum::{Prod, U4, U64};
 
 use crate::{
@@ -27,7 +27,7 @@ pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsIn
 
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct DataColumnIdentifier {
     block_root: H256,
@@ -58,6 +58,21 @@ impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
         f.debug_struct("DataColumnSidecar")
             .field("index", &self.index)
             .finish()
+    }
+}
+
+impl<P: Preset> From<&DataColumnSidecar<P>> for DataColumnIdentifier {
+    fn from(sidecar: &DataColumnSidecar<P>) -> Self {
+        let DataColumnSidecar {
+            index,
+            signed_block_header,
+            ..
+        } = *sidecar;
+
+        let block_header = signed_block_header.message;
+        let block_root = block_header.hash_tree_root();
+
+        Self { block_root, index }
     }
 }
 
