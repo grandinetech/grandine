@@ -21,9 +21,9 @@ pub type Cell = Box<ByteVector<BytesPerCell>>;
 
 type DataColumn<P> = ContiguousList<Cell, <P as Preset>::MaxBlobCommitmentsPerBlock>;
 
-// This exists in Preset but value for EIP7594 is different:
-// https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/eip7594/p2p-interface.md#preset
-pub type KzgCommitmentInclusionProofDepth = U4;
+pub type KzgCommitmentsInclusionProofDepth = U4;
+
+pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
 #[derive(PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
@@ -42,7 +42,7 @@ pub struct DataColumnSidecar<P: Preset> {
     pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub signed_block_header: SignedBeaconBlockHeader,
-    pub kzg_commitments_inclusion_proof: ContiguousVector<H256, KzgCommitmentInclusionProofDepth>,
+    pub kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof,
 }
 
 impl<P: Preset> DataColumnSidecar<P> {

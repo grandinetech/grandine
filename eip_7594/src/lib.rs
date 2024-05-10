@@ -27,7 +27,7 @@ use types::{
         containers::SignedBeaconBlock,
         primitives::{BlobIndex, KzgCommitment, KzgProof},
     },
-    eip7594::{ColumnIndex, DataColumnSidecar, KzgCommitmentInclusionProofDepth},
+    eip7594::{BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar},
     phase0::{
         containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
         primitives::{DomainType, Epoch, NodeId, SubnetId},
@@ -354,7 +354,7 @@ fn get_data_column_sidecars<P: Preset>(
             kzg_commitments_inclusion_proof: kzg_commitment_inclusion_proof(
                 &signed_block.message.body,
                 column_index,
-            )?,
+            ),
         });
     }
 
@@ -364,64 +364,39 @@ fn get_data_column_sidecars<P: Preset>(
 fn kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
     commitment_index: BlobIndex,
-) -> Result<ContiguousVector<H256, KzgCommitmentInclusionProofDepth>> {
-    let depth = KzgCommitmentInclusionProofDepth::USIZE;
+) -> BlobCommitmentsInclusionProof {
+    let mut proof = BlobCommitmentsInclusionProof::default();
 
-    let mut proof = ContiguousVector::default();
+    proof[0] = body.bls_to_execution_changes().hash_tree_root();
 
-    // // TODO(feature/deneb): Try to break this up into something more readable.
-    // let mut merkle_tree = MerkleTree::<
-    //     <P::MaxBlobCommitmentsPerBlock as MerkleElements<KzgCommitment>>::UnpackedMerkleTreeDepth,
-    // >::default();
+    proof[1] = hashing::hash_256_256(
+        body.sync_aggregate().hash_tree_root(),
+        body.execution_payload().hash_tree_root(),
+    );
 
-    // let chunks = body
-    //     .blob_kzg_commitments()
-    //     .iter()
-    //     .map(SszHash::hash_tree_root);
+    proof[2] = ZERO_HASHES[2];
 
-    // let commitment_indices = 0..body.blob_kzg_commitments().len();
-    // let proof_indices = commitment_index.try_into()?..(commitment_index + 1).try_into()?;
+    proof[3] = hashing::hash_256_256(
+        hashing::hash_256_256(
+            hashing::hash_256_256(
+                body.randao_reveal().hash_tree_root(),
+                body.eth1_data().hash_tree_root(),
+            ),
+            hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
+        ),
+        hashing::hash_256_256(
+            hashing::hash_256_256(
+                body.attester_slashings().hash_tree_root(),
+                body.attestations().hash_tree_root(),
+            ),
+            hashing::hash_256_256(
+                body.deposits().hash_tree_root(),
+                body.voluntary_exits().hash_tree_root(),
+            ),
+        ),
+    );
 
-    // let subproof = merkle_tree
-    //     .extend_and_construct_proofs(chunks, commitment_indices, proof_indices)
-    //     .exactly_one()
-    //     .ok()
-    //     .expect("exactly one proof is requested");
-
-    // // The first 13 or 5 nodes are computed from other elements of `body.blob_kzg_commitments`.
-    // proof[..depth - 4].copy_from_slice(subproof.as_slice());
-
-    // // The last 4 nodes are computed from other fields of `body`.
-    // proof[depth - 4] = body.bls_to_execution_changes().hash_tree_root();
-
-    // proof[depth - 3] = hashing::hash_256_256(
-    //     body.sync_aggregate().hash_tree_root(),
-    //     body.execution_payload().hash_tree_root(),
-    // );
-
-    // proof[depth - 2] = ZERO_HASHES[2];
-
-    // proof[depth - 1] = hashing::hash_256_256(
-    //     hashing::hash_256_256(
-    //         hashing::hash_256_256(
-    //             body.randao_reveal().hash_tree_root(),
-    //             body.eth1_data().hash_tree_root(),
-    //         ),
-    //         hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
-    //     ),
-    //     hashing::hash_256_256(
-    //         hashing::hash_256_256(
-    //             body.attester_slashings().hash_tree_root(),
-    //             body.attestations().hash_tree_root(),
-    //         ),
-    //         hashing::hash_256_256(
-    //             body.deposits().hash_tree_root(),
-    //             body.voluntary_exits().hash_tree_root(),
-    //         ),
-    //     ),
-    // );
-
-    Ok(proof)
+    proof
 }
 
 #[cfg(test)]
@@ -481,8 +456,8 @@ mod tests {
 
     #[duplicate_item(
         glob                                                                                              function_name                            preset;
-        ["consensus-spec-tests/tests/mainnet/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [kzg_commitment_inclusion_proof_mainnet] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [kzg_commitment_inclusion_proof_minimal] [Minimal];
+        ["consensus-spec-tests/tests/mainnet/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [kzg_commitment_inclusion_proof_mainnet] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [kzg_commitment_inclusion_proof_minimal] [Minimal];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -520,8 +495,7 @@ mod tests {
         // > If the implementation supports generating merkle proofs, check that the
         // > self-generated proof matches the `proof` provided with the test.
         //
-        let proof = kzg_commitment_inclusion_proof(&block_body, commitment_index)
-            .expect("inclusion proof should be constructed successfully");
+        let proof = kzg_commitment_inclusion_proof(&block_body, commitment_index);
 
         assert_eq!(proof.as_slice(), branch);
     }
