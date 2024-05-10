@@ -194,10 +194,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 context.on_tick(tick);
             }
             Step::Attestation { attestation } => {
-                let attestation = case
-                    .try_ssz::<_, Attestation<P>>(config, attestation)
-                    .expect("test attestation is available");
-
+                let attestation = case.ssz::<_, Attestation<P>>(config, attestation);
                 context.on_test_attestation(attestation);
             }
             Step::Block {
@@ -268,10 +265,17 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
             } => {
                 context.on_notified_new_payload(block_hash, payload_status.into());
             }
-            Step::AttesterSlashing { attester_slashing } => {
-                let attester_slashing = case
-                    .try_ssz::<_, AttesterSlashing<P>>(config, attester_slashing)
-                    .expect("test attester_slashing is available");
+            Step::AttesterSlashing {
+                attester_slashing: file_name,
+            } => {
+                let attester_slashing = match config.genesis_phase() {
+                    Phase::Phase0
+                    | Phase::Altair
+                    | Phase::Bellatrix
+                    | Phase::Capella
+                    | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
+                    Phase::Electra => AttesterSlashing::Electra(case.ssz(config, file_name)),
+                };
 
                 context.on_attester_slashing(attester_slashing);
             }
