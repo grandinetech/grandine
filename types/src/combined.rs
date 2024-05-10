@@ -68,7 +68,6 @@ use crate::{
             BlindedBeaconBlock as ElectraBlindedBeaconBlock,
             ExecutionPayload as ElectraExecutionPayload,
             ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
-            IndexedAttestation as ElectraIndexedAttestation,
             LightClientBootstrap as ElectraLightClientBootstrap,
             LightClientFinalityUpdate as ElectraLightClientFinalityUpdate,
             LightClientOptimisticUpdate as ElectraLightClientOptimisticUpdate,
@@ -83,7 +82,7 @@ use crate::{
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, AttesterSlashing as Phase0AttesterSlashing,
-            BeaconBlock as Phase0BeaconBlock, IndexedAttestation as Phase0IndexedAttestation,
+            BeaconBlock as Phase0BeaconBlock,
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock, SignedBeaconBlockHeader,
         },
@@ -1284,13 +1283,6 @@ impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {
             AttestingIndices::Electra(list) => list.iter(),
         }
     }
-}
-
-// #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
-// #[serde(bound = "", untagged)]
-pub enum IndexedAttestation<P: Preset> {
-    Phase0(Phase0IndexedAttestation<P>),
-    Electra(ElectraIndexedAttestation<P>),
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
