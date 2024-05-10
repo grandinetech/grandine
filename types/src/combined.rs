@@ -1320,11 +1320,9 @@ impl<P: Preset> SszRead<Config> for Attestation<P> {
         let phase = config.phase_at_slot::<P>(slot);
 
         let attestation = match phase {
-            Phase::Phase0 => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Altair => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Bellatrix => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Capella => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Deneb => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
+            }
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
 
