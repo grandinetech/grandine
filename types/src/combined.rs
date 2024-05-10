@@ -1413,17 +1413,6 @@ impl<P: Preset> SszWrite for AttesterSlashing<P> {
     }
 }
 
-impl<P: Preset> SszHash for AttesterSlashing<P> {
-    type PackingFactor = U1;
-
-    fn hash_tree_root(&self) -> H256 {
-        match self {
-            Self::Phase0(attester_slashing) => attester_slashing.hash_tree_root(),
-            Self::Electra(attester_slashing) => attester_slashing.hash_tree_root(),
-        }
-    }
-}
-
 impl<P: Preset> AttesterSlashing<P> {
     #[must_use]
     pub fn pre_electra(self) -> Option<Phase0AttesterSlashing<P>> {
