@@ -2421,7 +2421,6 @@ dependencies = [
  "delay_map 0.4.0",
  "dirs",
  "discv5",
- "eip_7594",
  "either",
  "enum-iterator",
  "ethereum-types",
