@@ -2,7 +2,7 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, SszHash as _, H256};
-use typenum::{Prod, U4, U64};
+use typenum::{Prod, U128, U4, U64};
 
 use crate::{
     deneb::{
@@ -18,6 +18,7 @@ type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
 pub type ColumnIndex = u64;
 pub type Cell = Box<ByteVector<BytesPerCell>>;
+pub type NumberOfColumns = U128;
 
 type DataColumn<P> = ContiguousList<Cell, <P as Preset>::MaxBlobCommitmentsPerBlock>;
 
@@ -25,17 +26,18 @@ pub type KzgCommitmentsInclusionProofDepth = U4;
 
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
+pub const CUSTODY_REQUIREMENT: u64 = 1;
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct DataColumnIdentifier {
-    block_root: H256,
+    pub block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
-    index: ColumnIndex,
+    pub index: ColumnIndex,
 }
 
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Default, PartialEq, Eq, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
@@ -48,8 +50,19 @@ pub struct DataColumnSidecar<P: Preset> {
 }
 
 impl<P: Preset> DataColumnSidecar<P> {
-    pub fn slot(&self) -> u64 {
+    #[must_use]
+    pub const fn slot(&self) -> u64 {
         self.signed_block_header.message.slot
+    }
+
+    #[must_use]
+    pub fn full() -> Self {
+        Self {
+            column: DataColumn::<P>::full(Box::default()),
+            kzg_commitments: ContiguousList::full(KzgCommitment::repeat_byte(u8::MAX)),
+            kzg_proofs: ContiguousList::full(KzgProof::repeat_byte(u8::MAX)),
+            ..Default::default()
+        }
     }
 }
 

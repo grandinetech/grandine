@@ -921,6 +921,20 @@ impl<P: Preset> Network<P> {
 
                 Ok(())
             }
+            Request::LightClientOptimisticUpdate => {
+                self.log_with_feature(format_args!(
+                    "received LightClientOptimisticUpdate request (peer_id: {peer_id})",
+                ));
+
+                Ok(())
+            }
+            Request::LightClientFinalityUpdate => {
+                self.log_with_feature(format_args!(
+                    "received LightClientFinalityUpdate request (peer_id: {peer_id})",
+                ));
+
+                Ok(())
+            }
             Request::BlobsByRange(request) => {
                 self.handle_blobs_by_range_request(peer_id, peer_request_id, request)
             }
@@ -928,6 +942,8 @@ impl<P: Preset> Network<P> {
                 self.handle_blobs_by_root_request(peer_id, peer_request_id, request);
                 Ok(())
             }
+            Request::DataColumnsByRoot(_) => todo!(),
+            Request::DataColumnsByRange(_) => todo!(),
         }
     }
 
@@ -1395,6 +1411,33 @@ impl<P: Preset> Network<P> {
                     ),
                 );
             }
+            Response::LightClientOptimisticUpdate(_) => {
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received LightClientOptimisticUpdate response chunk (peer_id: {peer_id})",
+                    ),
+                );
+            }
+            Response::LightClientFinalityUpdate(_) => {
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received LightClientFinalityUpdate response chunk (peer_id: {peer_id})",
+                    ),
+                );
+            }
+            // TODO(feature/eip7594)
+            Response::DataColumnsByRange(Some(data_column_sidecar)) => todo!(),
+            Response::DataColumnsByRange(None) => {
+                self.log_with_feature(format_args!(
+                    "peer {peer_id} terminated DataColumnsByRange response stream for request_id: {request_id}",
+                ));
+
+                P2pToSync::DataColumnsByRangeRequestFinished(request_id)
+                    .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRoot(_) => todo!(),
         }
     }
 
@@ -1476,19 +1519,29 @@ impl<P: Preset> Network<P> {
                     "received data column sidecar as gossip in subnet {subnet_id}: {data_column_sidecar:?} from {source}",
                 ));
 
-                let block_seen = self.received_block_roots.contains_key(
-                    &data_column_sidecar
-                        .signed_block_header
-                        .message
-                        .hash_tree_root(),
-                );
+                let chain_config = self.controller.chain_config().as_ref();
+                let epoch = misc::compute_epoch_at_slot::<P>(data_column_sidecar.slot());
 
-                self.controller.on_gossip_data_column_sidecar(
-                    data_column_sidecar,
-                    subnet_id,
-                    GossipId { source, message_id },
-                    block_seen,
-                );
+                if chain_config.is_eip7594_fork(epoch) {
+                    let block_seen = self.received_block_roots.contains_key(
+                        &data_column_sidecar
+                            .signed_block_header
+                            .message
+                            .hash_tree_root(),
+                    );
+
+                    self.controller.on_gossip_data_column_sidecar(
+                        data_column_sidecar,
+                        subnet_id,
+                        GossipId { source, message_id },
+                        block_seen,
+                    );
+                } else {
+                    self.log_with_feature(format_args!(
+                        "ignoring pre-eip7594 data column sidecar in slot {} / {epoch}",
+                        data_column_sidecar.slot(),
+                    ));
+                }
             }
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -2051,7 +2104,7 @@ fn run_network_service<P: Preset>(
                             service.goodbye_peer(&peer_id, goodbye_reason, report_source);
                         }
                         ServiceInboundMessage::Publish(message) => {
-                            service.publish(message);
+                            service.publish(vec![message]);
                         }
                         ServiceInboundMessage::ReportPeer(peer_id, action, source, msg) => {
                             service.report_peer(&peer_id, action, source, msg);

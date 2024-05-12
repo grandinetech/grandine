@@ -13,7 +13,7 @@ use arithmetic::NonZeroExt as _;
 use clock::Tick;
 use eip_7594::{
     compute_subnet_for_data_column_sidecar, verify_data_column_sidecar_inclusion_proof,
-    verify_data_column_sidecar_kzg_proofs, NUMBER_OF_COLUMNS,
+    verify_data_column_sidecar_kzg_proofs,
 };
 use eip_7594::{verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
@@ -48,7 +48,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment},
     },
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
     nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -1019,7 +1019,7 @@ impl<P: Preset> Store<P> {
         {
             let missing_indices = self.indices_of_missing_data_columns(&block);
 
-            if missing_indices.len() * 2 >= NUMBER_OF_COLUMNS.try_into()? {
+            if missing_indices.len() * 2 >= NumberOfColumns::USIZE {
                 return Ok(BlockAction::DelayUntilBlobs(block));
             }
         } else {
@@ -1804,7 +1804,7 @@ impl<P: Preset> Store<P> {
             });
         // [REJECT] The sidecar's index is consistent with NUMBER_OF_COLUMNS -- i.e. sidecar.index < NUMBER_OF_COLUMNS.
         ensure!(
-            data_column_sidecar.index < NUMBER_OF_COLUMNS,
+            data_column_sidecar.index < NumberOfColumns::U64,
             Error::DataColumnSidecarInvalidIndex {
                 data_column_sidecar
             },
@@ -3179,7 +3179,7 @@ impl<P: Preset> Store<P> {
 
         let block_root = block.hash_tree_root();
 
-        (0..NUMBER_OF_COLUMNS)
+        (0..NumberOfColumns::U64)
             .filter(|index| {
                 !self
                     .accepted_data_column_sidecars

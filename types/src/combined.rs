@@ -904,7 +904,16 @@ pub enum LightClientBootstrap<P: Preset> {
 
 impl<P: Preset> LightClientBootstrap<P> {
     #[must_use]
-    pub fn slot(&self) -> Slot {
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+        }
+    }
+
+    #[must_use]
+    pub const fn slot(&self) -> Slot {
         match self {
             Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
             Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
@@ -983,6 +992,26 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
     }
 }
 
+impl<P: Preset> LightClientFinalityUpdate<P> {
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum LightClientOptimisticUpdate<P: Preset> {
     // Boxed to pass `clippy::large_enum_variant`.
@@ -1022,6 +1051,26 @@ impl<P: Preset> SszWrite for LightClientOptimisticUpdate<P> {
             }
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientOptimisticUpdate<P> {
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
         }
     }
 }
