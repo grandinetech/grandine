@@ -14,12 +14,13 @@ use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
+    eip7594::DataColumnIdentifier,
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
 
 use crate::{
-    block_sync_service::SyncDirection, misc::RequestId,
+    back_sync::Data, block_sync_service::SyncDirection, misc::RequestId,
     range_and_root_requests::RangeAndRootRequests,
 };
 
@@ -67,6 +68,7 @@ pub struct SyncManager {
     peers: HashMap<PeerId, StatusMessage>,
     blob_requests: RangeAndRootRequests<BlobIdentifier>,
     block_requests: RangeAndRootRequests<H256>,
+    data_column_requests: RangeAndRootRequests<DataColumnIdentifier>,
     last_sync_head: Slot,
     last_sync_range: Range<Slot>,
     sequential_redownloads: usize,
@@ -80,6 +82,7 @@ impl Default for SyncManager {
             peers: HashMap::new(),
             blob_requests: RangeAndRootRequests::<BlobIdentifier>::default(),
             block_requests: RangeAndRootRequests::<H256>::default(),
+            data_column_requests: RangeAndRootRequests::<DataColumnIdentifier>::default(),
             last_sync_range: 0..0,
             last_sync_head: 0,
             sequential_redownloads: 0,
@@ -390,6 +393,24 @@ impl SyncManager {
         blob_identifiers
             .into_iter()
             .filter(|blob_id| self.blob_requests.add_request_by_root(*blob_id, peer_id))
+            .collect_vec()
+    }
+
+    pub fn add_data_columns_request_by_root(
+        &mut self,
+        data_column_identifiers: Vec<DataColumnIdentifier>,
+        peer_id: PeerId,
+    ) -> Vec<DataColumnIdentifier> {
+        self.log_with_feature(format_args!(
+            "add data column request by root (identifiers: {data_column_identifiers:?}, peer_id: {peer_id})",
+        ));
+
+        data_column_identifiers
+            .into_iter()
+            .filter(|identifier| {
+                self.data_column_requests
+                    .add_request_by_root(*identifier, peer_id)
+            })
             .collect_vec()
     }
 

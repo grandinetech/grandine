@@ -22,6 +22,8 @@ use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use types::{
     deneb::containers::BlobIdentifier,
+    eip7594::DataColumnIdentifier,
+    nonstandard::Phase,
     phase0::primitives::{Slot, H256},
     preset::Preset,
 };
@@ -258,6 +260,9 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::BlockNeeded(block_root, peer_id) => {
                             self.request_needed_block(block_root, peer_id)?;
                         }
+                        P2pToSync::DataColumnsNeeded(identifiers, slot, peer_id) => {
+                            self.request_needed_data_columns(identifiers, slot, peer_id)?;
+                        }
                         P2pToSync::RequestedBlobSidecar(blob_sidecar, block_seen, peer_id) => {
                             self.controller.on_requested_blob_sidecar(blob_sidecar, block_seen, peer_id);
                         }
@@ -484,6 +489,32 @@ impl<P: Preset> BlockSyncService<P> {
                         .send(&self.sync_to_p2p_tx);
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    fn request_needed_data_columns(
+        &mut self,
+        identifiers: Vec<DataColumnIdentifier>,
+        slot: Slot,
+        peer_id: Option<PeerId>,
+    ) -> Result<()> {
+        // TODO(feature/eip_7594): data_column_serve_slot check
+
+        let request_id = self.request_id()?;
+
+        let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer()) else {
+            return Ok(());
+        };
+
+        let data_column_identifiers = self
+            .sync_manager
+            .add_data_columns_request_by_root(identifiers, peer_id);
+
+        if !data_column_identifiers.is_empty() {
+            SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, data_column_identifiers)
+                .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())

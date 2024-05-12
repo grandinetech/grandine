@@ -22,6 +22,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
+    eip7594::DataColumnIdentifier,
     phase0::{
         containers::Checkpoint,
         primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -178,6 +179,7 @@ pub enum P2pMessage<P: Preset> {
     Reject(GossipId, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
+    DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
 }
