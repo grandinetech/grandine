@@ -1381,7 +1381,48 @@ impl<P: Preset> Network<P> {
                 P2pToSync::DataColumnsByRangeRequestFinished(request_id)
                     .send(&self.channels.p2p_to_sync_tx);
             }
-            Response::DataColumnsByRoot(_) => todo!(),
+            Response::DataColumnsByRoot(Some(data_column_sidecar)) => {
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received DataColumnsByRoot response chunk \
+                         (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
+                        data_column_sidecar.signed_block_header.message.slot,
+                    ),
+                );
+
+                let data_column_identifier: DataColumnIdentifier =
+                    data_column_sidecar.as_ref().into();
+                let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+
+                self.log_with_feature(format_args!(
+                    "received data column sidecar from RPC (identifier: {data_column_identifier:?}, slot: {data_column_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
+                ));
+
+                // if self.register_new_received_data_column_sidecar(
+                //     data_column_identifier,
+                //     data_column_sidecar_slot,
+                // ) {
+                //     let block_seen = self
+                //         .received_block_roots
+                //         .contains_key(&data_column_identifier.block_root);
+
+                //     P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, block_seen, peer_id)
+                //         .send(&self.channels.p2p_to_sync_tx);
+                // }
+
+                // P2pToSync::DataColumnsByRootChunkReceived(
+                //     data_column_identifier,
+                //     peer_id,
+                //     request_id,
+                // )
+                // .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRoot(None) => {
+                self.log_with_feature(format_args!(
+                    "peer {peer_id} terminated DataColumnsByRoot response stream for request_id: {request_id}",
+                ));
+            }
         }
     }
 

@@ -282,6 +282,9 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                             }
                         }
+                        P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, block_seen, peer_id) => {
+                            self.controller.on_requested_data_column_sidecar(data_column_sidecar, block_seen, peer_id);
+                        }
                         P2pToSync::BlobsByRangeRequestFinished(request_id) => {
                             self.sync_manager.blobs_by_range_request_finished(request_id);
                             self.request_blobs_and_blocks_if_ready()?;

@@ -16,7 +16,7 @@ use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::DataColumnIdentifier,
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::Phase,
     phase0::{
         containers::{ProposerSlashing, SignedVoluntaryExit},
@@ -43,6 +43,7 @@ pub enum P2pToSync<P: Preset> {
     DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, bool, PeerId),
     RequestedBlock((Arc<SignedBeaconBlock<P>>, PeerId, RequestId)),
+    RequestedDataColumnSidecar(Arc<DataColumnSidecar<P>>, bool, PeerId),
     BlobsByRangeRequestFinished(RequestId),
     BlobsByRootChunkReceived(BlobIdentifier, PeerId, RequestId),
     BlocksByRangeRequestFinished(RequestId),
