@@ -13,7 +13,8 @@ use eth1_api::{BlobFetcherToP2p, RealController};
 use eth2_libp2p::{
     rpc::{
         methods::{
-            BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest, OldBlocksByRangeRequest,
+            BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
+            DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
         },
         GoodbyeReason, Request, RequestId as IncomingRequestId, RequestType, StatusMessage,
     },
@@ -46,6 +47,7 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::DataColumnIdentifier,
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -340,12 +342,16 @@ impl<P: Preset> Network<P> {
                             );
                         }
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
-                            if let MutatorRejectionReason::InvalidBlobSidecar {
-                                blob_identifier,
-                            } = mutator_rejection_reason
-                            {
-                                P2pToSync::BlobSidecarRejected(blob_identifier)
-                                    .send(&self.channels.p2p_to_sync_tx)
+                            match mutator_rejection_reason {
+                                MutatorRejectionReason::InvalidBlobSidecar { blob_identifier } => {
+                                    P2pToSync::BlobSidecarRejected(blob_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
+                                MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } => {
+                                    P2pToSync::DataColumnSidecarRejected(data_column_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
+                                _ => {}
                             }
 
                             if let Some(gossip_id) = gossip_id {
@@ -357,6 +363,18 @@ impl<P: Preset> Network<P> {
                                     mutator_rejection_reason,
                                 );
                             }
+                        }
+                        P2pMessage::DataColumnsNeeded(identifiers, slot, peer_id) => {
+                            if let Some(peer_id) = peer_id {
+                                debug!("data columns needed: {identifiers:?} from {peer_id}");
+                            } else {
+                                debug!("data columns needed: {identifiers:?}");
+                            }
+
+                            let peer_id = self.ensure_peer_connected(peer_id);
+
+                            P2pToSync::DataColumnsNeeded(identifiers, slot, peer_id)
+                                .send(&self.channels.p2p_to_sync_tx);
                         }
                         P2pMessage::BlockNeeded(root, peer_id) => {
                             debug!("block needed: {root:?} from {peer_id:?}");
@@ -440,6 +458,9 @@ impl<P: Preset> Network<P> {
                         }
                         SyncToP2p::RequestBlockByRoot(request_id, peer_id, block_root) => {
                             self.request_block_by_root(request_id, peer_id, block_root);
+                        }
+                        SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, identifiers) => {
+                            self.request_data_columns_by_root(request_id, peer_id, identifiers);
                         }
                         SyncToP2p::RequestPeerStatus(request_id, peer_id) => {
                             self.request_peer_status(request_id, peer_id);
@@ -919,14 +940,21 @@ impl<P: Preset> Network<P> {
                 self.handle_blocks_by_root_request(peer_id, peer_request_id, request_id, request);
                 Ok(())
             }
-            RequestType::DataColumnsByRange(_) => {
-                debug!("received DataColumnsByRange request (peer_id: {peer_id})");
+            RequestType::DataColumnsByRoot(request) => {
+                self.handle_data_columns_by_root_request(
+                    peer_id,
+                    peer_request_id,
+                    request_id,
+                    request,
+                );
                 Ok(())
             }
-            RequestType::DataColumnsByRoot(_) => {
-                debug!("received DataColumnsByRoot request (peer_id: {peer_id})");
-                Ok(())
-            }
+            RequestType::DataColumnsByRange(request) => self.handle_data_columns_by_range_request(
+                peer_id,
+                peer_request_id,
+                request_id,
+                request,
+            ),
             RequestType::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientBootstrap request (peer_id: {peer_id})");
@@ -1121,6 +1149,78 @@ impl<P: Preset> Network<P> {
                 Ok::<_, anyhow::Error>(())
             })
             .detach();
+
+        Ok(())
+    }
+
+    fn handle_data_columns_by_root_request(
+        &self,
+        peer_id: PeerId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
+        request: DataColumnsByRootRequest,
+    ) {
+        debug!("received DataColumnsByRoot request (peer_id: {peer_id}, request: {request:?})");
+
+        let DataColumnsByRootRequest { data_column_ids } = request;
+
+        let controller = self.controller.clone_arc();
+        let network_to_service_tx = self.network_to_service_tx.clone();
+
+        // TODO(feature/eip7549): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        let max_request_data_column_sidecars =
+            self.controller
+                .chain_config()
+                .max_request_data_column_sidecars as usize;
+
+        self.dedicated_executor
+            .spawn(async move {
+                // > Clients MAY limit the number of blocks and sidecars in the response.
+                let data_column_ids = data_column_ids
+                    .into_iter()
+                    .take(max_request_data_column_sidecars);
+
+                let data_column_sidecars = controller.data_column_sidecars_by_ids(data_column_ids)?;
+
+                for data_column_sidecar in data_column_sidecars {
+                    debug!(
+                        "sending DataColumnsSidecarsByRoot response chunk \
+                         (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, data_column_sidecar: {data_column_sidecar:?})",
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        peer_request_id,
+                        request_id,
+                        Box::new(Response::DataColumnsByRoot(Some(data_column_sidecar))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+
+                debug!("terminating DataColumnsByRoot response stream");
+
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    peer_request_id,
+                    request_id,
+                    Box::new(Response::DataColumnsByRoot(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
+    }
+
+    fn handle_data_columns_by_range_request(
+        &self,
+        peer_id: PeerId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
+        request: DataColumnsByRangeRequest,
+    ) -> Result<()> {
+        // TODO(feature/eip7549): implement this
+        debug!("received DataColumnsByRange request (peer_id: {peer_id}, request: {request:?})");
 
         Ok(())
     }
@@ -1370,17 +1470,53 @@ impl<P: Preset> Network<P> {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
             }
-            // TODO(feature/eip7594)
-            Response::DataColumnsByRange(Some(data_column_sidecar)) => todo!(),
-            Response::DataColumnsByRange(None) => {
+            Response::DataColumnsByRange(Some(data_column_sidecar)) => {
+                let data_column_identifier: DataColumnIdentifier =
+                    data_column_sidecar.as_ref().into();
+
                 debug!(
-                    "peer {peer_id} terminated DataColumnsByRange response stream for request_id: {request_id}",
+                    "received DataColumnsByRange response chunk \
+                    (request_id: {request_id}, peer_id: {peer_id}, \
+                    slot: {}, id: {data_column_identifier:?})",
+                    data_column_sidecar.slot(),
                 );
+
+                P2pToSync::RequestedDataColumnSidecar(
+                    data_column_sidecar,
+                    peer_id,
+                    request_id,
+                    RPCRequestType::Range,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRange(None) => {
+                debug!("peer {peer_id} terminated DataColumnsByRange response stream for request_id: {request_id}");
 
                 P2pToSync::DataColumnsByRangeRequestFinished(request_id)
                     .send(&self.channels.p2p_to_sync_tx);
             }
-            Response::DataColumnsByRoot(_) => todo!(),
+            Response::DataColumnsByRoot(Some(data_column_sidecar)) => {
+                let data_column_identifier: DataColumnIdentifier =
+                    data_column_sidecar.as_ref().into();
+
+                debug!(
+                    "received DataColumnsByRoot response chunk \
+                    (request_id: {request_id}, peer_id: {peer_id}, \
+                    slot: {}, id: {data_column_identifier:?})",
+                    data_column_sidecar.slot(),
+                );
+
+                P2pToSync::RequestedDataColumnSidecar(
+                    data_column_sidecar,
+                    peer_id,
+                    request_id,
+                    RPCRequestType::Root,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRoot(None) => {
+                debug!("peer {peer_id} terminated DataColumnsByRoot response stream for request_id: {request_id}");
+            }
         }
     }
 
@@ -1433,7 +1569,8 @@ impl<P: Preset> Network<P> {
                 let (subnet_id, data_column_sidecar) = *data;
 
                 debug!(
-                    "received data column sidecar as gossip in subnet {subnet_id}: {data_column_sidecar:?} from {source}",
+                    "received data column sidecar as gossip in subnet {subnet_id}: {data_column_sidecar:?} \
+                    from {source}",
                 );
 
                 P2pToSync::GossipDataColumnSidecar(
@@ -1820,7 +1957,25 @@ impl<P: Preset> Network<P> {
         self.request(peer_id, request_id, RequestType::BlocksByRoot(request));
     }
 
-    fn subscribe_to_core_topics(&self) {
+    fn request_data_columns_by_root(
+        &self,
+        request_id: RequestId,
+        peer_id: PeerId,
+        data_column_identifiers: Vec<DataColumnIdentifier>,
+    ) {
+        let request = DataColumnsByRootRequest::new(
+            self.controller.chain_config(),
+            data_column_identifiers.into_iter(),
+        );
+
+        debug!(
+            "sending DataColumnSidecarsByRoot request (request_id: {request_id}, peer_id: {peer_id}, request: {request:?})",
+        );
+
+        self.request(peer_id, request_id, RequestType::DataColumnsByRoot(request));
+    }
+
+    fn subscribe_to_core_topics(&mut self) {
         // `subscribe_kind` locks `gossipsub_subscriptions` for writing.
         // Read current subscriptions before subscribing to avoid a deadlock.
         let subscribed_topics = self
