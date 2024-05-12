@@ -24,6 +24,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::PayloadStatus,
     phase0::{
         consts::GENESIS_SLOT,
@@ -116,6 +117,17 @@ impl<P: Preset> BackSync<P> {
             self.batch.push_block(block);
         } else {
             debug!("ignoring block: {slot}");
+        }
+    }
+
+    pub fn push_data_column_sidecar(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+        let slot = data_column_sidecar.signed_block_header.message.slot;
+
+        if slot <= self.high_slot() && !self.is_finished() {
+            self.batch.push_data_column_sidecar(data_column_sidecar);
+        } else {
+            let data_column_id: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+            debug!("ignoring data column sidecar: {data_column_id:?}, slot: {slot}");
         }
     }
 
@@ -212,6 +224,7 @@ impl<P: Preset> BackSync<P> {
 struct Batch<P: Preset> {
     blocks: BTreeMap<Slot, Arc<SignedBeaconBlock<P>>>,
     blob_sidecars: HashMap<BlobIdentifier, Arc<BlobSidecar<P>>>,
+    data_column_sidecars: HashMap<DataColumnIdentifier, Arc<DataColumnSidecar<P>>>,
 }
 
 impl<P: Preset> Batch<P> {
@@ -222,6 +235,11 @@ impl<P: Preset> Batch<P> {
 
     fn push_block(&mut self, block: Arc<SignedBeaconBlock<P>>) {
         self.blocks.insert(block.message().slot(), block);
+    }
+
+    fn push_data_column_sidecar(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+        self.data_column_sidecars
+            .insert(data_column_sidecar.as_ref().into(), data_column_sidecar);
     }
 
     pub fn valid_blob_sidecars_for(

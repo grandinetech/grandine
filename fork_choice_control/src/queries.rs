@@ -18,6 +18,7 @@ use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -522,6 +523,21 @@ where
             .map(|root| self.block_by_root(root))
             .filter_map(Result::transpose)
             .collect()
+    }
+
+    pub fn data_column_sidecars_by_ids(
+        &self,
+        data_column_ids: impl IntoIterator<Item = DataColumnIdentifier> + Send,
+    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+        let snapshot = self.snapshot();
+
+        // TODO(feature/eip7594): data columns from storage
+        let data_columns = data_column_ids
+            .into_iter()
+            .filter_map(|data_column_id| snapshot.cached_data_column_sidecar_by_id(data_column_id))
+            .collect_vec();
+
+        Ok(data_columns)
     }
 
     pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
@@ -1040,6 +1056,15 @@ impl<P: Preset> Snapshot<'_, P> {
         blob_id: BlobIdentifier,
     ) -> Option<Arc<BlobSidecar<P>>> {
         self.store_snapshot.cached_blob_sidecar_by_id(blob_id)
+    }
+
+    #[must_use]
+    pub(crate) fn cached_data_column_sidecar_by_id(
+        &self,
+        data_column_id: DataColumnIdentifier,
+    ) -> Option<Arc<DataColumnSidecar<P>>> {
+        self.store_snapshot
+            .cached_data_column_sidecar_by_id(data_column_id)
     }
 }
 

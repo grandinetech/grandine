@@ -25,6 +25,7 @@ use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
+    eip7594::DataColumnIdentifier,
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -79,6 +80,7 @@ pub struct SyncManager {
     peers: HashMap<PeerId, StatusMessage>,
     blob_requests: RangeAndRootRequests<BlobIdentifier>,
     block_requests: RangeAndRootRequests<H256>,
+    data_column_requests: RangeAndRootRequests<DataColumnIdentifier>,
     last_sync_head: Slot,
     last_sync_range: Range<Slot>,
     sequential_redownloads: usize,
@@ -96,6 +98,7 @@ impl SyncManager {
             peers: HashMap::new(),
             blob_requests: RangeAndRootRequests::<BlobIdentifier>::default(),
             block_requests: RangeAndRootRequests::<H256>::default(),
+            data_column_requests: RangeAndRootRequests::<DataColumnIdentifier>::default(),
             last_sync_range: 0..0,
             last_sync_head: 0,
             sequential_redownloads: 0,
@@ -126,6 +129,19 @@ impl SyncManager {
     ) {
         self.block_requests
             .record_received_response(&block_root, &peer_id, app_request_id);
+    }
+
+    pub fn record_received_data_column_sidecar_response(
+        &mut self,
+        data_column_identifier: DataColumnIdentifier,
+        peer_id: PeerId,
+        app_request_id: AppRequestId,
+    ) {
+        self.data_column_requests.record_received_response(
+            &data_column_identifier,
+            &peer_id,
+            app_request_id,
+        );
     }
 
     pub fn request_direction(&mut self, app_request_id: AppRequestId) -> Option<SyncDirection> {
@@ -510,6 +526,24 @@ impl SyncManager {
         blob_identifiers
             .into_iter()
             .filter(|blob_id| self.blob_requests.add_request_by_root(*blob_id, peer_id))
+            .collect_vec()
+    }
+
+    pub fn add_data_columns_request_by_root(
+        &mut self,
+        data_column_identifiers: Vec<DataColumnIdentifier>,
+        peer_id: PeerId,
+    ) -> Vec<DataColumnIdentifier> {
+        self.log(Level::Debug, format_args!(
+            "add data column request by root (identifiers: {data_column_identifiers:?}, peer_id: {peer_id})",
+        ));
+
+        data_column_identifiers
+            .into_iter()
+            .filter(|identifier| {
+                self.data_column_requests
+                    .add_request_by_root(*identifier, peer_id)
+            })
             .collect_vec()
     }
 
