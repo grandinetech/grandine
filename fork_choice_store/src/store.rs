@@ -362,6 +362,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn cached_data_column_sidecar_by_id(
+        &self,
+        data_column_id: DataColumnIdentifier,
+    ) -> Option<Arc<DataColumnSidecar<P>>> {
+        self.data_column_cache
+            .get(&data_column_id)
+            .map(|(sidecar, _)| (*sidecar).clone_arc())
+    }
+
+    #[must_use]
     pub const fn justified_checkpoint(&self) -> Checkpoint {
         self.justified_checkpoint
     }

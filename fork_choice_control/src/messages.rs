@@ -10,7 +10,7 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, Store,
+    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin,
 };
 use log::debug;
 use serde::Serialize;
@@ -184,6 +184,7 @@ pub enum P2pMessage<P: Preset> {
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
+    DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
     Stop,
