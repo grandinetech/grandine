@@ -41,7 +41,7 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
-    // TODO(feature/fulu): add DataColumnNeeded
+    DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, AppRequestId, RPCRequestType),
     RequestedBlock(
         Arc<SignedBeaconBlock<P>>,
@@ -49,7 +49,12 @@ pub enum P2pToSync<P: Preset> {
         AppRequestId,
         RPCRequestType,
     ),
-    // TODO(feature/fulu): add RequestedDataColumnSidecar
+    RequestedDataColumnSidecar(
+        Arc<DataColumnSidecar<P>>,
+        PeerId,
+        AppRequestId,
+        RPCRequestType,
+    ),
     BlobsByRangeRequestFinished(AppRequestId),
     BlocksByRangeRequestFinished(PeerId, AppRequestId),
     DataColumnsByRangeRequestFinished(AppRequestId),
@@ -59,6 +64,7 @@ pub enum P2pToSync<P: Preset> {
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
+    DataColumnSidecarRejected(DataColumnIdentifier),
     Stop,
 }
 
@@ -130,6 +136,8 @@ pub enum SyncToP2p {
     RequestBlobsByRoot(AppRequestId, PeerId, Vec<BlobIdentifier>),
     RequestBlocksByRange(AppRequestId, PeerId, Slot, u64),
     RequestBlockByRoot(AppRequestId, PeerId, H256),
+    // RequestDataColumnsByRange(AppRequestId, PeerId, Slot, u64),
+    RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnIdentifier>),
     RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,
 }
