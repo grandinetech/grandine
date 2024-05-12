@@ -45,7 +45,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::DataColumnSidecar,
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -479,28 +479,66 @@ where
                     submission_time,
                 };
 
-                let missing_blob_indices =
-                    self.store.indices_of_missing_blobs(&pending_block.block);
+                if self
+                    .store
+                    .chain_config()
+                    .is_eip7594_fork(misc::compute_epoch_at_slot::<P>(slot))
+                {
+                    let parent = self
+                        .store
+                        .chain_link(pending_block.block.message().parent_root())
+                        .expect("block data availability check should be done after block parent presence check");
 
-                if missing_blob_indices.is_empty() {
-                    self.retry_block(wait_group, pending_block);
-                } else {
-                    debug!("block delayed until blobs: {pending_block:?}");
+                    let missing_column_indices =
+                        self.store.indices_of_missing_data_columns(&parent.block);
 
-                    if let Some(gossip_id) = pending_block.origin.gossip_id() {
-                        P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                    if missing_column_indices.is_empty() {
+                        self.retry_block(wait_group, pending_block);
+                    } else {
+                        info!(
+                            "block delayed until parent has sufficient data columns \
+                             (column indices: {missing_column_indices:?}, pending block root: {block_root:?})",
+                        );
+
+                        if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                            P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                        }
+
+                        let column_ids = missing_column_indices
+                            .into_iter()
+                            .map(|index| DataColumnIdentifier { block_root, index })
+                            .collect_vec();
+
+                        let peer_id = pending_block.origin.peer_id();
+
+                        // P2pMessage::DataColumnsNeeded(column_ids, slot, peer_id).send(&self.p2p_tx);
+
+                        self.delay_block_until_blobs(block_root, pending_block);
                     }
+                } else {
+                    let missing_blob_indices =
+                        self.store.indices_of_missing_blobs(&pending_block.block);
 
-                    let blob_ids = missing_blob_indices
-                        .into_iter()
-                        .map(|index| BlobIdentifier { block_root, index })
-                        .collect_vec();
+                    if missing_blob_indices.is_empty() {
+                        self.retry_block(wait_group, pending_block);
+                    } else {
+                        debug!("block delayed until blobs: {pending_block:?}");
 
-                    let peer_id = pending_block.origin.peer_id();
+                        if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                            P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                        }
 
-                    P2pMessage::BlobsNeeded(blob_ids, slot, peer_id).send(&self.p2p_tx);
+                        let blob_ids = missing_blob_indices
+                            .into_iter()
+                            .map(|index| BlobIdentifier { block_root, index })
+                            .collect_vec();
 
-                    self.delay_block_until_blobs(block_root, pending_block);
+                        let peer_id = pending_block.origin.peer_id();
+
+                        P2pMessage::BlobsNeeded(blob_ids, slot, peer_id).send(&self.p2p_tx);
+
+                        self.delay_block_until_blobs(block_root, pending_block);
+                    }
                 }
             }
             Ok(BlockAction::DelayUntilParent(block)) => {

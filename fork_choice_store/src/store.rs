@@ -1017,7 +1017,7 @@ impl<P: Preset> Store<P> {
             .chain_config
             .is_eip7594_fork(accessors::get_current_epoch(&state))
         {
-            let missing_indices = self.indices_of_missing_data_columns(&block);
+            let missing_indices = self.indices_of_missing_data_columns(&parent.block);
 
             if missing_indices.len() * 2 >= NumberOfColumns::USIZE {
                 return Ok(BlockAction::DelayUntilBlobs(block));
