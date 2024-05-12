@@ -85,6 +85,7 @@ pub struct BlockSyncService<P: Preset> {
     received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     data_dumper: Arc<DataDumper>,
+    received_data_column_sidecars: HashMap<DataColumnIdentifier, Slot>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
     sync_to_p2p_tx: UnboundedSender<SyncToP2p>,
@@ -214,6 +215,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_blob_sidecars,
             received_block_roots: HashMap::new(),
             data_dumper,
+            received_data_column_sidecars: HashMap::new(),
             fork_choice_to_sync_rx,
             p2p_to_sync_rx,
             sync_to_p2p_tx,
@@ -312,6 +314,9 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                         P2pToSync::BlockNeeded(block_root, peer_id) => {
                             self.request_needed_block(block_root, peer_id)?;
+                        }
+                        P2pToSync::DataColumnsNeeded(identifiers, slot, peer_id) => {
+                            self.request_needed_data_columns(identifiers, slot, peer_id)?;
                         }
                         P2pToSync::GossipBlobSidecar(blob_sidecar, subnet_id, gossip_id) => {
                             self.data_dumper.dump_blob_sidecar(blob_sidecar.clone_arc());
@@ -437,6 +442,39 @@ impl<P: Preset> BlockSyncService<P> {
                                 block_seen,
                             );
                         }
+                        P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id, request_id, request_type) => {
+                            let data_column_identifier = data_column_sidecar.as_ref().into();
+
+                            self.sync_manager.record_received_data_column_sidecar_response(data_column_identifier, peer_id, request_id);
+
+                            // Back sync does not issue BlobSidecarsByRoot requests
+                            let request_direction = match request_type {
+                                RPCRequestType::Root => SyncDirection::Forward,
+                                RPCRequestType::Range => self
+                                    .sync_manager
+                                    .request_direction(request_id)
+                                    .unwrap_or(self.sync_direction),
+                            };
+
+                            match request_direction {
+                                SyncDirection::Forward => {
+                                    let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+
+                                    if self.register_new_received_data_column_sidecar(data_column_identifier, data_column_sidecar_slot) {
+                                        let block_seen = self
+                                            .received_block_roots
+                                            .contains_key(&data_column_identifier.block_root);
+
+                                        self.controller.on_requested_data_column_sidecar(data_column_sidecar, block_seen, peer_id);
+                                    }
+                                }
+                                SyncDirection::Back => {
+                                    if let Some(back_sync) = self.back_sync.as_mut() {
+                                        back_sync.push_data_column_sidecar(data_column_sidecar);
+                                    }
+                                }
+                            }
+                        }
                         P2pToSync::BlobsByRangeRequestFinished(request_id) => {
                             let request_direction = self.sync_manager.request_direction(request_id);
 
@@ -464,8 +502,8 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready()?;
                         }
+                        //TODO(feature/eip7549)
                         P2pToSync::DataColumnsByRangeRequestFinished(request_id) => {
-                            todo!()
                             // self.sync_manager.blobs_by_range_request_finished(request_id);
                             // self.request_blobs_and_blocks_if_ready()?;
                         }
@@ -475,11 +513,15 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
+                            self.received_data_column_sidecars.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
                             // Grandine should not dismiss newer valid blob sidecars with the same blob identifier
                             self.received_blob_sidecars.remove(&blob_identifier);
+                        }
+                        P2pToSync::DataColumnSidecarRejected(data_column_identifier) => {
+                            self.received_data_column_sidecars.remove(&data_column_identifier);
                         }
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
@@ -501,6 +543,9 @@ impl<P: Preset> BlockSyncService<P> {
     pub fn check_back_sync_progress(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
+        // TODO(feature/fulu): enable this once `request_expired_data_column_range_requests`
+        // implemented
+        // self.request_expired_data_column_range_requests()?;
 
         // Check if batch has finished
         if !self.sync_manager.ready_to_request_by_range() {
@@ -635,6 +680,17 @@ impl<P: Preset> BlockSyncService<P> {
         self.retry_sync_batches(expired_batches)
     }
 
+    // TODO(feature/fulu): enable this once `expired_data_column_range_batches` implemented
+    // fn request_expired_data_column_range_requests(&mut self) -> Result<()> {
+    //     let expired_batches = self
+    //         .sync_manager
+    //         .expired_data_column_range_batches()
+    //         .map(|(batch, _)| batch)
+    //         .collect();
+
+    //     self.retry_sync_batches(expired_batches)
+    // }
+
     fn request_blobs_and_blocks_if_ready(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
@@ -714,6 +770,32 @@ impl<P: Preset> BlockSyncService<P> {
                         .send(&self.sync_to_p2p_tx);
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    fn request_needed_data_columns(
+        &mut self,
+        identifiers: Vec<DataColumnIdentifier>,
+        slot: Slot,
+        peer_id: Option<PeerId>,
+    ) -> Result<()> {
+        // TODO(feature/eip_7594): data_column_serve_slot check
+
+        let request_id = self.request_id()?;
+
+        let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
+            return Ok(());
+        };
+
+        let data_column_identifiers = self
+            .sync_manager
+            .add_data_columns_request_by_root(identifiers, peer_id);
+
+        if !data_column_identifiers.is_empty() {
+            SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, data_column_identifiers)
+                .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())
@@ -892,6 +974,16 @@ impl<P: Preset> BlockSyncService<P> {
             .is_none()
     }
 
+    fn register_new_received_data_column_sidecar(
+        &mut self,
+        data_column_identifier: DataColumnIdentifier,
+        slot: Slot,
+    ) -> bool {
+        self.received_data_column_sidecars
+            .insert(data_column_identifier, slot)
+            .is_none()
+    }
+
     fn track_collection_metrics(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
@@ -908,6 +1000,13 @@ impl<P: Preset> BlockSyncService<P> {
                 &type_name,
                 "received_block_roots",
                 self.received_block_roots.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "received_data_column_sidecars",
+                self.received_data_column_sidecars.len(),
             );
         }
     }
