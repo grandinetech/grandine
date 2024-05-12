@@ -18,6 +18,7 @@ use tap::Pipe as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
+    eip7594::DataColumnIdentifier,
     phase0::{
         containers::{Attestation, Checkpoint},
         primitives::{
@@ -156,6 +157,7 @@ pub enum P2pMessage<P: Preset> {
     Reject(GossipId, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
+    DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, educe(Debug(ignore)))] Arc<BeaconState<P>>),
     ReverifyGossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
