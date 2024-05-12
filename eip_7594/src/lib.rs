@@ -27,7 +27,7 @@ use types::{
         containers::SignedBeaconBlock,
         primitives::{BlobIndex, KzgCommitment, KzgProof},
     },
-    eip7594::{BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar},
+    eip7594::{BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns},
     phase0::{
         containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
         primitives::{DomainType, Epoch, NodeId, SubnetId},
@@ -40,7 +40,6 @@ use types::{
 };
 
 const SAMPLES_PER_SLOT: u64 = 8;
-const CUSTODY_REQUIREMENT: u64 = 1;
 const TARGET_NUMBER_OF_PEERS: u64 = 70;
 const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
 const FIELD_ELEMENTS_PER_EXT_BLOB: usize = 2 * FIELD_ELEMENTS_PER_BLOB;
@@ -50,7 +49,6 @@ const BYTES_PER_CELL: usize = FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
 type BytesPerCell = U2048;
 const CELLS_PER_BLOB: usize = FIELD_ELEMENTS_PER_EXT_BLOB / FIELD_ELEMENTS_PER_CELL;
 const KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH: usize = 4;
-pub const NUMBER_OF_COLUMNS: u64 = 128;
 const MAX_BLOBS_PER_BLOCK: u64 = 6; //todo!();
 const MAX_BLOB_COMMITMENTS_PER_BLOCK: usize = 6; // todo!();
 
@@ -58,7 +56,7 @@ type PolynomialCoeff = [Bytes32; FIELD_ELEMENTS_PER_EXT_BLOB];
 type CellID = u64;
 type RowIndex = u64;
 // type BlobIndex = usize;
-type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
+type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
 
 pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
     let DataColumnSidecar {
@@ -69,7 +67,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         ..
     } = data_column_sidecar;
 
-    assert!(*index < NUMBER_OF_COLUMNS);
+    assert!(*index < NumberOfColumns::U64);
     assert!(column.len() == kzg_commitments.len() && column.len() == kzg_proofs.len());
 
     let mut row_ids = Vec::new();
@@ -138,7 +136,7 @@ pub fn compute_subnet_for_data_column_sidecar(column_index: ColumnIndex) -> Subn
 pub fn verify_data_column_sidecar_kzg_proofs<P: Preset>(
     sidecar: DataColumnSidecar<P>,
 ) -> Result<bool> {
-    assert!(sidecar.index < NUMBER_OF_COLUMNS);
+    assert!(sidecar.index < NumberOfColumns::U64);
     assert!(
         sidecar.column.len() == sidecar.kzg_commitments.len()
             && sidecar.column.len() == sidecar.kzg_proofs.len()
@@ -224,7 +222,7 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
     }
     assert_eq!(subnet_ids.len() as u64, custody_subnet_count);
 
-    let columns_per_subnet = NUMBER_OF_COLUMNS / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+    let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
     let mut result = Vec::new();
     for i in 0..columns_per_subnet {
         for &subnet_id in &subnet_ids {
@@ -251,7 +249,7 @@ pub fn compute_extended_matrix(blobs: Vec<Blob>) -> Result<ExtendedMatrix> {
         extended_matrix.extend(cells);
     }
 
-    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
+    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
     array.copy_from_slice(&extended_matrix[..]);
 
     Ok(array)
@@ -279,7 +277,7 @@ fn recover_matrix(
         let full_polynomial = CKzgCell::recover_polynomial(&cell_ids, &cells, &kzg_settings)?;
         extended_matrix.push(full_polynomial);
     }
-    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NUMBER_OF_COLUMNS) as usize];
+    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
     array.copy_from_slice(&extended_matrix[..]);
 
     Ok(array)
@@ -316,7 +314,7 @@ fn get_data_column_sidecars<P: Preset>(
     //     proofs.push(cells_and_proofs[i].1.clone());
     // }
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
-    for column_index in 0..NUMBER_OF_COLUMNS {
+    for column_index in 0..NumberOfColumns::U64 {
         let mut column_cells: Vec<CKzgCell> = Vec::new();
         for row_index in 0..blob_count {
             column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());

@@ -324,6 +324,11 @@ impl<P: Preset> BlockSyncService<P> {
                             self.sync_manager.block_by_root_request_finished(block_root);
                             self.request_blobs_and_blocks_if_ready()?;
                         }
+                        P2pToSync::DataColumnsByRangeRequestFinished(request_id) => {
+                            todo!()
+                            // self.sync_manager.blobs_by_range_request_finished(request_id);
+                            // self.request_blobs_and_blocks_if_ready()?;
+                        }
                     }
                 }
             }

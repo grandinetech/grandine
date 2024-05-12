@@ -45,6 +45,7 @@ pub enum P2pToSync<P: Preset> {
     BlobsByRootChunkReceived(BlobIdentifier, PeerId, RequestId),
     BlocksByRangeRequestFinished(RequestId),
     BlockByRootRequestFinished(H256),
+    DataColumnsByRangeRequestFinished(RequestId),
     RequestFailed(PeerId),
 }
 

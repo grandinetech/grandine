@@ -2,7 +2,7 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, Ssz, SszHash as _, H256};
-use typenum::{Prod, U128, U4, U48, U6, U64};
+use typenum::{Prod, U128, U4, U64};
 
 use crate::{
     deneb::{
@@ -18,6 +18,7 @@ type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
 pub type ColumnIndex = u64;
 pub type Cell = Box<ByteVector<BytesPerCell>>;
+pub type NumberOfColumns = U128;
 
 type DataColumn<P> = ContiguousList<Cell, <P as Preset>::MaxBlobCommitmentsPerBlock>;
 
@@ -25,6 +26,7 @@ pub type KzgCommitmentsInclusionProofDepth = U4;
 
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
+pub const CUSTODY_REQUIREMENT: u64 = 1;
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
