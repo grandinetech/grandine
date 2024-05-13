@@ -9,15 +9,16 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 c-kzg = { workspace = true }
-hashing = { workspace = true}
-helper_functions = { workspace = true}
+hashing = { workspace = true }
+helper_functions = { workspace = true }
+kzg = { workspace = true }
+num-traits = { workspace = true }
 ssz = { workspace = true}
-sha3 = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
-sha2 = { workspace = true}
-num-traits = { workspace = true }
 
 [dev-dependencies]
 duplicate = { workspace = true }

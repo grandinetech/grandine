@@ -1516,6 +1516,12 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::DataColumnsByRoot(Some(data_column_sidecar)) => {
+                debug!(
+                    "received DataColumnsByRoot response chunk \
+                    (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
+                    data_column_sidecar.signed_block_header.message.slot,
+                );
+
                 let data_column_identifier: DataColumnIdentifier =
                     data_column_sidecar.as_ref().into();
 
