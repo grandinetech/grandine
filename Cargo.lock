@@ -8266,6 +8266,7 @@ dependencies = [
  "derive_more",
  "directories",
  "educe",
+ "eip_7594",
  "eth1",
  "eth1_api",
  "eth2_libp2p",

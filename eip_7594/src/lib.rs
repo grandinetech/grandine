@@ -4,7 +4,9 @@ use std::{
 };
 
 use anyhow::Result;
-use c_kzg::{Blob, Bytes32, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings};
+use c_kzg::{
+    Blob as CKzgBlob, Bytes32, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings,
+};
 use hashing::{hash_64, ZERO_HASHES};
 use helper_functions::{
     accessors,
@@ -21,18 +23,18 @@ use ssz::{
 use try_from_iterator::TryFromIterator as _;
 use typenum::{Unsigned as _, U2048};
 use types::{
+    combined::SignedBeaconBlock,
     config::Config,
     deneb::{
         consts::DOMAIN_BLOB_SIDECAR,
-        containers::SignedBeaconBlock,
-        primitives::{BlobIndex, KzgCommitment, KzgProof},
+        primitives::{Blob, BlobIndex, KzgCommitment, KzgProof},
     },
     eip7594::{BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns},
     phase0::{
         containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
         primitives::{DomainType, Epoch, NodeId, SubnetId},
     },
-    traits::{BeaconState, PostDenebBeaconBlockBody},
+    traits::{BeaconBlock as _, BeaconState, PostDenebBeaconBlockBody, SignedBeaconBlock as _},
 };
 use types::{
     eip7594::{Cell, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
@@ -231,7 +233,7 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
     result
 }
 
-pub fn compute_extended_matrix(blobs: Vec<Blob>) -> Result<ExtendedMatrix> {
+pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
     let mut extended_matrix: Vec<CKzgCell> = Vec::new();
 
     let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
@@ -277,86 +279,84 @@ fn recover_matrix(
     Ok(array)
 }
 
-fn get_data_column_sidecars<P: Preset>(
+pub fn get_data_column_sidecars<P: Preset>(
     signed_block: SignedBeaconBlock<P>,
-    blobs: Vec<Blob>,
+    blobs: impl Iterator<Item = Blob<P>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
-    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
-
-    let block_header = BeaconBlockHeader {
-        slot: signed_block.message.slot,
-        proposer_index: signed_block.message.proposer_index,
-        parent_root: signed_block.message.parent_root,
-        state_root: signed_block.message.state_root,
-        body_root: signed_block.message.body.hash_tree_root(),
-    };
-    let signed_block_header = SignedBeaconBlockHeader {
-        message: block_header,
-        signature: signed_block.signature,
-    };
-
-    let mut cells_and_proofs = Vec::new();
-    for blob in &blobs {
-        cells_and_proofs.push(CKzgCell::compute_cells_and_proofs(&blob, &kzg_settings)?);
-    }
-    let blob_count = blobs.len();
-    // let mut cells: Vec<Vec<CKzgCell>> = Vec::new();
-    // let mut proofs: Vec<Vec<KzgProof>> = Vec::new();
-    // for i in 0..blob_count {
-    //     cells.push(cells_and_proofs[i].0.clone());
-    //     proofs.push(cells_and_proofs[i].1.clone());
-    // }
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
-    for column_index in 0..NumberOfColumns::U64 {
-        let mut column_cells: Vec<CKzgCell> = Vec::new();
-        for row_index in 0..blob_count {
-            column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());
+    let (beacon_block, signature) = signed_block.split();
+
+    if let Some(post_deneb_beacon_block_body) = beacon_block.body().post_deneb() {
+        let kzg_commitments_inclusion_proof =
+            kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
+
+        let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
+        let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+
+        let signed_block_header = SignedBeaconBlockHeader {
+            message: beacon_block.to_header(),
+            signature,
+        };
+
+        let c_kzg_blobs = blobs
+            .map(|blob| CKzgBlob::from_bytes(blob.as_bytes()).map_err(Into::into))
+            .collect::<Result<Vec<CKzgBlob>>>()?;
+
+        let cells_and_proofs = c_kzg_blobs
+            .into_iter()
+            .map(|blob| {
+                CKzgCell::compute_cells_and_proofs(&blob, &kzg_settings).map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let blob_count = cells_and_proofs.len();
+
+        for column_index in 0..NumberOfColumns::U64 {
+            let mut column_cells: Vec<CKzgCell> = Vec::new();
+            for row_index in 0..blob_count {
+                column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());
+            }
+            let kzg_proof_of_column: Vec<_> = (0..blob_count)
+                .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
+                .collect();
+
+            let cells = column_cells.iter().map(|cell| cell.to_bytes());
+            let mut cont_cells = Vec::new();
+            for cell in cells {
+                let bytes = cell.into_iter();
+                let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
+                let v = Box::new(v);
+
+                cont_cells.push(v);
+            }
+            // let mut column_cell_array = [[0; 2048]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
+            // column_cell_array.copy_from_slice(&column_cells[..]);
+
+            let mut kzg_proofs_array: [[u8; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK] =
+                [[0; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
+            kzg_proofs_array.copy_from_slice(&kzg_proof_of_column[..]);
+
+            let mut continuous_proof_vec = Vec::new();
+            for proof in kzg_proofs_array {
+                continuous_proof_vec.push(KzgProof::try_from(proof)?);
+            }
+
+            sidecars.push(DataColumnSidecar {
+                index: column_index,
+                column: ContiguousList::try_from(cont_cells)?,
+                kzg_commitments: post_deneb_beacon_block_body.blob_kzg_commitments().clone(),
+                kzg_proofs: ContiguousList::try_from(continuous_proof_vec)?,
+                signed_block_header,
+                kzg_commitments_inclusion_proof,
+            });
         }
-        let kzg_proof_of_column: Vec<_> = (0..blob_count)
-            .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
-            .collect();
-
-        let cells = column_cells.iter().map(|cell| cell.to_bytes());
-        let mut cont_cells = Vec::new();
-        for cell in cells {
-            let bytes = cell.into_iter();
-            let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
-            let v = Box::new(v);
-
-            cont_cells.push(v);
-        }
-        // let mut column_cell_array = [[0; 2048]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
-        // column_cell_array.copy_from_slice(&column_cells[..]);
-
-        let mut kzg_proofs_array: [[u8; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK] =
-            [[0; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
-        kzg_proofs_array.copy_from_slice(&kzg_proof_of_column[..]);
-
-        let mut continuous_proof_vec = Vec::new();
-        for proof in kzg_proofs_array {
-            continuous_proof_vec.push(KzgProof::try_from(proof)?);
-        }
-
-        sidecars.push(DataColumnSidecar {
-            index: column_index,
-            column: ContiguousList::try_from(cont_cells)?,
-            kzg_commitments: signed_block.message.body.blob_kzg_commitments.clone(),
-            kzg_proofs: ContiguousList::try_from(continuous_proof_vec)?,
-            signed_block_header,
-            kzg_commitments_inclusion_proof: kzg_commitment_inclusion_proof(
-                &signed_block.message.body,
-                column_index,
-            ),
-        });
     }
 
-    Ok(sidecars)
+    Ok(vec![])
 }
 
 fn kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
-    commitment_index: BlobIndex,
 ) -> BlobCommitmentsInclusionProof {
     let mut proof = BlobCommitmentsInclusionProof::default();
 
@@ -488,7 +488,7 @@ mod tests {
         // > If the implementation supports generating merkle proofs, check that the
         // > self-generated proof matches the `proof` provided with the test.
         //
-        let proof = kzg_commitment_inclusion_proof(&block_body, commitment_index);
+        let proof = kzg_commitment_inclusion_proof(&block_body);
 
         assert_eq!(proof.as_slice(), branch);
     }
