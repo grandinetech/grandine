@@ -1159,7 +1159,13 @@ impl<P: Preset> Network<P> {
         peer_request_id: PeerRequestId,
         request: DataColumnsByRootRequest,
     ) {
-        todo!();
+        // TODO(feature/eip7549): implement this
+        self.log(
+            Level::Debug,
+            format_args!(
+                "received DataColumnsByRoot request (peer_id: {peer_id}, request: {request:?})"
+            ),
+        );
     }
 
     fn handle_data_columns_by_range_request(
@@ -1168,7 +1174,15 @@ impl<P: Preset> Network<P> {
         peer_request_id: PeerRequestId,
         request: DataColumnsByRangeRequest,
     ) -> Result<()> {
-        todo!();
+        // TODO(feature/eip7549): implement this
+        self.log(
+            Level::Debug,
+            format_args!(
+                "received DataColumnsByRange request (peer_id: {peer_id}, request: {request:?})"
+            ),
+        );
+
+        Ok(())
     }
 
     fn handle_blobs_by_root_request(
@@ -1478,7 +1492,7 @@ impl<P: Preset> Network<P> {
                 );
             }
             // TODO(feature/eip7594)
-            Response::DataColumnsByRange(Some(data_column_sidecar)) => todo!(),
+            Response::DataColumnsByRange(Some(data_column_sidecar)) => {}
             Response::DataColumnsByRange(None) => {
                 self.log_with_feature(format_args!(
                     "peer {peer_id} terminated DataColumnsByRange response stream for request_id: {request_id}",
