@@ -9099,6 +9099,8 @@ dependencies = [
  "derive_more 1.0.0",
  "directories",
  "doppelganger_protection",
+ "eip_7594",
+ "eth1",
  "eth1_api",
  "eth2_cache_utils",
  "eth2_libp2p",
