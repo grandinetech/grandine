@@ -934,6 +934,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         if !was_forward_synced && is_forward_synced {
             SyncToP2p::SubscribeToCoreTopics.send(&self.sync_to_p2p_tx);
+            SyncToP2p::SubscribeToDataColumnTopics.send(&self.sync_to_p2p_tx);
 
             if self.back_sync.is_some() {
                 self.received_block_roots = HashMap::new();
