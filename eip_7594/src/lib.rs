@@ -16,10 +16,11 @@ use helper_functions::{
     signing::SignForSingleFork,
 };
 use kzg::eip_4844::{load_trusted_setup_string, BYTES_PER_G1, BYTES_PER_G2};
-use sha3::{Digest, Sha3_256};
+use num_traits::One as _;
+use sha2::{Digest as _, Sha256};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, MerkleElements, MerkleTree, SszHash, SszWrite,
-    H256,
+    Uint256, H256,
 };
 use try_from_iterator::TryFromIterator as _;
 use typenum::{Unsigned as _, U2048};
@@ -83,18 +84,18 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
     let column = column
         .clone()
         .into_iter()
-        .map(|a| CKzgCell::from_bytes(a.as_bytes()).unwrap())
-        .collect::<Vec<_>>();
+        .map(|a| CKzgCell::from_bytes(a.as_bytes()).map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
 
     let commitment = kzg_commitments
         .iter()
-        .map(|a| Bytes48::from_bytes(a.as_bytes()).unwrap())
-        .collect::<Vec<_>>();
+        .map(|a| Bytes48::from_bytes(a.as_bytes()).map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
 
     let kzg_proofs = kzg_proofs
         .iter()
-        .map(|a| Bytes48::from_bytes(&a.as_bytes()).unwrap())
-        .collect::<Vec<_>>();
+        .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
 
     Ok(CKzgProof::verify_cell_proof_batch(
         &commitment[..],
@@ -146,18 +147,20 @@ pub fn verify_data_column_sidecar_kzg_proofs<P: Preset>(
     let column = sidecar
         .column
         .into_iter()
-        .map(|a| CKzgCell::from_bytes(&a.as_bytes()).unwrap())
-        .collect::<Vec<_>>();
+        .map(|a| CKzgCell::from_bytes(&a.as_bytes()).map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
+
     let commitment = sidecar
         .kzg_commitments
         .iter()
-        .map(|a| Bytes48::from_bytes(a.as_bytes()).unwrap())
-        .collect::<Vec<_>>();
+        .map(|a| Bytes48::from_bytes(a.as_bytes()).map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
+
     let kzg_proofs = sidecar
         .kzg_proofs
         .iter()
-        .map(|a| Bytes48::from_bytes(&a.as_bytes()).unwrap())
-        .collect::<Vec<_>>();
+        .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
 
     Ok(CKzgProof::verify_cell_proof_batch(
         &commitment[..],
@@ -186,35 +189,35 @@ pub fn verify_data_column_sidecar_inclusion_proof<P: Preset>(
 pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 
-    let mut subnet_ids = HashSet::new();
-    let mut i: u64 = 0;
-    while (subnet_ids.len() as u64) < custody_subnet_count {
-        let mut hasher = Sha3_256::new();
-        let mut bytes: [u8; 32] = [0; 32];
-        (node_id + NodeId::from_u64(i)).write_fixed(&mut bytes);
-        println!("bytes = {:?}", bytes);
+    let mut subnet_ids = vec![];
+    let mut current_id = node_id;
 
-        let last_8_bytes: [u8; 8] = bytes[0..8].try_into().unwrap();
-        println!("last_8_bytes = {:?}", &last_8_bytes);
-        hasher.update(last_8_bytes);
-        let u64_from_last_8 = u64::from_le_bytes(last_8_bytes);
-        let el = hash_64(u64_from_last_8);
-        // let mut output: [u8; 32] = hasher.finalize().into();
-        let output = el.as_bytes();
-        println!("hasho output = {:?}", output);
+    while (subnet_ids.len() as u64) < custody_subnet_count {
+        let mut hasher = Sha256::new();
+        let mut bytes: [u8; 32] = [0; 32];
+
+        current_id.into_raw().to_little_endian(&mut bytes);
+
+        hasher.update(&bytes);
+        bytes = hasher.finalize().into();
 
         let output_prefix = [
-            output[0], output[1], output[2], output[3], output[4], output[5], output[6], output[7],
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ];
+
         let output_prefix_u64 = u64::from_le_bytes(output_prefix);
         let subnet_id = output_prefix_u64 % DATA_COLUMN_SIDECAR_SUBNET_COUNT;
-        println!("subnet_id = {}", subnet_id);
+
         if !subnet_ids.contains(&subnet_id) {
-            subnet_ids.insert(subnet_id);
+            subnet_ids.push(subnet_id);
         }
-        i += 1;
+
+        if current_id == Uint256::MAX {
+            current_id = Uint256::ZERO;
+        }
+
+        current_id = current_id + Uint256::one();
     }
-    assert_eq!(subnet_ids.len() as u64, custody_subnet_count);
 
     let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
     let mut result = Vec::new();
@@ -227,6 +230,7 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
             );
         }
     }
+
     result.sort();
     result
 }
