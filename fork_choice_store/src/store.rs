@@ -11,10 +11,7 @@ use std::{
 use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::NonZeroExt as _;
 use clock::Tick;
-use eip_7594::{
-    compute_subnet_for_data_column_sidecar, verify_data_column_sidecar_inclusion_proof,
-    verify_data_column_sidecar_kzg_proofs,
-};
+use eip_7594::{verify_data_column_sidecar_inclusion_proof, verify_data_column_sidecar_kzg_proofs};
 use eip_7594::{verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
@@ -1887,7 +1884,7 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
         // galimai sitas neveikia su gossipu
-        let expected = compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
+        let expected = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
         ensure!(
             subnet_id == expected,
             Error::DataColumnSidecarOnIncorrectSubnet {
