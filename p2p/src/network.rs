@@ -13,7 +13,7 @@ use eth2_libp2p::{
     rpc::{
         methods::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRangeRequest, BlocksByRootRequest,
-            DataColumnsByRangeRequest, DataColumnsByRootRequest,
+            DataColumnsByRangeRequest, DataColumnsByRootRequest, MaxRequestDataColumnSidecars,
         },
         GoodbyeReason, StatusMessage,
     },
@@ -42,6 +42,7 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
+use typenum::Unsigned as _;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
@@ -1085,13 +1086,67 @@ impl<P: Preset> Network<P> {
         peer_request_id: PeerRequestId,
         request: DataColumnsByRootRequest,
     ) {
-        // TODO(feature/eip7549): implement this
         self.log(
             Level::Debug,
             format_args!(
                 "received DataColumnsByRoot request (peer_id: {peer_id}, request: {request:?})"
             ),
         );
+
+        let DataColumnsByRootRequest { data_column_ids } = request;
+
+        let controller = self.controller.clone_arc();
+        let network_to_service_tx = self.network_to_service_tx.clone();
+
+        // TODO(feature/eip7549): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        let connected_peers = self.network_globals.connected_peers();
+        let target_peers = self.target_peers;
+
+        self.dedicated_executor
+            .spawn(async move {
+                // > Clients MAY limit the number of blocks and sidecars in the response.
+                let data_column_ids = data_column_ids.into_iter().take(
+                        MaxRequestDataColumnSidecars::USIZE
+                );
+
+                let data_column_sidecars = controller.data_column_sidecars_by_ids(data_column_ids)?;
+
+                for data_column_sidecar in data_column_sidecars {
+                    log(
+                        Level::Debug,
+                        connected_peers,
+                        target_peers,
+                        format_args!(
+                            "sending DataColumnsSidecarsByRoot response chunk \
+                         (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, data_column_sidecar: {data_column_sidecar:?})",
+                        ),
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        peer_request_id,
+                        Box::new(Response::DataColumnsByRoot(Some(data_column_sidecar))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+
+                log(
+                    Level::Debug,
+                    connected_peers,
+                    target_peers,
+                    "terminating DataColumnsByRoot response stream",
+                );
+
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    peer_request_id,
+                    Box::new(Response::DataColumnsByRoot(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
     }
 
     fn handle_data_columns_by_range_request(
