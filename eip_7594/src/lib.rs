@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use c_kzg::{
     Blob as CKzgBlob, Bytes32, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings,
 };
@@ -15,6 +15,7 @@ use helper_functions::{
     predicates::{index_at_commitment_depth, is_valid_merkle_branch},
     signing::SignForSingleFork,
 };
+use kzg::eip_4844::{load_trusted_setup_string, BYTES_PER_G1, BYTES_PER_G2};
 use sha3::{Digest, Sha3_256};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, MerkleElements, MerkleTree, SszHash, SszWrite,
@@ -77,8 +78,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         row_ids.push(i as u64);
     }
 
-    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+    let kzg_settings = load_kzg_settings()?;
 
     let column = column
         .clone()
@@ -141,8 +141,7 @@ pub fn verify_data_column_sidecar_kzg_proofs<P: Preset>(
         row_ids.push(i as u64);
     }
 
-    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+    let kzg_settings = load_kzg_settings()?;
 
     let column = sidecar
         .column
@@ -235,9 +234,7 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
 pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
     let mut extended_matrix: Vec<CKzgCell> = Vec::new();
 
-    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-
-    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+    let kzg_settings = load_kzg_settings()?;
 
     for blob in blobs {
         let cells = *CKzgCell::compute_cells(&blob, &kzg_settings)?;
@@ -254,8 +251,7 @@ fn recover_matrix(
     cells_dict: &HashMap<(BlobIndex, CellID), CKzgCell>,
     blob_count: usize,
 ) -> Result<ExtendedMatrix> {
-    let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-    let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+    let kzg_settings = load_kzg_settings()?;
 
     let mut extended_matrix = Vec::new();
     for blob_index in 0..blob_count {
@@ -289,8 +285,7 @@ pub fn get_data_column_sidecars<P: Preset>(
         let kzg_commitments_inclusion_proof =
             kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
 
-        let trusted_setup_file = Path::new("kzg_utils/trusted_setup.txt");
-        let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+        let kzg_settings = load_kzg_settings()?;
 
         let signed_block_header = SignedBeaconBlockHeader {
             message: beacon_block.to_header(),
@@ -389,6 +384,24 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
     );
 
     proof
+}
+
+fn load_kzg_settings() -> Result<KzgSettings> {
+    let contents = include_str!("../../kzg_utils/src/trusted_setup.txt");
+    let (g1_bytes, g2_bytes) =
+        load_trusted_setup_string(contents).map_err(|error| anyhow!(error))?;
+
+    KzgSettings::load_trusted_setup(
+        &g1_bytes
+            .chunks_exact(BYTES_PER_G1)
+            .map(|chunk| TryInto::<[u8; BYTES_PER_G1]>::try_into(chunk).map_err(Into::into))
+            .collect::<Result<Vec<_>>>()?,
+        &g2_bytes
+            .chunks_exact(BYTES_PER_G2)
+            .map(|chunk| TryInto::<[u8; BYTES_PER_G2]>::try_into(chunk).map_err(Into::into))
+            .collect::<Result<Vec<_>>>()?,
+    )
+    .map_err(|error| anyhow!(error))
 }
 
 #[cfg(test)]
