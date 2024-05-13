@@ -23,6 +23,7 @@ use types::{
             Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
         },
     },
+    eip7594::{ColumnIndex, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
@@ -288,6 +289,13 @@ pub fn compute_subnet_for_blob_sidecar<P: Preset>(
     let phase = config.phase_at_slot::<P>(blob_sidecar.signed_block_header.message.slot);
 
     blob_sidecar.index % config.blob_sidecar_subnet_count(phase)
+}
+
+// source: https://github.com/ethereum/consensus-specs/pull/3574/files/cebf78a83e6fc8fa237daf4264b9ca0fe61473f4#diff-96cf4db15bede3d60f04584fb25339507c35755959159cdbe19d760ca92de109R106
+pub fn compute_subnet_for_data_column_sidecar(column_index: ColumnIndex) -> SubnetId {
+    (column_index % DATA_COLUMN_SIDECAR_SUBNET_COUNT)
+        .try_into()
+        .unwrap()
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#broadcast-sync-committee-message>
