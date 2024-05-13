@@ -70,6 +70,12 @@ impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DataColumnSidecar")
             .field("index", &self.index)
+            .field(
+                "kzg_commitments_inclusion_proof",
+                &self.kzg_commitments_inclusion_proof,
+            )
+            .field("signed_block_header", &self.signed_block_header)
+            .field("kzg_commitments", &self.kzg_commitments.hash_tree_root())
             .finish()
     }
 }

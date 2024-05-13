@@ -1,66 +1,29 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use c_kzg::{
-    Blob as CKzgBlob, Bytes32, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings,
-};
-use hashing::{hash_64, ZERO_HASHES};
-use helper_functions::{
-    accessors,
-    error::SignatureKind,
-    misc,
-    predicates::{index_at_commitment_depth, is_valid_merkle_branch},
-    signing::SignForSingleFork,
-};
+use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings};
+use hashing::ZERO_HASHES;
+use helper_functions::predicates::{index_at_commitment_depth, is_valid_merkle_branch};
 use kzg::eip_4844::{load_trusted_setup_string, BYTES_PER_G1, BYTES_PER_G2};
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
-use ssz::{
-    ByteVector, ContiguousList, ContiguousVector, MerkleElements, MerkleTree, SszHash, SszWrite,
-    Uint256, H256,
-};
+use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
 use try_from_iterator::TryFromIterator as _;
-use typenum::{Unsigned as _, U2048};
+use typenum::Unsigned as _;
 use types::{
     combined::SignedBeaconBlock,
-    config::Config,
-    deneb::{
-        consts::DOMAIN_BLOB_SIDECAR,
-        primitives::{Blob, BlobIndex, KzgCommitment, KzgProof},
-    },
+    deneb::primitives::{Blob, BlobIndex, KzgProof},
     eip7594::{BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns},
-    phase0::{
-        containers::{BeaconBlockHeader, SignedBeaconBlockHeader},
-        primitives::{DomainType, Epoch, NodeId, SubnetId},
-    },
-    traits::{BeaconBlock as _, BeaconState, PostDenebBeaconBlockBody, SignedBeaconBlock as _},
+    phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
+    traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
 };
-use types::{
-    eip7594::{Cell, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
-    preset::Preset,
-};
+use types::{eip7594::DATA_COLUMN_SIDECAR_SUBNET_COUNT, preset::Preset};
 
-const SAMPLES_PER_SLOT: u64 = 8;
-const TARGET_NUMBER_OF_PEERS: u64 = 70;
-const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
-const FIELD_ELEMENTS_PER_EXT_BLOB: usize = 2 * FIELD_ELEMENTS_PER_BLOB;
-const FIELD_ELEMENTS_PER_CELL: usize = 64;
-const BYTES_PER_FIELD_ELEMENT: usize = 32;
-const BYTES_PER_CELL: usize = FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
-type BytesPerCell = U2048;
-const CELLS_PER_BLOB: usize = FIELD_ELEMENTS_PER_EXT_BLOB / FIELD_ELEMENTS_PER_CELL;
-const KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH: usize = 4;
 const MAX_BLOBS_PER_BLOCK: u64 = 6;
 const MAX_BLOB_COMMITMENTS_PER_BLOCK: usize = 6;
 
-type PolynomialCoeff = [Bytes32; FIELD_ELEMENTS_PER_EXT_BLOB];
-type CellID = u64;
-type RowIndex = u64;
-// type BlobIndex = usize;
 type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
+type CellID = u64;
 
 pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
     let DataColumnSidecar {
