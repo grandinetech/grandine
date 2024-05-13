@@ -46,7 +46,7 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::SignedBeaconBlock,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
+    eip7594::{DataColumnIdentifier, DataColumnSidecar, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
     nonstandard::{Phase, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -398,6 +398,9 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishBlobSidecar(blob_sidecar) => {
                             self.publish_blob_sidecar(blob_sidecar);
                         }
+                        ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
+                            self.publish_data_column_sidecar(data_column_sidecar);
+                        }
                         ValidatorToP2p::PublishSingularAttestation(attestation, subnet_id) => {
                             self.publish_singular_attestation(attestation, subnet_id);
                         }
@@ -589,6 +592,23 @@ impl<P: Preset> Network<P> {
         self.publish(PubsubMessage::BlobSidecar(Box::new((
             subnet_id,
             blob_sidecar,
+        ))));
+    }
+
+    fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+        let subnet_id = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
+        let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+
+        self.log(
+            Level::Debug,
+            format_args!(
+                "publishing data column sidecar: {data_column_identifier:?}, subnet_id: {subnet_id}"
+            ),
+        );
+
+        self.publish(PubsubMessage::DataColumnSidecar(Box::new((
+            subnet_id,
+            data_column_sidecar,
         ))));
     }
 
