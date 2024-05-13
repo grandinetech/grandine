@@ -11,9 +11,7 @@ use std::{
 use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::NonZeroExt as _;
 use clock::Tick;
-use eip_7594::{
-    compute_subnet_for_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof,
-};
+use eip_7594::{verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
 use hash_hasher::HashedMap;
@@ -2044,7 +2042,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected = compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
+            let expected = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
 
             ensure!(
                 actual == expected,
