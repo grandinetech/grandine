@@ -2157,12 +2157,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-        ensure!(
-            verify_kzg_proofs(&data_column_sidecar).unwrap_or(false),
+        verify_kzg_proofs(&data_column_sidecar).map_err(|error| {
             Error::DataColumnSidecarInvalid {
-                data_column_sidecar
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
             }
-        );
+        })?;
 
         if !origin.is_from_back_sync() {
             // [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the current shuffling
