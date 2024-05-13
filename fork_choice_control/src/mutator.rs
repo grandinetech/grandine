@@ -1691,7 +1691,6 @@ where
 
         self.update_store_snapshot();
 
-        todo!();
         // TODO(feature/eip-7594):
 
         // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
