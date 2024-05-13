@@ -48,7 +48,7 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::DataColumnIdentifier,
+    eip7594::{DataColumnIdentifier, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -450,6 +450,12 @@ impl<P: Preset> Network<P> {
                         }
                         SyncToP2p::SubscribeToCoreTopics => {
                             self.subscribe_to_core_topics();
+                        }
+                        SyncToP2p::SubscribeToDataColumnTopics => {
+                            self.subscribe_to_data_column_topics();
+                        }
+                        SyncToP2p::PruneReceivedBlocks => {
+                            self.received_block_roots = HashMap::new();
                         }
                     }
                 },
@@ -1990,6 +1996,17 @@ impl<P: Preset> Network<P> {
             .cloned()
         {
             ServiceInboundMessage::SubscribeKind(kind).send(&self.network_to_service_tx);
+        }
+    }
+
+    fn subscribe_to_data_column_topics(&mut self) {
+        // TODO(das): for now, subscribe to all data column sidecar subnets
+        for subnet_id in 0..DATA_COLUMN_SIDECAR_SUBNET_COUNT {
+            let subnet = Subnet::DataColumn(subnet_id);
+
+            if let Some(topic) = self.subnet_gossip_topic(subnet) {
+                ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
+            }
         }
     }
 
