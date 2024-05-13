@@ -135,6 +135,7 @@ pub enum SyncToP2p {
     RequestBlockByRoot(RequestId, PeerId, H256),
     RequestPeerStatus(RequestId, PeerId),
     SubscribeToCoreTopics,
+    SubscribeToDataColumnTopics,
 }
 
 impl SyncToP2p {
