@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Error as AnyhowError;
 use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
@@ -85,9 +86,10 @@ pub enum Error<P: Preset> {
     },
     // TODO(feature/deneb): This is vague.
     //                      The validation that fails with this error actually checks commitments.
-    #[error("data_column sidecar is invalid: {data_column_sidecar:?}")]
+    #[error("data_column sidecar is invalid: {data_column_sidecar:?} error: {error}")]
     DataColumnSidecarInvalid {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        error: AnyhowError,
     },
     #[error("data_column sidecar's block's parent is invalid: {data_column_sidecar:?}")]
     DataColumnSidecarInvalidParentOfBlock {

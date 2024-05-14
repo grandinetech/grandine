@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings};
 use hashing::ZERO_HASHES;
 use helper_functions::predicates::{index_at_commitment_depth, is_valid_merkle_branch};
@@ -8,22 +8,47 @@ use kzg::eip_4844::{load_trusted_setup_string, BYTES_PER_G1, BYTES_PER_G2};
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
+use thiserror::Error;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     combined::SignedBeaconBlock,
     deneb::primitives::{Blob, BlobIndex, KzgProof},
-    eip7594::{BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns},
+    eip7594::{
+        BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns,
+        DATA_COLUMN_SIDECAR_SUBNET_COUNT,
+    },
     phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
+    preset::Preset,
     traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
 };
-use types::{eip7594::DATA_COLUMN_SIDECAR_SUBNET_COUNT, preset::Preset};
 
 const MAX_BLOBS_PER_BLOCK: u64 = 6;
 const MAX_BLOB_COMMITMENTS_PER_BLOCK: usize = 6;
 
 type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
 type CellID = u64;
+
+#[derive(Debug, Error)]
+pub enum VerifyKzgProofsError {
+    #[error(
+        "Sidecar index is out of bounds: {index} expected {}",
+        NumberOfColumns::U64
+    )]
+    SidecarIndexOutOfBounds { index: u64 },
+    #[error(
+        "Sidecar column length {column_length} does not match commitment length {commitments_length}"
+    )]
+    SidecarCommitmentsLengthError {
+        column_length: usize,
+        commitments_length: usize,
+    },
+    #[error("Sidecar column length {column_length} does not match proofs length {proofs_length}")]
+    SidecarProofsLengthError {
+        column_length: usize,
+        proofs_length: usize,
+    },
+}
 
 pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
     let DataColumnSidecar {
@@ -34,8 +59,26 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         ..
     } = data_column_sidecar;
 
-    assert!(*index < NumberOfColumns::U64);
-    assert!(column.len() == kzg_commitments.len() && column.len() == kzg_proofs.len());
+    ensure!(
+        *index < NumberOfColumns::U64,
+        VerifyKzgProofsError::SidecarIndexOutOfBounds { index: *index }
+    );
+
+    ensure!(
+        column.len() == kzg_commitments.len(),
+        VerifyKzgProofsError::SidecarCommitmentsLengthError {
+            column_length: column.len(),
+            commitments_length: kzg_commitments.len(),
+        }
+    );
+
+    ensure!(
+        column.len() == kzg_proofs.len(),
+        VerifyKzgProofsError::SidecarProofsLengthError {
+            column_length: column.len(),
+            proofs_length: kzg_proofs.len(),
+        }
+    );
 
     let mut row_ids = Vec::new();
     for i in 0..column.len() {

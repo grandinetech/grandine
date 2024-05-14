@@ -210,6 +210,7 @@ pub fn compute_subnet_for_blob_sidecar(blob_index: BlobIndex) -> SubnetId {
 }
 
 // source: https://github.com/ethereum/consensus-specs/pull/3574/files/cebf78a83e6fc8fa237daf4264b9ca0fe61473f4#diff-96cf4db15bede3d60f04584fb25339507c35755959159cdbe19d760ca92de109R106
+#[must_use]
 pub fn compute_subnet_for_data_column_sidecar(column_index: ColumnIndex) -> SubnetId {
     (column_index % DATA_COLUMN_SIDECAR_SUBNET_COUNT)
         .try_into()
