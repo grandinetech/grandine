@@ -2043,6 +2043,7 @@ dependencies = [
  "spec_test_utils",
  "ssz",
  "test-generator",
+ "thiserror",
  "try_from_iterator",
  "typenum",
  "types",

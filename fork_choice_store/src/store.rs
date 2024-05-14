@@ -1856,12 +1856,12 @@ impl<P: Preset> Store<P> {
         );
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-        ensure!(
-            verify_kzg_proofs(&data_column_sidecar).unwrap_or(false),
+        verify_kzg_proofs(&data_column_sidecar).map_err(|error| {
             Error::DataColumnSidecarInvalid {
-                data_column_sidecar
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
             }
-        );
+        })?;
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 1/2:
