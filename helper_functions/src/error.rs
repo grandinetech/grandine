@@ -28,8 +28,11 @@ pub(crate) enum Error {
     FailedToSelectProposer,
     #[error("no validators are active")]
     NoActiveValidators,
-    #[error("aggregation bitlist length does not match participants count")]
-    ParticipantsCountMismatch,
+    #[error("aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}")]
+    ParticipantsCountMismatch {
+        aggregation_bitlist_length: usize,
+        participants_count: usize,
+    },
     #[error("permutated prefix maximum overflowed")]
     PermutatedPrefixMaximumOverflow,
     #[error("{0} is invalid")]
