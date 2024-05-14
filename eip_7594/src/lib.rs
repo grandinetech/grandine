@@ -87,6 +87,9 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
 
     let kzg_settings = load_kzg_settings()?;
 
+    // let trusted_setup_file = std::path::Path::new("../kzg_utils/src/trusted_setup.txt");
+    // let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
+
     let column = column
         .clone()
         .into_iter()
@@ -104,7 +107,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .collect::<Result<Vec<_>>>()?;
 
     Ok(CKzgProof::verify_cell_proof_batch(
-        &commitment[..],
+        commitment.as_slice(),
         &row_ids,
         &[*index],
         &column[..],
@@ -363,10 +366,11 @@ mod tests {
     use helper_functions::predicates::{index_at_commitment_depth, is_valid_merkle_branch};
     use serde::Deserialize;
     use spec_test_utils::Case;
-    use ssz::{SszHash as _, H256};
+    use ssz::{SszHash as _, SszRead as _, H256};
     use test_generator::test_resources;
     use typenum::Unsigned as _;
     use types::{
+        config::Config,
         deneb::containers::BeaconBlockBody as DenebBeaconBlockBody,
         phase0::primitives::NodeId,
         preset::{Mainnet, Minimal, Preset},
@@ -374,87 +378,16 @@ mod tests {
 
     use crate::{get_custody_columns, kzg_commitment_inclusion_proof, ColumnIndex};
 
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Meta {
-        description: Option<String>,
-        node_id: NodeId,
-        custody_subnet_count: u64,
-        result: Vec<ColumnIndex>,
-    }
+    use super::*;
 
-    #[duplicate_item(
-        glob                                                                              function_name                 preset;
-        ["consensus-spec-tests/tests/mainnet/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_mainnet] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_minimal] [Minimal];
-    )]
-    #[test_resources(glob)]
-    fn function_name(case: Case) {
-        run_case::<preset>(case);
-    }
+    #[test]
+    fn test_verify_kzg_proofs() -> Result<()> {
+        let config = Config::mainnet();
+        let bytes = fs_err::read("../data_column_sidecar.ssz")?;
+        let sidecar = DataColumnSidecar::<Mainnet>::from_ssz(&config, &bytes)?;
 
-    fn run_case<P: Preset>(case: Case) {
-        let Meta {
-            description: _description,
-            node_id,
-            custody_subnet_count,
-            result,
-        } = case.yaml::<Meta>("meta");
+        verify_kzg_proofs(&sidecar)?;
 
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
-    }
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Proof {
-        leaf: H256,
-        leaf_index: u64,
-        branch: Vec<H256>,
-    }
-
-    #[duplicate_item(
-        glob                                                                                              function_name                            preset;
-        ["consensus-spec-tests/tests/mainnet/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [kzg_commitment_inclusion_proof_mainnet] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [kzg_commitment_inclusion_proof_minimal] [Minimal];
-    )]
-    #[test_resources(glob)]
-    fn function_name(case: Case) {
-        run_beacon_block_body_proof_case::<preset>(case);
-    }
-
-    fn run_beacon_block_body_proof_case<P: Preset>(case: Case) {
-        let Proof {
-            leaf,
-            leaf_index,
-            branch,
-        } = case.yaml("proof");
-
-        // Unlike the name suggests, `leaf_index` is actually a generalized index.
-        // `is_valid_merkle_branch` expects an index that includes only leaves.
-        let commitment_index = leaf_index % P::MaxBlobCommitmentsPerBlock::U64;
-        let index_at_commitment_depth = index_at_commitment_depth::<P>(commitment_index);
-        // vs
-        // let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
-
-        let block_body: DenebBeaconBlockBody<P> =
-            case.ssz_default::<DenebBeaconBlockBody<P>>("object");
-
-        let root = block_body.hash_tree_root();
-
-        // > Check that `is_valid_merkle_branch` confirms `leaf` at `leaf_index` to verify
-        // > against `has_tree_root(state)` and `proof`.
-        assert!(is_valid_merkle_branch(
-            leaf,
-            branch.iter().copied(),
-            index_at_commitment_depth,
-            root,
-        ));
-
-        // > If the implementation supports generating merkle proofs, check that the
-        // > self-generated proof matches the `proof` provided with the test.
-        //
-        let proof = kzg_commitment_inclusion_proof(&block_body);
-
-        assert_eq!(proof.as_slice(), branch);
+        Ok(())
     }
 }

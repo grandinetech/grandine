@@ -2034,6 +2034,7 @@ dependencies = [
  "anyhow",
  "c-kzg",
  "duplicate",
+ "fs-err",
  "hashing",
  "helper_functions",
  "kzg",
