@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, ensure, Result};
 use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings};
 use hashing::ZERO_HASHES;
-use helper_functions::predicates::{index_at_commitment_depth, is_valid_merkle_branch};
+use helper_functions::predicates::is_valid_merkle_branch;
 use kzg::eip_4844::{load_trusted_setup_string, BYTES_PER_G1, BYTES_PER_G2};
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
@@ -117,14 +117,14 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
 ) -> bool {
     let DataColumnSidecar {
-        index,
         kzg_commitments,
         signed_block_header,
         kzg_commitments_inclusion_proof,
         ..
     } = data_column_sidecar;
 
-    let index_at_commitment_depth = index_at_commitment_depth::<P>(*index);
+    // Fields in BeaconBlockBody before blob KZG commitments
+    let index_at_commitment_depth = 11;
 
     // is_valid_blob_sidecar_inclusion_proof
     return is_valid_merkle_branch(
