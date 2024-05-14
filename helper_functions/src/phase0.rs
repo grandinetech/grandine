@@ -54,7 +54,10 @@ pub fn get_attesting_indices<'all, P: Preset>(
 
     ensure!(
         committee.len() == aggregation_bits.len(),
-        Error::CommitteeLengthMismatch,
+        Error::CommitteeLengthMismatch {
+            aggregation_bitlist_length: aggregation_bits.len(),
+            committee_length: committee.len(),
+        },
     );
 
     // `Itertools::zip_eq` is slower than `Iterator::zip` when iterating over packed indices.
