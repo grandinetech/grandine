@@ -92,63 +92,6 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     );
 }
 
-pub fn verify_data_column_sidecar_kzg_proofs<P: Preset>(
-    sidecar: DataColumnSidecar<P>,
-) -> Result<bool> {
-    assert!(sidecar.index < NumberOfColumns::U64);
-    assert!(
-        sidecar.column.len() == sidecar.kzg_commitments.len()
-            && sidecar.column.len() == sidecar.kzg_proofs.len()
-    );
-    let mut row_ids = Vec::new();
-    for i in 0..sidecar.column.len() {
-        row_ids.push(i as u64);
-    }
-
-    let kzg_settings = load_kzg_settings()?;
-
-    let column = sidecar
-        .column
-        .into_iter()
-        .map(|a| CKzgCell::from_bytes(&a.as_bytes()).map_err(Into::into))
-        .collect::<Result<Vec<_>>>()?;
-
-    let commitment = sidecar
-        .kzg_commitments
-        .iter()
-        .map(|a| Bytes48::from_bytes(a.as_bytes()).map_err(Into::into))
-        .collect::<Result<Vec<_>>>()?;
-
-    let kzg_proofs = sidecar
-        .kzg_proofs
-        .iter()
-        .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(CKzgProof::verify_cell_proof_batch(
-        &commitment[..],
-        &row_ids,
-        &vec![sidecar.index],
-        &column[..],
-        &kzg_proofs,
-        &kzg_settings,
-    )?)
-}
-
-pub fn verify_data_column_sidecar_inclusion_proof<P: Preset>(
-    sidecar: DataColumnSidecar<P>,
-) -> bool {
-    let index_at_commitment_depth = index_at_commitment_depth::<P>(sidecar.index);
-
-    // is_valid_blob_sidecar_inclusion_proof
-    return is_valid_merkle_branch(
-        sidecar.kzg_commitments.hash_tree_root(),
-        sidecar.kzg_commitments_inclusion_proof,
-        index_at_commitment_depth,
-        sidecar.signed_block_header.message.body_root,
-    );
-}
-
 pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 

@@ -11,7 +11,6 @@ use std::{
 use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::NonZeroExt as _;
 use clock::Tick;
-use eip_7594::{verify_data_column_sidecar_inclusion_proof, verify_data_column_sidecar_kzg_proofs};
 use eip_7594::{verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
