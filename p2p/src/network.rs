@@ -1239,8 +1239,76 @@ impl<P: Preset> Network<P> {
         request_id: IncomingRequestId,
         request: DataColumnsByRangeRequest,
     ) -> Result<()> {
-        // TODO(feature/eip7549): implement this
         debug!("received DataColumnsByRange request (peer_id: {peer_id}, request: {request:?})");
+
+        let DataColumnsByRangeRequest {
+            start_slot,
+            count,
+            columns,
+        } = request;
+
+        let controller = self.controller.clone_arc();
+
+        // TODO(feature/eip7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        // Let data_column_serve_range be
+        //  [max(current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS, EIP7594_FORK_EPOCH), current_epoch].
+        let start_slot = start_slot.max(misc::compute_start_slot_at_epoch::<P>(
+            self.controller.chain_config().eip7594_fork_epoch,
+        ));
+
+        // > Clients MAY limit the number of blocks and sidecars in the response.
+        let difference = count.min(
+            self.controller
+                .chain_config()
+                .max_request_data_column_sidecars,
+        );
+
+        let current_slot = self.controller.head_slot();
+        let end_slot = start_slot
+            .checked_add(difference)
+            .ok_or(Error::EndSlotOverflow {
+                start_slot,
+                difference,
+            })?
+            .min(current_slot);
+
+        let network_to_service_tx = self.network_to_service_tx.clone();
+
+        self.dedicated_executor
+            .spawn(async move {
+                let mut data_column_sidecars = controller.data_column_sidecars_by_range(start_slot..end_slot, &columns)?;
+
+                // The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
+                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+
+                for data_column_sidecar in data_column_sidecars {
+                    debug!(
+                        "sending DataColumnsSidecarsByRange response chunk \
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, data_column_sidecar: {data_column_sidecar:?})",
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        peer_request_id,
+                        request_id,
+                        Box::new(Response::DataColumnsByRange(Some(data_column_sidecar))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+
+                debug!("terminating BlobSidecarsByRange response stream");
+
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    peer_request_id,
+                    request_id,
+                    Box::new(Response::DataColumnsByRange(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
 
         Ok(())
     }
@@ -1474,22 +1542,9 @@ impl<P: Preset> Network<P> {
                     request_id: {request_id}",
                 );
             }
-            Response::LightClientBootstrap(_) => {
-                // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
-            }
-            Response::LightClientFinalityUpdate(_) => {
-                // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientFinalityUpdate response (peer_id: {peer_id})");
-            }
-            Response::LightClientOptimisticUpdate(_) => {
-                // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientOptimisticUpdate response (peer_id: {peer_id})");
-            }
-            Response::LightClientUpdatesByRange(_) => {
-                // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
-            }
+            // TODO(feature/eip7594): This appears to be unfinished.
+            // > Before consuming the next response chunk, the response reader SHOULD verify the
+            // > data column sidecar is well-formatted, has valid inclusion proof, and is correct w.r.t. the expected KZG commitments
             Response::DataColumnsByRange(Some(data_column_sidecar)) => {
                 let data_column_identifier: DataColumnIdentifier =
                     data_column_sidecar.as_ref().into();
@@ -1542,6 +1597,22 @@ impl<P: Preset> Network<P> {
             }
             Response::DataColumnsByRoot(None) => {
                 debug!("peer {peer_id} terminated DataColumnsByRoot response stream for request_id: {request_id}");
+            }
+            Response::LightClientBootstrap(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                debug!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
+            }
+            Response::LightClientFinalityUpdate(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                debug!("received LightClientFinalityUpdate response (peer_id: {peer_id})");
+            }
+            Response::LightClientOptimisticUpdate(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                debug!("received LightClientOptimisticUpdate response (peer_id: {peer_id})");
+            }
+            Response::LightClientUpdatesByRange(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                debug!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
             }
         }
     }

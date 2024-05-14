@@ -12,12 +12,13 @@ use fork_choice_store::{
 use helper_functions::misc;
 use itertools::Itertools as _;
 use serde::Serialize;
+use ssz::ContiguousList;
 use std_ext::ArcExt;
 use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -493,6 +494,28 @@ where
             .collect_vec();
 
         Ok(data_columns)
+    }
+
+    pub fn data_column_sidecars_by_range(
+        &self,
+        range: Range<Slot>,
+        columns: &ContiguousList<ColumnIndex, NumberOfColumns>,
+    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+        let canonical_chain_blocks = self.blocks_by_range(range)?;
+
+        let data_column_ids = canonical_chain_blocks
+            .iter()
+            .filter_map(|BlockWithRoot { block, root }| {
+                block.message().body().post_deneb().map(|_| {
+                    columns.iter().map(|index| DataColumnIdentifier {
+                        index: *index,
+                        block_root: *root,
+                    })
+                })
+            })
+            .flatten();
+
+        self.data_column_sidecars_by_ids(data_column_ids)
     }
 
     pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
