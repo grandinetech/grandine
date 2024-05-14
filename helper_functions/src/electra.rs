@@ -103,7 +103,10 @@ pub fn get_attesting_indices<P: Preset>(
     // This works the same as `assert len(attestation.aggregation_bits) == participants_count`
     ensure!(
         committee_offset == attestation.aggregation_bits.len(),
-        Error::ParticipantsCountMismatch,
+        Error::ParticipantsCountMismatch {
+            aggregation_bitlist_length: attestation.aggregation_bits.len(),
+            participants_count: committee_offset
+        },
     );
 
     Ok(output)
