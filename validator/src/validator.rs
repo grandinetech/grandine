@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::ops::{ControlFlow, Div as _};
+use core::ops::{ControlFlow, Deref as _, Div as _};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     error::Error as StdError,
@@ -1373,7 +1373,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 committee_bits.set(committee_index.try_into()?, true);
             }
 
-            let bits = Vec::<u8>::from(aggregate.aggregation_bits);
+            // let bits = Vec::<u8>::from(aggregate.aggregation_bits);
+            let bits = aggregate
+                .aggregation_bits
+                .deref()
+                .clone()
+                .into_bitvec()
+                .into_vec();
+
             aggregation_bits.extend_from_slice(&bits);
 
             signature.aggregate_in_place(aggregate.signature.try_into()?);
