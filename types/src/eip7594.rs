@@ -87,7 +87,7 @@ impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
                 &self.kzg_commitments_inclusion_proof,
             )
             .field("signed_block_header", &self.signed_block_header)
-            .field("kzg_commitments", &self.kzg_commitments.hash_tree_root())
+            .field("kzg_commitments", &self.kzg_commitments)
             .finish()
     }
 }

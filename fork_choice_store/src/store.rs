@@ -2900,6 +2900,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        self.accepted_data_column_sidecars
+            .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        // TODO(feature/eip-7594):
+        //
+        // Data columns must be stored for much longer period than finalization.
+        // However, that should be done in persistence layer.
+        self.data_column_cache
+            .retain(|_, (_, slot)| finalized_slot <= *slot);
         self.prune_checkpoint_states();
         self.prune_state_cache(false);
         self.aggregate_and_proof_supersets
