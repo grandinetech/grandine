@@ -327,7 +327,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
-                        if !self.attestation_agg_pool.has_registered_validators_proposing_in_slots(slot..=slot).await {
+                        let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
+                            || self.attestation_agg_pool.has_registered_validators_proposing_in_slots(slot..=slot).await;
+
+                        if !should_prepare_execution_payload {
                             return Ok(());
                         }
 
