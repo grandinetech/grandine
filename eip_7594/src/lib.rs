@@ -80,10 +80,11 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         }
     );
 
-    let mut row_ids = Vec::new();
-    for i in 0..column.len() {
-        row_ids.push(i as u64);
-    }
+    let (row_indices, col_indices): (Vec<_>, Vec<_>) = column
+        .iter()
+        .zip(0_u64..)
+        .map(|(_, row_index)| (row_index, index))
+        .unzip();
 
     let kzg_settings = load_kzg_settings()?;
 
@@ -93,7 +94,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| CKzgCell::from_bytes(a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    let commitment = kzg_commitments
+    let commitments = kzg_commitments
         .iter()
         .map(|a| Bytes48::from_bytes(a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
@@ -103,14 +104,15 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(CKzgProof::verify_cell_proof_batch(
-        &commitment[..],
-        &row_ids,
-        &[*index],
-        &column[..],
+    CKzgProof::verify_cell_proof_batch(
+        commitments.as_slice(),
+        &row_indices,
+        &col_indices,
+        column.as_slice(),
         &kzg_proofs,
         &kzg_settings,
-    )?)
+    )
+    .map_err(Into::into)
 }
 
 pub fn verify_sidecar_inclusion_proof<P: Preset>(
