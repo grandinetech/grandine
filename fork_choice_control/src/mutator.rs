@@ -45,10 +45,11 @@ use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    eip7594::{DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -589,7 +590,7 @@ where
                     let missing_column_indices =
                         self.store.indices_of_missing_data_columns(&parent.block);
 
-                    if missing_column_indices.is_empty() {
+                    if missing_column_indices.len() * 2 >= NumberOfColumns::USIZE {
                         self.retry_block(wait_group, pending_block);
                     } else {
                         info!(
@@ -1985,11 +1986,11 @@ where
 
         self.update_store_snapshot();
 
-        // TODO(feature/eip-7594):
+        if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
+            self.retry_block(wait_group.clone(), pending_block.clone());
+        }
 
-        // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
-        //     self.retry_block(wait_group.clone(), pending_block.clone());
-        // }
+        // TODO(feature/eip-7594):
 
         // self.spawn(PersistBlobSidecarsTask {
         //     store_snapshot: self.owned_store(),
@@ -1999,7 +2000,7 @@ where
         //     metrics: self.metrics.clone(),
         // });
 
-        // self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
+        self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
 
     fn notify_about_finalized_checkpoint(&self) {
