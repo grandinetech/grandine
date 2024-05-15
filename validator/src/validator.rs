@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::ops::{ControlFlow, Deref as _, Div as _};
+use core::ops::{ControlFlow, Div as _};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     error::Error as StdError,
@@ -1356,38 +1356,31 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             })
             .collect_vec();
 
+        let aggregation_bits = aggregates
+            .iter()
+            .map(|attestation| &attestation.aggregation_bits)
+            .pipe(BitList::concatenate)?;
+
         let data = if let Some(attestation) = aggregates.first() {
             attestation.data
         } else {
             return Err(AnyhowError::msg("no attestations for block aggregate"));
         };
 
-        let mut signature = AggregateSignature::default();
-        let mut aggregation_bits: Vec<u8> = vec![];
         let mut committee_bits = BitVector::default();
+        let mut signature = AggregateSignature::default();
 
         for aggregate in aggregates {
-            if let Some(committee_index) =
-                misc::get_committee_indices::<P>(aggregate.committee_bits).next()
-            {
-                committee_bits.set(committee_index.try_into()?, true);
+            for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
+                let index = committee_index.try_into()?;
+                committee_bits.set(index, true);
             }
-
-            // let bits = Vec::<u8>::from(aggregate.aggregation_bits);
-            let bits = aggregate
-                .aggregation_bits
-                .deref()
-                .clone()
-                .into_bitvec()
-                .into_vec();
-
-            aggregation_bits.extend_from_slice(&bits);
 
             signature.aggregate_in_place(aggregate.signature.try_into()?);
         }
 
         Ok(ElectraAttestation {
-            aggregation_bits: BitList::try_from(aggregation_bits)?,
+            aggregation_bits,
             data,
             committee_bits,
             signature: signature.into(),
