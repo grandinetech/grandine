@@ -115,7 +115,8 @@ use types::{
     },
     preset::Preset,
     traits::{
-        BeaconState as _, PostAltairBeaconState, PostBellatrixBeaconState, SignedBeaconBlock as _,
+        BeaconState as BeaconStateTrait, PostAltairBeaconState, PostBellatrixBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 
@@ -1270,10 +1271,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         .filter_map(|attestation| convert_to_electra_attestation(attestation).ok())
                         .group_by(|attestation| attestation.data);
 
+                    let state = slot_head.beacon_state.as_ref();
+
                     let attestations = attestations
                         .into_iter()
                         .filter_map(|(_, attestations)| {
-                            Self::compute_on_chain_aggregate(attestations).ok()
+                            Self::compute_on_chain_aggregate(state, attestations).ok()
                         })
                         .take(P::MaxAttestationsElectra::USIZE);
 
@@ -1348,8 +1351,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     pub fn compute_on_chain_aggregate(
+        state: &impl BeaconStateTrait<P>,
         attestations: impl Iterator<Item = ElectraAttestation<P>>,
     ) -> Result<ElectraAttestation<P>> {
+        log::info!("COMPUTE ON CHAIN AGGREGTES");
+
         let aggregates = attestations
             .sorted_by_key(|attestation| {
                 misc::get_committee_indices::<P>(attestation.committee_bits).next()
@@ -1371,6 +1377,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let mut signature = AggregateSignature::default();
 
         for aggregate in aggregates {
+            let committee_indices = misc::get_committee_indices::<P>(aggregate.committee_bits);
+            let mut committee_offset = 0;
+
+            for index in committee_indices {
+                let committee = accessors::beacon_committee(state, aggregate.data.slot, index)?;
+
+                let committee_attesters = committee
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, index)| {
+                        (aggregate.aggregation_bits.get(committee_offset + i)?).then_some(index)
+                    })
+                    .collect::<Vec<_>>();
+
+                log::info!("GET ATTESTING INDICES FOR AGGREGATE ATTESTATIONS: {aggregate:#?}");
+                log::info!("COMMITTEE {index} ATTESTERS: {committee_attesters:#?}");
+
+                committee_offset += committee.len();
+            }
+
             for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
                 let index = committee_index.try_into()?;
                 committee_bits.set(index, true);
