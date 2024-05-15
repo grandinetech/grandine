@@ -80,15 +80,13 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         }
     );
 
-    let mut row_ids = Vec::new();
-    for i in 0..column.len() {
-        row_ids.push(i as u64);
-    }
+    let (row_indices, col_indices): (Vec<_>, Vec<_>) = column
+        .iter()
+        .zip(0_u64..)
+        .map(|(_, row_index)| (row_index, index))
+        .unzip();
 
     let kzg_settings = load_kzg_settings()?;
-
-    // let trusted_setup_file = std::path::Path::new("../kzg_utils/src/trusted_setup.txt");
-    // let kzg_settings = KzgSettings::load_trusted_setup_file(trusted_setup_file).unwrap();
 
     let column = column
         .clone()
@@ -96,7 +94,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| CKzgCell::from_bytes(a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    let commitment = kzg_commitments
+    let commitments = kzg_commitments
         .iter()
         .map(|a| Bytes48::from_bytes(a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
@@ -106,11 +104,11 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(CKzgProof::verify_cell_proof_batch(
-        commitment.as_slice(),
-        &row_ids,
-        &[*index],
-        &column[..],
+    Ok(CKzgProof::verify_cell_kzg_proof_batch(
+        commitments.as_slice(),
+        &row_indices,
+        &col_indices,
+        column.as_slice(),
         &kzg_proofs,
         &kzg_settings,
     )?)
@@ -203,6 +201,7 @@ pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
     Ok(array)
 }
 
+/*
 fn recover_matrix(
     cells_dict: &HashMap<(BlobIndex, CellID), CKzgCell>,
     blob_count: usize,
@@ -221,7 +220,7 @@ fn recover_matrix(
             .iter()
             .map(|&cell_id| cells_dict[&(blob_index as u64, cell_id)])
             .collect();
-        let full_polynomial = CKzgCell::recover_polynomial(&cell_ids, &cells, &kzg_settings)?;
+        let full_polynomial = CKzgCell::recover_all_cells(&cell_ids, &cells, &kzg_settings)?;
         extended_matrix.push(full_polynomial);
     }
     let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
@@ -255,7 +254,7 @@ pub fn get_data_column_sidecars<P: Preset>(
         let cells_and_proofs = c_kzg_blobs
             .into_iter()
             .map(|blob| {
-                CKzgCell::compute_cells_and_proofs(&blob, &kzg_settings).map_err(Into::into)
+                CKzgCell::compute_cells_and_kzg_proofs(&blob, &kzg_settings).map_err(Into::into)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -304,6 +303,7 @@ pub fn get_data_column_sidecars<P: Preset>(
 
     Ok(vec![])
 }
+*/
 
 fn kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
@@ -356,6 +356,7 @@ fn load_kzg_settings() -> Result<KzgSettings> {
             .chunks_exact(BYTES_PER_G2)
             .map(|chunk| TryInto::<[u8; BYTES_PER_G2]>::try_into(chunk).map_err(Into::into))
             .collect::<Result<Vec<_>>>()?,
+        0,
     )
     .map_err(|error| anyhow!(error))
 }
