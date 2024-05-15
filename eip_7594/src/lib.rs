@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, ensure, Result};
-use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, KzgSettings};
+use anyhow::{ensure, Result};
+use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof};
 use hashing::ZERO_HASHES;
 use helper_functions::predicates::is_valid_merkle_branch;
-use kzg::eip_4844::{load_trusted_setup_string, BYTES_PER_G1, BYTES_PER_G2};
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
@@ -24,8 +23,11 @@ use types::{
     traits::{BeaconBlock as _, BeaconState, PostElectraBeaconBlockBody, SignedBeaconBlock as _},
 };
 
+use crate::trusted_setup::settings;
+
+mod trusted_setup;
+
 const MAX_BLOBS_PER_BLOCK: u64 = 6;
-const MAX_BLOB_COMMITMENTS_PER_BLOCK: usize = 6;
 
 type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
 type CellID = u64;
@@ -81,12 +83,13 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         }
     );
 
-    let mut row_ids = Vec::new();
-    for i in 0..column.len() {
-        row_ids.push(i as u64);
-    }
+    let (row_indices, col_indices): (Vec<_>, Vec<_>) = column
+        .iter()
+        .zip(0_u64..)
+        .map(|(_, row_index)| (row_index, index))
+        .unzip();
 
-    let kzg_settings = load_kzg_settings()?;
+    let kzg_settings = settings();
 
     let column = column
         .clone()
@@ -94,7 +97,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| CKzgCell::from_bytes(a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    let commitment = kzg_commitments
+    let commitments = kzg_commitments
         .iter()
         .map(|a| Bytes48::from_bytes(a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
@@ -104,14 +107,15 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(CKzgProof::verify_cell_proof_batch(
-        &commitment[..],
-        &row_ids,
-        &[*index],
-        &column[..],
+    CKzgProof::verify_cell_proof_batch(
+        commitments.as_slice(),
+        &row_indices,
+        &col_indices,
+        column.as_slice(),
         &kzg_proofs,
         &kzg_settings,
-    )?)
+    )
+    .map_err(Into::into)
 }
 
 pub fn verify_sidecar_inclusion_proof<P: Preset>(
@@ -188,7 +192,7 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
 pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
     let mut extended_matrix: Vec<CKzgCell> = Vec::new();
 
-    let kzg_settings = load_kzg_settings()?;
+    let kzg_settings = settings();
 
     for blob in blobs {
         let cells = *CKzgCell::compute_cells(&blob, &kzg_settings)?;
@@ -205,7 +209,7 @@ fn recover_matrix(
     cells_dict: &HashMap<(BlobIndex, CellID), CKzgCell>,
     blob_count: usize,
 ) -> Result<ExtendedMatrix> {
-    let kzg_settings = load_kzg_settings()?;
+    let kzg_settings = settings();
 
     let mut extended_matrix = Vec::new();
     for blob_index in 0..blob_count {
@@ -239,7 +243,7 @@ pub fn get_data_column_sidecars<P: Preset>(
         let kzg_commitments_inclusion_proof =
             kzg_commitment_inclusion_proof(post_electra_beacon_block_body);
 
-        let kzg_settings = load_kzg_settings()?;
+        let kzg_settings = settings();
 
         let signed_block_header = SignedBeaconBlockHeader {
             message: beacon_block.to_header(),
@@ -261,15 +265,19 @@ pub fn get_data_column_sidecars<P: Preset>(
 
         for column_index in 0..NumberOfColumns::U64 {
             let mut column_cells: Vec<CKzgCell> = Vec::new();
+
             for row_index in 0..blob_count {
                 column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());
             }
+
             let kzg_proof_of_column: Vec<_> = (0..blob_count)
                 .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
                 .collect();
 
             let cells = column_cells.iter().map(|cell| cell.to_bytes());
+
             let mut cont_cells = Vec::new();
+
             for cell in cells {
                 let bytes = cell.into_iter();
                 let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
@@ -277,17 +285,13 @@ pub fn get_data_column_sidecars<P: Preset>(
 
                 cont_cells.push(v);
             }
-            // let mut column_cell_array = [[0; 2048]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
-            // column_cell_array.copy_from_slice(&column_cells[..]);
 
-            let mut kzg_proofs_array: [[u8; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK] =
-                [[0; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
-            kzg_proofs_array.copy_from_slice(&kzg_proof_of_column[..]);
+            let proofs = kzg_proof_of_column
+                .iter()
+                .map(|data| KzgProof::try_from(data).map_err(Into::into))
+                .collect::<Result<Vec<KzgProof>>>()?;
 
-            let mut continuous_proof_vec = Vec::new();
-            for proof in kzg_proofs_array {
-                continuous_proof_vec.push(KzgProof::try_from(proof)?);
-            }
+            let kzg_proofs = ContiguousList::try_from_iter(proofs.into_iter())?;
 
             sidecars.push(DataColumnSidecar {
                 index: column_index,
@@ -295,14 +299,14 @@ pub fn get_data_column_sidecars<P: Preset>(
                 kzg_commitments: post_electra_beacon_block_body
                     .blob_kzg_commitments()
                     .clone(),
-                kzg_proofs: ContiguousList::try_from(continuous_proof_vec)?,
+                kzg_proofs,
                 signed_block_header,
                 kzg_commitments_inclusion_proof,
             });
         }
     }
 
-    Ok(vec![])
+    Ok(sidecars)
 }
 
 fn kzg_commitment_inclusion_proof<P: Preset>(
@@ -343,24 +347,6 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
     );
 
     proof
-}
-
-fn load_kzg_settings() -> Result<KzgSettings> {
-    let contents = include_str!("../../kzg_utils/src/trusted_setup.txt");
-    let (g1_monomial_bytes, _g1_lagrange_bytes, g2_monomial_bytes) =
-        load_trusted_setup_string(contents).map_err(|error| anyhow!(error))?;
-
-    KzgSettings::load_trusted_setup(
-        &g1_monomial_bytes
-            .chunks_exact(BYTES_PER_G1)
-            .map(|chunk| TryInto::<[u8; BYTES_PER_G1]>::try_into(chunk).map_err(Into::into))
-            .collect::<Result<Vec<_>>>()?,
-        &g2_monomial_bytes
-            .chunks_exact(BYTES_PER_G2)
-            .map(|chunk| TryInto::<[u8; BYTES_PER_G2]>::try_into(chunk).map_err(Into::into))
-            .collect::<Result<Vec<_>>>()?,
-    )
-    .map_err(|error| anyhow!(error))
 }
 
 #[must_use]
