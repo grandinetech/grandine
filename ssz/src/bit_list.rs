@@ -65,6 +65,25 @@ impl<N: Unsigned> TryFrom<Vec<u8>> for BitList<N> {
     }
 }
 
+// This could be a `From` impl if feature `generic_const_exprs` were stable.
+// See <https://internals.rust-lang.org/t/const-generics-where-restrictions/12742/6>.
+#[cfg(test)]
+impl<N: Unsigned, const SIZE: usize> TryFrom<[bool; SIZE]> for BitList<N> {
+    type Error = ReadError;
+
+    fn try_from(bits: [bool; SIZE]) -> Result<Self, Self::Error> {
+        Self::validate_length(SIZE)?;
+
+        let mut bit_list = Self::with_length(SIZE);
+
+        for (index, bit) in bits.into_iter().enumerate() {
+            bit_list.bits.set(index, bit);
+        }
+
+        Ok(bit_list)
+    }
+}
+
 impl<N> BitOrAssign<&Self> for BitList<N> {
     fn bitor_assign(&mut self, other: &Self) {
         assert_eq!(self.len(), other.len());
@@ -175,6 +194,28 @@ impl<N> BitList<N> {
         Self::from_bit_box(bitbox![_, _; u8::from(value); length])
     }
 
+    pub fn concatenate<'lists>(
+        bit_lists: impl IntoIterator<Item = &'lists Self>,
+    ) -> Result<Self, ReadError>
+    where
+        N: Unsigned,
+    {
+        let mut bits = BitVec::new();
+
+        for bit_list in bit_lists {
+            bits.extend_from_bitslice(bit_list);
+        }
+
+        let maximum = N::USIZE;
+        let actual = bits.len();
+
+        if actual > maximum {
+            return Err(ReadError::BitListTooLong { maximum, actual });
+        }
+
+        Ok(Self::from_bit_box(bits.into_boxed_bitslice()))
+    }
+
     #[must_use]
     pub fn any_not_in(&self, other: &Self) -> bool {
         assert_eq!(self.len(), other.len());
@@ -243,6 +284,22 @@ impl<N> BitList<N> {
     }
 }
 
+#[cfg(test)]
+impl<N> BitList<N> {
+    const fn validate_length(actual: usize) -> Result<(), ReadError>
+    where
+        N: Unsigned,
+    {
+        let maximum = N::USIZE;
+
+        if actual > maximum {
+            return Err(ReadError::BitListTooLong { maximum, actual });
+        }
+
+        Ok(())
+    }
+}
+
 const fn bytes_without_delimiting_bit(length: usize) -> usize {
     length.div_ceil(BITS_PER_BYTE)
 }
@@ -253,6 +310,8 @@ const fn bytes_with_delimiting_bit(length: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use typenum::U2;
+
     use super::*;
 
     // `BitVec::repeat` sets all bits in its buffer (including unused ones) to the same value.
@@ -267,5 +326,120 @@ mod tests {
     #[test]
     fn bit_list_new_with_false_clears_unused_bits() {
         assert_eq!(BitList::<U1>::new(false, 1).bits.as_raw_slice(), [0]);
+    }
+
+    #[test]
+    fn can_concatenate_bit_lists_of_max_length_1() -> Result<(), ReadError> {
+        type N = U1;
+
+        fn bit_list<const SIZE: usize>(bits: [bool; SIZE]) -> Result<BitList<N>, ReadError> {
+            bits.try_into()
+        }
+
+        #[allow(clippy::needless_pass_by_value)]
+        fn concatenate<const SIZE: usize>(
+            bit_lists: [BitList<N>; SIZE],
+        ) -> Result<BitList<N>, ReadError> {
+            BitList::concatenate(bit_lists.iter())
+        }
+
+        assert_eq!(concatenate([]), bit_list([]));
+        assert_eq!(concatenate([bit_list([])?]), bit_list([]));
+        assert_eq!(concatenate([bit_list([])?, bit_list([])?]), bit_list([]));
+
+        assert_eq!(concatenate([bit_list([false])?]), bit_list([false]));
+        assert_eq!(concatenate([bit_list([true])?]), bit_list([true]));
+
+        assert_eq!(
+            concatenate([bit_list([true])?, bit_list([true])?]),
+            Err(ReadError::BitListTooLong {
+                maximum: 1,
+                actual: 2,
+            }),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_concatenate_bit_lists_of_max_length_2() -> Result<(), ReadError> {
+        type N = U2;
+
+        fn bit_list<const SIZE: usize>(bits: [bool; SIZE]) -> Result<BitList<N>, ReadError> {
+            bits.try_into()
+        }
+
+        #[allow(clippy::needless_pass_by_value)]
+        fn concatenate<const SIZE: usize>(
+            bit_lists: [BitList<N>; SIZE],
+        ) -> Result<BitList<N>, ReadError> {
+            BitList::concatenate(bit_lists.iter())
+        }
+
+        assert_eq!(
+            concatenate([bit_list([false])?, bit_list([false])?]),
+            bit_list([false, false]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([false])?, bit_list([true])?]),
+            bit_list([false, true]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([true])?, bit_list([false])?]),
+            bit_list([true, false]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([true])?, bit_list([true])?]),
+            bit_list([true, true]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([false, false])?, bit_list([])?]),
+            bit_list([false, false]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([])?, bit_list([false, false])?]),
+            bit_list([false, false]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([true, true])?, bit_list([])?]),
+            bit_list([true, true]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([])?, bit_list([true, true])?]),
+            bit_list([true, true]),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([true, true])?, bit_list([true])?]),
+            Err(ReadError::BitListTooLong {
+                maximum: 2,
+                actual: 3,
+            }),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([true])?, bit_list([true, true])?]),
+            Err(ReadError::BitListTooLong {
+                maximum: 2,
+                actual: 3,
+            }),
+        );
+
+        assert_eq!(
+            concatenate([bit_list([true, true])?, bit_list([true, true])?]),
+            Err(ReadError::BitListTooLong {
+                maximum: 2,
+                actual: 4,
+            }),
+        );
+
+        Ok(())
     }
 }
