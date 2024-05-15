@@ -109,8 +109,7 @@ use types::{
             SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
-            ValidatorIndex, H256,
+            Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256, ValidatorIndex, H256,
         },
     },
     preset::Preset,
@@ -1755,7 +1754,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             } = own_attestation;
 
-            let committee_index = committee_index(attestation);
+            let committee_index = misc::committee_index(attestation);
 
             debug!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
@@ -1794,7 +1793,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.own_aggregators = accepted_attestations
             .into_iter()
             .filter_map(|own_attestation| {
-                let committee_index = committee_index(&own_attestation.attestation);
+                let committee_index = misc::committee_index(&own_attestation.attestation);
 
                 let member =
                     own_members.get(&(committee_index, own_attestation.validator_index))?;
@@ -3500,16 +3499,5 @@ async fn update_beacon_committee_subscriptions(
 
     if let Err(error) = receiver.await {
         warn!("failed to update beacon committee subscriptions: {error:?}");
-    }
-}
-
-fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeIndex {
-    match attestation {
-        Attestation::Phase0(attestation) => attestation.data.index,
-        Attestation::Electra(attestation) => {
-            misc::get_committee_indices::<P>(attestation.committee_bits)
-                .next()
-                .unwrap_or_default()
-        }
     }
 }
