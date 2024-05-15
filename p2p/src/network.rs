@@ -1263,13 +1263,13 @@ impl<P: Preset> Network<P> {
                 for data_column_sidecar in data_column_sidecars {
                     debug!(
                         "sending DataColumnsSidecarsByRange response chunk \
-                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, data_column_sidecar: {data_column_sidecar:?})",
+                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        data_column_sidecar: {data_column_sidecar:?})",
                     );
 
                     ServiceInboundMessage::SendResponse(
                         peer_id,
-                        peer_request_id,
-                        request_id,
+                        inbound_request_id,
                         Box::new(Response::DataColumnsByRange(Some(data_column_sidecar))),
                     )
                     .send(&network_to_service_tx);
@@ -1279,8 +1279,7 @@ impl<P: Preset> Network<P> {
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
-                    peer_request_id,
-                    request_id,
+                    inbound_request_id,
                     Box::new(Response::DataColumnsByRange(None)),
                 )
                 .send(&network_to_service_tx);
