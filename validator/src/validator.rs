@@ -1267,20 +1267,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     },
                 }),
                 Phase::Electra => {
-                    // TODO(feature/electra): don't ignore errors
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|attestation| convert_to_electra_attestation(attestation).ok())
-                        .group_by(|attestation| attestation.data);
+                    let attestations = if misc::compute_epoch_at_slot::<P>(slot)
+                        == self.chain_config.electra_fork_epoch
+                    {
+                        ContiguousList::default()
+                    } else {
+                        // TODO(feature/electra): don't ignore errors
+                        let attestations = attestations
+                            .into_iter()
+                            .filter_map(|attestation| {
+                                convert_to_electra_attestation(attestation).ok()
+                            })
+                            .group_by(|attestation| attestation.data);
 
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|(_, attestations)| {
-                            Self::compute_on_chain_aggregate(attestations).ok()
-                        })
-                        .take(P::MaxAttestationsElectra::USIZE);
+                        let attestations = attestations
+                            .into_iter()
+                            .filter_map(|(_, attestations)| {
+                                Self::compute_on_chain_aggregate(attestations).ok()
+                            })
+                            .take(P::MaxAttestationsElectra::USIZE);
 
-                    let attestations = ContiguousList::try_from_iter(attestations)?;
+                        ContiguousList::try_from_iter(attestations)?
+                    };
 
                     BeaconBlock::from(ElectraBeaconBlock {
                         slot,
