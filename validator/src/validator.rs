@@ -1112,7 +1112,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // TODO(Grandine Team): Move this to a separate task so it prepares the execution payload
         //                      before it is time to propose a block.
         let WithBlobsAndMev {
-            value: execution_payload,
+            value: mut execution_payload,
             commitments,
             proofs,
             blobs,
@@ -1122,6 +1122,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
             .map(|value| value.map(Some))
             .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+
+        // TODO(feature/electra): Decide whether to keep the post-Capella execution payload logic.
+        //                        It exists only for snapshot testing.
+        // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
+        // Construct a superficially valid execution payload for snapshot testing.
+        // It will almost always be invalid in a real network, but so would a default payload.
+        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
+        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
+        if slot_head.phase() >= Phase::Capella && execution_payload.is_none() {
+            execution_payload = Some(factory::execution_payload(
+                &self.chain_config,
+                &slot_head.beacon_state,
+                slot_head.slot(),
+                ExecutionBlockHash::from_low_u64_be(slot_head.slot()),
+            )?);
+        }
 
         let blob_kzg_commitments = commitments.unwrap_or_default();
         let sync_aggregate = self.process_sync_committee_contributions(slot_head).await?;
@@ -1175,7 +1191,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
             let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
 
-            let without_state_root = match slot_head.beacon_state.phase() {
+            let without_state_root = match slot_head.phase() {
                 Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
                     slot,
                     proposer_index,
@@ -1840,7 +1856,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[allow(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&mut self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
-        let phase = config.phase_at_slot::<P>(slot_head.slot());
+        let phase = slot_head.phase();
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -2164,7 +2180,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_attestations);
         }
 
-        let phase = self.chain_config.phase_at_slot::<P>(slot_head.slot());
+        let phase = slot_head.phase();
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {

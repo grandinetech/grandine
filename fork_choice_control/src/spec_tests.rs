@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use clock::Tick;
 use duplicate::duplicate_item;
-use execution_engine::{PayloadStatusV1, PayloadValidationStatus};
+use execution_engine::PayloadStatusWithBlockHash;
 use helper_functions::misc;
 use serde::Deserialize;
 use spec_test_utils::Case;
@@ -17,7 +17,7 @@ use types::{
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
-        primitives::{ExecutionBlockHash, Slot, UnixSeconds, H256},
+        primitives::{Slot, UnixSeconds, H256},
     },
     preset::{Mainnet, Minimal, Preset},
     traits::{BeaconState as _, PostDenebBeaconBlockBody, SignedBeaconBlock as _},
@@ -44,42 +44,13 @@ enum Step {
     MergeBlock {
         pow_block: PathBuf,
     },
-    PayloadStatus {
-        block_hash: ExecutionBlockHash,
-        payload_status: PayloadStatus,
-    },
+    PayloadStatus(PayloadStatusWithBlockHash),
     AttesterSlashing {
         attester_slashing: PathBuf,
     },
     Checks {
         checks: Box<Checks>,
     },
-}
-
-// `PayloadStatusV1` is deserialized from data containing keys in `camelCase`,
-// whereas `consensus-spec-tests` uses `snake_case`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PayloadStatus {
-    status: PayloadValidationStatus,
-    latest_valid_hash: Option<ExecutionBlockHash>,
-    validation_error: Option<String>,
-}
-
-impl From<PayloadStatus> for PayloadStatusV1 {
-    fn from(payload_status: PayloadStatus) -> Self {
-        let PayloadStatus {
-            status,
-            latest_valid_hash,
-            validation_error,
-        } = payload_status;
-
-        Self {
-            status,
-            latest_valid_hash,
-            validation_error,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -259,10 +230,10 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
 
                 context.on_merge_block(block_hash, timed_pow_block);
             }
-            Step::PayloadStatus {
+            Step::PayloadStatus(PayloadStatusWithBlockHash {
                 block_hash,
                 payload_status,
-            } => {
+            }) => {
                 context.on_notified_new_payload(block_hash, payload_status.into());
             }
             Step::AttesterSlashing {

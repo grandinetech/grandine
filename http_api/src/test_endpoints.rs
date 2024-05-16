@@ -3,6 +3,7 @@
 
 use axum::{extract::State, Json};
 use clock::Tick;
+use execution_engine::PayloadStatusWithBlockHash;
 use fork_choice_control::{P2pMessage, SyncMessage};
 use operation_pools::PoolToP2pMessage;
 use p2p::{ApiToP2p, ValidatorToP2p};
@@ -30,6 +31,19 @@ pub async fn post_tick<P: Preset>(
     Json(tick): Json<Tick>,
 ) {
     controller.on_tick(tick);
+}
+
+/// `POST /test/payload_status`
+pub async fn post_payload_status<P: Preset>(
+    State(controller): State<TestApiController<P>>,
+    Json(payload_status_with_block_hash): Json<PayloadStatusWithBlockHash>,
+) {
+    let PayloadStatusWithBlockHash {
+        block_hash,
+        payload_status,
+    } = payload_status_with_block_hash;
+
+    controller.on_notified_new_payload(block_hash, payload_status.into());
 }
 
 /// `POST /test/take_messages`

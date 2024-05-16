@@ -64,6 +64,7 @@ dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }
 eth1 = { workspace = true }
 eth2_cache_utils = { workspace = true }
+execution_engine = { workspace = true }
 factory = { workspace = true }
 fork_choice_store = { workspace = true }
 hex-literal = { workspace = true }

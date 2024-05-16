@@ -23,6 +23,7 @@ eth1 = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 execution_engine = { workspace = true }
+factory = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
@@ -61,7 +62,6 @@ types = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-factory = { workspace = true }
 interop = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
