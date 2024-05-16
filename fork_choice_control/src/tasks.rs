@@ -331,14 +331,11 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
     }
 }
 
-// data column sidecar zemiau
-
 pub struct DataColumnSidecarTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
-    pub block_seen: bool,
     pub origin: DataColumnSidecarOrigin,
     pub submission_time: Instant,
     pub metrics: Option<Arc<Metrics>>,
@@ -351,7 +348,6 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             mutator_tx,
             wait_group,
             data_column_sidecar,
-            block_seen,
             origin,
             submission_time,
             metrics,
@@ -373,7 +369,6 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
         MutatorMessage::DataColumnSidecar {
             wait_group,
             result,
-            block_seen,
             origin,
             submission_time,
         }
