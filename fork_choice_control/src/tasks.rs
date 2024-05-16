@@ -359,9 +359,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
 
         let result = store_snapshot.validate_data_column_sidecar(
             data_column_sidecar,
-            origin
-                .subnet_id()
-                .expect("It is needed it validation, so I don't know how to get it..."),
+            &origin,
             store_snapshot.slot(),
             MultiVerifier::default(),
         );
