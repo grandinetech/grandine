@@ -1736,11 +1736,11 @@ where
 
         self.update_store_snapshot();
 
-        // TODO(feature/eip-7594):
+        if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
+            self.retry_block(wait_group.clone(), pending_block.clone());
+        }
 
-        // if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
-        //     self.retry_block(wait_group.clone(), pending_block.clone());
-        // }
+        // TODO(feature/eip-7594):
 
         // self.spawn(PersistBlobSidecarsTask {
         //     store_snapshot: self.owned_store(),
@@ -1750,7 +1750,7 @@ where
         //     metrics: self.metrics.clone(),
         // });
 
-        // self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
+        self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
 
     fn notify_about_finalized_checkpoint(&self) {
