@@ -1228,7 +1228,7 @@ impl<P: Preset> Network<P> {
 
         let controller = self.controller.clone_arc();
 
-        // TODO(feature/eip7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        // TODO(feature/eip-7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
         // Let data_column_serve_range be
         //  [max(current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS, EIP7594_FORK_EPOCH), current_epoch].
         let start_slot = start_slot.max(misc::compute_start_slot_at_epoch::<P>(
@@ -1255,7 +1255,8 @@ impl<P: Preset> Network<P> {
 
         self.dedicated_executor
             .spawn(async move {
-                let mut data_column_sidecars = controller.data_column_sidecars_by_range(start_slot..end_slot, &columns)?;
+                let mut data_column_sidecars =
+                    controller.data_column_sidecars_by_range(start_slot..end_slot, &columns)?;
 
                 // The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
                 data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
