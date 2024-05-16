@@ -74,6 +74,7 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
+    DataColumnSidecarOrigin,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -1858,11 +1859,12 @@ impl<P: Preset> Store<P> {
     pub fn validate_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
-        subnet_id: u64,
+        origin: &DataColumnSidecarOrigin,
         current_slot: Slot,
         mut verifier: impl Verifier + Send,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_header = data_column_sidecar.signed_block_header.message;
+
         let mut state = self
             .preprocessed_states
             .before_or_at_slot(block_header.parent_root, block_header.slot)
@@ -1873,6 +1875,7 @@ impl<P: Preset> Store<P> {
                     .map(|chain_link| chain_link.state(self))
                     .unwrap_or_else(|| self.head().state(self))
             });
+
         // [REJECT] The sidecar's index is consistent with NUMBER_OF_COLUMNS -- i.e. sidecar.index < NUMBER_OF_COLUMNS.
         ensure!(
             data_column_sidecar.index < NumberOfColumns::U64,
@@ -1882,21 +1885,24 @@ impl<P: Preset> Store<P> {
         );
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
-        // galimai sitas neveikia su gossipu
-        let expected = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
-        ensure!(
-            subnet_id == expected,
-            Error::DataColumnSidecarOnIncorrectSubnet {
-                data_column_sidecar,
-                expected: expected.try_into().unwrap(),
-                actual: subnet_id,
-            },
-        );
+        if let Some(subnet_id) = origin.subnet_id() {
+            let expected = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
+
+            ensure!(
+                subnet_id == expected,
+                Error::DataColumnSidecarOnIncorrectSubnet {
+                    data_column_sidecar,
+                    expected: expected.try_into().unwrap(),
+                    actual: subnet_id,
+                },
+            );
+        }
 
         // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot (a client MAY queue future sidecars for processing at the appropriate slot).
         if data_column_sidecar.slot() > current_slot {
             return Ok(DataColumnSidecarAction::Ignore);
         }
+
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
         if data_column_sidecar.signed_block_header.message.slot
             <= misc::compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch)
