@@ -24,7 +24,6 @@ use types::{
 };
 
 const MAX_BLOBS_PER_BLOCK: u64 = 6;
-const MAX_BLOB_COMMITMENTS_PER_BLOCK: usize = 6;
 
 type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
 type CellID = u64;
@@ -278,23 +277,19 @@ pub fn get_data_column_sidecars<P: Preset>(
 
                 cont_cells.push(v);
             }
-            // let mut column_cell_array = [[0; 2048]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
-            // column_cell_array.copy_from_slice(&column_cells[..]);
 
-            let mut kzg_proofs_array: [[u8; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK] =
-                [[0; 48]; MAX_BLOB_COMMITMENTS_PER_BLOCK];
-            kzg_proofs_array.copy_from_slice(&kzg_proof_of_column[..]);
+            let proofs = kzg_proof_of_column
+                .iter()
+                .map(|data| KzgProof::try_from(data).map_err(Into::into))
+                .collect::<Result<Vec<KzgProof>>>()?;
 
-            let mut continuous_proof_vec = Vec::new();
-            for proof in kzg_proofs_array {
-                continuous_proof_vec.push(KzgProof::try_from(proof)?);
-            }
+            let kzg_proofs = ContiguousList::try_from_iter(proofs.into_iter())?;
 
             sidecars.push(DataColumnSidecar {
                 index: column_index,
                 column: ContiguousList::try_from(cont_cells)?,
                 kzg_commitments: post_deneb_beacon_block_body.blob_kzg_commitments().clone(),
-                kzg_proofs: ContiguousList::try_from(continuous_proof_vec)?,
+                kzg_proofs,
                 signed_block_header,
                 kzg_commitments_inclusion_proof,
             });
