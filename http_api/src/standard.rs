@@ -338,6 +338,36 @@ pub struct MetaPeersResponse {
 }
 
 #[derive(Serialize)]
+pub struct NodePeerCountResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    connected: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    connecting: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    disconnected: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    disconnecting: u64,
+}
+
+impl From<NodePeerCount> for NodePeerCountResponse {
+    fn from(node_peer_count: NodePeerCount) -> Self {
+        let NodePeerCount {
+            connected,
+            connecting,
+            disconnected,
+            disconnecting,
+        } = node_peer_count;
+
+        Self {
+            connected,
+            connecting,
+            disconnected,
+            disconnecting,
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct NodeVersionResponse<'version> {
     version: Option<&'version str>,
 }
@@ -1598,14 +1628,14 @@ pub async fn node_peer<P: Preset>(
 /// `GET /eth/v1/node/peer_count`
 pub async fn node_peer_count<P: Preset>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-) -> Result<EthResponse<NodePeerCount>, Error> {
+) -> Result<EthResponse<NodePeerCountResponse>, Error> {
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     ApiToP2p::RequestPeerCount(sender).send(&api_to_p2p_tx);
 
     let data = receiver.await?;
 
-    Ok(EthResponse::json(data))
+    Ok(EthResponse::json(data.into()))
 }
 
 /// `GET /eth/v1/node/version`
