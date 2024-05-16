@@ -786,6 +786,12 @@ impl SyncManager {
         self.block_requests.expired_range_batches()
     }
 
+    pub fn expired_data_column_range_batches(
+        &mut self,
+    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+        self.data_column_requests.expired_range_batches()
+    }
+
     pub fn cache_clear(&mut self) {
         self.blob_requests.cache_clear();
         self.block_requests.cache_clear();
