@@ -264,15 +264,19 @@ pub fn get_data_column_sidecars<P: Preset>(
 
         for column_index in 0..NumberOfColumns::U64 {
             let mut column_cells: Vec<CKzgCell> = Vec::new();
+
             for row_index in 0..blob_count {
                 column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());
             }
+
             let kzg_proof_of_column: Vec<_> = (0..blob_count)
                 .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
                 .collect();
 
             let cells = column_cells.iter().map(|cell| cell.to_bytes());
+
             let mut cont_cells = Vec::new();
+
             for cell in cells {
                 let bytes = cell.into_iter();
                 let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
@@ -299,7 +303,7 @@ pub fn get_data_column_sidecars<P: Preset>(
         }
     }
 
-    Ok(vec![])
+    Ok(sidecars)
 }
 
 fn kzg_commitment_inclusion_proof<P: Preset>(

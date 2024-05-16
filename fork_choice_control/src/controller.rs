@@ -218,8 +218,6 @@ where
         self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::Api)
     }
 
-    // zemiau data_column_sidecar
-
     pub fn on_own_data_column_sidecar(
         &self,
         wait_group: W,
