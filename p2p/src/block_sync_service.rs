@@ -502,7 +502,7 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready()?;
                         }
-                        //TODO(feature/eip7549)
+                        //TODO(feature/eip-7594)
                         P2pToSync::DataColumnsByRangeRequestFinished(request_id) => {
                             // self.sync_manager.blobs_by_range_request_finished(request_id);
                             // self.request_blobs_and_blocks_if_ready()?;
@@ -543,9 +543,7 @@ impl<P: Preset> BlockSyncService<P> {
     pub fn check_back_sync_progress(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
-        // TODO(feature/fulu): enable this once `request_expired_data_column_range_requests`
-        // implemented
-        // self.request_expired_data_column_range_requests()?;
+        self.request_expired_data_column_range_requests()?;
 
         // Check if batch has finished
         if !self.sync_manager.ready_to_request_by_range() {
@@ -680,16 +678,15 @@ impl<P: Preset> BlockSyncService<P> {
         self.retry_sync_batches(expired_batches)
     }
 
-    // TODO(feature/fulu): enable this once `expired_data_column_range_batches` implemented
-    // fn request_expired_data_column_range_requests(&mut self) -> Result<()> {
-    //     let expired_batches = self
-    //         .sync_manager
-    //         .expired_data_column_range_batches()
-    //         .map(|(batch, _)| batch)
-    //         .collect();
+    fn request_expired_data_column_range_requests(&mut self) -> Result<()> {
+        let expired_batches = self
+            .sync_manager
+            .expired_data_column_range_batches()
+            .map(|(batch, _)| batch)
+            .collect();
 
-    //     self.retry_sync_batches(expired_batches)
-    // }
+        self.retry_sync_batches(expired_batches)
+    }
 
     fn request_blobs_and_blocks_if_ready(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests()?;
@@ -871,8 +868,6 @@ impl<P: Preset> BlockSyncService<P> {
         peer_id: Option<PeerId>,
     ) -> Result<()> {
         // TODO(feature/eip_7594): data_column_serve_slot check
-
-        let request_id = self.request_id()?;
 
         let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
             return Ok(());
