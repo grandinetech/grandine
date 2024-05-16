@@ -70,13 +70,14 @@ use crate::{
     },
     misc::{
         BlockBlobAvailability, Delayed, MutatorRejectionReason, PendingAggregateAndProof,
-        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink, ReorgSource,
-        VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
+        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink,
+        PendingDataColumnSidecar, ReorgSource, VerifyAggregateAndProofResult,
+        VerifyAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        PersistBlobSidecarsTask, PreprocessStateTask,
+        DataColumnSidecarTask, PersistBlobSidecarsTask, PreprocessStateTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -1362,6 +1363,46 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
+            Ok(DataColumnSidecarAction::DelayUntilParent(data_column_sidecar)) => {
+                let parent_root = data_column_sidecar.signed_block_header.message.parent_root;
+
+                let pending_data_column_sidecar = PendingDataColumnSidecar {
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    submission_time,
+                };
+
+                if self.store.contains_block(parent_root) {
+                    self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar);
+                } else {
+                    debug!("data column sidecar delayed until block parent: {parent_root:?}");
+
+                    let peer_id = pending_data_column_sidecar.origin.peer_id();
+
+                    P2pMessage::BlockNeeded(parent_root, peer_id).send(&self.p2p_tx);
+
+                    self.delay_data_column_sidecar_until_parent(pending_data_column_sidecar);
+                }
+            }
+            Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar)) => {
+                let slot = data_column_sidecar.signed_block_header.message.slot;
+
+                let pending_data_column_sidecar = PendingDataColumnSidecar {
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    submission_time,
+                };
+
+                if slot <= self.store.slot() {
+                    self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar);
+                } else {
+                    debug!("data column sidecar delayed until slot: {slot}");
+
+                    self.delay_data_column_sidecar_until_slot(pending_data_column_sidecar);
+                }
+            }
             Err(error) => {
                 warn!("data column sidecar rejected (error: {error}, origin: {origin:?})");
 
@@ -2367,6 +2408,40 @@ where
         self.delayed_until_state.remove(&(block_root, slot))
     }
 
+    fn delay_data_column_sidecar_until_parent(
+        &mut self,
+        pending_data_column_sidecar: PendingDataColumnSidecar<P>,
+    ) {
+        self.delayed_until_block
+            .entry(
+                pending_data_column_sidecar
+                    .data_column_sidecar
+                    .signed_block_header
+                    .message
+                    .parent_root,
+            )
+            .or_default()
+            .data_column_sidecars
+            .push(pending_data_column_sidecar);
+    }
+
+    fn delay_data_column_sidecar_until_slot(
+        &mut self,
+        pending_data_column_sidecar: PendingDataColumnSidecar<P>,
+    ) {
+        self.delayed_until_slot
+            .entry(
+                pending_data_column_sidecar
+                    .data_column_sidecar
+                    .signed_block_header
+                    .message
+                    .slot,
+            )
+            .or_default()
+            .data_column_sidecars
+            .push(pending_data_column_sidecar);
+    }
+
     // `wait_group` is a reference not just to pass Clippy lints but for correctness as well.
     // The referenced value must not be dropped before the current message is handled.
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
@@ -2378,6 +2453,7 @@ where
             aggregates,
             attestations,
             blob_sidecars,
+            data_column_sidecars,
         } = delayed;
 
         for pending_block in blocks {
@@ -2394,6 +2470,10 @@ where
 
         for pending_blob_sidecar in blob_sidecars {
             self.retry_blob_sidecar(wait_group.clone(), pending_blob_sidecar, None);
+        }
+
+        for pending_data_column_sidecar in data_column_sidecars {
+            self.retry_data_column_sidecar(wait_group.clone(), pending_data_column_sidecar);
         }
     }
 
@@ -2511,6 +2591,32 @@ where
         gossip_ids
     }
 
+    fn retry_data_column_sidecar(
+        &self,
+        wait_group: W,
+        pending_data_column_sidecar: PendingDataColumnSidecar<P>,
+    ) {
+        debug!("retrying delayed data column sidecar: {pending_data_column_sidecar:?}");
+
+        let PendingDataColumnSidecar {
+            data_column_sidecar,
+            block_seen,
+            origin,
+            submission_time,
+        } = pending_data_column_sidecar;
+
+        self.spawn(DataColumnSidecarTask {
+            store_snapshot: self.owned_store(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            data_column_sidecar,
+            block_seen,
+            origin,
+            submission_time,
+            metrics: self.metrics.clone(),
+        });
+    }
+
     // Some objects may be delayed until a block that is itself delayed.
     // If the latter is pruned, objects depending on it could be pruned as well.
     // We don't bother doing this. It's tricky to implement and might not even be worth it.
@@ -2531,6 +2637,7 @@ where
                 aggregates,
                 attestations,
                 blob_sidecars,
+                data_column_sidecars,
             } = delayed;
 
             gossip_ids.extend(
@@ -2580,6 +2687,16 @@ where
                     .drain_filter(|pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.blob_sidecar.signed_block_header.message.slot - 1 <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                data_column_sidecars
+                    .drain_filter(|pending| {
+                        // The parent of a delayed block cannot be in a finalized slot.
+                        pending.data_column_sidecar.signed_block_header.message.slot - 1
+                            <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );

@@ -12,7 +12,6 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     combined::SignedBeaconBlock,
-    config::Config,
     deneb::primitives::{Blob, BlobIndex, KzgProof},
     eip7594::{
         BlobCommitmentsInclusionProof, ColumnIndex, CustodyIndex, DataColumnSidecar,
@@ -20,7 +19,7 @@ use types::{
     },
     phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
     preset::Preset,
-    traits::{BeaconBlock as _, BeaconState, PostElectraBeaconBlockBody, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, PostElectraBeaconBlockBody},
 };
 
 use crate::trusted_setup::settings;
