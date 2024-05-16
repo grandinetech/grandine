@@ -495,13 +495,13 @@ where
 
     pub fn on_gossip_data_column_sidecar(
         &self,
-        blob_sidecar: Arc<DataColumnSidecar<P>>,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
         subnet_id: SubnetId,
         gossip_id: GossipId,
         block_seen: bool,
     ) {
         self.spawn_data_column_sidecar_task(
-            blob_sidecar,
+            data_column_sidecar,
             block_seen,
             DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
         )
@@ -614,8 +614,6 @@ where
             metrics: self.metrics.clone(),
         })
     }
-
-    // data_column_sidecar zemiau
 
     fn spawn_data_column_sidecar_task(
         &self,
