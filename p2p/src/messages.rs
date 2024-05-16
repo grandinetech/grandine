@@ -43,7 +43,7 @@ pub enum P2pToSync<P: Preset> {
     DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, bool, PeerId),
     RequestedBlock((Arc<SignedBeaconBlock<P>>, PeerId, RequestId)),
-    RequestedDataColumnSidecar(Arc<DataColumnSidecar<P>>, bool, PeerId),
+    RequestedDataColumnSidecar(Arc<DataColumnSidecar<P>>, PeerId),
     BlobsByRangeRequestFinished(RequestId),
     BlobsByRootChunkReceived(BlobIdentifier, PeerId, RequestId),
     BlocksByRangeRequestFinished(RequestId),

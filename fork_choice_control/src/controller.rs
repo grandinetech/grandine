@@ -239,13 +239,12 @@ where
         self.spawn_data_column_sidecar_task_with_wait_group(
             wait_group,
             data_column_sidecar,
-            true,
             DataColumnSidecarOrigin::Own,
         )
     }
 
     pub fn on_api_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
-        self.spawn_data_column_sidecar_task(data_column_sidecar, true, DataColumnSidecarOrigin::Api)
+        self.spawn_data_column_sidecar_task(data_column_sidecar, DataColumnSidecarOrigin::Api)
     }
 
     pub fn on_api_block(
@@ -439,11 +438,9 @@ where
         blob_sidecar: Arc<DataColumnSidecar<P>>,
         subnet_id: SubnetId,
         gossip_id: GossipId,
-        block_seen: bool,
     ) {
         self.spawn_data_column_sidecar_task(
             blob_sidecar,
-            block_seen,
             DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
         )
     }
@@ -469,7 +466,6 @@ where
     pub fn on_requested_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
-        block_seen: bool,
         peer_id: PeerId,
     ) {
         self.spawn(DataColumnSidecarTask {
@@ -477,7 +473,6 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             data_column_sidecar,
-            block_seen,
             origin: DataColumnSidecarOrigin::Requested(peer_id),
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
@@ -534,18 +529,14 @@ where
         })
     }
 
-    // data_column_sidecar zemiau
-
     fn spawn_data_column_sidecar_task(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
-        block_seen: bool,
         origin: DataColumnSidecarOrigin,
     ) {
         self.spawn_data_column_sidecar_task_with_wait_group(
             self.owned_wait_group(),
             data_column_sidecar,
-            block_seen,
             origin,
         )
     }
@@ -554,7 +545,6 @@ where
         &self,
         wait_group: W,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
-        block_seen: bool,
         origin: DataColumnSidecarOrigin,
     ) {
         self.spawn(DataColumnSidecarTask {
@@ -562,7 +552,6 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             data_column_sidecar,
-            block_seen,
             origin,
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),

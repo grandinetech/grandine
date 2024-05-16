@@ -1943,7 +1943,9 @@ impl<P: Preset> Store<P> {
 
         // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
         let Some(parent) = self.chain_link(block_header.parent_root) else {
-            return Ok(DataColumnSidecarAction::Ignore);
+            return Ok(DataColumnSidecarAction::DelayUntilParent(
+                data_column_sidecar,
+            ));
         };
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.

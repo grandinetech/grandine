@@ -1195,7 +1195,7 @@ impl<P: Preset> Network<P> {
 
         let controller = self.controller.clone_arc();
 
-        // TODO(feature/eip7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        // TODO(feature/eip-7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
         // Let data_column_serve_range be
         //  [max(current_epoch - MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS, EIP7594_FORK_EPOCH), current_epoch].
         let start_slot = start_slot.max(misc::compute_start_slot_at_epoch::<P>(
@@ -1539,7 +1539,7 @@ impl<P: Preset> Network<P> {
                     ),
                 );
             }
-            // TODO(feature/eip7594): This appears to be unfinished.
+            // TODO(feature/eip-7594): This appears to be unfinished.
             // > Before consuming the next response chunk, the response reader SHOULD verify the
             // > data column sidecar is well-formatted, has valid inclusion proof, and is correct w.r.t. the expected KZG commitments
             Response::DataColumnsByRange(Some(data_column_sidecar)) => {
@@ -1559,11 +1559,7 @@ impl<P: Preset> Network<P> {
                     data_column_identifier,
                     data_column_sidecar_slot,
                 ) {
-                    let block_seen = self
-                        .received_block_roots
-                        .contains_key(&data_column_identifier.block_root);
-
-                    P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, block_seen, peer_id)
+                    P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
                         .send(&self.channels.p2p_to_sync_tx);
                 }
             }
@@ -1702,18 +1698,10 @@ impl<P: Preset> Network<P> {
                 let epoch = misc::compute_epoch_at_slot::<P>(data_column_sidecar.slot());
 
                 if chain_config.is_eip7594_fork(epoch) {
-                    let block_seen = self.received_block_roots.contains_key(
-                        &data_column_sidecar
-                            .signed_block_header
-                            .message
-                            .hash_tree_root(),
-                    );
-
                     self.controller.on_gossip_data_column_sidecar(
                         data_column_sidecar,
                         subnet_id,
                         GossipId { source, message_id },
-                        block_seen,
                     );
                 } else {
                     self.log_with_feature(format_args!(

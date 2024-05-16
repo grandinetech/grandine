@@ -123,7 +123,6 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         result: Result<DataColumnSidecarAction<P>>,
         origin: DataColumnSidecarOrigin,
-        block_seen: bool,
         submission_time: Instant,
     },
     FinishedPersistingBlobSidecars {

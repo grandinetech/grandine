@@ -637,6 +637,8 @@ pub enum BlobSidecarAction<P: Preset> {
 pub enum DataColumnSidecarAction<P: Preset> {
     Accept(Arc<DataColumnSidecar<P>>),
     Ignore,
+    DelayUntilParent(Arc<DataColumnSidecar<P>>),
+    DelayUntilSlot(Arc<DataColumnSidecar<P>>),
 }
 
 pub enum PartialBlockAction {
