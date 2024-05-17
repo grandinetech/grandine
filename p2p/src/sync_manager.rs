@@ -21,11 +21,12 @@ use log::{log, Level};
 use lru::LruCache;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
+use ssz::ContiguousList;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
-    eip7594::DataColumnIdentifier,
+    eip7594::{ColumnIndex, DataColumnIdentifier, NumberOfColumns},
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -66,7 +67,7 @@ pub enum SyncTarget {
     DataColumnSidecar,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone)]
 pub struct SyncBatch {
     pub target: SyncTarget,
     pub direction: SyncDirection,
@@ -75,6 +76,7 @@ pub struct SyncBatch {
     pub count: u64,
     pub retry_count: usize,
     pub response_received: bool,
+    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, NumberOfColumns>>>,
 }
 
 pub struct SyncManager {
@@ -212,11 +214,13 @@ impl SyncManager {
                     count: batch.count,
                     retry_count: batch.retry_count + 1,
                     response_received: false,
+                    data_columns: batch.data_columns.clone(),
                 };
 
                 match batch.target {
-                    // TODO(feature/eip7594)
-                    SyncTarget::DataColumnSidecar => {}
+                    SyncTarget::DataColumnSidecar => {
+                        self.add_data_columns_request_by_range(app_request_id, batch)
+                    }
                     SyncTarget::BlobSidecar => {
                         self.add_blob_request_by_range(app_request_id, batch)
                     }
@@ -294,6 +298,7 @@ impl SyncManager {
                             count,
                             response_received: false,
                             retry_count: 0,
+                            data_columns: None,
                         };
 
                         self.log(
@@ -315,6 +320,8 @@ impl SyncManager {
                 count,
                 response_received: false,
                 retry_count: 0,
+                // TODO(feature/eip7594)
+                data_columns: None,
             };
 
             self.log(
@@ -454,7 +461,18 @@ impl SyncManager {
             max_slot = start_slot + count - 1;
 
             if config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(start_slot)) {
-                // TODO(feature/eip7594)
+                // TODO(feature/eip7594): figure out slot range and data columns
+                //
+                // if data_column_serve_range_slot < max_slot {
+                //     sync_batches.push(SyncBatch {
+                //         target: SyncTarget::BlobSidecar,
+                //         direction: SyncDirection::Forward,
+                //         peer_id,
+                //         start_slot,
+                //         count,
+                //         data_columns: None,
+                //     });
+                // }
             } else {
                 if blob_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
@@ -465,10 +483,12 @@ impl SyncManager {
                         count,
                         response_received: false,
                         retry_count: 0,
+                        data_columns: None,
                     });
                 }
             }
 
+            // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
             sync_batches.push(SyncBatch {
                 target: SyncTarget::Block,
                 direction: SyncDirection::Forward,
@@ -477,6 +497,7 @@ impl SyncManager {
                 count,
                 response_received: false,
                 retry_count: 0,
+                data_columns: None,
             });
         }
 
@@ -502,6 +523,25 @@ impl SyncManager {
     ) -> bool {
         self.block_requests
             .ready_to_request_by_root(&block_root, peer_id)
+    }
+
+    pub fn add_data_columns_request_by_range(
+        &mut self,
+        app_request_id: AppRequestId,
+        batch: SyncBatch,
+    ) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add blob request by range (app_request_id: {:?}, peer_id: {}, range: {:?})",
+                app_request_id,
+                batch.peer_id,
+                (batch.start_slot..(batch.start_slot + batch.count)),
+            ),
+        );
+
+        self.data_column_requests
+            .add_request_by_range(app_request_id, batch)
     }
 
     pub fn add_blob_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
@@ -664,6 +704,15 @@ impl SyncManager {
                 self.retry_batch(app_request_id, sync_batch, true);
             }
         }
+    }
+
+    pub fn data_columns_by_range_request_finished(&mut self, app_request_id: AppRequestId) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "request data columns by range finished (app_request_id: {app_request_id:?})"
+            ),
+        );
     }
 
     /// Log a message with peer count information.
@@ -843,6 +892,7 @@ impl SyncManager {
                 count: 64,
                 retry_count: 0,
                 response_received: false,
+                data_columns: None,
             },
         );
     }
@@ -868,6 +918,7 @@ impl SyncManager {
                 count: 64,
                 retry_count: 0,
                 response_received: false,
+                data_columns: None,
             },
         );
     }
