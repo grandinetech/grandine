@@ -39,6 +39,7 @@ use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
 use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
+use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
@@ -47,7 +48,10 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DataColumnSidecar, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
+    eip7594::{
+        ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns,
+        DATA_COLUMN_SIDECAR_SUBNET_COUNT,
+    },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -464,6 +468,9 @@ impl<P: Preset> Network<P> {
                         }
                         SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, identifiers) => {
                             self.request_data_columns_by_root(request_id, peer_id, identifiers);
+                        }
+                        SyncToP2p::RequestDataColumnsByRange(request_id, peer_id, start_slot, count, columns) => {
+                            self.request_data_columns_by_range(request_id, peer_id, start_slot, count, columns);
                         }
                         SyncToP2p::RequestPeerStatus(request_id, peer_id) => {
                             self.request_peer_status(request_id, peer_id);
@@ -2052,6 +2059,32 @@ impl<P: Preset> Network<P> {
         );
 
         self.request(peer_id, request_id, RequestType::BlocksByRoot(request));
+    }
+
+    fn request_data_columns_by_range(
+        &mut self,
+        request_id: RequestId,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+        columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
+    ) {
+        // TODO: is count capped in eth2_libp2p?
+        let request = DataColumnsByRangeRequest {
+            start_slot,
+            count,
+            columns,
+        };
+
+        debug!(
+            "sending DataColumnsByRange request (request_id: {request_id} peer_id: {peer_id}, request: {request:?})",
+        );
+
+        self.request(
+            peer_id,
+            request_id,
+            RequestType::DataColumnsByRange(request),
+        );
     }
 
     fn request_data_columns_by_root(
