@@ -527,7 +527,7 @@ where
                     let missing_column_indices =
                         self.store.indices_of_missing_data_columns(&parent.block);
 
-                    if missing_column_indices.len() * 2 >= NumberOfColumns::USIZE {
+                    if missing_column_indices.len() * 2 < NumberOfColumns::USIZE {
                         self.retry_block(wait_group, pending_block);
                     } else {
                         info!(

@@ -1096,7 +1096,9 @@ impl<P: Preset> Store<P> {
         {
             let missing_indices = self.indices_of_missing_data_columns(&parent.block);
 
-            if missing_indices.len() * 2 >= NumberOfColumns::USIZE {
+            if missing_indices.len() * 2 >= NumberOfColumns::USIZE
+                && self.finished_initial_forward_sync()
+            {
                 return Ok(BlockAction::DelayUntilBlobs(block));
             }
         } else {
@@ -3048,6 +3050,11 @@ impl<P: Preset> Store<P> {
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
         self.state_cache.before_or_at_slot(self, block_root, slot)
+    }
+
+    #[must_use]
+    pub fn finished_initial_forward_sync(&self) -> bool {
+        self.finished_initial_forward_sync
     }
 
     #[must_use]
