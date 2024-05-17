@@ -643,6 +643,8 @@ impl<P: Preset> BlockSyncService<P> {
 
             if let Some(peer_id) = peer {
                 match target {
+                    // todo!(feature/eip7594)
+                    SyncTarget::DataColumnSidecar => {}
                     SyncTarget::BlobSidecar => {
                         SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count)
                             .send(&self.sync_to_p2p_tx);
@@ -755,6 +757,8 @@ impl<P: Preset> BlockSyncService<P> {
             } = batch;
 
             match target {
+                //TODO(feature/eip-7594)
+                SyncTarget::DataColumnSidecar => {}
                 SyncTarget::BlobSidecar => {
                     self.sync_manager
                         .add_blob_request_by_range(request_id, batch);
