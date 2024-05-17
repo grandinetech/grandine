@@ -10,11 +10,12 @@ use itertools::Itertools as _;
 use log::{log, Level};
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
+use ssz::ContiguousList;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
-    eip7594::DataColumnIdentifier,
+    eip7594::{ColumnIndex, DataColumnIdentifier, NumberOfColumns},
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -56,13 +57,14 @@ pub enum SyncTarget {
     DataColumnSidecar,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyncBatch {
     pub target: SyncTarget,
     pub direction: SyncDirection,
     pub peer_id: PeerId,
     pub start_slot: Slot,
     pub count: u64,
+    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, NumberOfColumns>>>,
 }
 
 pub struct SyncManager {
@@ -134,11 +136,13 @@ impl SyncManager {
                     peer_id,
                     start_slot: batch.start_slot,
                     count: batch.count,
+                    data_columns: batch.data_columns.clone(),
                 };
 
                 match batch.target {
-                    // TODO(feature/eip7594)
-                    SyncTarget::DataColumnSidecar => {}
+                    SyncTarget::DataColumnSidecar => {
+                        self.add_data_columns_request_by_range(request_id, batch)
+                    }
                     SyncTarget::BlobSidecar => self.add_blob_request_by_range(request_id, batch),
                     SyncTarget::Block => self.add_block_request_by_range(request_id, batch),
                 }
@@ -193,6 +197,8 @@ impl SyncManager {
                 peer_id,
                 start_slot,
                 count,
+                // TODO(feature/eip7594)
+                data_columns: None,
             };
 
             self.log_with_feature(format_args!("back sync batch built: {batch:?})"));
@@ -310,7 +316,18 @@ impl SyncManager {
             max_slot = start_slot + count - 1;
 
             if config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(start_slot)) {
-                // TODO(feature/eip7594)
+                // TODO(feature/eip7594): figure out slot range and data columns
+                //
+                // if data_column_serve_range_slot < max_slot {
+                //     sync_batches.push(SyncBatch {
+                //         target: SyncTarget::BlobSidecar,
+                //         direction: SyncDirection::Forward,
+                //         peer_id,
+                //         start_slot,
+                //         count,
+                //         data_columns: None,
+                //     });
+                // }
             } else {
                 if blob_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
@@ -319,16 +336,19 @@ impl SyncManager {
                         peer_id,
                         start_slot,
                         count,
+                        data_columns: None,
                     });
                 }
             }
 
+            // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
             sync_batches.push(SyncBatch {
                 target: SyncTarget::Block,
                 direction: SyncDirection::Forward,
                 peer_id,
                 start_slot,
                 count,
+                data_columns: None,
             });
         }
 
@@ -353,6 +373,18 @@ impl SyncManager {
     ) -> bool {
         self.block_requests
             .ready_to_request_by_root(&block_root, peer_id)
+    }
+
+    pub fn add_data_columns_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+        self.log_with_feature(format_args!(
+            "add blob request by range (request_id: {}, peer_id: {}, range: {:?})",
+            request_id,
+            batch.peer_id,
+            (batch.start_slot..(batch.start_slot + batch.count)),
+        ));
+
+        self.data_column_requests
+            .add_request_by_range(request_id, batch)
     }
 
     pub fn add_blob_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
@@ -461,6 +493,12 @@ impl SyncManager {
     pub fn block_by_root_request_finished(&mut self, block_root: H256) {
         self.log_with_feature(format_args!(
             "request block by root finished (block_root: {block_root:?})",
+        ));
+    }
+
+    pub fn data_columns_by_range_request_finished(&mut self, request_id: RequestId) {
+        self.log_with_feature(format_args!(
+            "request data columns by range finished (request_id: {request_id:?})",
         ));
     }
 
@@ -588,6 +626,12 @@ impl SyncManager {
         &mut self,
     ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
         self.block_requests.expired_range_batches()
+    }
+
+    pub fn expired_data_column_range_batches(
+        &mut self,
+    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+        self.data_column_requests.expired_range_batches()
     }
 
     pub fn outdated_peers(&mut self, status: StatusMessage) -> Vec<PeerId> {
