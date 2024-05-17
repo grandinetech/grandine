@@ -1156,7 +1156,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             {
                 let missing_indices = self.indices_of_missing_data_columns(&parent.block);
 
-                if missing_indices.len() * 2 >= NumberOfColumns::USIZE {
+                if missing_indices.len() * 2 >= NumberOfColumns::USIZE && self.is_forward_synced() {
                     return Ok(BlockAction::DelayUntilBlobs(block.clone(), state));
                 }
             } else {
