@@ -53,7 +53,6 @@ impl NodePeer {
     }
 }
 
-#[derive(Serialize)]
 pub struct NodePeerCount {
     pub connected: u64,
     pub connecting: u64,
