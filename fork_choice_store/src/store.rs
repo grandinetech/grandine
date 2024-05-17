@@ -1026,9 +1026,7 @@ impl<P: Preset> Store<P> {
         {
             let missing_indices = self.indices_of_missing_data_columns(&parent.block);
 
-            if missing_indices.len() * 2 >= NumberOfColumns::USIZE
-                && self.finished_initial_forward_sync()
-            {
+            if missing_indices.len() * 2 >= NumberOfColumns::USIZE && self.is_forward_synced() {
                 return Ok(BlockAction::DelayUntilBlobs(block));
             }
         } else {
@@ -3001,11 +2999,6 @@ impl<P: Preset> Store<P> {
 
     pub fn insert_preprocessed_state(&mut self, block_root: H256, state: Arc<BeaconState<P>>) {
         self.preprocessed_states.insert(block_root, state);
-    }
-
-    #[must_use]
-    pub fn finished_initial_forward_sync(&self) -> bool {
-        self.finished_initial_forward_sync
     }
 
     #[must_use]
