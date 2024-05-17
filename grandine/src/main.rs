@@ -209,6 +209,10 @@ impl Context {
             )?
         };
 
+        Feature::DebugP2p.enable();
+
+        log::info!("CHAIN CONFIG: {chain_config:#?}");
+
         let eth1_chain = Eth1Chain::new(
             chain_config.clone_arc(),
             eth1_config.clone_arc(),
