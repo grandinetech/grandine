@@ -91,6 +91,7 @@ pub use crate::{
 };
 
 mod blob_cache;
+mod data_column_cache;
 mod error;
 mod misc;
 mod segment;

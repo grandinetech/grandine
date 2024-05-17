@@ -1,4 +1,4 @@
-use core::{
+nse core::{
     cmp::Ordering,
     ops::{AddAssign as _, Bound, SubAssign as _},
 };
@@ -60,6 +60,7 @@ use unwrap_none::UnwrapNone as _;
 
 use crate::{
     blob_cache::BlobCache,
+    data_column_cache::DataColumnCache,
     error::Error,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
@@ -216,7 +217,7 @@ pub struct Store<P: Preset> {
     >,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
-    data_column_cache: HashMap<DataColumnIdentifier, (Arc<DataColumnSidecar<P>>, Slot)>,
+    data_column_cache: DataColumnCache<P>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
 }
@@ -290,7 +291,7 @@ impl<P: Preset> Store<P> {
             state_cache: Arc::new(StateCacheProcessor::new(
                 store_config.state_cache_lock_timeout,
             )),
-            data_column_cache: HashMap::default(),
+            data_column_cache: DataColumnCache::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
         }
@@ -351,9 +352,7 @@ impl<P: Preset> Store<P> {
         &self,
         data_column_id: DataColumnIdentifier,
     ) -> Option<Arc<DataColumnSidecar<P>>> {
-        self.data_column_cache
-            .get(&data_column_id)
-            .map(|(sidecar, _)| (*sidecar).clone_arc())
+        self.data_column_cache.get(data_column_id)
     }
 
     #[must_use]
@@ -2083,6 +2082,8 @@ impl<P: Preset> Store<P> {
         self.update_head_segment_id();
 
         self.blob_cache.on_slot(new_tick.slot);
+        // TODO(feature/eip-7594): uncomment this after implementing persistence
+        // self.data_column_cache.on_slot(new_tick.slot);
 
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
@@ -2351,10 +2352,7 @@ impl<P: Preset> Store<P> {
 
         commitments.insert(block_root, data_sidecar.kzg_commitments.clone());
 
-        let identifier = data_sidecar.as_ref().into();
-
-        self.data_column_cache
-            .insert(identifier, (data_sidecar, block_header.slot));
+        self.data_column_cache.insert(data_sidecar);
     }
 
     fn insert_block(&mut self, chain_link: ChainLink<P>) -> Result<()> {
@@ -2668,8 +2666,7 @@ impl<P: Preset> Store<P> {
         //
         // Data columns must be stored for much longer period than finalization.
         // However, that should be done in persistence layer.
-        self.data_column_cache
-            .retain(|_, (_, slot)| finalized_slot <= *slot);
+        self.data_column_cache.prune_finalized(finalized_slot);
         self.prune_checkpoint_states();
         self.state_cache.prune(finalized_slot).ok();
         self.aggregate_and_proof_supersets
