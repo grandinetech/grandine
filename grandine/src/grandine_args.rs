@@ -300,7 +300,7 @@ struct BeaconNodeOptions {
     disable_block_verification_pool: bool,
 
     /// Subscribe to all subnets
-    #[clap(long)]
+    #[clap(long, default_value_t = true)]
     subscribe_all_subnets: bool,
 
     /// Suggested value for the feeRecipient field of the new payload
