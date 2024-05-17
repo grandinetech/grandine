@@ -502,10 +502,9 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready()?;
                         }
-                        //TODO(feature/eip-7594)
                         P2pToSync::DataColumnsByRangeRequestFinished(request_id) => {
-                            // self.sync_manager.blobs_by_range_request_finished(request_id);
-                            // self.request_blobs_and_blocks_if_ready()?;
+                            self.sync_manager.data_columns_by_range_request_finished(request_id);
+                            self.request_blobs_and_blocks_if_ready()?;
                         }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
@@ -597,6 +596,7 @@ impl<P: Preset> BlockSyncService<P> {
                 peer_id,
                 mut start_slot,
                 mut count,
+                ref data_columns,
                 ..
             } = batch;
 
@@ -637,14 +637,26 @@ impl<P: Preset> BlockSyncService<P> {
                 .send(&self.sync_to_p2p_tx);
             }
 
-            let peer =
-                self.sync_manager
-                    .retry_batch(request_id, batch, direction == SyncDirection::Back);
+            let peer = self.sync_manager.retry_batch(
+                request_id,
+                batch.clone(),
+                direction == SyncDirection::Back,
+            );
 
             if let Some(peer_id) = peer {
                 match target {
-                    // todo!(feature/eip7594)
-                    SyncTarget::DataColumnSidecar => {}
+                    SyncTarget::DataColumnSidecar => {
+                        let data_columns = data_columns.clone().unwrap_or_default();
+
+                        SyncToP2p::RequestDataColumnsByRange(
+                            request_id,
+                            peer_id,
+                            start_slot,
+                            count,
+                            data_columns,
+                        )
+                        .send(&self.sync_to_p2p_tx);
+                    }
                     SyncTarget::BlobSidecar => {
                         SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count)
                             .send(&self.sync_to_p2p_tx);
@@ -693,6 +705,7 @@ impl<P: Preset> BlockSyncService<P> {
     fn request_blobs_and_blocks_if_ready(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
+        self.request_expired_data_column_range_requests()?;
 
         if !self.sync_manager.ready_to_request_by_range() {
             return Ok(());
@@ -753,12 +766,27 @@ impl<P: Preset> BlockSyncService<P> {
                 start_slot,
                 count,
                 target,
+                ref data_columns,
                 ..
             } = batch;
 
             match target {
                 //TODO(feature/eip-7594)
-                SyncTarget::DataColumnSidecar => {}
+                SyncTarget::DataColumnSidecar => {
+                    let data_columns = data_columns.clone().unwrap_or_default();
+
+                    self.sync_manager
+                        .add_data_columns_request_by_range(request_id, batch);
+
+                    SyncToP2p::RequestDataColumnsByRange(
+                        request_id,
+                        peer_id,
+                        start_slot,
+                        count,
+                        data_columns,
+                    )
+                    .send(&self.sync_to_p2p_tx);
+                }
                 SyncTarget::BlobSidecar => {
                     self.sync_manager
                         .add_blob_request_by_range(request_id, batch);
