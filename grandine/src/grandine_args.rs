@@ -306,7 +306,7 @@ struct BeaconNodeOptions {
     state_slot: Option<Slot>,
 
     /// Subscribe to all subnets
-    #[clap(long)]
+    #[clap(long, default_value_t = true)]
     subscribe_all_subnets: bool,
 
     /// Suggested value for the feeRecipient field of the new payload
