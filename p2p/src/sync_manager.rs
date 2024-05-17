@@ -63,6 +63,7 @@ const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
 pub enum SyncTarget {
     BlobSidecar,
     Block,
+    DataColumnSidecar,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -214,6 +215,8 @@ impl SyncManager {
                 };
 
                 match batch.target {
+                    // TODO(feature/eip7594)
+                    SyncTarget::DataColumnSidecar => {}
                     SyncTarget::BlobSidecar => {
                         self.add_blob_request_by_range(app_request_id, batch)
                     }
@@ -450,16 +453,20 @@ impl SyncManager {
 
             max_slot = start_slot + count - 1;
 
-            if blob_serve_range_slot < max_slot {
-                sync_batches.push(SyncBatch {
-                    target: SyncTarget::BlobSidecar,
-                    direction: SyncDirection::Forward,
-                    peer_id,
-                    start_slot,
-                    count,
-                    response_received: false,
-                    retry_count: 0,
-                });
+            if config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(start_slot)) {
+                // TODO(feature/eip7594)
+            } else {
+                if blob_serve_range_slot < max_slot {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::BlobSidecar,
+                        direction: SyncDirection::Forward,
+                        peer_id,
+                        start_slot,
+                        count,
+                        response_received: false,
+                        retry_count: 0,
+                    });
+                }
             }
 
             sync_batches.push(SyncBatch {
