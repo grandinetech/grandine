@@ -12,11 +12,12 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use operation_pools::PoolRejectionReason;
 use serde::Serialize;
+use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -125,7 +126,13 @@ pub enum SyncToP2p {
     RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
     RequestBlocksByRange(RequestId, PeerId, Slot, u64),
     RequestBlockByRoot(RequestId, PeerId, H256),
-    // RequestDataColumnsByRange(RequestId, PeerId, Slot, u64),
+    RequestDataColumnsByRange(
+        RequestId,
+        PeerId,
+        Slot,
+        u64,
+        Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
+    ),
     RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnIdentifier>),
     RequestPeerStatus(RequestId, PeerId),
     SubscribeToCoreTopics,
