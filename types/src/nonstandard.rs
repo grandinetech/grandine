@@ -24,6 +24,7 @@ use crate::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     phase0::{
         containers::Attestation,
         primitives::{Uint256, UnixSeconds, ValidatorIndex, H256},
@@ -184,6 +185,12 @@ impl AttestationOutcome {
 pub struct BlobSidecarWithId<P: Preset> {
     pub blob_sidecar: Arc<BlobSidecar<P>>,
     pub blob_id: BlobIdentifier,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataColumnSidecarWithId<P: Preset> {
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub data_column_id: DataColumnIdentifier,
 }
 
 #[derive(Clone, Copy)]
