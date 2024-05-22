@@ -35,7 +35,7 @@ use runtime::{
     MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
     DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
     DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_REQUEST_TIMEOUT,
-    DEFAULT_TARGET_PEERS, DEFAULT_TIMEOUT,
+    DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -458,6 +458,10 @@ struct NetworkConfigOptions {
     #[clap(long, default_value_t = DEFAULT_TARGET_PEERS)]
     target_peers: usize,
 
+    /// Target number of subnet peers
+    #[clap(long, default_value_t = DEFAULT_TARGET_SUBNET_PEERS)]
+    target_subnet_peers: usize,
+
     /// List of trusted peers
     #[clap(long, value_delimiter = ',')]
     trusted_peers: Vec<PeerIdSerialized>,
@@ -496,6 +500,7 @@ impl NetworkConfigOptions {
             boot_nodes,
             libp2p_nodes,
             target_peers,
+            target_subnet_peers,
             trusted_peers,
         } = self;
 
@@ -511,6 +516,7 @@ impl NetworkConfigOptions {
         network_config.network_dir = in_memory.not().then_some(network_dir);
         network_config.metrics_enabled = metrics;
         network_config.target_peers = target_peers;
+        network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
 
         if let Some(listen_address_ipv6) = listen_address_ipv6 {
