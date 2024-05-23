@@ -65,7 +65,9 @@ impl<P: Preset> AttestationVerifier<P> {
             controller,
             dedicated_executor,
             active_task_count: 0,
-            max_active_tasks: num_cpus::get(),
+            // `blst` already parallelizes signature verification. For non parallelized BLS
+            // libraries use `num_cpus::get()`
+            max_active_tasks: 1,
             metrics,
             p2p_to_verifier_rx,
             task_to_verifier_rx,

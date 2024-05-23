@@ -27,7 +27,6 @@ helper_functions = { workspace = true }
 igd-next = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
-num_cpus = { workspace = true }
 operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 prometheus-client = { workspace = true }
