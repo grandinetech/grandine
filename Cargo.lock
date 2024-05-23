@@ -5329,7 +5329,6 @@ dependencies = [
  "igd-next",
  "itertools 0.12.1",
  "log",
- "num_cpus",
  "operation_pools",
  "prometheus-client",
  "prometheus_metrics",
