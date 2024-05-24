@@ -1,3 +1,7 @@
+// Adding backquotes to doc comments affects `--help` output.
+// `clap` derive macros preserve backquotes even if `verbatim_doc_comment` is disabled.
+#![allow(clippy::doc_markdown)]
+
 use core::{
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},

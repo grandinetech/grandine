@@ -342,7 +342,7 @@ where
                             .blob_kzg_commitments()
                             .iter()
                             .copied()
-                            .map(helper_functions::misc::kzg_commitment_to_versioned_hash)
+                            .map(misc::kzg_commitment_to_versioned_hash)
                             .collect();
 
                         params = Some(ExecutionPayloadParams::Deneb {
@@ -2007,7 +2007,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.77.2.
+        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.78.0.
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
@@ -2081,7 +2081,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.77.2.
+        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.78.0.
         self.waiting_for_checkpoint_states
             .retain(|target, waiting| {
                 let prune = target.epoch < finalized_epoch;

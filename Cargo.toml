@@ -88,6 +88,7 @@ let_underscore_drop                    = 'warn'
 macro_use_extern_crate                 = 'warn'
 meta_variable_misuse                   = 'warn'
 non_ascii_idents                       = 'warn'
+non_local_definitions                  = 'warn'
 trivial_casts                          = 'warn'
 trivial_numeric_casts                  = 'warn'
 unit_bindings                          = 'warn'
@@ -140,7 +141,7 @@ wildcard_dependencies   = 'warn'
 #
 # - `clippy::single_call_fn`.
 #   It's unidiomatic and conflicts with lints like `clippy::too_many_lines`.
-#   Public functions are not exempt from it as of Rust 1.77.2.
+#   Public functions are not exempt from it if `avoid-breaking-exported-api` is `false`.
 #
 # - `clippy::std_instead_of_alloc`
 #   It would require adding `extern crate alloc;` everywhere.
