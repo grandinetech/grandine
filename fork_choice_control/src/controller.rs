@@ -484,6 +484,10 @@ where
         &self.state_cache
     }
 
+    pub fn store_config(&self) -> StoreConfig {
+        self.store_snapshot().store_config()
+    }
+
     pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P>>> {
         self.store_snapshot.load()
     }
@@ -506,18 +510,6 @@ where
 
     pub(crate) fn owned_mutator_tx(&self) -> Sender<MutatorMessage<P, W>> {
         self.mutator_tx.clone()
-    }
-}
-
-#[cfg(test)]
-impl<P, E, W> Controller<P, E, W>
-where
-    P: Preset,
-    E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
-    W: Wait,
-{
-    pub fn store_config(&self) -> StoreConfig {
-        self.store_snapshot().store_config()
     }
 }
 

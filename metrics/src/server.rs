@@ -190,11 +190,17 @@ pub async fn prometheus_metrics<P: Preset, W: Wait>(
             .unwrap_or_default(),
     );
 
-    let epoch = misc::compute_epoch_at_slot::<P>(controller.head().value.slot());
-    // Take state at last slot in epoch
-    let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
-    if let Some(state) = controller.state_at_slot(slot)? {
-        scrape_epoch_statistics(&state.value, &metrics)?;
+    let head_slot = controller.head().value.slot();
+    let store_slot = controller.slot();
+    let max_empty_slots = controller.store_config().max_empty_slots;
+
+    if head_slot + max_empty_slots >= store_slot {
+        let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
+        // Take state at last slot in epoch
+        let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
+        if let Some(state) = controller.state_at_slot(slot)? {
+            scrape_epoch_statistics(&state.value, &metrics)?;
+        }
     }
 
     TextEncoder::new()
