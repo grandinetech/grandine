@@ -8,8 +8,8 @@ use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
-    AttestationAction, AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction,
-    BlockOrigin, ChainLink, Store,
+    AggregateAndProofOrigin, AttestationAction, AttestationOrigin, AttesterSlashingOrigin,
+    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, Store,
 };
 use helper_functions::{accessors, misc};
 use log::debug;
@@ -19,10 +19,8 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
     phase0::{
-        containers::{Attestation, Checkpoint},
-        primitives::{
-            DepositIndex, Epoch, ExecutionBlockHash, Slot, SubnetId, ValidatorIndex, H256,
-        },
+        containers::{Attestation, Checkpoint, SignedAggregateAndProof},
+        primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -150,7 +148,11 @@ pub enum P2pMessage<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, educe(Debug(ignore)))] Arc<BeaconState<P>>),
-    ReverifyGossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
+    ReverifyAttestation(Arc<Attestation<P>>, AttestationOrigin<GossipId>),
+    ReverifyAggregateAndProof(
+        Arc<SignedAggregateAndProof<P>>,
+        AggregateAndProofOrigin<GossipId>,
+    ),
 }
 
 impl<P: Preset> P2pMessage<P> {

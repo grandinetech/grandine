@@ -298,7 +298,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<BeaconCommitteeSubscription>> {
 }
 
 #[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Box<SignedAggregateAndProof<P>>>> {
+impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<SignedAggregateAndProof<P>>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {

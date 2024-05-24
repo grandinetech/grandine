@@ -5,7 +5,9 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::RealController;
 use eth2_libp2p::GossipId;
 use fork_choice_control::{VerifyAggregateAndProofResult, VerifyAttestationResult};
-use fork_choice_store::{AggregateAndProofAction, AttestationAction};
+use fork_choice_store::{
+    AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationOrigin,
+};
 use futures::{
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
     select, StreamExt,
@@ -25,10 +27,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::BeaconState,
     config::Config,
-    phase0::{
-        containers::{AggregateAndProof, Attestation, SignedAggregateAndProof},
-        primitives::SubnetId,
-    },
+    phase0::containers::{AggregateAndProof, Attestation, SignedAggregateAndProof},
     preset::Preset,
 };
 
@@ -92,19 +91,20 @@ impl<P: Preset> AttestationVerifier<P> {
                 }
                 message = self.p2p_to_verifier_rx.select_next_some() => {
                     match message {
-                        P2pToAttestationVerifier::GossipAggregateAndProof(aggregate, gossip_id) => {
+                        P2pToAttestationVerifier::AggregateAndProof(aggregate, origin) => {
                             self.aggregates.push(AggregateWithOrigin {
                                 aggregate,
-                                gossip_id,
+                                origin,
                             });
+
                             self.spawn_verify_batch_tasks();
                         }
-                        P2pToAttestationVerifier::GossipAttestation(attestation, subnet_id, gossip_id) => {
+                        P2pToAttestationVerifier::Attestation(attestation, origin) => {
                             self.attestations.push(AttestationWithOrigin {
                                 attestation,
-                                subnet_id,
-                                gossip_id,
+                                origin,
                             });
+
                             self.spawn_verify_batch_tasks();
                         }
                     }
@@ -191,7 +191,13 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
         aggregates_with_origins: Vec<AggregateWithOrigin<P>>,
         metrics: Option<&Arc<Metrics>>,
     ) {
+        log::info!(
+            "AV: aggregates_with_origins: {}",
+            aggregates_with_origins.len()
+        );
+
         let _timer = metrics.map(|metrics| {
+            // metrics.set_attestation_verifier_aggregate_batch_len(aggregates_with_origins.len());
             metrics
                 .attestation_verifier_processs_aggregate_batch_times
                 .start_timer()
@@ -199,34 +205,23 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
 
         let snapshot = self.controller.snapshot();
 
-        let ((accepted_aggregates_wo, accepted), other): ((Vec<_>, Vec<_>), Vec<_>) =
-            aggregates_with_origins
-                .into_par_iter()
-                .map(|aggregate_wo| {
-                    let AggregateWithOrigin {
-                        aggregate,
-                        gossip_id,
-                    } = aggregate_wo.clone();
-
-                    let result =
-                        snapshot.prevalidate_gossip_aggregate_and_proof(aggregate, gossip_id);
-
-                    (aggregate_wo, result)
-                })
-                .partition_map(|(aggregate_wo, result)| match result.result {
-                    Ok(AggregateAndProofAction::Accept { .. }) => {
-                        Either::Left((aggregate_wo, result))
-                    }
-                    _ => Either::Right(result),
-                });
+        // let ((accepted_aggregates, accepted), other): ((Vec<_>, Vec<_>), Vec<_>) =
+        let (accepted, other): (Vec<_>, Vec<_>) = aggregates_with_origins
+            .into_par_iter()
+            .map(|aggregate_wo| {
+                let AggregateWithOrigin { aggregate, origin } = aggregate_wo;
+                snapshot.prevalidate_verifier_aggregate_and_proof(aggregate, origin)
+            })
+            .partition_map(|result| match result.result {
+                Ok(AggregateAndProofAction::Accept { .. }) => Either::Left(result),
+                _ => Either::Right(result),
+            });
 
         self.send_results_to_fork_choice(other);
 
-        match self.verify_aggregate_batch_signatures(
-            &accepted_aggregates_wo,
-            &snapshot.head_state(),
-            metrics,
-        ) {
+        log::info!("AV: aggregates_signature_batch_len: {}", accepted.len());
+
+        match self.verify_aggregate_batch_signatures(&accepted, &snapshot.head_state(), metrics) {
             Ok(()) => {
                 self.send_results_to_fork_choice(accepted);
             }
@@ -235,8 +230,19 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
                     "signature verification for gossip aggregate and proof batch failed: {error}",
                 );
 
-                for aggregate_wo in accepted_aggregates_wo {
-                    self.process_singular_aggregate(aggregate_wo);
+                for accepted_aggregate in accepted {
+                    let VerifyAggregateAndProofResult { result, origin } = accepted_aggregate;
+
+                    if let Ok(AggregateAndProofAction::Accept {
+                        aggregate_and_proof,
+                        ..
+                    }) = result
+                    {
+                        self.process_singular_aggregate(AggregateWithOrigin {
+                            aggregate: aggregate_and_proof,
+                            origin,
+                        });
+                    }
                 }
             }
         }
@@ -247,16 +253,17 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
             return;
         }
 
-        self.controller.on_gossip_aggregate_and_proof_batch(results);
+        self.controller.on_aggregate_and_proof_batch(results);
     }
 
     fn verify_aggregate_batch_signatures(
         &self,
-        aggregates_wo: &[AggregateWithOrigin<P>],
+        aggregates: &[VerifyAggregateAndProofResult<P>],
         state: &BeaconState<P>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<()> {
         let _timer = metrics.map(|metrics| {
+            // metrics.set_attestation_verifier_aggregate_batch_signature_len(aggregates_wo.len());
             metrics
                 .attestation_verifier_verify_agg_batch_signature_times
                 .start_timer()
@@ -265,44 +272,53 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
         let config = self.controller.chain_config().as_ref();
         let mut verifier = MultiVerifier::default();
 
-        verifier.reserve(aggregates_wo.len() * 3);
+        verifier.reserve(aggregates.len() * 3);
 
-        for aggregate_wo in aggregates_wo {
-            let SignedAggregateAndProof {
-                ref message,
-                signature,
-            } = *aggregate_wo.aggregate;
+        let mut messages = vec![];
 
-            let AggregateAndProof {
-                aggregator_index,
-                ref aggregate,
-                selection_proof,
-            } = *message;
+        for aggregate in aggregates {
+            let VerifyAggregateAndProofResult {
+                ref result,
+                origin: _,
+            } = aggregate;
 
-            let public_key = accessors::public_key(state, aggregator_index)?;
+            if let Ok(AggregateAndProofAction::Accept {
+                ref aggregate_and_proof,
+                ..
+            }) = result
+            {
+                let SignedAggregateAndProof {
+                    ref message,
+                    signature,
+                } = **aggregate_and_proof;
 
-            verifier.verify_singular(
-                aggregate.data.slot.signing_root(config, state),
-                selection_proof,
-                public_key,
-                SignatureKind::SelectionProof,
-            )?;
+                let AggregateAndProof {
+                    aggregator_index,
+                    ref aggregate,
+                    selection_proof,
+                } = *message;
 
-            verifier.verify_singular(
-                message.signing_root(config, state),
-                signature,
-                public_key,
-                SignatureKind::AggregateAndProof,
-            )?;
+                let public_key = accessors::public_key(state, aggregator_index)?;
+
+                verifier.verify_singular(
+                    aggregate.data.slot.signing_root(config, state),
+                    selection_proof,
+                    public_key,
+                    SignatureKind::SelectionProof,
+                )?;
+
+                verifier.verify_singular(
+                    message.signing_root(config, state),
+                    signature,
+                    public_key,
+                    SignatureKind::AggregateAndProof,
+                )?;
+
+                messages.push(&aggregate_and_proof.message.aggregate);
+            }
         }
 
-        let attestation_triples = attestation_batch_triples(
-            config,
-            aggregates_wo
-                .iter()
-                .map(|aggregate_wo| &aggregate_wo.aggregate.message.aggregate),
-            state,
-        )?;
+        let attestation_triples = attestation_batch_triples(config, messages, state)?;
 
         verifier.extend(attestation_triples, SignatureKind::Attestation)?;
 
@@ -310,13 +326,9 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
     }
 
     fn process_singular_aggregate(&self, aggregate_with_origin: AggregateWithOrigin<P>) {
-        let AggregateWithOrigin {
-            aggregate,
-            gossip_id,
-        } = aggregate_with_origin;
+        let AggregateWithOrigin { aggregate, origin } = aggregate_with_origin;
 
-        self.controller
-            .on_gossip_aggregate_and_proof(aggregate, gossip_id);
+        self.controller.on_aggregate_and_proof(aggregate, origin);
     }
 }
 
@@ -350,39 +362,54 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
     fn process_attestation_batch(&self, attestations_with_origins: Vec<AttestationWithOrigin<P>>) {
         let snapshot = self.controller.snapshot();
 
-        let ((accepted_attestations_wo, accepted), other): ((Vec<_>, Vec<_>), Vec<_>) =
-            attestations_with_origins
-                .into_par_iter()
-                .map(|attestation_wo| {
-                    let AttestationWithOrigin {
-                        attestation,
-                        subnet_id,
-                        gossip_id,
-                    } = attestation_wo.clone();
+        log::info!(
+            "AV: attestations_with_origins: {}",
+            attestations_with_origins.len()
+        );
 
-                    let result =
-                        snapshot.prevalidate_gossip_attestation(attestation, subnet_id, gossip_id);
+        // if let Some(metrics) = metrics.as_ref() {
+        //     metrics.set_attestation_verifier_attestation_batch_len(attestations_with_origins.len());
+        // }
 
-                    (attestation_wo, result)
-                })
-                .partition_map(|(attestation_wo, result)| match result.result {
-                    Ok(AttestationAction::Accept { .. }) => Either::Left((attestation_wo, result)),
-                    _ => Either::Right(result),
-                });
+        let (accepted, other): (Vec<_>, Vec<_>) = attestations_with_origins
+            .into_par_iter()
+            .map(|attestation_wo| {
+                let AttestationWithOrigin {
+                    attestation,
+                    origin,
+                } = attestation_wo;
+
+                snapshot.prevalidate_verifier_attestation(attestation, origin)
+            })
+            .partition_map(|result| match result.result {
+                Ok(AttestationAction::Accept { .. }) => Either::Left(result),
+                _ => Either::Right(result),
+            });
 
         self.send_results_to_fork_choice(other);
 
-        match self
-            .verify_attestation_batch_signatures(&accepted_attestations_wo, &snapshot.head_state())
-        {
+        // if let Some(metrics) = metrics.as_ref() {
+        //     metrics.set_attestation_verifier_attestation_batch_signature_len(accepted_attestations_wo.len());
+        // }
+
+        log::info!("AV: attestations_signature_batch_len: {}", accepted.len());
+
+        match self.verify_attestation_batch_signatures(&accepted, &snapshot.head_state()) {
             Ok(()) => {
                 self.send_results_to_fork_choice(accepted);
             }
             Err(error) => {
                 warn!("signature verification for gossip attestation batch failed: {error}");
 
-                for attestation_wo in accepted_attestations_wo {
-                    self.process_singular_attestation(attestation_wo);
+                for accepted_attestation in accepted {
+                    let VerifyAttestationResult { result, origin } = accepted_attestation;
+
+                    if let Ok(AttestationAction::Accept { attestation, .. }) = result {
+                        self.process_singular_attestation(AttestationWithOrigin {
+                            attestation,
+                            origin,
+                        });
+                    }
                 }
             }
         }
@@ -393,23 +420,35 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
             return;
         }
 
-        self.controller.on_gossip_attestation_batch(results);
+        self.controller.on_attestation_batch(results);
     }
 
     fn verify_attestation_batch_signatures(
         &self,
-        attestations_wo: &[AttestationWithOrigin<P>],
+        results: &[VerifyAttestationResult<P>],
         state: &BeaconState<P>,
     ) -> Result<()> {
         let mut verifier = MultiVerifier::default();
 
-        verifier.reserve(attestations_wo.len());
+        verifier.reserve(results.len());
 
         let triples = attestation_batch_triples(
             self.controller.chain_config(),
-            attestations_wo
-                .iter()
-                .map(|attestation_wo| attestation_wo.attestation.as_ref()),
+            results.iter().filter_map(|result| {
+                let VerifyAttestationResult {
+                    ref result,
+                    origin: _,
+                } = result;
+
+                if let Ok(AttestationAction::Accept {
+                    ref attestation, ..
+                }) = result
+                {
+                    Some(attestation.as_ref())
+                } else {
+                    None
+                }
+            }),
             state,
         )?;
 
@@ -421,12 +460,10 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
     fn process_singular_attestation(&self, attestation_with_origin: AttestationWithOrigin<P>) {
         let AttestationWithOrigin {
             attestation,
-            subnet_id,
-            gossip_id,
+            origin,
         } = attestation_with_origin;
 
-        self.controller
-            .on_gossip_singular_attestation(attestation, subnet_id, gossip_id);
+        self.controller.on_singular_attestation(attestation, origin);
     }
 }
 
@@ -455,17 +492,14 @@ fn attestation_batch_triples<'a, P: Preset>(
         .collect()
 }
 
-#[derive(Clone)]
 struct AggregateWithOrigin<P: Preset> {
-    aggregate: Box<SignedAggregateAndProof<P>>,
-    gossip_id: GossipId,
+    aggregate: Arc<SignedAggregateAndProof<P>>,
+    origin: AggregateAndProofOrigin<GossipId>,
 }
 
-#[derive(Clone)]
 struct AttestationWithOrigin<P: Preset> {
     attestation: Arc<Attestation<P>>,
-    subnet_id: SubnetId,
-    gossip_id: GossipId,
+    origin: AttestationOrigin<GossipId>,
 }
 
 enum TaskMessage {

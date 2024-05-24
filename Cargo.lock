@@ -2678,6 +2678,7 @@ dependencies = [
  "kzg_utils",
  "log",
  "prometheus_metrics",
+ "serde",
  "ssz",
  "static_assertions",
  "std_ext",

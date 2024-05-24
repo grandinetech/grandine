@@ -6,6 +6,7 @@ use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::GossipId;
 use execution_engine::{MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus};
+use fork_choice_store::AttestationOrigin;
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use std_ext::ArcExt as _;
@@ -549,10 +550,9 @@ impl<P: Preset> Context<P> {
             factory::singular_attestation(self.config(), state.clone_arc(), epoch, validator_index)
                 .expect("attestation should be constructed successfully");
 
-        self.controller().on_gossip_singular_attestation(
+        self.controller().on_singular_attestation(
             Arc::new(attestation),
-            subnet_id,
-            GossipId::default(),
+            AttestationOrigin::Gossip(subnet_id, GossipId::default()),
         );
 
         self.controller().wait_for_tasks();

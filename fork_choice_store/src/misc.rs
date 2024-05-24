@@ -11,6 +11,7 @@ use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
+use serde::{Serialize, Serializer};
 use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
@@ -266,15 +267,23 @@ impl BlockOrigin {
 #[derive(Debug, AsRefStr)]
 pub enum AggregateAndProofOrigin<I> {
     Gossip(I),
-    GossipBatch(I),
     Api(OneshotSender<Result<ValidationOutcome>>),
+}
+
+impl Serialize for AggregateAndProofOrigin<GossipId> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
 }
 
 impl<I> AggregateAndProofOrigin<I> {
     #[must_use]
     pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
         match self {
-            Self::Gossip(gossip_id) | Self::GossipBatch(gossip_id) => (Some(gossip_id), None),
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, Some(sender)),
         }
     }
@@ -282,7 +291,7 @@ impl<I> AggregateAndProofOrigin<I> {
     #[must_use]
     pub fn gossip_id(self) -> Option<I> {
         match self {
-            Self::Gossip(gossip_id) | Self::GossipBatch(gossip_id) => Some(gossip_id),
+            Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,
         }
     }
@@ -290,7 +299,7 @@ impl<I> AggregateAndProofOrigin<I> {
     #[must_use]
     pub const fn gossip_id_ref(&self) -> Option<&I> {
         match self {
-            Self::Gossip(gossip_id) | Self::GossipBatch(gossip_id) => Some(gossip_id),
+            Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,
         }
     }
@@ -299,14 +308,13 @@ impl<I> AggregateAndProofOrigin<I> {
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,
-            Self::GossipBatch(_) => false,
         }
     }
 
     #[must_use]
     pub const fn send_to_validator(&self) -> bool {
         match self {
-            Self::Gossip(_) | Self::GossipBatch(_) | Self::Api(_) => true,
+            Self::Gossip(_) | Self::Api(_) => true,
         }
     }
 
@@ -315,7 +323,6 @@ impl<I> AggregateAndProofOrigin<I> {
     pub const fn metrics_label(&self) -> &str {
         match self {
             Self::Gossip(_) => "Gossip",
-            Self::GossipBatch(_) => "GossipBatch",
             Self::Api(_) => "Api",
         }
     }
@@ -324,7 +331,6 @@ impl<I> AggregateAndProofOrigin<I> {
 #[derive(Debug, AsRefStr)]
 pub enum AttestationOrigin<I> {
     Gossip(SubnetId, I),
-    GossipBatch(SubnetId, I),
     Own(SubnetId),
     Api(SubnetId, OneshotSender<Result<ValidationOutcome>>),
     Block,
@@ -334,11 +340,20 @@ pub enum AttestationOrigin<I> {
     Test,
 }
 
+impl Serialize for AttestationOrigin<GossipId> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
+}
+
 impl<I> AttestationOrigin<I> {
     #[must_use]
     pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
         match self {
-            Self::Gossip(_, gossip_id) | Self::GossipBatch(_, gossip_id) => (Some(gossip_id), None),
+            Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(_, sender) => (None, Some(sender)),
             Self::Own(_) | Self::Block | Self::Test => (None, None),
         }
@@ -347,10 +362,9 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn subnet_id(&self) -> Option<SubnetId> {
         match *self {
-            Self::Gossip(subnet_id, _)
-            | Self::GossipBatch(subnet_id, _)
-            | Self::Own(subnet_id)
-            | Self::Api(subnet_id, _) => Some(subnet_id),
+            Self::Gossip(subnet_id, _) | Self::Own(subnet_id) | Self::Api(subnet_id, _) => {
+                Some(subnet_id)
+            }
             Self::Block | Self::Test => None,
         }
     }
@@ -358,7 +372,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub fn gossip_id(self) -> Option<I> {
         match self {
-            Self::Gossip(_, gossip_id) | Self::GossipBatch(_, gossip_id) => Some(gossip_id),
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
             _ => None,
         }
     }
@@ -366,7 +380,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn gossip_id_ref(&self) -> Option<&I> {
         match self {
-            Self::Gossip(_, gossip_id) | Self::GossipBatch(_, gossip_id) => Some(gossip_id),
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
             _ => None,
         }
     }
@@ -379,11 +393,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn validate_as_gossip(&self) -> bool {
         match self {
-            Self::Gossip(_, _)
-            | Self::GossipBatch(_, _)
-            | Self::Own(_)
-            | Self::Api(_, _)
-            | Self::Test => true,
+            Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) | Self::Test => true,
             Self::Block => false,
         }
     }
@@ -391,7 +401,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn must_be_singular(&self) -> bool {
         match self {
-            Self::Gossip(_, _) | Self::GossipBatch(_, _) | Self::Own(_) | Self::Api(_, _) => true,
+            Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) => true,
             Self::Block | Self::Test => false,
         }
     }
@@ -402,10 +412,10 @@ impl<I> AttestationOrigin<I> {
     }
 
     #[must_use]
-    pub fn validate_indexed(&self) -> bool {
+    pub fn validate_signature(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Api(_, _) | Self::Test => true,
-            Self::GossipBatch(_, _) | Self::Block => false,
+            Self::Block => false,
             Self::Own(_) => !Feature::TrustOwnAttestationSignatures.is_enabled(),
         }
     }
@@ -413,7 +423,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn send_to_validator(&self) -> bool {
         match self {
-            Self::Gossip(_, _) | Self::GossipBatch(_, _) | Self::Api(_, _) => true,
+            Self::Gossip(_, _) | Self::Api(_, _) => true,
             Self::Own(_) | Self::Block | Self::Test => false,
         }
     }
@@ -423,7 +433,6 @@ impl<I> AttestationOrigin<I> {
     pub const fn metrics_label(&self) -> &str {
         match self {
             Self::Gossip(_, _) => "Gossip",
-            Self::GossipBatch(_, _) => "GossipBatch",
             Self::Own(_) => "Own",
             Self::Api(_, _) => "Api",
             Self::Block => "Block",
@@ -496,14 +505,14 @@ pub enum BlockAction<P: Preset> {
 
 pub enum AggregateAndProofAction<P: Preset> {
     Accept {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
         is_superset: bool,
     },
     Ignore,
-    DelayUntilBlock(Box<SignedAggregateAndProof<P>>, H256),
-    DelayUntilSlot(Box<SignedAggregateAndProof<P>>),
-    WaitForTargetState(Box<SignedAggregateAndProof<P>>),
+    DelayUntilBlock(Arc<SignedAggregateAndProof<P>>, H256),
+    DelayUntilSlot(Arc<SignedAggregateAndProof<P>>),
+    WaitForTargetState(Arc<SignedAggregateAndProof<P>>),
 }
 
 pub enum AttestationAction<P: Preset> {

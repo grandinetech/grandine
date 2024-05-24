@@ -23,6 +23,7 @@ use enum_iterator::Sequence as _;
 use eth1_api::ApiController;
 use eth2_libp2p::PeerId;
 use fork_choice_control::{ForkChoiceContext, ForkTip, Wait};
+use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin};
 use futures::{
     channel::mpsc::UnboundedSender,
     stream::{FuturesOrdered, Stream, StreamExt as _},
@@ -2201,7 +2202,7 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJson(aggregate_and_proofs): EthJson<Vec<Box<SignedAggregateAndProof<P>>>>,
+    EthJson(aggregate_and_proofs): EthJson<Vec<Arc<SignedAggregateAndProof<P>>>>,
 ) -> Result<(), Error> {
     let (successes, failures): (Vec<_>, Vec<_>) = aggregate_and_proofs
         .into_iter()
@@ -2209,7 +2210,10 @@ pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
         .map(|(index, aggregate_and_proof)| {
             let (sender, receiver) = futures::channel::oneshot::channel();
 
-            controller.on_api_aggregate_and_proof(aggregate_and_proof.clone(), sender);
+            controller.on_aggregate_and_proof(
+                aggregate_and_proof.clone_arc(),
+                AggregateAndProofOrigin::Api(sender),
+            );
 
             async move {
                 let run = async {
@@ -2523,7 +2527,10 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
 
         let (sender, receiver) = futures::channel::oneshot::channel();
 
-        controller.on_api_singular_attestation(attestation.clone_arc(), subnet_id, sender);
+        controller.on_singular_attestation(
+            attestation.clone_arc(),
+            AttestationOrigin::Api(subnet_id, sender),
+        );
 
         let validation_outcome = receiver.await??;
 

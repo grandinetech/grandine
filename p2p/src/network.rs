@@ -23,6 +23,7 @@ use eth2_libp2p::{
     Response, ShutdownReason, Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
 };
 use fork_choice_control::P2pMessage;
+use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin};
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
@@ -342,8 +343,12 @@ impl<P: Preset> Network<P> {
                         P2pMessage::HeadState(state) => {
                             P2pToSync::HeadState(state).send(&self.channels.p2p_to_sync_tx);
                         }
-                        P2pMessage::ReverifyGossipAttestation(attestation, subnet_id, gossip_id) => {
-                            P2pToAttestationVerifier::GossipAttestation(attestation, subnet_id, gossip_id)
+                        P2pMessage::ReverifyAttestation(attestation, origin) => {
+                            P2pToAttestationVerifier::Attestation(attestation, origin)
+                                .send(&self.channels.p2p_to_attestation_verifier_tx);
+                        }
+                        P2pMessage::ReverifyAggregateAndProof(aggregate_and_proof, origin) => {
+                            P2pToAttestationVerifier::AggregateAndProof(aggregate_and_proof, origin)
                                 .send(&self.channels.p2p_to_attestation_verifier_tx);
                         }
                     }
@@ -583,7 +588,7 @@ impl<P: Preset> Network<P> {
         self.publish(PubsubMessage::Attestation(subnet_id, attestation));
     }
 
-    fn publish_aggregate_and_proof(&self, aggregate_and_proof: Box<SignedAggregateAndProof<P>>) {
+    fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
         if aggregate_and_proof
             .message
             .aggregate
@@ -1483,8 +1488,11 @@ impl<P: Preset> Network<P> {
 
                 let gossip_id = GossipId { source, message_id };
 
-                P2pToAttestationVerifier::GossipAggregateAndProof(aggregate_and_proof, gossip_id)
-                    .send(&self.channels.p2p_to_attestation_verifier_tx);
+                P2pToAttestationVerifier::AggregateAndProof(
+                    aggregate_and_proof,
+                    AggregateAndProofOrigin::Gossip(gossip_id),
+                )
+                .send(&self.channels.p2p_to_attestation_verifier_tx);
             }
             PubsubMessage::Attestation(subnet_id, attestation) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1505,8 +1513,11 @@ impl<P: Preset> Network<P> {
 
                 let gossip_id = GossipId { source, message_id };
 
-                P2pToAttestationVerifier::GossipAttestation(attestation, subnet_id, gossip_id)
-                    .send(&self.channels.p2p_to_attestation_verifier_tx);
+                P2pToAttestationVerifier::Attestation(
+                    attestation,
+                    AttestationOrigin::Gossip(subnet_id, gossip_id),
+                )
+                .send(&self.channels.p2p_to_attestation_verifier_tx);
             }
             PubsubMessage::VoluntaryExit(signed_voluntary_exit) => {
                 if let Some(metrics) = self.metrics.as_ref() {

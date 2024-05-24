@@ -8,6 +8,7 @@ use eth2_libp2p::{
     GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
     PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery,
 };
+use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin};
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use operation_pools::PoolRejectionReason;
@@ -36,8 +37,11 @@ use crate::{
 };
 
 pub enum P2pToAttestationVerifier<P: Preset> {
-    GossipAggregateAndProof(Box<SignedAggregateAndProof<P>>, GossipId),
-    GossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
+    AggregateAndProof(
+        Arc<SignedAggregateAndProof<P>>,
+        AggregateAndProofOrigin<GossipId>,
+    ),
+    Attestation(Arc<Attestation<P>>, AttestationOrigin<GossipId>),
 }
 
 impl<P: Preset> P2pToAttestationVerifier<P> {
@@ -80,7 +84,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
-    PublishAggregateAndProof(Box<SignedAggregateAndProof<P>>),
+    PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
@@ -160,7 +164,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
-    PublishAggregateAndProof(Box<SignedAggregateAndProof<P>>),
+    PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),

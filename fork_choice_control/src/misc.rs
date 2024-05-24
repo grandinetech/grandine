@@ -91,7 +91,7 @@ pub struct PendingChainLink<P: Preset> {
 
 #[derive(Debug)]
 pub struct PendingAggregateAndProof<P: Preset> {
-    pub aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+    pub aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
 }
 
