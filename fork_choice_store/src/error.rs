@@ -17,14 +17,14 @@ use types::{
 pub enum Error<P: Preset> {
     #[error("aggregate attestation has no aggregation bits set: {aggregate_and_proof:?}")]
     AggregateAttestationHasNoAggregationBitsSet {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error(
         "aggregator is not in committee \
          (aggregate_and_proof: {aggregate_and_proof:?}, committee: {committee:?})"
     )]
     AggregatorNotInCommittee {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         committee: Box<[ValidatorIndex]>,
     },
     #[error(
@@ -76,11 +76,11 @@ pub enum Error<P: Preset> {
     },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("LMD GHOST vote is inconsistent with FFG vote target (attestation: {attestation:?})")]
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
@@ -118,7 +118,7 @@ pub enum Error<P: Preset> {
     },
     #[error("validator is not an aggregator: {aggregate_and_proof:?}")]
     ValidatorNotAggregator {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
 }
 

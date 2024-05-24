@@ -144,7 +144,7 @@ pub struct AggregateAndProofTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+    pub aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -167,7 +167,9 @@ impl<P: Preset, W> Run for AggregateAndProofTask<P, W> {
             )
         });
 
-        let result = store_snapshot.validate_aggregate_and_proof(aggregate_and_proof, &origin);
+        let result =
+            store_snapshot.validate_aggregate_and_proof(aggregate_and_proof, &origin, false);
+
         let result = VerifyAggregateAndProofResult { result, origin };
 
         MutatorMessage::AggregateAndProof { wait_group, result }.send(&mutator_tx);
@@ -198,7 +200,7 @@ impl<P: Preset, W> Run for AttestationTask<P, W> {
             prometheus_metrics::start_timer_vec(&metrics.fc_attestation_task_times, origin.as_ref())
         });
 
-        let result = store_snapshot.validate_attestation(attestation, &origin);
+        let result = store_snapshot.validate_attestation(attestation, &origin, false);
         let result = VerifyAttestationResult { result, origin };
 
         MutatorMessage::Attestation { wait_group, result }.send(&mutator_tx);
@@ -237,7 +239,7 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             .map(|attestation| {
                 let attestation = Arc::new(attestation.clone());
                 let origin = AttestationOrigin::<GossipId>::Block;
-                store_snapshot.validate_attestation(attestation, &origin)
+                store_snapshot.validate_attestation(attestation, &origin, true)
             })
             .collect();
 

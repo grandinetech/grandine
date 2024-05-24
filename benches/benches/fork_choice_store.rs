@@ -192,7 +192,7 @@ fn process_attestation<P: Preset>(
 ) -> Result<()> {
     let slot = attestation.data.slot;
     let origin = AttestationOrigin::<Never>::Test;
-    let attestation_action = store.validate_attestation(attestation, &origin)?;
+    let attestation_action = store.validate_attestation(attestation, &origin, false)?;
 
     let AttestationAction::Accept {
         attestation,

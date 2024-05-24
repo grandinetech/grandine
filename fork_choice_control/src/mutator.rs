@@ -64,8 +64,8 @@ use crate::{
     state_cache::StateCache,
     storage::Storage,
     tasks::{
-        AggregateAndProofTask, AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask,
-        CheckpointStateTask, PersistBlobSidecarsTask, PreprocessStateTask,
+        AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
+        PersistBlobSidecarsTask, PreprocessStateTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -662,11 +662,7 @@ where
                     origin,
                 };
 
-                self.delay_aggregate_and_proof_until_block(
-                    wait_group,
-                    pending_aggregate_and_proof,
-                    block_root,
-                );
+                self.delay_aggregate_and_proof_until_block(pending_aggregate_and_proof, block_root);
             }
             Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -678,7 +674,7 @@ where
                     origin,
                 };
 
-                self.delay_aggregate_and_proof_until_slot(wait_group, pending_aggregate_and_proof);
+                self.delay_aggregate_and_proof_until_slot(pending_aggregate_and_proof);
             }
             Ok(AggregateAndProofAction::WaitForTargetState(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -693,7 +689,7 @@ where
                 };
 
                 if self.store.contains_checkpoint_state(checkpoint) {
-                    self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+                    self.retry_aggregate_and_proof(pending_aggregate_and_proof);
                 } else {
                     let waiting = self
                         .waiting_for_checkpoint_states
@@ -1117,7 +1113,7 @@ where
         }
 
         for pending_aggregate_and_proof in aggregates {
-            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
         }
 
         // This spawns a separate task for each attestation.
@@ -1700,12 +1696,11 @@ where
 
     fn delay_aggregate_and_proof_until_block(
         &mut self,
-        wait_group: &W,
         pending_aggregate_and_proof: PendingAggregateAndProof<P>,
         block_root: H256,
     ) {
         if self.store.contains_block(block_root) {
-            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
         } else {
             debug!(
                 "aggregate and proof delayed until block \
@@ -1777,7 +1772,6 @@ where
 
     fn delay_aggregate_and_proof_until_slot(
         &mut self,
-        wait_group: &W,
         pending_aggregate_and_proof: PendingAggregateAndProof<P>,
     ) {
         let slot = pending_aggregate_and_proof
@@ -1788,7 +1782,7 @@ where
             .slot;
 
         if slot <= self.store.slot() {
-            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
         } else {
             debug!("aggregate and proof delayed until slot: {pending_aggregate_and_proof:?}");
 
@@ -1886,7 +1880,7 @@ where
         }
 
         for pending_aggregate_and_proof in aggregates {
-            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
         }
 
         for pending_attestation in attestations {
@@ -1927,22 +1921,18 @@ where
             origin,
         } = pending_attestation;
 
-        if let Some(subnet_id) = origin.subnet_id() {
-            if let Some(gossip_id) = origin.gossip_id_ref() {
-                P2pMessage::ReverifyGossipAttestation(attestation, subnet_id, gossip_id.clone())
-                    .send(&self.p2p_tx);
-                return;
-            }
+        if origin.validate_signature() {
+            P2pMessage::ReverifyAttestation(attestation, origin).send(&self.p2p_tx);
+        } else {
+            self.spawn(AttestationTask {
+                store_snapshot: self.owned_store(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group,
+                attestation,
+                origin,
+                metrics: self.metrics.clone(),
+            });
         }
-
-        self.spawn(AttestationTask {
-            store_snapshot: self.owned_store(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            attestation,
-            origin,
-            metrics: self.metrics.clone(),
-        });
     }
 
     fn retry_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
@@ -1951,11 +1941,7 @@ where
         self.handle_tick(wait_group, tick)
     }
 
-    fn retry_aggregate_and_proof(
-        &self,
-        wait_group: W,
-        pending_aggregate_and_proof: PendingAggregateAndProof<P>,
-    ) {
+    fn retry_aggregate_and_proof(&self, pending_aggregate_and_proof: PendingAggregateAndProof<P>) {
         debug!("retrying delayed aggregate and proof: {pending_aggregate_and_proof:?}");
 
         let PendingAggregateAndProof {
@@ -1963,14 +1949,7 @@ where
             origin,
         } = pending_aggregate_and_proof;
 
-        self.spawn(AggregateAndProofTask {
-            store_snapshot: self.owned_store(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            aggregate_and_proof,
-            origin,
-            metrics: self.metrics.clone(),
-        });
+        P2pMessage::ReverifyAggregateAndProof(aggregate_and_proof, origin).send(&self.p2p_tx);
     }
 
     fn retry_blob_sidecar(&self, wait_group: W, pending_blob_sidecar: PendingBlobSidecar<P>) {

@@ -17,7 +17,7 @@ use types::{
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::{Attestation, Checkpoint, SignedAggregateAndProof},
-        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, UnixSeconds, H256},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -783,32 +783,27 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
     }
 
     #[must_use]
-    pub fn prevalidate_gossip_aggregate_and_proof(
+    pub fn prevalidate_verifier_aggregate_and_proof(
         &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
-        gossip_id: GossipId,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
     ) -> VerifyAggregateAndProofResult<P> {
-        let origin = AggregateAndProofOrigin::GossipBatch(gossip_id);
-
-        let result = self
-            .store_snapshot
-            .validate_aggregate_and_proof(aggregate_and_proof, &origin);
+        let result =
+            self.store_snapshot
+                .validate_aggregate_and_proof(aggregate_and_proof, &origin, true);
 
         VerifyAggregateAndProofResult { result, origin }
     }
 
     #[must_use]
-    pub fn prevalidate_gossip_attestation(
+    pub fn prevalidate_verifier_attestation(
         &self,
         attestation: Arc<Attestation<P>>,
-        subnet_id: SubnetId,
-        gossip_id: GossipId,
+        origin: AttestationOrigin<GossipId>,
     ) -> VerifyAttestationResult<P> {
-        let origin = AttestationOrigin::GossipBatch(subnet_id, gossip_id);
-
         let result = self
             .store_snapshot
-            .validate_attestation(attestation, &origin);
+            .validate_attestation(attestation, &origin, true);
 
         VerifyAttestationResult { result, origin }
     }

@@ -1165,8 +1165,9 @@ impl<P: Preset> Store<P> {
     #[allow(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         origin: &AggregateAndProofOrigin<I>,
+        signature_validated: bool,
     ) -> Result<AggregateAndProofAction<P>> {
         let SignedAggregateAndProof {
             ref message,
@@ -1284,7 +1285,7 @@ impl<P: Preset> Store<P> {
 
         let public_key = &target_state.validators().get(aggregator_index)?.pubkey;
 
-        if origin.verify_signatures() {
+        if !signature_validated && origin.verify_signatures() {
             let chain_config = &self.chain_config;
 
             // > The `aggregate_and_proof.selection_proof` is a valid signature of the
@@ -1306,8 +1307,11 @@ impl<P: Preset> Store<P> {
             }
         }
 
-        let attesting_indices =
-            self.attesting_indices(&target_state, aggregate, origin.verify_signatures())?;
+        let attesting_indices = self.attesting_indices(
+            &target_state,
+            aggregate,
+            !signature_validated && origin.verify_signatures(),
+        )?;
 
         // https://github.com/ethereum/consensus-specs/pull/2847
         let is_superset = self.aggregate_and_proof_supersets.check(aggregate);
@@ -1323,6 +1327,7 @@ impl<P: Preset> Store<P> {
         &self,
         attestation: Arc<Attestation<P>>,
         origin: &AttestationOrigin<I>,
+        signature_validated: bool,
     ) -> Result<AttestationAction<P>> {
         match self.validate_attestation_internal(&attestation, origin.is_from_block())? {
             PartialAttestationAction::Accept => {}
@@ -1417,8 +1422,11 @@ impl<P: Preset> Store<P> {
             );
         }
 
-        let attesting_indices =
-            self.attesting_indices(&target_state, &attestation, origin.validate_indexed())?;
+        let attesting_indices = self.attesting_indices(
+            &target_state,
+            &attestation,
+            !signature_validated && origin.validate_signature(),
+        )?;
 
         Ok(AttestationAction::Accept {
             attestation,

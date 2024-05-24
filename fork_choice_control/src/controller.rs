@@ -24,7 +24,7 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
     BlockOrigin, Store, StoreConfig,
 };
-use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
+use futures::channel::mpsc::Sender as MultiSender;
 use genesis::AnchorCheckpointProvider;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
@@ -245,88 +245,37 @@ where
         .send(&self.mutator_tx);
     }
 
-    pub fn on_api_aggregate_and_proof(
+    pub fn on_aggregate_and_proof(
         &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
-        sender: OneshotSender<Result<ValidationOutcome>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
     ) {
         self.spawn(AggregateAndProofTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             aggregate_and_proof,
-            origin: AggregateAndProofOrigin::Api(sender),
+            origin,
             metrics: self.metrics.clone(),
         })
     }
 
-    pub fn on_gossip_aggregate_and_proof(
-        &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
-        gossip_id: GossipId,
-    ) {
-        self.spawn(AggregateAndProofTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
-            aggregate_and_proof,
-            origin: AggregateAndProofOrigin::Gossip(gossip_id),
-            metrics: self.metrics.clone(),
-        })
-    }
-
-    pub fn on_api_singular_attestation(
+    pub fn on_singular_attestation(
         &self,
         attestation: Arc<Attestation<P>>,
-        subnet_id: SubnetId,
-        sender: OneshotSender<Result<ValidationOutcome>>,
+        origin: AttestationOrigin<GossipId>,
     ) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             attestation,
-            origin: AttestationOrigin::Api(subnet_id, sender),
+            origin,
             metrics: self.metrics.clone(),
         })
     }
 
-    pub fn on_gossip_singular_attestation(
-        &self,
-        attestation: Arc<Attestation<P>>,
-        subnet_id: SubnetId,
-        gossip_id: GossipId,
-    ) {
-        self.spawn(AttestationTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
-            attestation,
-            origin: AttestationOrigin::Gossip(subnet_id, gossip_id),
-            metrics: self.metrics.clone(),
-        })
-    }
-
-    pub fn on_own_singular_attestation(
-        &self,
-        wait_group: W,
-        attestation: Arc<Attestation<P>>,
-        subnet_id: SubnetId,
-    ) {
-        self.spawn(AttestationTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            attestation,
-            origin: AttestationOrigin::Own(subnet_id),
-            metrics: self.metrics.clone(),
-        })
-    }
-
-    pub fn on_gossip_aggregate_and_proof_batch(
-        &self,
-        results: Vec<VerifyAggregateAndProofResult<P>>,
-    ) {
+    pub fn on_aggregate_and_proof_batch(&self, results: Vec<VerifyAggregateAndProofResult<P>>) {
         if results.is_empty() {
             return;
         }
@@ -338,7 +287,7 @@ where
         .send(&self.mutator_tx)
     }
 
-    pub fn on_gossip_attestation_batch(&self, results: Vec<VerifyAttestationResult<P>>) {
+    pub fn on_attestation_batch(&self, results: Vec<VerifyAttestationResult<P>>) {
         if results.is_empty() {
             return;
         }
