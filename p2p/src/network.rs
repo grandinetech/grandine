@@ -24,7 +24,7 @@ use eth2_libp2p::{
 };
 use fork_choice_control::P2pMessage;
 use futures::{
-    channel::mpsc::{self, Receiver, UnboundedReceiver, UnboundedSender},
+    channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
     select,
     stream::StreamExt as _,
@@ -174,8 +174,8 @@ impl<P: Preset> Network<P> {
             }
         }
 
-        let (network_to_service_tx, network_to_service_rx) = mpsc::unbounded();
-        let (service_to_network_tx, service_to_network_rx) = mpsc::unbounded();
+        let (network_to_service_tx, network_to_service_rx) = futures::channel::mpsc::unbounded();
+        let (service_to_network_tx, service_to_network_rx) = futures::channel::mpsc::unbounded();
 
         run_network_service(service, network_to_service_rx, service_to_network_tx);
 
