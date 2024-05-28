@@ -23,7 +23,6 @@ use enum_iterator::Sequence as _;
 use eth1_api::ApiController;
 use eth2_libp2p::PeerId;
 use fork_choice_control::{ForkChoiceContext, ForkTip, Wait};
-use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin};
 use futures::{
     channel::mpsc::UnboundedSender,
     stream::{FuturesOrdered, Stream, StreamExt as _},
@@ -2210,10 +2209,7 @@ pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
         .map(|(index, aggregate_and_proof)| {
             let (sender, receiver) = futures::channel::oneshot::channel();
 
-            controller.on_aggregate_and_proof(
-                aggregate_and_proof.clone_arc(),
-                AggregateAndProofOrigin::Api(sender),
-            );
+            controller.on_api_aggregate_and_proof(aggregate_and_proof.clone_arc(), sender);
 
             async move {
                 let run = async {
@@ -2527,10 +2523,7 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
 
         let (sender, receiver) = futures::channel::oneshot::channel();
 
-        controller.on_singular_attestation(
-            attestation.clone_arc(),
-            AttestationOrigin::Api(subnet_id, sender),
-        );
+        controller.on_api_singular_attestation(attestation.clone_arc(), subnet_id, sender);
 
         let validation_outcome = receiver.await??;
 

@@ -1,7 +1,6 @@
 pub use eth2_libp2p::{metrics, Enr, ListenAddr, Multiaddr, NetworkConfig};
 
 pub use crate::{
-    attestation_verifier::AttestationVerifier,
     block_sync_service::{BlockSyncService, Channels as BlockSyncServiceChannels},
     messages::{
         ApiToP2p, P2pToSlasher, P2pToValidator, SubnetServiceToP2p, SyncToApi, SyncToMetrics,
@@ -14,7 +13,6 @@ pub use crate::{
 };
 
 mod attestation_subnets;
-mod attestation_verifier;
 mod back_sync;
 mod beacon_committee_subscriptions;
 mod block_sync_service;

@@ -18,8 +18,9 @@
 pub use crate::{
     controller::Controller,
     messages::{
-        ApiMessage, BlockEvent, ChainReorgEvent, FinalizedCheckpointEvent, HeadEvent, P2pMessage,
-        SubnetMessage, SyncMessage, ValidatorMessage,
+        ApiMessage, AttestationVerifierMessage, BlockEvent, ChainReorgEvent,
+        FinalizedCheckpointEvent, HeadEvent, P2pMessage, SubnetMessage, SyncMessage,
+        ValidatorMessage,
     },
     misc::{MutatorRejectionReason, VerifyAggregateAndProofResult, VerifyAttestationResult},
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},

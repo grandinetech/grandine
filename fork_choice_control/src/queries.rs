@@ -25,9 +25,11 @@ use types::{
 
 use crate::{
     controller::Controller,
+    messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     state_cache::StateCache,
     storage::Storage,
+    unbounded_sink::UnboundedSink,
     wait::Wait,
 };
 
@@ -41,10 +43,11 @@ use ::{clock::Tick, types::phase0::consts::GENESIS_SLOT};
 
 // Some of the methods defined here may take a while to execute.
 // Do not call them directly in `async` tasks. Use something like `tokio::task::spawn_blocking`.
-impl<P, E, W> Controller<P, E, W>
+impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
     #[must_use]
@@ -538,10 +541,11 @@ where
 }
 
 #[cfg(test)]
-impl<P, E, W> Controller<P, E, W>
+impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
     #[must_use]

@@ -20,7 +20,6 @@ eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
-fork_choice_store = { workspace = true }
 futures = { workspace = true }
 genesis = { workspace = true }
 helper_functions = { workspace = true }
@@ -58,6 +57,7 @@ unwrap_none = { workspace = true }
 validator = { workspace = true }
 
 [dev-dependencies]
+attestation_verifier = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }

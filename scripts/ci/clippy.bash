@@ -16,6 +16,7 @@ options=(
     --package ad_hoc_bench
     --package allocator
     --package arithmetic
+    --package attestation_verifier
     --package benches
     --package binary_utils
     --package bls

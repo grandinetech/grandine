@@ -3,6 +3,7 @@ members = [
     'ad_hoc_bench',
     'allocator',
     'arithmetic',
+    'attestation_verifier',
     'benches',
     'binary_utils',
     'bls',
@@ -420,6 +421,7 @@ zeroize = { version = '1.7.0', features = ['derive', 'serde'] }
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
+attestation_verifier = { path = 'attestation_verifier' }
 binary_utils = { path = 'binary_utils' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
