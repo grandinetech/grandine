@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use dedicated_executor::DedicatedExecutor;
-use eth1_api::RealController;
+use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
-use fork_choice_control::{VerifyAggregateAndProofResult, VerifyAttestationResult};
+use fork_choice_control::{
+    AttestationVerifierMessage, VerifyAggregateAndProofResult, VerifyAttestationResult, Wait,
+};
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationOrigin,
 };
@@ -31,30 +33,28 @@ use types::{
     preset::Preset,
 };
 
-use crate::messages::P2pToAttestationVerifier;
-
 const MAX_BATCH_SIZE: usize = 64;
 
-pub struct AttestationVerifier<P: Preset> {
+pub struct AttestationVerifier<P: Preset, W: Wait> {
     attestations: Vec<AttestationWithOrigin<P>>,
     aggregates: Vec<AggregateWithOrigin<P>>,
-    controller: RealController<P>,
-    dedicated_executor: DedicatedExecutor,
+    controller: ApiController<P, W>,
+    dedicated_executor: Arc<DedicatedExecutor>,
     active_task_count: usize,
     max_active_tasks: usize,
     metrics: Option<Arc<Metrics>>,
-    p2p_to_verifier_rx: UnboundedReceiver<P2pToAttestationVerifier<P>>,
-    task_to_verifier_rx: UnboundedReceiver<TaskMessage>,
-    task_to_verifier_tx: UnboundedSender<TaskMessage>,
+    fc_to_verifier_rx: UnboundedReceiver<AttestationVerifierMessage<P, W>>,
+    task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
+    task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
 }
 
-impl<P: Preset> AttestationVerifier<P> {
+impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
     #[must_use]
     pub fn new(
-        controller: RealController<P>,
-        dedicated_executor: DedicatedExecutor,
+        controller: ApiController<P, W>,
+        dedicated_executor: Arc<DedicatedExecutor>,
         metrics: Option<Arc<Metrics>>,
-        p2p_to_verifier_rx: UnboundedReceiver<P2pToAttestationVerifier<P>>,
+        fc_to_verifier_rx: UnboundedReceiver<AttestationVerifierMessage<P, W>>,
     ) -> Self {
         let (task_to_verifier_tx, task_to_verifier_rx) = mpsc::unbounded();
 
@@ -68,7 +68,7 @@ impl<P: Preset> AttestationVerifier<P> {
             // libraries use `num_cpus::get()`
             max_active_tasks: 1,
             metrics,
-            p2p_to_verifier_rx,
+            fc_to_verifier_rx,
             task_to_verifier_rx,
             task_to_verifier_tx,
         }
@@ -79,9 +79,9 @@ impl<P: Preset> AttestationVerifier<P> {
             select! {
                 message = self.task_to_verifier_rx.select_next_some() => {
                     match message {
-                        TaskMessage::Finished => {
+                        TaskMessage::Finished(wait_group) => {
                             self.active_task_count -= 1;
-                            self.spawn_verify_batch_tasks();
+                            self.spawn_verify_batch_tasks(&wait_group);
 
                             if let Some(metrics) = self.metrics.as_ref() {
                                 metrics.set_attestation_verifier_active_task_count(self.active_task_count);
@@ -89,23 +89,31 @@ impl<P: Preset> AttestationVerifier<P> {
                         }
                     }
                 }
-                message = self.p2p_to_verifier_rx.select_next_some() => {
+                message = self.fc_to_verifier_rx.select_next_some() => {
                     match message {
-                        P2pToAttestationVerifier::AggregateAndProof(aggregate, origin) => {
+                        AttestationVerifierMessage::AggregateAndProof {
+                            wait_group,
+                            aggregate_and_proof,
+                            origin,
+                        } => {
                             self.aggregates.push(AggregateWithOrigin {
-                                aggregate,
+                                aggregate: aggregate_and_proof,
                                 origin,
                             });
 
-                            self.spawn_verify_batch_tasks();
+                            self.spawn_verify_batch_tasks(&wait_group);
                         }
-                        P2pToAttestationVerifier::Attestation(attestation, origin) => {
+                        AttestationVerifierMessage::Attestation {
+                            wait_group,
+                            attestation,
+                            origin,
+                        } => {
                             self.attestations.push(AttestationWithOrigin {
                                 attestation,
                                 origin,
                             });
 
-                            self.spawn_verify_batch_tasks();
+                            self.spawn_verify_batch_tasks(&wait_group);
                         }
                     }
                 }
@@ -113,12 +121,12 @@ impl<P: Preset> AttestationVerifier<P> {
         }
     }
 
-    fn spawn_verify_batch_tasks(&mut self) {
-        self.spawn_verify_attestation_batch_task();
-        self.spawn_verify_aggregate_batch_task();
+    fn spawn_verify_batch_tasks(&mut self, wait_group: &W) {
+        self.spawn_verify_attestation_batch_task(wait_group);
+        self.spawn_verify_aggregate_batch_task(wait_group);
     }
 
-    fn spawn_verify_aggregate_batch_task(&mut self) {
+    fn spawn_verify_aggregate_batch_task(&mut self, wait_group: &W) {
         if self.aggregates.is_empty() || self.active_task_count >= self.max_active_tasks {
             return;
         }
@@ -133,6 +141,7 @@ impl<P: Preset> AttestationVerifier<P> {
         let aggregates = self.aggregates.split_off(split_at);
 
         VerifyAggregateBatchTask::spawn(
+            wait_group.clone(),
             aggregates,
             self.controller.clone_arc(),
             &self.dedicated_executor,
@@ -141,7 +150,7 @@ impl<P: Preset> AttestationVerifier<P> {
         );
     }
 
-    fn spawn_verify_attestation_batch_task(&mut self) {
+    fn spawn_verify_attestation_batch_task(&mut self, wait_group: &W) {
         if self.attestations.is_empty() || self.active_task_count >= self.max_active_tasks {
             return;
         }
@@ -156,6 +165,7 @@ impl<P: Preset> AttestationVerifier<P> {
         let attestations = self.attestations.split_off(split_at);
 
         VerifyAttestationBatchTask::spawn(
+            wait_group.clone(),
             attestations,
             self.controller.clone_arc(),
             &self.dedicated_executor,
@@ -165,23 +175,24 @@ impl<P: Preset> AttestationVerifier<P> {
     }
 }
 
-struct VerifyAggregateBatchTask<P: Preset> {
-    controller: RealController<P>,
+struct VerifyAggregateBatchTask<P: Preset, W: Wait> {
+    controller: ApiController<P, W>,
 }
 
-impl<P: Preset> VerifyAggregateBatchTask<P> {
+impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
     fn spawn(
+        wait_group: W,
         aggregates: Vec<AggregateWithOrigin<P>>,
-        controller: RealController<P>,
+        controller: ApiController<P, W>,
         dedicated_executor: &DedicatedExecutor,
         metrics: Option<Arc<Metrics>>,
-        task_to_verifier_tx: UnboundedSender<TaskMessage>,
+        task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
     ) {
         dedicated_executor
             .spawn(async move {
                 Self { controller }.process_aggregate_batch(aggregates, metrics.as_ref());
 
-                TaskMessage::Finished.send(&task_to_verifier_tx);
+                TaskMessage::Finished(wait_group).send(&task_to_verifier_tx);
             })
             .detach();
     }
@@ -191,11 +202,6 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
         aggregates_with_origins: Vec<AggregateWithOrigin<P>>,
         metrics: Option<&Arc<Metrics>>,
     ) {
-        log::info!(
-            "AV: aggregates_with_origins: {}",
-            aggregates_with_origins.len()
-        );
-
         let _timer = metrics.map(|metrics| {
             // metrics.set_attestation_verifier_aggregate_batch_len(aggregates_with_origins.len());
             metrics
@@ -218,8 +224,6 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
             });
 
         self.send_results_to_fork_choice(other);
-
-        log::info!("AV: aggregates_signature_batch_len: {}", accepted.len());
 
         match self.verify_aggregate_batch_signatures(&accepted, &snapshot.head_state(), metrics) {
             Ok(()) => {
@@ -332,17 +336,18 @@ impl<P: Preset> VerifyAggregateBatchTask<P> {
     }
 }
 
-struct VerifyAttestationBatchTask<P: Preset> {
-    controller: RealController<P>,
+struct VerifyAttestationBatchTask<P: Preset, W: Wait> {
+    controller: ApiController<P, W>,
 }
 
-impl<P: Preset> VerifyAttestationBatchTask<P> {
+impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
     fn spawn(
+        wait_group: W,
         attestations: Vec<AttestationWithOrigin<P>>,
-        controller: RealController<P>,
+        controller: ApiController<P, W>,
         dedicated_executor: &DedicatedExecutor,
         metrics: Option<Arc<Metrics>>,
-        task_to_verifier_tx: UnboundedSender<TaskMessage>,
+        task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
     ) {
         dedicated_executor
             .spawn(async move {
@@ -354,18 +359,13 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
 
                 Self { controller }.process_attestation_batch(attestations);
 
-                TaskMessage::Finished.send(&task_to_verifier_tx);
+                TaskMessage::Finished(wait_group).send(&task_to_verifier_tx);
             })
             .detach();
     }
 
     fn process_attestation_batch(&self, attestations_with_origins: Vec<AttestationWithOrigin<P>>) {
         let snapshot = self.controller.snapshot();
-
-        log::info!(
-            "AV: attestations_with_origins: {}",
-            attestations_with_origins.len()
-        );
 
         // if let Some(metrics) = metrics.as_ref() {
         //     metrics.set_attestation_verifier_attestation_batch_len(attestations_with_origins.len());
@@ -391,8 +391,6 @@ impl<P: Preset> VerifyAttestationBatchTask<P> {
         // if let Some(metrics) = metrics.as_ref() {
         //     metrics.set_attestation_verifier_attestation_batch_signature_len(accepted_attestations_wo.len());
         // }
-
-        log::info!("AV: attestations_signature_batch_len: {}", accepted.len());
 
         match self.verify_attestation_batch_signatures(&accepted, &snapshot.head_state()) {
             Ok(()) => {
@@ -502,11 +500,11 @@ struct AttestationWithOrigin<P: Preset> {
     origin: AttestationOrigin<GossipId>,
 }
 
-enum TaskMessage {
-    Finished,
+enum TaskMessage<W> {
+    Finished(W),
 }
 
-impl TaskMessage {
+impl<W> TaskMessage<W> {
     fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug!(

@@ -55,7 +55,10 @@ use types::{
 };
 
 use crate::{
-    messages::{MutatorMessage, P2pMessage, SubnetMessage, SyncMessage, ValidatorMessage},
+    messages::{
+        AttestationVerifierMessage, MutatorMessage, P2pMessage, SubnetMessage, SyncMessage,
+        ValidatorMessage,
+    },
     misc::{
         Delayed, MutatorRejectionReason, PendingAggregateAndProof, PendingAttestation,
         PendingBlobSidecar, PendingBlock, PendingChainLink, VerifyAggregateAndProofResult,
@@ -74,7 +77,7 @@ use crate::{
 };
 
 #[allow(clippy::struct_field_names)]
-pub struct Mutator<P: Preset, E, W, AS, PS, NS, SS, VS> {
+pub struct Mutator<P: Preset, E, W, AS, TS, PS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
     state_cache: Arc<StateCache<P, W>>,
@@ -108,18 +111,20 @@ pub struct Mutator<P: Preset, E, W, AS, PS, NS, SS, VS> {
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
     api_tx: AS,
+    attestation_verifier_tx: TS,
     p2p_tx: PS,
     subnet_tx: NS,
     sync_tx: SS,
     validator_tx: VS,
 }
 
-impl<P, E, W, AS, PS, NS, SS, VS> Mutator<P, E, W, AS, PS, NS, SS, VS>
+impl<P, E, W, AS, TS, PS, NS, SS, VS> Mutator<P, E, W, AS, TS, PS, NS, SS, VS>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
     W: Wait,
     AS: UnboundedSink<ApiMessage<P>>,
+    TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
@@ -136,6 +141,7 @@ where
         mutator_tx: Sender<MutatorMessage<P, W>>,
         mutator_rx: Receiver<MutatorMessage<P, W>>,
         api_tx: AS,
+        attestation_verifier_tx: TS,
         p2p_tx: PS,
         subnet_tx: NS,
         sync_tx: SS,
@@ -157,6 +163,7 @@ where
             mutator_tx,
             mutator_rx,
             api_tx,
+            attestation_verifier_tx,
             p2p_tx,
             subnet_tx,
             sync_tx,
@@ -662,7 +669,11 @@ where
                     origin,
                 };
 
-                self.delay_aggregate_and_proof_until_block(pending_aggregate_and_proof, block_root);
+                self.delay_aggregate_and_proof_until_block(
+                    wait_group,
+                    pending_aggregate_and_proof,
+                    block_root,
+                );
             }
             Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -674,7 +685,7 @@ where
                     origin,
                 };
 
-                self.delay_aggregate_and_proof_until_slot(pending_aggregate_and_proof);
+                self.delay_aggregate_and_proof_until_slot(wait_group, pending_aggregate_and_proof);
             }
             Ok(AggregateAndProofAction::WaitForTargetState(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -689,7 +700,7 @@ where
                 };
 
                 if self.store.contains_checkpoint_state(checkpoint) {
-                    self.retry_aggregate_and_proof(pending_aggregate_and_proof);
+                    self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
                 } else {
                     let waiting = self
                         .waiting_for_checkpoint_states
@@ -1113,7 +1124,7 @@ where
         }
 
         for pending_aggregate_and_proof in aggregates {
-            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         }
 
         // This spawns a separate task for each attestation.
@@ -1696,11 +1707,12 @@ where
 
     fn delay_aggregate_and_proof_until_block(
         &mut self,
+        wait_group: &W,
         pending_aggregate_and_proof: PendingAggregateAndProof<P>,
         block_root: H256,
     ) {
         if self.store.contains_block(block_root) {
-            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         } else {
             debug!(
                 "aggregate and proof delayed until block \
@@ -1772,6 +1784,7 @@ where
 
     fn delay_aggregate_and_proof_until_slot(
         &mut self,
+        wait_group: &W,
         pending_aggregate_and_proof: PendingAggregateAndProof<P>,
     ) {
         let slot = pending_aggregate_and_proof
@@ -1782,7 +1795,7 @@ where
             .slot;
 
         if slot <= self.store.slot() {
-            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         } else {
             debug!("aggregate and proof delayed until slot: {pending_aggregate_and_proof:?}");
 
@@ -1880,7 +1893,7 @@ where
         }
 
         for pending_aggregate_and_proof in aggregates {
-            self.retry_aggregate_and_proof(pending_aggregate_and_proof);
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         }
 
         for pending_attestation in attestations {
@@ -1922,7 +1935,12 @@ where
         } = pending_attestation;
 
         if origin.validate_signature() {
-            P2pMessage::ReverifyAttestation(attestation, origin).send(&self.p2p_tx);
+            AttestationVerifierMessage::Attestation {
+                wait_group,
+                attestation,
+                origin,
+            }
+            .send(&self.attestation_verifier_tx);
         } else {
             self.spawn(AttestationTask {
                 store_snapshot: self.owned_store(),
@@ -1941,7 +1959,11 @@ where
         self.handle_tick(wait_group, tick)
     }
 
-    fn retry_aggregate_and_proof(&self, pending_aggregate_and_proof: PendingAggregateAndProof<P>) {
+    fn retry_aggregate_and_proof(
+        &self,
+        wait_group: W,
+        pending_aggregate_and_proof: PendingAggregateAndProof<P>,
+    ) {
         debug!("retrying delayed aggregate and proof: {pending_aggregate_and_proof:?}");
 
         let PendingAggregateAndProof {
@@ -1949,7 +1971,12 @@ where
             origin,
         } = pending_aggregate_and_proof;
 
-        P2pMessage::ReverifyAggregateAndProof(aggregate_and_proof, origin).send(&self.p2p_tx);
+        AttestationVerifierMessage::AggregateAndProof {
+            wait_group,
+            aggregate_and_proof,
+            origin,
+        }
+        .send(&self.attestation_verifier_tx);
     }
 
     fn retry_blob_sidecar(&self, wait_group: W, pending_blob_sidecar: PendingBlobSidecar<P>) {

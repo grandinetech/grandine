@@ -554,6 +554,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "attestation_verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dedicated_executor",
+ "eth1_api",
+ "eth2_libp2p",
+ "fork_choice_control",
+ "fork_choice_store",
+ "futures",
+ "helper_functions",
+ "itertools 0.12.1",
+ "log",
+ "prometheus_metrics",
+ "rayon",
+ "std_ext",
+ "types",
+]
+
+[[package]]
 name = "attohttpc"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3469,6 +3489,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arithmetic",
+ "attestation_verifier",
  "axum",
  "axum-extra",
  "bls",
@@ -5319,7 +5340,6 @@ dependencies = [
  "eth2_libp2p",
  "features",
  "fork_choice_control",
- "fork_choice_store",
  "futures",
  "genesis",
  "helper_functions",
@@ -5330,7 +5350,6 @@ dependencies = [
  "prometheus-client",
  "prometheus_metrics",
  "rand",
- "rayon",
  "serde",
  "serde_utils",
  "serde_with",
@@ -6425,6 +6444,7 @@ name = "runtime"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "attestation_verifier",
  "builder_api",
  "bytesize",
  "clock",

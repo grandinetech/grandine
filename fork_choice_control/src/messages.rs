@@ -38,6 +38,27 @@ use core::fmt::Debug;
 #[cfg(test)]
 use educe::Educe;
 
+pub enum AttestationVerifierMessage<P: Preset, W> {
+    AggregateAndProof {
+        wait_group: W,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
+    },
+    Attestation {
+        wait_group: W,
+        attestation: Arc<Attestation<P>>,
+        origin: AttestationOrigin<GossipId>,
+    },
+}
+
+impl<P: Preset, W> AttestationVerifierMessage<P, W> {
+    pub fn send(self, tx: &impl UnboundedSink<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to attestation verifier failed because the receiver was dropped");
+        }
+    }
+}
+
 // Attestations cannot result in delayed objects being retried, but a `wait_group` field is still
 // needed in the attestation variants to make `Controller::wait_for_tasks` work.
 pub enum MutatorMessage<P: Preset, W> {
@@ -148,11 +169,6 @@ pub enum P2pMessage<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, educe(Debug(ignore)))] Arc<BeaconState<P>>),
-    ReverifyAttestation(Arc<Attestation<P>>, AttestationOrigin<GossipId>),
-    ReverifyAggregateAndProof(
-        Arc<SignedAggregateAndProof<P>>,
-        AggregateAndProofOrigin<GossipId>,
-    ),
 }
 
 impl<P: Preset> P2pMessage<P> {

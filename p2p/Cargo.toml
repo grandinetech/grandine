@@ -19,7 +19,6 @@ eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
-fork_choice_store = { workspace = true }
 futures = { workspace = true }
 genesis = { workspace = true }
 helper_functions = { workspace = true }
@@ -30,7 +29,6 @@ operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 prometheus-client = { workspace = true }
 rand = { workspace = true }
-rayon = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }

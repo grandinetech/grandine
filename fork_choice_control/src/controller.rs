@@ -24,7 +24,7 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
     BlockOrigin, Store, StoreConfig,
 };
-use futures::channel::mpsc::Sender as MultiSender;
+use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
@@ -44,7 +44,8 @@ use types::{
 
 use crate::{
     messages::{
-        ApiMessage, MutatorMessage, P2pMessage, SubnetMessage, SyncMessage, ValidatorMessage,
+        ApiMessage, AttestationVerifierMessage, MutatorMessage, P2pMessage, SubnetMessage,
+        SyncMessage, ValidatorMessage,
     },
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
@@ -58,7 +59,7 @@ use crate::{
     wait::Wait,
 };
 
-pub struct Controller<P: Preset, E, W: Wait> {
+pub struct Controller<P: Preset, E, A, W: Wait> {
     // The latest consistent snapshot of the store.
     store_snapshot: Arc<ArcSwap<Store<P>>>,
     execution_engine: E,
@@ -68,19 +69,21 @@ pub struct Controller<P: Preset, E, W: Wait> {
     wait_group: W::Swappable,
     metrics: Option<Arc<Metrics>>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
+    attestation_verifier_tx: A,
 }
 
-impl<P: Preset, E, W: Wait> Drop for Controller<P, E, W> {
+impl<P: Preset, E, A, W: Wait> Drop for Controller<P, E, A, W> {
     fn drop(&mut self) {
         let save_to_storage = !std::thread::panicking();
         MutatorMessage::Stop { save_to_storage }.send(&self.mutator_tx);
     }
 }
 
-impl<P, E, W> Controller<P, E, W>
+impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
     #[allow(clippy::too_many_arguments)]
@@ -93,6 +96,7 @@ where
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         api_tx: impl UnboundedSink<ApiMessage<P>>,
+        attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
@@ -130,6 +134,7 @@ where
             mutator_tx.clone(),
             mutator_rx,
             api_tx,
+            attestation_verifier_tx.clone(),
             p2p_tx,
             subnet_tx,
             sync_tx,
@@ -158,6 +163,7 @@ where
             wait_group: W::Swappable::default(),
             metrics,
             mutator_tx: mutator_tx.clone(),
+            attestation_verifier_tx,
         });
 
         let mutator_handle = MutatorHandle {
@@ -243,6 +249,60 @@ where
             payload_status,
         }
         .send(&self.mutator_tx);
+    }
+
+    pub fn on_api_aggregate_and_proof(
+        &self,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        sender: OneshotSender<Result<ValidationOutcome>>,
+    ) {
+        AttestationVerifierMessage::AggregateAndProof {
+            wait_group: self.owned_wait_group(),
+            aggregate_and_proof,
+            origin: AggregateAndProofOrigin::Api(sender),
+        }
+        .send(&self.attestation_verifier_tx);
+    }
+
+    pub fn on_api_singular_attestation(
+        &self,
+        attestation: Arc<Attestation<P>>,
+        subnet_id: SubnetId,
+        sender: OneshotSender<Result<ValidationOutcome>>,
+    ) {
+        AttestationVerifierMessage::Attestation {
+            wait_group: self.owned_wait_group(),
+            attestation,
+            origin: AttestationOrigin::Api(subnet_id, sender),
+        }
+        .send(&self.attestation_verifier_tx);
+    }
+
+    pub fn on_gossip_aggregate_and_proof(
+        &self,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        gossip_id: GossipId,
+    ) {
+        AttestationVerifierMessage::AggregateAndProof {
+            wait_group: self.owned_wait_group(),
+            aggregate_and_proof,
+            origin: AggregateAndProofOrigin::Gossip(gossip_id),
+        }
+        .send(&self.attestation_verifier_tx);
+    }
+
+    pub fn on_gossip_singular_attestation(
+        &self,
+        attestation: Arc<Attestation<P>>,
+        subnet_id: SubnetId,
+        gossip_id: GossipId,
+    ) {
+        AttestationVerifierMessage::Attestation {
+            wait_group: self.owned_wait_group(),
+            attestation,
+            origin: AttestationOrigin::Gossip(subnet_id, gossip_id),
+        }
+        .send(&self.attestation_verifier_tx);
     }
 
     pub fn on_aggregate_and_proof(

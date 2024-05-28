@@ -8,7 +8,6 @@ use eth2_libp2p::{
     GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
     PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery,
 };
-use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin};
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use operation_pools::PoolRejectionReason;
@@ -35,22 +34,6 @@ use crate::{
     },
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
 };
-
-pub enum P2pToAttestationVerifier<P: Preset> {
-    AggregateAndProof(
-        Arc<SignedAggregateAndProof<P>>,
-        AggregateAndProofOrigin<GossipId>,
-    ),
-    Attestation(Arc<Attestation<P>>, AttestationOrigin<GossipId>),
-}
-
-impl<P: Preset> P2pToAttestationVerifier<P> {
-    pub fn send(self, tx: &UnboundedSender<Self>) {
-        if tx.unbounded_send(self).is_err() {
-            debug!("send to attestation verifier failed because the receiver was dropped");
-        }
-    }
-}
 
 pub enum P2pToSync<P: Preset> {
     Slot(Slot),
