@@ -15,7 +15,7 @@ use operation_pools::PoolRejectionReason;
 use serde::Serialize;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::SignedBeaconBlock,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::Phase,
     phase0::{
@@ -53,8 +53,6 @@ impl<P: Preset> P2pToAttestationVerifier<P> {
 }
 
 pub enum P2pToSync<P: Preset> {
-    FinalizedEpoch(Epoch),
-    HeadState(Arc<BeaconState<P>>),
     Slot(Slot),
     AddPeer(PeerId, StatusMessage),
     RemovePeer(PeerId),

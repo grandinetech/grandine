@@ -17,7 +17,6 @@ derive_more = { workspace = true }
 enum-iterator = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
-execution_engine = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
@@ -42,7 +41,6 @@ std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
-transition_functions = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }

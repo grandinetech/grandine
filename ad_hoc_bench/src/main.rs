@@ -6,23 +6,18 @@ use anyhow::{Error, Result};
 use bytesize::ByteSize;
 use clap::{Parser, ValueEnum};
 use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdrawal_devnet_4};
-use fork_choice_control::{AdHocBenchController, P2pMessage};
+use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
-use helper_functions::misc;
 use jemalloc_ctl::Result as JemallocResult;
 use log::info;
-use p2p::BlockVerificationPool;
 use rand::seq::SliceRandom as _;
-use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     phase0::{consts::GENESIS_SLOT, primitives::Slot},
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::SignedBeaconBlock as _,
 };
-
-const VERIFY_EPOCHS_PER_BATCH: u64 = 2;
 
 #[derive(Clone, Copy, Parser)]
 struct Options {
@@ -32,8 +27,6 @@ struct Options {
     order: Order,
     #[clap(value_enum)]
     mode: Mode,
-    #[clap(long)]
-    use_block_verification_pool: bool,
     #[clap(long)]
     unfinalized_states_in_memory: u64,
 }
@@ -308,7 +301,6 @@ fn run<P: Preset>(
         blocks,
         order,
         mode,
-        use_block_verification_pool,
         unfinalized_states_in_memory,
     } = options;
 
@@ -340,25 +332,13 @@ fn run<P: Preset>(
 
     let anchor_state = beacon_state(first_slot, slot_width);
 
-    let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
-
-    let (controller, _mutator_handle) = if use_block_verification_pool {
-        AdHocBenchController::with_p2p_tx(
-            chain_config,
-            store_config,
-            anchor_block,
-            anchor_state,
-            p2p_tx,
-        )
-    } else {
-        AdHocBenchController::with_p2p_tx(
-            chain_config,
-            store_config,
-            anchor_block,
-            anchor_state,
-            futures::sink::drain(),
-        )
-    };
+    let (controller, _mutator_handle) = AdHocBenchController::with_p2p_tx(
+        chain_config,
+        store_config,
+        anchor_block,
+        anchor_state,
+        futures::sink::drain(),
+    );
 
     controller.on_slot(last_slot);
     controller.wait_for_tasks();
@@ -376,63 +356,16 @@ fn run<P: Preset>(
 
     let start = Instant::now();
 
-    if use_block_verification_pool {
-        let first_epoch = misc::compute_epoch_at_slot::<P>(first_slot);
-        let last_epoch = misc::compute_epoch_at_slot::<P>(last_slot);
-        let batch_size = usize::try_from(VERIFY_EPOCHS_PER_BATCH)?;
+    for block in blocks {
+        controller.on_requested_block(block, None);
 
-        let mut block_verification_pool = BlockVerificationPool::new(controller.clone_arc())?;
-
-        for epoch in (first_epoch..last_epoch).step_by(batch_size) {
-            let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch) + 1;
-            let end_slot = misc::compute_start_slot_at_epoch::<P>(epoch + VERIFY_EPOCHS_PER_BATCH);
-
-            let epoch_blocks = blocks
-                .as_slice()
-                .iter()
-                .filter(|block| block.message().slot() >= start_slot)
-                .filter(|block| block.message().slot() <= end_slot);
-
-            for block in epoch_blocks {
-                block_verification_pool.push(block.clone_arc());
-
-                if mode == Mode::Synchronous {
-                    let state = controller.head_state().value;
-                    block_verification_pool.verify_and_process_blocks(&state);
-                    controller.wait_for_tasks();
-                }
-            }
-        }
-
-        if mode == Mode::Asynchronous {
-            let anchor_state = controller.head_state().value;
-
-            block_verification_pool.verify_and_process_blocks(&anchor_state);
-
-            for message in futures::executor::block_on_stream(p2p_rx) {
-                if let P2pMessage::HeadState(state) = message {
-                    if state.slot() == last_slot {
-                        break;
-                    }
-
-                    block_verification_pool.verify_and_process_blocks(&state);
-                }
-            }
-
+        if mode == Mode::Synchronous {
             controller.wait_for_tasks();
         }
-    } else {
-        for block in blocks {
-            controller.on_requested_block(block, None);
+    }
 
-            if mode == Mode::Synchronous {
-                controller.wait_for_tasks();
-            }
-        }
-
-        if mode == Mode::Asynchronous {
-            controller.wait_for_tasks();
-        }
+    if mode == Mode::Asynchronous {
+        controller.wait_for_tasks();
     }
 
     let time = start.elapsed().as_secs_f64();

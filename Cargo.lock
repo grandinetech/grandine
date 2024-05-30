@@ -15,12 +15,9 @@ dependencies = [
  "fork_choice_control",
  "fork_choice_store",
  "futures",
- "helper_functions",
  "jemalloc-ctl",
  "log",
- "p2p",
  "rand",
- "std_ext",
  "types",
 ]
 
@@ -5320,7 +5317,6 @@ dependencies = [
  "enum-iterator",
  "eth1_api",
  "eth2_libp2p",
- "execution_engine",
  "features",
  "fork_choice_control",
  "fork_choice_store",
@@ -5346,7 +5342,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "transition_functions",
  "tynm",
  "typenum",
  "types",

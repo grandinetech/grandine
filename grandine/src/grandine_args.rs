@@ -298,11 +298,6 @@ struct BeaconNodeOptions {
     #[clap(long)]
     state_slot: Option<Slot>,
 
-    /// Disable block signature verification pool
-    /// [default: enabled]
-    #[clap(long)]
-    disable_block_verification_pool: bool,
-
     /// Subscribe to all subnets
     #[clap(long)]
     subscribe_all_subnets: bool,
@@ -859,7 +854,6 @@ impl GrandineArgs {
             unfinalized_states_in_memory,
             request_timeout,
             state_slot,
-            disable_block_verification_pool,
             subscribe_all_subnets,
             suggested_fee_recipient,
             jwt_id,
@@ -1139,7 +1133,6 @@ impl GrandineArgs {
 
         let features = features
             .into_iter()
-            .chain(disable_block_verification_pool.then_some(Feature::DisableBlockVerificationPool))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
             .collect();
