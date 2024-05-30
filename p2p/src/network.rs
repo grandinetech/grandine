@@ -337,11 +337,9 @@ impl<P: Preset> Network<P> {
                         P2pMessage::FinalizedCheckpoint(finalized_checkpoint) => {
                             self.prune_received_blob_sidecars(finalized_checkpoint.epoch);
                             self.prune_received_block_roots(finalized_checkpoint.epoch);
-
-                            P2pToSync::FinalizedEpoch(self.controller.finalized_epoch()).send(&self.channels.p2p_to_sync_tx);
                         }
-                        P2pMessage::HeadState(state) => {
-                            P2pToSync::HeadState(state).send(&self.channels.p2p_to_sync_tx);
+                        P2pMessage::HeadState(_state) => {
+                            // This message is only used in tests
                         }
                         P2pMessage::ReverifyAttestation(attestation, origin) => {
                             P2pToAttestationVerifier::Attestation(attestation, origin)
@@ -1350,8 +1348,6 @@ impl<P: Preset> Network<P> {
                 ));
 
                 P2pToSync::BlocksByRangeRequestFinished(request_id)
-                    .send(&self.channels.p2p_to_sync_tx);
-                P2pToSync::HeadState(self.controller.head_state().value)
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRoot(Some(block)) => {
