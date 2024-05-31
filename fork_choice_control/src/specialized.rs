@@ -29,7 +29,8 @@ use std::sync::Mutex;
 
 #[cfg(test)]
 use ::{
-    execution_engine::MockExecutionEngine, fork_choice_store::AttestationOrigin,
+    execution_engine::MockExecutionEngine,
+    fork_choice_store::{AttestationItem, AttestationOrigin},
     types::phase0::containers::Attestation,
 };
 
@@ -205,8 +206,7 @@ impl<P: Preset> TestController<P> {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
-            attestation,
-            origin: AttestationOrigin::Test,
+            attestation: AttestationItem::unverified(attestation, AttestationOrigin::Test),
             metrics: None,
         })
     }

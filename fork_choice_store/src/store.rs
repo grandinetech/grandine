@@ -58,10 +58,11 @@ use crate::{
     error::Error,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
-        AttestationAction, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction,
-        BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, Difference, DifferenceAtLocation,
-        DissolvedDifference, LatestMessage, Location, PartialAttestationAction, PartialBlockAction,
-        PayloadAction, Score, SegmentId, UnfinalizedBlock, ValidAttestation,
+        AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
+        BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, Difference,
+        DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
+        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId,
+        UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache::StateCache,
@@ -1325,35 +1326,42 @@ impl<P: Preset> Store<P> {
 
     pub fn validate_attestation<I>(
         &self,
-        attestation: Arc<Attestation<P>>,
-        origin: &AttestationOrigin<I>,
-        signature_validated: bool,
-    ) -> Result<AttestationAction<P>> {
-        match self.validate_attestation_internal(&attestation, origin.is_from_block())? {
-            PartialAttestationAction::Accept => {}
-            PartialAttestationAction::Ignore => {
-                return Ok(AttestationAction::Ignore);
+        attestation: AttestationItem<P, I>,
+        skip_signatures_verification: bool,
+    ) -> Result<AttestationAction<P, I>, AttestationValidationError<P, I>> {
+        match self
+            .validate_attestation_internal(&attestation.item, attestation.origin.is_from_block())
+        {
+            Ok(PartialAttestationAction::Accept) => {}
+            Ok(PartialAttestationAction::Ignore) => {
+                return Ok(AttestationAction::Ignore(attestation));
             }
-            PartialAttestationAction::DelayUntilBlock(block_root) => {
+            Ok(PartialAttestationAction::DelayUntilBlock(block_root)) => {
                 return Ok(AttestationAction::DelayUntilBlock(attestation, block_root));
             }
-            PartialAttestationAction::DelayUntilSlot => {
+            Ok(PartialAttestationAction::DelayUntilSlot) => {
                 return Ok(AttestationAction::DelayUntilSlot(attestation));
             }
-        }
+            Err(source) => {
+                return Err(AttestationValidationError::Other {
+                    attestation,
+                    source,
+                })
+            }
+        };
 
         let AttestationData {
             slot,
             index,
             target,
             ..
-        } = attestation.data;
+        } = attestation.data();
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.
         //                      Deneb replaces the old validation with 2 new ones.
         //                      One of them is in `Store::validate_attestation_internal`.
-        if self.phase() < Phase::Deneb && origin.validate_as_gossip() {
+        if self.phase() < Phase::Deneb && attestation.origin.validate_as_gossip() {
             // > `aggregate.data.slot` is within the last `ATTESTATION_PROPAGATION_SLOT_RANGE` slots
             //
             // The other half of this validation is performed in
@@ -1364,16 +1372,19 @@ impl<P: Preset> Store<P> {
             // is not a full replacement for the `target.epoch` validation in
             // `Store::validate_attestation_internal`.
             if slot + ATTESTATION_PROPAGATION_SLOT_RANGE < self.slot() {
-                return Ok(AttestationAction::Ignore);
+                return Ok(AttestationAction::Ignore(attestation));
             }
         }
 
-        if origin.must_be_singular() {
+        if attestation.origin.must_be_singular() {
             // > The attestation is unaggregated
-            ensure!(
-                attestation.aggregation_bits.count_ones() == 1,
-                Error::SingularAttestationHasMultipleAggregationBitsSet { attestation },
-            );
+            if attestation.item.aggregation_bits.count_ones() != 1 {
+                return Err(
+                    AttestationValidationError::SingularAttestationHasMultipleAggregationBitsSet {
+                        attestation,
+                    },
+                );
+            }
         }
 
         // > Get state at the `target` to fully validate attestation
@@ -1401,32 +1412,49 @@ impl<P: Preset> Store<P> {
         };
 
         let Ok(relative_epoch) = accessors::relative_epoch(&target_state, target.epoch) else {
-            return Ok(AttestationAction::Ignore);
+            return Ok(AttestationAction::Ignore(attestation));
         };
 
-        if let Some(actual) = origin.subnet_id() {
+        if let Some(actual) = attestation.origin.subnet_id() {
             let committees_per_slot =
                 accessors::get_committee_count_per_slot(&target_state, relative_epoch);
 
             let expected =
-                misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, index)?;
+                match misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, index) {
+                    Ok(subnet) => subnet,
+                    Err(source) => {
+                        return Err(AttestationValidationError::Other {
+                            attestation,
+                            source,
+                        })
+                    }
+                };
 
             // > The attestation is for the correct subnet
-            ensure!(
-                actual == expected,
-                Error::SingularAttestationOnIncorrectSubnet {
-                    attestation,
-                    expected,
-                    actual,
-                },
-            );
+            if actual != expected {
+                return Err(
+                    AttestationValidationError::SingularAttestationOnIncorrectSubnet {
+                        attestation,
+                        expected,
+                        actual,
+                    },
+                );
+            }
         }
 
-        let attesting_indices = self.attesting_indices(
+        let attesting_indices = match self.attesting_indices(
             &target_state,
-            &attestation,
-            !signature_validated && origin.validate_signature(),
-        )?;
+            &attestation.item,
+            !skip_signatures_verification && attestation.origin.verify_signatures(),
+        ) {
+            Ok(indices) => indices,
+            Err(source) => {
+                return Err(AttestationValidationError::Other {
+                    source,
+                    attestation,
+                })
+            }
+        };
 
         Ok(AttestationAction::Accept {
             attestation,

@@ -13,8 +13,8 @@ use easy_ext::ext;
 use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
 use fork_choice_store::{
-    ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationOrigin, BlockAction, Store,
-    StoreConfig, ValidAttestation,
+    ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
+    BlockAction, Store, StoreConfig, ValidAttestation,
 };
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
@@ -192,7 +192,8 @@ fn process_attestation<P: Preset>(
 ) -> Result<()> {
     let slot = attestation.data.slot;
     let origin = AttestationOrigin::<Never>::Test;
-    let attestation_action = store.validate_attestation(attestation, &origin, false)?;
+    let attestation_action =
+        store.validate_attestation(AttestationItem::unverified(attestation, origin), false)?;
 
     let AttestationAction::Accept {
         attestation,
@@ -203,7 +204,7 @@ fn process_attestation<P: Preset>(
     };
 
     let valid_attestation = ValidAttestation {
-        data: attestation.data,
+        data: attestation.data(),
         attesting_indices,
         is_from_block: false,
     };

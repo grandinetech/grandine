@@ -9,8 +9,8 @@ use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
-    BlockOrigin, Store,
+    AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
+    BlobSidecarOrigin, BlockOrigin, Store,
 };
 use helper_functions::{
     accessors, misc,
@@ -24,7 +24,7 @@ use types::{
     deneb::containers::BlobSidecar,
     nonstandard::RelativeEpoch,
     phase0::{
-        containers::{Attestation, AttesterSlashing, Checkpoint, SignedAggregateAndProof},
+        containers::{AttesterSlashing, Checkpoint, SignedAggregateAndProof},
         primitives::{Slot, H256},
     },
     preset::Preset,
@@ -32,9 +32,7 @@ use types::{
 };
 
 use crate::{
-    messages::MutatorMessage,
-    misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
-    state_cache::StateCache,
+    messages::MutatorMessage, misc::VerifyAggregateAndProofResult, state_cache::StateCache,
     storage::Storage,
 };
 
@@ -180,8 +178,7 @@ pub struct AttestationTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub attestation: Arc<Attestation<P>>,
-    pub origin: AttestationOrigin<GossipId>,
+    pub attestation: AttestationItem<P, GossipId>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -192,16 +189,17 @@ impl<P: Preset, W> Run for AttestationTask<P, W> {
             mutator_tx,
             wait_group,
             attestation,
-            origin,
             metrics,
         } = self;
 
         let _timer = metrics.as_ref().map(|metrics| {
-            prometheus_metrics::start_timer_vec(&metrics.fc_attestation_task_times, origin.as_ref())
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_attestation_task_times,
+                attestation.origin.as_ref(),
+            )
         });
 
-        let result = store_snapshot.validate_attestation(attestation, &origin, false);
-        let result = VerifyAttestationResult { result, origin };
+        let result = store_snapshot.validate_attestation(attestation, false);
 
         MutatorMessage::Attestation { wait_group, result }.send(&mutator_tx);
     }
@@ -237,9 +235,13 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             .attestations()
             .iter()
             .map(|attestation| {
-                let attestation = Arc::new(attestation.clone());
-                let origin = AttestationOrigin::<GossipId>::Block;
-                store_snapshot.validate_attestation(attestation, &origin, true)
+                store_snapshot.validate_attestation(
+                    AttestationItem::verified(
+                        Arc::new(attestation.clone()),
+                        AttestationOrigin::Block,
+                    ),
+                    true,
+                )
             })
             .collect();
 

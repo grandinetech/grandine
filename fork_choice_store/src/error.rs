@@ -86,17 +86,6 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
-    #[error(
-        "singular attestation published on incorrect subnet \
-         (attestation: {attestation:?}, expected: {expected}, actual: {actual})"
-    )]
-    SingularAttestationOnIncorrectSubnet {
-        attestation: Arc<Attestation<P>>,
-        expected: SubnetId,
-        actual: SubnetId,
-    },
-    #[error("singular attestation has multiple aggregation bits set: {attestation:?}")]
-    SingularAttestationHasMultipleAggregationBitsSet { attestation: Arc<Attestation<P>> },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(
