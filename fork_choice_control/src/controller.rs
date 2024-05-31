@@ -21,8 +21,8 @@ use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
-    BlockOrigin, Store, StoreConfig,
+    AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
+    BlobSidecarOrigin, BlockOrigin, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -272,8 +272,10 @@ where
     ) {
         AttestationVerifierMessage::Attestation {
             wait_group: self.owned_wait_group(),
-            attestation,
-            origin: AttestationOrigin::Api(subnet_id, sender),
+            attestation: AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Api(subnet_id, sender),
+            ),
         }
         .send(&self.attestation_verifier_tx);
     }
@@ -299,8 +301,10 @@ where
     ) {
         AttestationVerifierMessage::Attestation {
             wait_group: self.owned_wait_group(),
-            attestation,
-            origin: AttestationOrigin::Gossip(subnet_id, gossip_id),
+            attestation: AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Gossip(subnet_id, gossip_id),
+            ),
         }
         .send(&self.attestation_verifier_tx);
     }
@@ -320,17 +324,12 @@ where
         })
     }
 
-    pub fn on_singular_attestation(
-        &self,
-        attestation: Arc<Attestation<P>>,
-        origin: AttestationOrigin<GossipId>,
-    ) {
+    pub fn on_singular_attestation(&self, attestation: AttestationItem<P, GossipId>) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             attestation,
-            origin,
             metrics: self.metrics.clone(),
         })
     }

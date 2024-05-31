@@ -27,7 +27,7 @@ use execution_engine::{
 };
 use features::Feature;
 use fork_choice_control::{StateCacheError, ValidatorMessage, Wait};
-use fork_choice_store::{AttestationOrigin, ChainLink};
+use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future::{Either as EitherFuture, OptionFuture},
@@ -1656,10 +1656,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let subnet_id = slot_head.subnet_id(attestation.data.slot, attestation.data.index)?;
 
-            self.controller.on_singular_attestation(
-                attestation.clone_arc(),
-                AttestationOrigin::Own(subnet_id),
-            );
+            self.controller
+                .on_singular_attestation(AttestationItem::unverified(
+                    attestation.clone_arc(),
+                    AttestationOrigin::Own(subnet_id),
+                ));
 
             ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
                 .send(&self.p2p_tx);

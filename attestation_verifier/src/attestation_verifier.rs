@@ -8,7 +8,7 @@ use fork_choice_control::{
     AttestationVerifierMessage, VerifyAggregateAndProofResult, VerifyAttestationResult, Wait,
 };
 use fork_choice_store::{
-    AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationOrigin,
+    AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
 };
 use futures::{
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -36,7 +36,7 @@ use types::{
 const MAX_BATCH_SIZE: usize = 64;
 
 pub struct AttestationVerifier<P: Preset, W: Wait> {
-    attestations: Vec<AttestationWithOrigin<P>>,
+    attestations: Vec<AttestationItem<P, GossipId>>,
     aggregates: Vec<AggregateWithOrigin<P>>,
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
@@ -106,13 +106,8 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                         AttestationVerifierMessage::Attestation {
                             wait_group,
                             attestation,
-                            origin,
                         } => {
-                            self.attestations.push(AttestationWithOrigin {
-                                attestation,
-                                origin,
-                            });
-
+                            self.attestations.push(attestation);
                             self.spawn_verify_batch_tasks(&wait_group);
                         }
                     }
@@ -343,7 +338,7 @@ struct VerifyAttestationBatchTask<P: Preset, W: Wait> {
 impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
     fn spawn(
         wait_group: W,
-        attestations: Vec<AttestationWithOrigin<P>>,
+        attestations: Vec<AttestationItem<P, GossipId>>,
         controller: ApiController<P, W>,
         dedicated_executor: &DedicatedExecutor,
         metrics: Option<Arc<Metrics>>,
@@ -364,24 +359,17 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
             .detach();
     }
 
-    fn process_attestation_batch(&self, attestations_with_origins: Vec<AttestationWithOrigin<P>>) {
+    fn process_attestation_batch(&self, attestations: Vec<AttestationItem<P, GossipId>>) {
         let snapshot = self.controller.snapshot();
 
         // if let Some(metrics) = metrics.as_ref() {
         //     metrics.set_attestation_verifier_attestation_batch_len(attestations_with_origins.len());
         // }
 
-        let (accepted, other): (Vec<_>, Vec<_>) = attestations_with_origins
+        let (accepted, other): (Vec<_>, Vec<_>) = attestations
             .into_par_iter()
-            .map(|attestation_wo| {
-                let AttestationWithOrigin {
-                    attestation,
-                    origin,
-                } = attestation_wo;
-
-                snapshot.prevalidate_verifier_attestation(attestation, origin)
-            })
-            .partition_map(|result| match result.result {
+            .map(|attestation| snapshot.prevalidate_verifier_attestation(attestation))
+            .partition_map(|result| match result {
                 Ok(AttestationAction::Accept { .. }) => Either::Left(result),
                 _ => Either::Right(result),
             });
@@ -394,19 +382,19 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
 
         match self.verify_attestation_batch_signatures(&accepted, &snapshot.head_state()) {
             Ok(()) => {
+                let accepted = accepted
+                    .into_iter()
+                    .map(|action| action.map(AttestationAction::into_verified))
+                    .collect();
+
                 self.send_results_to_fork_choice(accepted);
             }
             Err(error) => {
                 warn!("signature verification for gossip attestation batch failed: {error}");
 
-                for accepted_attestation in accepted {
-                    let VerifyAttestationResult { result, origin } = accepted_attestation;
-
-                    if let Ok(AttestationAction::Accept { attestation, .. }) = result {
-                        self.process_singular_attestation(AttestationWithOrigin {
-                            attestation,
-                            origin,
-                        });
+                for accepted_attestation in accepted.into_iter().flatten() {
+                    if let AttestationAction::Accept { attestation, .. } = accepted_attestation {
+                        self.controller.on_singular_attestation(attestation);
                     }
                 }
             }
@@ -433,16 +421,11 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
         let triples = attestation_batch_triples(
             self.controller.chain_config(),
             results.iter().filter_map(|result| {
-                let VerifyAttestationResult {
-                    ref result,
-                    origin: _,
-                } = result;
-
                 if let Ok(AttestationAction::Accept {
                     ref attestation, ..
                 }) = result
                 {
-                    Some(attestation.as_ref())
+                    Some(attestation.item.as_ref())
                 } else {
                     None
                 }
@@ -453,15 +436,6 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
         verifier.extend(triples, SignatureKind::Attestation)?;
 
         verifier.finish()
-    }
-
-    fn process_singular_attestation(&self, attestation_with_origin: AttestationWithOrigin<P>) {
-        let AttestationWithOrigin {
-            attestation,
-            origin,
-        } = attestation_with_origin;
-
-        self.controller.on_singular_attestation(attestation, origin);
     }
 }
 
@@ -494,12 +468,6 @@ struct AggregateWithOrigin<P: Preset> {
     aggregate: Arc<SignedAggregateAndProof<P>>,
     origin: AggregateAndProofOrigin<GossipId>,
 }
-
-struct AttestationWithOrigin<P: Preset> {
-    attestation: Arc<Attestation<P>>,
-    origin: AttestationOrigin<GossipId>,
-}
-
 enum TaskMessage<W> {
     Finished(W),
 }

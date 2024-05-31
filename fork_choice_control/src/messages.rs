@@ -8,8 +8,9 @@ use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationAction, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, Store,
+    AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
+    AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
+    ChainLink, Store,
 };
 use helper_functions::{accessors, misc};
 use log::debug;
@@ -46,8 +47,7 @@ pub enum AttestationVerifierMessage<P: Preset, W> {
     },
     Attestation {
         wait_group: W,
-        attestation: Arc<Attestation<P>>,
-        origin: AttestationOrigin<GossipId>,
+        attestation: AttestationItem<P, GossipId>,
     },
 }
 
@@ -91,7 +91,8 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     BlockAttestations {
         wait_group: W,
-        results: Vec<Result<AttestationAction<P>>>,
+        results:
+            Vec<Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>>,
     },
     AttesterSlashing {
         wait_group: W,

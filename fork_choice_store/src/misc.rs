@@ -4,7 +4,7 @@ use core::{
 };
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Error as AnyhowError, Result};
 use derive_more::DebugCustom;
 use educe::Educe;
 use eth2_libp2p::{GossipId, PeerId};
@@ -16,6 +16,7 @@ use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
+use thiserror::Error;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -328,25 +329,90 @@ impl<I> AggregateAndProofOrigin<I> {
     }
 }
 
+#[derive(Debug)]
+pub struct AttestationItem<P: Preset, I> {
+    pub item: Arc<Attestation<P>>,
+    pub origin: AttestationOrigin<I>,
+    pub signature_status: SignatureStatus,
+}
+
+impl<P: Preset, I> AttestationItem<P, I> {
+    #[must_use]
+    pub fn unverified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+        Self {
+            item,
+            origin,
+            signature_status: SignatureStatus::Unverified,
+        }
+    }
+
+    #[must_use]
+    pub fn verified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+        Self {
+            item,
+            origin,
+            signature_status: SignatureStatus::Verified,
+        }
+    }
+
+    #[must_use]
+    pub fn into_verified(self) -> Self {
+        let Self { item, origin, .. } = self;
+
+        Self {
+            item,
+            origin,
+            signature_status: SignatureStatus::Verified,
+        }
+    }
+
+    #[must_use]
+    pub fn verify_signatures(&self) -> bool {
+        !self.signature_status.is_verified() && self.origin.verify_signatures()
+    }
+
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        self.data().slot
+    }
+
+    #[must_use]
+    pub fn data(&self) -> AttestationData {
+        self.item.data
+    }
+
+    #[must_use]
+    pub fn item(&self) -> Arc<Attestation<P>> {
+        self.item.clone_arc()
+    }
+}
+
 #[derive(Debug, AsRefStr)]
+pub enum SignatureStatus {
+    Verified,
+    Unverified,
+}
+
+impl SignatureStatus {
+    #[must_use]
+    pub const fn is_verified(&self) -> bool {
+        matches!(self, Self::Verified)
+    }
+}
+
+#[derive(Debug, AsRefStr, Serialize)]
 pub enum AttestationOrigin<I> {
     Gossip(SubnetId, I),
     Own(SubnetId),
-    Api(SubnetId, OneshotSender<Result<ValidationOutcome>>),
+    Api(
+        SubnetId,
+        #[serde(skip)] OneshotSender<Result<ValidationOutcome>>,
+    ),
     Block,
     // Some test cases in `consensus-spec-tests` contain data that cannot occur in normal operation.
     // `fork_choice` test cases contain bare aggregate attestations.
     // Normally they can only occur inside blocks or alongside aggregate selection proofs.
     Test,
-}
-
-impl Serialize for AttestationOrigin<GossipId> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_ref())
-    }
 }
 
 impl<I> AttestationOrigin<I> {
@@ -412,7 +478,7 @@ impl<I> AttestationOrigin<I> {
     }
 
     #[must_use]
-    pub fn validate_signature(&self) -> bool {
+    pub fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Api(_, _) | Self::Test => true,
             Self::Block => false,
@@ -515,15 +581,38 @@ pub enum AggregateAndProofAction<P: Preset> {
     WaitForTargetState(Arc<SignedAggregateAndProof<P>>),
 }
 
-pub enum AttestationAction<P: Preset> {
+pub enum AttestationAction<P: Preset, I> {
     Accept {
-        attestation: Arc<Attestation<P>>,
+        attestation: AttestationItem<P, I>,
         attesting_indices: ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>,
     },
-    Ignore,
-    DelayUntilBlock(Arc<Attestation<P>>, H256),
-    DelayUntilSlot(Arc<Attestation<P>>),
-    WaitForTargetState(Arc<Attestation<P>>),
+    Ignore(AttestationItem<P, I>),
+    DelayUntilBlock(AttestationItem<P, I>, H256),
+    DelayUntilSlot(AttestationItem<P, I>),
+    WaitForTargetState(AttestationItem<P, I>),
+}
+
+impl<P: Preset, I> AttestationAction<P, I> {
+    #[must_use]
+    pub fn into_verified(self) -> Self {
+        match self {
+            Self::Accept {
+                attestation,
+                attesting_indices,
+            } => Self::Accept {
+                attestation: attestation.into_verified(),
+                attesting_indices,
+            },
+            Self::Ignore(attestation) => Self::Ignore(attestation.into_verified()),
+            Self::DelayUntilBlock(attestation, block_root) => {
+                Self::DelayUntilBlock(attestation.into_verified(), block_root)
+            }
+            Self::DelayUntilSlot(attestation) => Self::DelayUntilSlot(attestation.into_verified()),
+            Self::WaitForTargetState(attestation) => {
+                Self::WaitForTargetState(attestation.into_verified())
+            }
+        }
+    }
 }
 
 pub enum BlobSidecarAction<P: Preset> {
@@ -717,4 +806,35 @@ pub struct LatestMessage {
     // This is named differently than in `consensus-specs` to avoid confusion with FFG vote roots.
     // This is the LMD GHOST vote root and it corresponds to `AttestationData.beacon_block_root`.
     pub beacon_block_root: H256,
+}
+
+#[derive(Error, Debug)]
+pub enum AttestationValidationError<P: Preset, I> {
+    #[error(
+        "singular attestation published on incorrect subnet \
+         (attestation: {attestation:?}, expected: {expected}, actual: {actual})"
+    )]
+    SingularAttestationOnIncorrectSubnet {
+        attestation: AttestationItem<P, I>,
+        expected: SubnetId,
+        actual: SubnetId,
+    },
+    #[error("singular attestation has multiple aggregation bits set: {attestation:?}")]
+    SingularAttestationHasMultipleAggregationBitsSet { attestation: AttestationItem<P, I> },
+    #[error("singular attestation validation error: {attestation:?} {source:}")]
+    Other {
+        source: AnyhowError,
+        attestation: AttestationItem<P, I>,
+    },
+}
+
+impl<P: Preset, I> AttestationValidationError<P, I> {
+    #[must_use]
+    pub fn attestation(self) -> AttestationItem<P, I> {
+        match self {
+            Self::SingularAttestationOnIncorrectSubnet { attestation, .. }
+            | Self::SingularAttestationHasMultipleAggregationBitsSet { attestation }
+            | Self::Other { attestation, .. } => attestation,
+        }
+    }
 }

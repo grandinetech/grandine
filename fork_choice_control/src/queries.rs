@@ -5,7 +5,7 @@ use anyhow::{bail, ensure, Result};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
-use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin, ChainLink, Segment, Store};
+use fork_choice_store::{AggregateAndProofOrigin, AttestationItem, ChainLink, Segment, Store};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use serde::Serialize;
@@ -16,7 +16,7 @@ use types::{
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
-        containers::{Attestation, Checkpoint, SignedAggregateAndProof},
+        containers::{Checkpoint, SignedAggregateAndProof},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, H256},
     },
     preset::Preset,
@@ -799,17 +799,11 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         VerifyAggregateAndProofResult { result, origin }
     }
 
-    #[must_use]
     pub fn prevalidate_verifier_attestation(
         &self,
-        attestation: Arc<Attestation<P>>,
-        origin: AttestationOrigin<GossipId>,
+        attestation: AttestationItem<P, GossipId>,
     ) -> VerifyAttestationResult<P> {
-        let result = self
-            .store_snapshot
-            .validate_attestation(attestation, &origin, true);
-
-        VerifyAttestationResult { result, origin }
+        self.store_snapshot.validate_attestation(attestation, true)
     }
 
     // TODO(Grandine Team): If `slot` is empty, this advances the next most recent state to `slot`,

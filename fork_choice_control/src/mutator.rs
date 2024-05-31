@@ -24,7 +24,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
 use drain_filter_polyfill::VecExt as _;
@@ -32,8 +32,9 @@ use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
-    AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction,
-    BlockOrigin, ChainLink, PayloadAction, Store, ValidAttestation,
+    AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
+    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction,
+    Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -753,10 +754,8 @@ where
     fn handle_attestation(
         &mut self,
         wait_group: &W,
-        verify_result: VerifyAttestationResult<P>,
+        result: VerifyAttestationResult<P>,
     ) -> Result<()> {
-        let VerifyAttestationResult { result, origin } = verify_result;
-
         match result {
             Ok(AttestationAction::Accept {
                 attestation,
@@ -766,20 +765,27 @@ where
                     metrics.register_mutator_attestation(&["accepted"]);
                 }
 
-                debug!("attestation accepted (attestation: {attestation:?}, origin: {origin:?})");
+                debug!("attestation accepted (attestation: {attestation:?})");
 
-                if origin.should_generate_event() {
-                    ApiMessage::AttestationEvent(attestation.clone_arc()).send(&self.api_tx);
+                if attestation.origin.should_generate_event() {
+                    ApiMessage::AttestationEvent(attestation.item.clone_arc()).send(&self.api_tx);
                 }
 
-                if origin.send_to_validator() {
-                    let attestation = attestation.clone_arc();
+                if attestation.origin.send_to_validator() {
+                    let attestation = attestation.item.clone_arc();
 
                     ValidatorMessage::ValidAttestation(wait_group.clone(), attestation)
                         .send(&self.validator_tx);
                 }
 
-                let is_from_block = origin.is_from_block();
+                let is_from_block = attestation.origin.is_from_block();
+
+                let AttestationItem {
+                    item: attestation,
+                    origin,
+                    ..
+                } = attestation;
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -803,12 +809,12 @@ where
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
-            Ok(AttestationAction::Ignore) => {
+            Ok(AttestationAction::Ignore(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["ignored"]);
                 }
 
-                let (gossip_id, sender) = origin.split();
+                let (gossip_id, sender) = attestation.origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
@@ -821,39 +827,24 @@ where
                     metrics.register_mutator_attestation(&["delayed_until_block"]);
                 }
 
-                let pending_attestation = PendingAttestation {
-                    attestation,
-                    origin,
-                };
-
-                self.delay_attestation_until_block(wait_group, pending_attestation, block_root);
+                self.delay_attestation_until_block(wait_group, attestation, block_root);
             }
             Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_slot"]);
                 }
 
-                let pending_attestation = PendingAttestation {
-                    attestation,
-                    origin,
-                };
-
-                self.delay_attestation_until_slot(wait_group, pending_attestation);
+                self.delay_attestation_until_slot(wait_group, attestation);
             }
             Ok(AttestationAction::WaitForTargetState(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_state"]);
                 }
 
-                let checkpoint = attestation.data.target;
-
-                let pending_attestation = PendingAttestation {
-                    attestation,
-                    origin,
-                };
+                let checkpoint = attestation.data().target;
 
                 if self.store.contains_checkpoint_state(checkpoint) {
-                    self.retry_attestation(wait_group.clone(), pending_attestation);
+                    self.retry_attestation(wait_group.clone(), attestation);
                 } else {
                     let waiting = self
                         .waiting_for_checkpoint_states
@@ -862,7 +853,7 @@ where
 
                     let new = waiting.is_empty();
 
-                    waiting.attestations.push(pending_attestation);
+                    waiting.attestations.push(attestation);
 
                     if new {
                         self.spawn_checkpoint_state_task(wait_group.clone(), checkpoint);
@@ -874,16 +865,18 @@ where
                     metrics.register_mutator_attestation(&["rejected"]);
                 }
 
-                warn!("attestation rejected (error: {error}, origin: {origin:?})");
+                let source = error.to_string();
+                warn!("attestation rejected (error: {error:?})",);
 
-                let (gossip_id, sender) = origin.split();
+                let attestation = error.attestation();
+                let (gossip_id, sender) = attestation.origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidAttestation)
                         .send(&self.p2p_tx);
                 }
 
-                reply_to_http_api(sender, Err(error));
+                reply_to_http_api(sender, Err(anyhow!(source)));
             }
         }
 
@@ -905,7 +898,9 @@ where
     fn handle_block_attestations(
         &mut self,
         wait_group: &W,
-        results: Vec<Result<AttestationAction<P>>>,
+        results: Vec<
+            Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>,
+        >,
     ) -> Result<()> {
         let accepted = results
             .into_iter()
@@ -914,39 +909,21 @@ where
                     attestation,
                     attesting_indices,
                 }) => Some(ValidAttestation {
-                    data: attestation.data,
+                    data: attestation.data(),
                     attesting_indices,
                     is_from_block: true,
                 }),
-                Ok(AttestationAction::Ignore) => None,
+                Ok(AttestationAction::Ignore(_)) => None,
                 Ok(AttestationAction::DelayUntilBlock(attestation, block_root)) => {
-                    self.delay_attestation_until_block(
-                        wait_group,
-                        PendingAttestation {
-                            attestation,
-                            origin: AttestationOrigin::Block,
-                        },
-                        block_root,
-                    );
+                    self.delay_attestation_until_block(wait_group, attestation, block_root);
                     None
                 }
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
-                    self.delay_attestation_until_slot(
-                        wait_group,
-                        PendingAttestation {
-                            attestation,
-                            origin: AttestationOrigin::Block,
-                        },
-                    );
+                    self.delay_attestation_until_slot(wait_group, attestation);
                     None
                 }
-                Ok(AttestationAction::WaitForTargetState(attestation)) => {
-                    let checkpoint = attestation.data.target;
-
-                    let pending_attestation = PendingAttestation {
-                        attestation,
-                        origin: AttestationOrigin::Block,
-                    };
+                Ok(AttestationAction::WaitForTargetState(pending_attestation)) => {
+                    let checkpoint = pending_attestation.data().target;
 
                     if self.store.contains_checkpoint_state(checkpoint) {
                         self.retry_attestation(wait_group.clone(), pending_attestation)
@@ -1812,7 +1789,7 @@ where
         wait_group: &W,
         pending_attestation: PendingAttestation<P>,
     ) {
-        let slot = pending_attestation.attestation.data.slot;
+        let slot = pending_attestation.slot();
 
         if slot <= self.store.slot() {
             self.retry_attestation(wait_group.clone(), pending_attestation);
@@ -1828,7 +1805,7 @@ where
             ));
 
             self.delayed_until_slot
-                .entry(pending_attestation.attestation.data.slot)
+                .entry(pending_attestation.slot())
                 .or_default()
                 .attestations
                 .push(pending_attestation);
@@ -1926,19 +1903,13 @@ where
         });
     }
 
-    fn retry_attestation(&self, wait_group: W, pending_attestation: PendingAttestation<P>) {
-        debug!("retrying delayed attestation: {pending_attestation:?}");
+    fn retry_attestation(&self, wait_group: W, attestation: PendingAttestation<P>) {
+        debug!("retrying delayed attestation: {attestation:?}");
 
-        let PendingAttestation {
-            attestation,
-            origin,
-        } = pending_attestation;
-
-        if origin.validate_signature() {
+        if attestation.verify_signatures() {
             AttestationVerifierMessage::Attestation {
                 wait_group,
                 attestation,
-                origin,
             }
             .send(&self.attestation_verifier_tx);
         } else {
@@ -1947,7 +1918,6 @@ where
                 mutator_tx: self.owned_mutator_tx(),
                 wait_group,
                 attestation,
-                origin,
                 metrics: self.metrics.clone(),
             });
         }
@@ -2050,7 +2020,7 @@ where
             gossip_ids.extend(
                 attestations
                     .drain_filter(|pending| {
-                        let epoch = pending.attestation.data.target.epoch;
+                        let epoch = pending.data().target.epoch;
 
                         epoch < previous_epoch
                     })
