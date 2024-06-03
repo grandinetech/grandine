@@ -121,6 +121,7 @@ use crate::{
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
     validator_config::ValidatorConfig,
+    PayloadIdEntry,
 };
 
 const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
@@ -857,7 +858,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let mut payload_id = self
             .payload_id_cache
             .cache_get(&(head_block_root, state.slot()))
-            .copied();
+            .copied()
+            .map(PayloadIdEntry::Cached);
 
         if payload_id.is_none() {
             warn!("payload_id not found in payload_id_cache for {head_block_root:?}");
@@ -870,6 +872,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     proposer_index,
                 )
                 .await?
+                .map(PayloadIdEntry::Live)
         };
 
         let Some(payload_id) = payload_id else {
@@ -880,10 +883,44 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(None);
         };
 
-        let payload = self
+        let payload = match self
             .execution_engine
-            .get_execution_payload(payload_id)
-            .await?;
+            .get_execution_payload(payload_id.id())
+            .await
+        {
+            Ok(payload) => payload,
+            Err(error) => {
+                warn!("unable to retrieve payload with payload_id {payload_id:?}: {error:?}");
+
+                match payload_id {
+                    PayloadIdEntry::Cached(_) => {
+                        let payload_id = self
+                            .prepare_execution_payload(
+                                state,
+                                snapshot.safe_execution_payload_hash(),
+                                snapshot.finalized_execution_payload_hash(),
+                                proposer_index,
+                            )
+                            .await?;
+
+                        if let Some(payload_id) = payload_id {
+                            info!("successfully retrieved non-cached payload_id: {payload_id:?}");
+
+                            self.execution_engine
+                                .get_execution_payload(payload_id)
+                                .await?
+                        } else {
+                            error!(
+                                "payload_id from execution layer was not received; This will lead to missed block"
+                            );
+
+                            return Ok(None);
+                        }
+                    }
+                    PayloadIdEntry::Live(_) => return Err(error),
+                }
+            }
+        };
 
         let payload_root = payload.value.hash_tree_root();
 
