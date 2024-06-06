@@ -181,6 +181,19 @@ impl<P: Preset> P2pMessage<P> {
     }
 }
 
+pub enum PoolMessage {
+    Slot(Slot),
+    Tick(Tick),
+}
+
+impl PoolMessage {
+    pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to operation pools failed because the receiver was dropped");
+        }
+    }
+}
+
 pub enum ValidatorMessage<P: Preset, W> {
     Tick(W, Tick),
     FinalizedEth1Data(DepositIndex),

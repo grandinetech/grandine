@@ -181,6 +181,14 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
 
         let contribution_and_proof = signed_contribution_and_proof.message;
 
+        if pool.is_subset(contribution_and_proof.contribution).await {
+            debug!(
+                "sync committee contribution is a known subset: {signed_contribution_and_proof:?}"
+            );
+
+            return Ok(ValidationOutcome::Ignore);
+        }
+
         let already_exists = pool
             .contribution_and_proof_exists(contribution_and_proof)
             .await;
@@ -334,7 +342,7 @@ impl<P: Preset> PoolTask for HandleSlotTask<P> {
             .as_ref()
             .map(|metrics| metrics.sync_pool_handle_slot_times.start_timer());
 
-        pool.on_slot(slot).await;
+        pool.on_slot(slot, metrics).await;
 
         Ok(())
     }

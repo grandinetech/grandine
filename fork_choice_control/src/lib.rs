@@ -19,7 +19,7 @@ pub use crate::{
     controller::Controller,
     messages::{
         ApiMessage, AttestationVerifierMessage, BlockEvent, ChainReorgEvent,
-        FinalizedCheckpointEvent, HeadEvent, P2pMessage, SubnetMessage, SyncMessage,
+        FinalizedCheckpointEvent, HeadEvent, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
         ValidatorMessage,
     },
     misc::{MutatorRejectionReason, VerifyAggregateAndProofResult, VerifyAttestationResult},

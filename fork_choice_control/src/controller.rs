@@ -44,8 +44,8 @@ use types::{
 
 use crate::{
     messages::{
-        ApiMessage, AttestationVerifierMessage, MutatorMessage, P2pMessage, SubnetMessage,
-        SyncMessage, ValidatorMessage,
+        ApiMessage, AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage,
+        SubnetMessage, SyncMessage, ValidatorMessage,
     },
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
@@ -98,6 +98,7 @@ where
         api_tx: impl UnboundedSink<ApiMessage<P>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        pool_tx: impl UnboundedSink<PoolMessage>,
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
@@ -136,6 +137,7 @@ where
             api_tx,
             attestation_verifier_tx.clone(),
             p2p_tx,
+            pool_tx,
             subnet_tx,
             sync_tx,
             validator_tx,

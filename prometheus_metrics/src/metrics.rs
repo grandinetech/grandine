@@ -204,7 +204,7 @@ impl Metrics {
             // Collection Lengths
             collection_lengths: IntGaugeVec::new(
                 opts!("COLLECTION_LENGTHS", "Number of items in each collection"),
-                &["type", "name"],
+                &["module", "type", "name"],
             )?,
 
             // HTTP API metrics
@@ -911,9 +911,15 @@ impl Metrics {
     }
 
     // Collection Lengths
-    pub fn set_collection_length(&self, typename: &str, collection_name: &str, value: usize) {
+    pub fn set_collection_length(
+        &self,
+        module_name: &str,
+        typename: &str,
+        collection_name: &str,
+        value: usize,
+    ) {
         self.collection_lengths
-            .get_metric_with_label_values(&[typename, collection_name])
+            .get_metric_with_label_values(&[module_name, typename, collection_name])
             .expect(
                 "the number of label values should match the number \
                  of labels that collection_lengths was created with",

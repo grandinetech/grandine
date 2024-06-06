@@ -91,6 +91,7 @@ impl<P: Preset> Context<P> {
         let (fc_to_attestation_verifier_tx, fc_to_attestation_verifier_rx) =
             futures::channel::mpsc::unbounded();
         let (fc_to_p2p_tx, fc_to_p2p_rx) = futures::channel::mpsc::unbounded();
+        let (fc_to_pool_tx, _) = futures::channel::mpsc::unbounded();
         let (fc_to_subnet_tx, fc_to_subnet_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_sync_tx, fc_to_sync_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_validator_tx, fc_to_validator_rx) = futures::channel::mpsc::unbounded();
@@ -183,6 +184,7 @@ impl<P: Preset> Context<P> {
             fc_to_api_tx,
             fc_to_attestation_verifier_tx,
             fc_to_p2p_tx,
+            fc_to_pool_tx,
             fc_to_subnet_tx,
             fc_to_sync_tx,
             fc_to_validator_tx,

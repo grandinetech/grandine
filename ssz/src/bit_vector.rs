@@ -160,6 +160,11 @@ impl<N: BitVectorBits> BitVector<N> {
         self.bytes.view_bits::<Lsb0>().last_one()
     }
 
+    #[must_use]
+    pub fn is_subset_of(&self, other: &Self) -> bool {
+        core::iter::zip(self.bytes, other.bytes).all(|(byte, other_byte)| byte & !other_byte == 0)
+    }
+
     // Indices could be checked statically like in `sized-vec` and `type-vec`, but that would only
     // add useless boilerplate.
     pub fn set(&mut self, index: usize, value: bool) {
@@ -247,3 +252,50 @@ impl<N: BitVectorBits> Iterator for Bits<N> {
 impl<N: BitVectorBits> ExactSizeIterator for Bits<N> {}
 
 impl<N: BitVectorBits> FusedIterator for Bits<N> {}
+
+#[cfg(test)]
+mod tests {
+    use test_case::test_case;
+    use typenum::U2;
+
+    use super::*;
+
+    #[test_case(
+        bit_vector(false, false), bit_vector(false, false) => true;
+        "0b00 is a subset of 0b00"
+    )]
+    #[test_case(
+        bit_vector(false, false), bit_vector(true, true) => true;
+        "0b00 is a subset of 0b11"
+    )]
+    #[test_case(
+        bit_vector(true, true), bit_vector(true, true) => true;
+        "0b11 is a subset of 0b11"
+    )]
+    #[test_case(
+        bit_vector(true, true), bit_vector(true, false) => false;
+        "0b11 is not a subset of 0b10"
+    )]
+    #[test_case(
+        bit_vector(true, false), bit_vector(true, true) => true;
+        "0b10 is a subset of 0b11"
+    )]
+    #[test_case(
+        bit_vector(true, false), bit_vector(false, true) => false;
+        "0b10 is not a subset of 0b01"
+    )]
+    #[test_case(
+        bit_vector(false, true), bit_vector(true, false) => false;
+        "0b01 is not a subset of 0b10"
+    )]
+    fn bit_vector_is_subset_of(a: BitVector<U2>, b: BitVector<U2>) -> bool {
+        a.is_subset_of(&b)
+    }
+
+    fn bit_vector(bit_0: bool, bit_1: bool) -> BitVector<U2> {
+        let mut bit_vector = BitVector::default();
+        bit_vector.set(0, bit_0);
+        bit_vector.set(1, bit_1);
+        bit_vector
+    }
+}
