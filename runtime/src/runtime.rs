@@ -27,7 +27,9 @@ use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use log::{info, warn};
 use metrics::{run_metrics_server, MetricsChannels, MetricsService};
-use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
+use operation_pools::{
+    AttestationAggPool, BlsToExecutionChangePool, Manager, SyncCommitteeAggPool,
+};
 use p2p::{
     BlockSyncService, BlockSyncServiceChannels, Channels, Network, NetworkConfig, SubnetService,
 };
@@ -101,6 +103,7 @@ pub async fn run_after_genesis<P: Preset>(
     let (fork_choice_to_subnet_tx, fork_choice_to_subnet_rx) = mpsc::unbounded();
     let (fork_choice_to_validator_tx, fork_choice_to_validator_rx) = mpsc::unbounded();
     let (p2p_to_sync_tx, p2p_to_sync_rx) = mpsc::unbounded();
+    let (fork_choice_to_pool_tx, fork_choice_to_pool_rx) = mpsc::unbounded();
     let (p2p_to_validator_tx, p2p_to_validator_rx) = mpsc::unbounded();
     let (sync_to_p2p_tx, sync_to_p2p_rx) = mpsc::unbounded();
     let (validator_to_p2p_tx, validator_to_p2p_rx) = mpsc::unbounded();
@@ -205,6 +208,7 @@ pub async fn run_after_genesis<P: Preset>(
         fc_to_api_tx,
         fork_choice_to_attestation_verifier_tx,
         fork_choice_to_p2p_tx,
+        fork_choice_to_pool_tx,
         fork_choice_to_subnet_tx,
         fork_choice_to_sync_tx,
         fork_choice_to_validator_tx,
@@ -468,6 +472,13 @@ pub async fn run_after_genesis<P: Preset>(
             metrics.clone(),
         );
 
+    let pool_manager = Manager::new(
+        attestation_agg_pool.clone_arc(),
+        bls_to_execution_change_pool.clone_arc(),
+        sync_committee_agg_pool.clone_arc(),
+        fork_choice_to_pool_rx,
+    );
+
     let validator_channels = ValidatorChannels {
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
@@ -616,6 +627,7 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(run_clock) => result,
         result = spawn_fallible(run_slasher) => result.map(from_never),
         result = spawn_fallible(bls_to_execution_change_pool_service.run()) => result,
+        result = spawn_fallible(pool_manager.run()) => result,
         result = spawn_fallible(run_metrics_server) => result,
         result = spawn_fallible(run_metrics_service) => result,
         result = spawn_fallible(run_liveness_tracker) => result,

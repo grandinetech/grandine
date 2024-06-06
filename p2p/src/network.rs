@@ -1964,12 +1964,14 @@ impl<P: Preset> Network<P> {
             let type_name = tynm::type_name::<Self>();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "received_blob_sidecars",
                 self.received_blob_sidecars.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "received_block_roots",
                 self.received_block_roots.len(),

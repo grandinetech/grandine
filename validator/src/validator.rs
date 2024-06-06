@@ -698,8 +698,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.discard_old_registered_validators(current_epoch);
             self.discard_old_attester_slashings(current_epoch);
             self.discard_old_voluntary_exits();
-            self.bls_to_execution_change_pool
-                .discard_old_bls_to_execution_changes();
             self.own_sync_committee_subscriptions
                 .discard_old_subscriptions(current_epoch);
         }
@@ -708,7 +706,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.register_validators(current_epoch);
         }
 
-        self.attestation_agg_pool.on_tick(tick).await;
         self.track_collection_metrics();
 
         let slot_head = if no_validators {
@@ -756,10 +753,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.discard_previous_slot_attestations();
                 self.propose(wait_group, &slot_head).await?;
-                // Sync committee messages and contributions for the previous slot are sometimes
-                // constructed while proposing a block. They must be discarded before the time to
-                // publish new ones comes.
-                self.sync_committee_agg_pool.on_slot(slot_head.slot());
                 self.published_own_sync_committee_messages = false;
             }
             TickKind::Attest => {
@@ -3189,6 +3182,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let type_name = tynm::type_name::<Self>();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "own_singular_attestations",
                 self.own_singular_attestations
@@ -3198,24 +3192,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "proposer_slashings",
                 self.proposer_slashings.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "attester_slashings",
                 self.attester_slashings.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "voluntary_exits",
                 self.voluntary_exits.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "validator_votes",
                 self.validator_votes.values().map(Vec::len).sum(),

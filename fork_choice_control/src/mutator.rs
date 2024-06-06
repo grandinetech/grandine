@@ -57,8 +57,8 @@ use types::{
 
 use crate::{
     messages::{
-        AttestationVerifierMessage, MutatorMessage, P2pMessage, SubnetMessage, SyncMessage,
-        ValidatorMessage,
+        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
+        SyncMessage, ValidatorMessage,
     },
     misc::{
         Delayed, MutatorRejectionReason, PendingAggregateAndProof, PendingAttestation,
@@ -78,7 +78,7 @@ use crate::{
 };
 
 #[allow(clippy::struct_field_names)]
-pub struct Mutator<P: Preset, E, W, AS, TS, PS, NS, SS, VS> {
+pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
     state_cache: Arc<StateCache<P, W>>,
@@ -114,12 +114,13 @@ pub struct Mutator<P: Preset, E, W, AS, TS, PS, NS, SS, VS> {
     api_tx: AS,
     attestation_verifier_tx: TS,
     p2p_tx: PS,
+    pool_tx: LS,
     subnet_tx: NS,
     sync_tx: SS,
     validator_tx: VS,
 }
 
-impl<P, E, W, AS, TS, PS, NS, SS, VS> Mutator<P, E, W, AS, TS, PS, NS, SS, VS>
+impl<P, E, W, AS, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, AS, TS, PS, LS, NS, SS, VS>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
@@ -127,6 +128,7 @@ where
     AS: UnboundedSink<ApiMessage<P>>,
     TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
+    LS: UnboundedSink<PoolMessage>,
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
@@ -144,6 +146,7 @@ where
         api_tx: AS,
         attestation_verifier_tx: TS,
         p2p_tx: PS,
+        pool_tx: LS,
         subnet_tx: NS,
         sync_tx: SS,
         validator_tx: VS,
@@ -166,6 +169,7 @@ where
             api_tx,
             attestation_verifier_tx,
             p2p_tx,
+            pool_tx,
             subnet_tx,
             sync_tx,
             validator_tx,
@@ -381,6 +385,7 @@ where
         self.update_store_snapshot();
 
         ValidatorMessage::Tick(wait_group.clone(), tick).send(&self.validator_tx);
+        PoolMessage::Tick(tick).send(&self.pool_tx);
 
         if changes.is_slot_updated() {
             let slot = tick.slot;
@@ -391,6 +396,7 @@ where
                 self.retry_delayed(delayed, wait_group);
             }
 
+            PoolMessage::Slot(slot).send(&self.pool_tx);
             P2pMessage::Slot(slot).send(&self.p2p_tx);
             SubnetMessage::Slot(wait_group.clone(), slot).send(&self.subnet_tx);
 
@@ -2277,12 +2283,14 @@ where
             let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block",
                 self.delayed_until_block.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block_blocks",
                 self.delayed_until_block
@@ -2292,6 +2300,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block_attestations",
                 self.delayed_until_block
@@ -2301,6 +2310,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block_aggregates",
                 self.delayed_until_block
@@ -2310,12 +2320,14 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot",
                 self.delayed_until_slot.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot_blocks",
                 self.delayed_until_slot
@@ -2325,6 +2337,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot_attestations",
                 self.delayed_until_slot
@@ -2334,6 +2347,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot_aggregates",
                 self.delayed_until_slot
@@ -2342,8 +2356,19 @@ where
                     .sum(),
             );
 
-            metrics.set_collection_length(&type_name, "high_priority_tasks", high_priority_tasks);
-            metrics.set_collection_length(&type_name, "low_priority_tasks", low_priority_tasks);
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "high_priority_tasks",
+                high_priority_tasks,
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "low_priority_tasks",
+                low_priority_tasks,
+            );
 
             self.store.track_collection_metrics(metrics);
         }

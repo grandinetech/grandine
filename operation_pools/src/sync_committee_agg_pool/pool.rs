@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use helper_functions::accessors;
 use itertools::Itertools as _;
 use log::debug;
+use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tokio::sync::RwLock;
 use types::{
@@ -23,7 +24,7 @@ use crate::sync_committee_agg_pool::types::{
 
 pub struct Pool<P: Preset> {
     aggregates: RwLock<AggregateMap<P>>,
-    aggregator_contributions: RwLock<HashSet<(ValidatorIndex, SubcommitteeIndex)>>,
+    aggregator_contributions: RwLock<HashSet<(ValidatorIndex, Slot, SubcommitteeIndex)>>,
     sync_committee_messages: RwLock<SyncCommitteeMessageMap>,
 }
 
@@ -39,18 +40,48 @@ impl<P: Preset> Pool<P> {
 
     // Messages and contributions should be discarded together.
     // Discarding them separately has led to a bug.
-    pub async fn on_slot(&self, slot: Slot) {
-        self.aggregates
-            .write()
-            .await
-            .retain(|data, _| data.slot >= slot);
+    pub async fn on_slot(&self, slot: Slot, metrics: Option<Arc<Metrics>>) {
+        if let Some(metrics) = metrics.as_ref() {
+            let type_name = tynm::type_name::<Self>();
 
-        self.aggregator_contributions.write().await.clear();
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "aggregates",
+                self.aggregates.read().await.len(),
+            );
 
-        self.sync_committee_messages
-            .write()
-            .await
-            .retain(|data, _| data.slot >= slot);
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "aggregator_contributions",
+                self.aggregator_contributions.read().await.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "sync_committee_messages",
+                self.sync_committee_messages.read().await.len(),
+            );
+        }
+
+        if let Some(previous_slot) = slot.checked_sub(1) {
+            self.aggregates
+                .write()
+                .await
+                .retain(|data, _| data.slot >= previous_slot);
+
+            self.aggregator_contributions
+                .write()
+                .await
+                .retain(|(_, slot, _)| *slot >= previous_slot);
+
+            self.sync_committee_messages
+                .write()
+                .await
+                .retain(|data, _| data.slot >= previous_slot);
+        }
     }
 
     pub async fn add_sync_committee_contribution(
@@ -68,10 +99,11 @@ impl<P: Preset> Pool<P> {
             ..
         } = contribution;
 
-        self.aggregator_contributions
-            .write()
-            .await
-            .insert((aggregator_index, subcommittee_index));
+        self.aggregator_contributions.write().await.insert((
+            aggregator_index,
+            contribution.slot,
+            contribution.subcommittee_index,
+        ));
 
         let state = beacon_state
             .post_altair()
@@ -236,10 +268,26 @@ impl<P: Preset> Pool<P> {
             ..
         } = contribution_and_proof;
 
-        self.aggregator_contributions
+        self.aggregator_contributions.read().await.contains(&(
+            aggregator_index,
+            contribution.slot,
+            contribution.subcommittee_index,
+        ))
+    }
+
+    pub async fn is_subset(&self, contribution: SyncCommitteeContribution<P>) -> bool {
+        let contribution_data = ContributionData::from(contribution);
+
+        self.aggregates(contribution_data)
+            .await
             .read()
             .await
-            .contains(&(aggregator_index, contribution.subcommittee_index))
+            .iter()
+            .any(|aggregate| {
+                contribution
+                    .aggregation_bits
+                    .is_subset_of(&aggregate.aggregation_bits)
+            })
     }
 
     pub async fn sync_committee_message_exists(
