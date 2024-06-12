@@ -35,7 +35,7 @@ use types::{
     traits::BeaconState as _,
 };
 
-use crate::messages::MetricsToMetrics;
+use crate::{beaconchain::ProcessMetrics, messages::MetricsToMetrics};
 
 #[derive(Clone, Debug)]
 pub struct MetricsServerConfig {
@@ -266,6 +266,10 @@ async fn scrape_system_stats(
     metrics.set_total_cpu_percentage(grandine_total_cpu_percentage);
     metrics.set_system_total_memory(system_total_memory);
     metrics.set_system_used_memory(system_used_memory);
+
+    let process_metrics = ProcessMetrics::get();
+
+    metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
 
     Ok(())
 }
