@@ -902,17 +902,6 @@ pub enum LightClientBootstrap<P: Preset> {
     Deneb(Box<DenebLightClientBootstrap<P>>),
 }
 
-impl<P: Preset> LightClientBootstrap<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
-        }
-    }
-}
-
 impl<P: Preset> SszSize for LightClientBootstrap<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
@@ -937,6 +926,17 @@ impl<P: Preset> SszWrite for LightClientBootstrap<P> {
             }
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientBootstrap<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
         }
     }
 }
@@ -983,6 +983,17 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
     }
 }
 
+impl<P: Preset> LightClientFinalityUpdate<P> {
+    #[must_use]
+    pub fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum LightClientOptimisticUpdate<P: Preset> {
     // Boxed to pass `clippy::large_enum_variant`.
@@ -1022,6 +1033,17 @@ impl<P: Preset> SszWrite for LightClientOptimisticUpdate<P> {
             }
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientOptimisticUpdate<P> {
+    #[must_use]
+    pub fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
         }
     }
 }

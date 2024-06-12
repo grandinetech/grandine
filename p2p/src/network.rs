@@ -912,6 +912,22 @@ impl<P: Preset> Network<P> {
 
                 Ok(())
             }
+            Request::LightClientFinalityUpdate => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log_with_feature(format_args!(
+                    "received LightClientFinalityUpdate request (peer_id: {peer_id})",
+                ));
+
+                Ok(())
+            }
+            Request::LightClientOptimisticUpdate => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log_with_feature(format_args!(
+                    "received LightClientOptimisticUpdate request (peer_id: {peer_id})",
+                ));
+
+                Ok(())
+            }
             Request::BlobsByRange(request) => {
                 self.handle_blobs_by_range_request(peer_id, peer_request_id, request)
             }
@@ -1381,6 +1397,24 @@ impl<P: Preset> Network<P> {
                     Level::Debug,
                     format_args!(
                         "received LightClientBootstrap response chunk (peer_id: {peer_id})",
+                    ),
+                );
+            }
+            Response::LightClientFinalityUpdate(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received LightClientFinalityUpdate response (peer_id: {peer_id})",
+                    ),
+                );
+            }
+            Response::LightClientOptimisticUpdate(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received LightClientOptimisticUpdate response (peer_id: {peer_id})",
                     ),
                 );
             }
@@ -2030,7 +2064,9 @@ fn run_network_service<P: Preset>(
                             );
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
-                            service.send_request(peer_id, request_id, request);
+                            if let Err(error) = service.send_request(peer_id, request_id, request) {
+                                warn!("Unable to send request: {error:?}");
+                            }
                         }
                         ServiceInboundMessage::SendResponse(peer_id, peer_request_id, response) => {
                             service.send_response(peer_id, peer_request_id, *response);

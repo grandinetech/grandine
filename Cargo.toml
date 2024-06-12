@@ -401,7 +401,7 @@ tiny-keccak = '2.0.2'
 tokio = { version = '1.36.0', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
 tokio-io-timeout = '1.2.0'
 tokio-stream = { version = '0.1.14', features = ['sync'] }
-tokio-util = { version = '0.6.10', features = ['codec', 'compat', 'time'] }
+tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.4.13', features = ['timeout'] }
 tower-http = { version = '0.4.4', features = ['cors', 'trace'] }
 tracing = '0.1.40'
@@ -410,7 +410,7 @@ tynm = '0.1.9'
 typenum = '1.17.0'
 unicode-normalization = '0.1.22'
 # 0.7.2 breaks `eth2_libp2p`. Update this is no longer the case.
-unsigned-varint = { version = '= 0.7.1', features = ['codec'] }
+unsigned-varint = { version = '= 0.8', features = ['codec'] }
 unwrap_none = '0.1.2'
 url = '2.5.0'
 uuid = { version = '1.7.0', features = ['serde', 'v4'] }
