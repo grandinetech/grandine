@@ -29,6 +29,7 @@ pub struct Metrics {
     system_used_memory: IntGauge,
     system_total_memory: IntGauge,
     total_cpu_percentage: Gauge,
+    total_cpu_seconds: IntGauge,
 
     // Collection Lengths
     collection_lengths: IntGaugeVec,
@@ -198,8 +199,14 @@ impl Metrics {
                 "Grandine CPU load usage measured in percentage",
             )?,
 
+            total_cpu_seconds: IntGauge::new(
+                "GRANDINE_TOTAL_CPU_SECONDS",
+                "Grandine CPU load usage measured in seconds"
+            )?,
+
             system_used_memory: IntGauge::new("SYSTEM_USED_MEMORY", "Node memory usage")?,
             system_total_memory: IntGauge::new("SYSTEM_TOTAL_MEMORY", "Total node mmeory")?,
+
 
             // Collection Lengths
             collection_lengths: IntGaugeVec::new(
@@ -732,6 +739,7 @@ impl Metrics {
         default_registry.register(Box::new(self.system_used_memory.clone()))?;
         default_registry.register(Box::new(self.system_total_memory.clone()))?;
         default_registry.register(Box::new(self.total_cpu_percentage.clone()))?;
+        default_registry.register(Box::new(self.total_cpu_seconds.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
         default_registry.register(Box::new(self.http_api_response_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
@@ -900,6 +908,10 @@ impl Metrics {
 
     pub fn set_total_cpu_percentage(&self, cpu_percentage: f32) {
         self.total_cpu_percentage.set(cpu_percentage as f64)
+    }
+
+    pub fn set_total_cpu_seconds(&self, total_cpu_seconds: u64) {
+        self.total_cpu_seconds.set(total_cpu_seconds as i64)
     }
 
     pub fn set_system_used_memory(&self, used_memory: u64) {
