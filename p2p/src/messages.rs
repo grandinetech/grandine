@@ -22,7 +22,7 @@ use types::{
             Attestation, AttesterSlashing, ProposerSlashing, SignedAggregateAndProof,
             SignedVoluntaryExit,
         },
-        primitives::{Epoch, ForkDigest, Slot, SubnetId, H256},
+        primitives::{Epoch, ForkDigest, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -242,7 +242,7 @@ impl SubnetServiceToP2p {
 }
 
 pub enum ToSubnetService {
-    SetRegisteredValidators(Vec<PublicKeyBytes>),
+    SetRegisteredValidators(Vec<PublicKeyBytes>, Vec<ValidatorIndex>),
     UpdateBeaconCommitteeSubscriptions(Slot, Vec<BeaconCommitteeSubscription>, Sender<Result<()>>),
     UpdateSyncCommitteeSubscriptions(Epoch, Vec<SyncCommitteeSubscription>),
 }

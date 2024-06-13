@@ -664,7 +664,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Tick { slot, kind } = tick;
 
-        let no_validators = self.signer.load().no_keys() && self.registered_validators.is_empty();
+        let no_validators = self.signer.load().no_keys()
+            && self.registered_validators.is_empty()
+            && self.prepared_proposers.is_empty();
 
         log!(
             if no_validators {
@@ -3040,6 +3042,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let chain_config = self.chain_config.clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
+        let prepared_proposer_indices = self.prepared_proposers.keys().copied().collect();
         let registered_validators = self.registered_validators.clone();
         let subnet_service_tx = self.subnet_service_tx.clone();
 
@@ -3054,6 +3057,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .copied()
                     .chain(pubkeys.iter().copied())
                     .collect(),
+                prepared_proposer_indices,
             )
             .send(&subnet_service_tx);
 

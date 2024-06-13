@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use axum::{
-    extract::{FromRef, State},
+    extract::{DefaultBodyLimit, FromRef, State},
     routing::{get, patch, post},
     Json, Router,
 };
@@ -217,6 +217,7 @@ pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
         .merge(eth_v1_validator_routes(state.clone()))
         .merge(eth_v2_validator_routes(state.clone()))
         .merge(eth_v3_validator_routes(state.clone()))
+        .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
 
