@@ -10,8 +10,8 @@ use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState, phase0::containers::Attestation, preset::Preset,
-    traits::BeaconState as _,
+    combined::BeaconState, phase0::containers::Attestation, phase0::primitives::ValidatorIndex,
+    preset::Preset, traits::BeaconState as _,
 };
 
 use crate::{
@@ -213,6 +213,7 @@ pub struct SetRegisteredValidatorsTask<P: Preset, W: Wait> {
     pub pool: Arc<Pool<P>>,
     pub controller: ApiController<P, W>,
     pub pubkeys: Vec<PublicKeyBytes>,
+    pub prepared_proposer_indices: Vec<ValidatorIndex>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
@@ -223,6 +224,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
             pool,
             controller,
             pubkeys,
+            prepared_proposer_indices,
         } = self;
 
         let beacon_state = controller.preprocessed_state_at_current_slot()?;
@@ -230,6 +232,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
         let validator_indices = pubkeys
             .into_iter()
             .filter_map(|pubkey| accessors::index_of_public_key(&beacon_state, pubkey))
+            .chain(prepared_proposer_indices)
             .collect();
 
         pool.set_registered_validator_indices(validator_indices)

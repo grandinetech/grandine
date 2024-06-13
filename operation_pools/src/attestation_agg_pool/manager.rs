@@ -15,7 +15,7 @@ use types::{
     config::Config,
     phase0::{
         containers::{Attestation, AttestationData},
-        primitives::{Epoch, H256},
+        primitives::{Epoch, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -141,11 +141,16 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
-    pub fn set_registered_validators(&self, pubkeys: Vec<PublicKeyBytes>) {
+    pub fn set_registered_validators(
+        &self,
+        pubkeys: Vec<PublicKeyBytes>,
+        prepared_proposer_indices: Vec<ValidatorIndex>,
+    ) {
         self.spawn_detached(SetRegisteredValidatorsTask {
             pool: self.pool.clone_arc(),
             controller: self.controller.clone_arc(),
             pubkeys,
+            prepared_proposer_indices,
         });
     }
 
