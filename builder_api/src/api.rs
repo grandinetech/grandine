@@ -283,12 +283,10 @@ fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "eth2-cache")]
 mod tests {
-    use eth2_cache_utils::mainnet;
     use reqwest::{Client, Url};
     use test_case::test_case;
-    use types::{preset::Mainnet, traits::SignedBeaconBlock as _};
+    use types::preset::Mainnet;
 
     use crate::{
         config::{DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH},
@@ -297,17 +295,22 @@ mod tests {
 
     use super::*;
 
+    const NON_EMPTY_SLOTS: [Slot; 27] = [
+        128, 127, 126, 125, 124, 122, 121, 120, 119, 118, 117, 116, 115, 114, 112, 111, 110, 109,
+        108, 104, 102, 101, 100, 99, 98, 97, 96,
+    ];
+
     #[test_case(
-        129, nonempty_slots_in_mainnet() => Ok(());
-        "missing blocks: 123, 113, 107 (not enough for short circuit)"
+        129, NON_EMPTY_SLOTS => Ok(());
+        "missing blocks: 123, 113, 107, 106, 105, 103 (not enough for short circuit)"
     )]
     #[test_case(
-        132, nonempty_slots_in_mainnet() => Err(BuilderApiError::RollingEpochMissingBlocks { missing_blocks: 6 });
-        "missing blocks: 131, 130, 129, 123, 113, 107"
+        132, NON_EMPTY_SLOTS => Err(BuilderApiError::RollingEpochMissingBlocks { missing_blocks: 9 });
+        "missing blocks: 131, 130, 129, 123, 113, 107, 106, 105, 103"
     )]
     #[test_case(
-        133, nonempty_slots_in_mainnet() => Err(BuilderApiError::ConsecutiveMissingBlocks { missing_blocks: 4 });
-        "missing blocks: 132, 131, 130, 129, 123, 113, 107"
+        133, NON_EMPTY_SLOTS => Err(BuilderApiError::ConsecutiveMissingBlocks { missing_blocks: 4 });
+        "missing blocks: 132, 131, 130, 129, 123, 113, 107, 106, 105, 103"
     )]
     #[test_case(
         34, [0] => Err(BuilderApiError::ConsecutiveMissingBlocks { missing_blocks: 33 });
@@ -338,13 +341,5 @@ mod tests {
         );
 
         api.can_use_builder_api::<Mainnet>(slot, nonempty_slots)
-    }
-
-    fn nonempty_slots_in_mainnet() -> impl Iterator<Item = Slot> {
-        mainnet::BEACON_BLOCKS_UP_TO_SLOT_128
-            .force()
-            .iter()
-            .map(|block| block.message().slot())
-            .rev()
     }
 }
