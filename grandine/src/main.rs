@@ -562,7 +562,7 @@ fn ensure_ports_not_in_use(
         if !network_config.disable_quic_support {
             UdpSocket::bind((addr, quic_port)).context(Error::PortInUse {
                 port: quic_port,
-                service: "libp2p",
+                service: "quic",
                 option: "--quic-port",
             })?;
         }
