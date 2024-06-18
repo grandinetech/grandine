@@ -28,7 +28,7 @@ use futures::{
     stream::{FuturesOrdered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
-use helper_functions::{accessors, misc, slot_report::SyncAggregateRewards};
+use helper_functions::{accessors, misc};
 use http_api_utils::BlockId;
 use itertools::{izip, Either, Itertools as _};
 use liveness_tracker::ApiToLiveness;
@@ -63,7 +63,7 @@ use types::{
         primitives::BlobIndex,
     },
     nonstandard::{
-        Phase, RelativeEpoch, SlashingKind, ValidationOutcome, WithBlobsAndMev, WithStatus,
+        BlockRewards, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev, WithStatus,
         WEI_IN_GWEI,
     },
     phase0::{
@@ -78,7 +78,7 @@ use types::{
         },
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
     ApiToValidator, ValidatorBlindedBlock, ValidatorConfig, ValidatorProposerData,
@@ -1099,20 +1099,51 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/beacon/rewards/blocks/{block_id}`
 pub async fn block_rewards<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<BlockRewardsResponse>, Error> {
     let WithStatus {
-        value: block,
+        value: signed_block,
         optimistic,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
-    let rewards = calculate_block_rewards(&chain_config, &controller, &block)?;
+    let block: BeaconBlock<P> = Arc::unwrap_or_clone(signed_block).into();
+    let block_slot = block.slot();
 
-    Ok(EthResponse::json(rewards)
+    let block_rewards = (block_slot > GENESIS_SLOT)
+        .then(|| {
+            let parent_root = block.parent_root();
+
+            let state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
+
+            controller
+                .block_processor()
+                .process_trusted_block_with_report(state, &block)
+        })
+        .transpose()?
+        .and_then(|(_, rewards)| rewards)
+        .unwrap_or_default();
+
+    let BlockRewards {
+        total,
+        attestations,
+        sync_aggregate,
+        proposer_slashings,
+        attester_slashings,
+    } = block_rewards;
+
+    let rewards_response = BlockRewardsResponse {
+        proposer_index: block.proposer_index(),
+        total,
+        attestations,
+        sync_aggregate,
+        proposer_slashings,
+        attester_slashings,
+    };
+
+    Ok(EthResponse::json(rewards_response)
         .execution_optimistic(optimistic)
         .finalized(finalized))
 }
@@ -1905,6 +1936,7 @@ pub async fn validator_blinded_block<P: Preset>(
     let blinded_block = receiver
         .await??
         .ok_or(Error::UnableToProduceBlindedBlock)?
+        .0
         .value
         .into_blinded();
 
@@ -1942,16 +1974,14 @@ pub async fn validator_block<P: Preset>(
     )
     .send(&api_to_validator_tx);
 
-    let beacon_block = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
+    let (beacon_block, _) = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
     let version = beacon_block.value.phase();
 
     Ok(EthResponse::json_or_ssz(beacon_block.into(), &headers).version(version))
 }
 
 /// `GET /eth/v3/validator/blocks/{slot}`
-pub async fn validator_block_v3<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
-    State(controller): State<ApiController<P, W>>,
+pub async fn validator_block_v3<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV3>,
@@ -1981,7 +2011,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     )
     .send(&api_to_validator_tx);
 
-    let validator_block = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
+    let (validator_block, block_rewards) =
+        receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
 
     let mev = validator_block.mev;
     let version = validator_block.value.phase();
@@ -1989,27 +2020,25 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
     // 'Uplift' validator block to signed beacon block for consensus reward calculation
     let signed_beacon_block = match validator_block.value.clone() {
-        ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.into(),
+        ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.with_zero_signature(),
         ValidatorBlindedBlock::BlindedBeaconBlock {
             blinded_block,
             execution_payload,
-        } => {
-            let beacon_block = blinded_block
-                .with_execution_payload(*execution_payload)
-                .map_err(AnyhowError::new)?;
-
-            beacon_block.into()
-        }
+        } => blinded_block
+            .with_execution_payload(*execution_payload)
+            .map_err(AnyhowError::new)?
+            .with_zero_signature(),
     };
 
-    let consensus_block_value =
-        match calculate_block_rewards(&chain_config, &controller, &Arc::new(signed_beacon_block)) {
-            Ok(rewards) => Some(Uint256::from_u64(rewards.total) * WEI_IN_GWEI),
-            Err(error) => {
-                warn!("unable to calculate block rewards for validator block: {error:?}");
-                None
-            }
-        };
+    let consensus_block_value = block_rewards
+        .map(|rewards| Uint256::from_u64(rewards.total) * WEI_IN_GWEI)
+        .or_else(|| {
+            warn!(
+                "unable to calculate block rewards for validator block {:?} at slot {slot}",
+                signed_beacon_block.message().hash_tree_root(),
+            );
+            None
+        });
 
     Ok(EthResponse::json_or_ssz(validator_block.into(), &headers)
         .version(version)
@@ -2346,53 +2375,6 @@ pub async fn validator_beacon_committee_selections() -> Error {
 /// `POST /eth/v1/validator/sync_committee_selections`
 pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
-}
-
-pub fn calculate_block_rewards<P: Preset, W: Wait>(
-    chain_config: &Arc<ChainConfig>,
-    controller: &ApiController<P, W>,
-    block: &Arc<SignedBeaconBlock<P>>,
-) -> Result<BlockRewardsResponse> {
-    let block_slot = block.message().slot();
-
-    let slot_report = (block_slot > GENESIS_SLOT)
-        .then(|| {
-            let parent_root = block.message().parent_root();
-
-            let mut state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
-
-            transition_functions::combined::state_transition_for_report(
-                chain_config,
-                state.make_mut(),
-                block,
-            )
-        })
-        .transpose()?
-        .unwrap_or_default();
-
-    let attestations = slot_report.attestation_rewards.iter().sum();
-
-    let sync_aggregate = slot_report
-        .sync_aggregate_rewards
-        .map(SyncAggregateRewards::total)
-        .unwrap_or_default();
-
-    let proposer_slashings = slot_report.slashing_rewards[SlashingKind::Proposer]
-        .iter()
-        .sum();
-
-    let attester_slashings = slot_report.slashing_rewards[SlashingKind::Attester]
-        .iter()
-        .sum();
-
-    Ok(BlockRewardsResponse {
-        proposer_index: block.message().proposer_index(),
-        total: attestations + sync_aggregate + proposer_slashings + attester_slashings,
-        attestations,
-        sync_aggregate,
-        proposer_slashings,
-        attester_slashings,
-    })
 }
 
 async fn publish_signed_block<P: Preset, W: Wait>(

@@ -32,7 +32,6 @@ use transition_functions::{
 };
 use typenum::Unsigned as _;
 use types::{
-    bellatrix::containers::PowBlock,
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     deneb::{
@@ -49,7 +48,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostBellatrixBeaconBlockBody, SignedBeaconBlock as _},
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use unwrap_none::UnwrapNone as _;
 
@@ -65,9 +64,10 @@ use crate::{
         UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
-    state_cache::StateCache,
+    state_cache_processor::StateCacheProcessor,
     store_config::StoreConfig,
     supersets::AggregateAndProofSets as AggregateAndProofSupersets,
+    validations::validate_merge_block,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -199,12 +199,12 @@ pub struct Store<P: Preset> {
     // Attestations cannot affect fork choice until their slots have passed.
     // This field is used to store them in the meantime.
     current_slot_attestations: Vector<ValidAttestation<P>>,
-    preprocessed_states: StateCache<P>,
     execution_payload_locations: HashMap<ExecutionBlockHash, Location>,
     aggregate_and_proof_supersets: Arc<AggregateAndProofSupersets<P>>,
     accepted_blob_sidecars:
         HashMap<(Slot, ValidatorIndex, BlobIndex), HashMap<H256, KzgCommitment>>,
     blob_cache: BlobCache<P>,
+    state_cache: Arc<StateCacheProcessor<P>>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
 }
@@ -268,11 +268,13 @@ impl<P: Preset> Store<P> {
             latest_messages,
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             current_slot_attestations: vector![],
-            preprocessed_states: StateCache::default(),
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
             accepted_blob_sidecars: HashMap::default(),
             blob_cache: BlobCache::default(),
+            state_cache: Arc::new(StateCacheProcessor::new(
+                store_config.state_cache_lock_timeout,
+            )),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
         }
@@ -896,14 +898,83 @@ impl<P: Preset> Store<P> {
             .unwrap_or_default()
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn validate_block(
         &self,
-        block: Arc<SignedBeaconBlock<P>>,
+        block: &Arc<SignedBeaconBlock<P>>,
         state_root_policy: StateRootPolicy,
         execution_engine: impl ExecutionEngine<P> + Send,
         verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
+        self.validate_block_with_custom_state_transition(block, |block_root, parent| {
+            // > Make a copy of the state to avoid mutability issues
+            let mut state = self
+                .state_cache
+                .before_or_at_slot(self, parent.block_root, block.message().slot())
+                .unwrap_or_else(|| {
+                    if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
+                    {
+                        // `Backtrace::force_capture` can be costly and a warning may be excessive,
+                        // but this is controlled by a `Feature` that should be disabled by default.
+                        warn!(
+                            "processing slots for beacon state not found in state cache before state transition \
+                            (block root: {block_root:?}, parent block root: {:?}, from slot {} to {})\n{}",
+                            parent.block_root,
+                            parent.slot(),
+                            block.message().slot(),
+                            Backtrace::force_capture(),
+                        );
+                    }
+
+                    parent.state(self)
+                });
+
+            // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
+            // See <https://github.com/ethereum/consensus-specs/pull/3232>.
+            // It is unclear when modifications to fork choice logic should come into effect.
+            // We check the phase of the block rather than the current slot.
+            if block.phase() < Phase::Capella {
+                // > [New in Bellatrix]
+                //
+                // The Fork Choice specification does this after the state transition.
+                // We don't because that would require keeping around a clone of the pre-state.
+                if let Some(body) = block
+                    .message()
+                    .body()
+                    .post_bellatrix()
+                    .filter(|body| predicates::is_merge_transition_block(&state, *body))
+                {
+                    match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
+                    {
+                        PartialBlockAction::Accept => {}
+                        PartialBlockAction::Ignore => return Ok((state, Some(BlockAction::Ignore))),
+                    }
+                }
+            }
+
+            // > Check the block is valid and compute the post-state
+            combined::custom_state_transition(
+                &self.chain_config,
+                state.make_mut(),
+                block,
+                ProcessSlots::IfNeeded,
+                state_root_policy,
+                execution_engine,
+                verifier,
+                NullSlotReport,
+            )?;
+
+            Ok((state, None))
+        })
+    }
+
+    pub fn validate_block_with_custom_state_transition<ST>(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        state_transition: ST,
+    ) -> Result<BlockAction<P>>
+    where
+        ST: FnOnce(H256, &ChainLink<P>) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
+    {
         let block_root = block.message().hash_tree_root();
 
         // Skip blocks that are already known.
@@ -917,7 +988,7 @@ impl<P: Preset> Store<P> {
         // > Blocks cannot be in the future.
         // > If they are, their consideration must be delayed until the are in the past.
         if self.slot() < block.message().slot() {
-            return Ok(BlockAction::DelayUntilSlot(block));
+            return Ok(BlockAction::DelayUntilSlot(block.clone_arc()));
         }
 
         // > Check that block is later than the finalized epoch slot
@@ -929,7 +1000,7 @@ impl<P: Preset> Store<P> {
 
         // > Parent block must be known
         let Some(parent) = self.chain_link(block.message().parent_root()) else {
-            return Ok(BlockAction::DelayUntilParent(block));
+            return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
         };
 
         // > Check block is a descendant of the finalized block at the checkpoint finalized slot
@@ -939,65 +1010,15 @@ impl<P: Preset> Store<P> {
             return Ok(BlockAction::Ignore);
         }
 
-        // > Make a copy of the state to avoid mutability issues
-        let mut state = self
-            .preprocessed_states
-            .before_or_at_slot(parent.block_root, block.message().slot())
-            .cloned()
-            .unwrap_or_else(|| {
-                if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
-                {
-                    // `Backtrace::force_capture` can be costly and a warning may be excessive,
-                    // but this is controlled by a `Feature` that should be disabled by default.
-                    warn!(
-                        "processing slots for beacon state not found in state cache before state transition \
-                         (block root: {block_root:?}, parent block root: {:?}, from slot {} to {})\n{}",
-                        parent.block_root,
-                        parent.slot(),
-                        block.message().slot(),
-                        Backtrace::force_capture(),
-                    );
-                }
+        // > Check the block is valid and compute the post-state
+        let (state, block_action) = state_transition(block_root, parent)?;
 
-                parent.state(self)
-            });
-
-        // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
-        // See <https://github.com/ethereum/consensus-specs/pull/3232>.
-        // It is unclear when modifications to fork choice logic should come into effect.
-        // We check the phase of the block rather than the current slot.
-        if block.phase() < Phase::Capella {
-            // > [New in Bellatrix]
-            //
-            // The Fork Choice specification does this after the state transition.
-            // We don't because that would require keeping around a clone of the pre-state.
-            if let Some(body) = block
-                .message()
-                .body()
-                .post_bellatrix()
-                .filter(|body| predicates::is_merge_transition_block(&state, *body))
-            {
-                match self.validate_merge_block(&block, body, &execution_engine)? {
-                    PartialBlockAction::Accept => {}
-                    PartialBlockAction::Ignore => return Ok(BlockAction::Ignore),
-                }
-            }
+        if let Some(action) = block_action {
+            return Ok(action);
         }
 
-        // > Check the block is valid and compute the post-state
-        combined::custom_state_transition(
-            &self.chain_config,
-            state.make_mut(),
-            &block,
-            ProcessSlots::IfNeeded,
-            state_root_policy,
-            execution_engine,
-            verifier,
-            NullSlotReport,
-        )?;
-
-        if !self.indices_of_missing_blobs(&block).is_empty() {
-            return Ok(BlockAction::DelayUntilBlobs(block));
+        if !self.indices_of_missing_blobs(block).is_empty() {
+            return Ok(BlockAction::DelayUntilBlobs(block.clone_arc()));
         }
 
         let attester_slashing_results = block
@@ -1036,7 +1057,7 @@ impl<P: Preset> Store<P> {
 
         let chain_link = ChainLink {
             block_root,
-            block,
+            block: block.clone_arc(),
             state: Some(state),
             unrealized_justified_checkpoint,
             unrealized_finalized_checkpoint,
@@ -1069,98 +1090,6 @@ impl<P: Preset> Store<P> {
         //
         // > Add new state for this block to the store
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
-    }
-
-    /// [`validate_merge_block`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/bellatrix/fork-choice.md#validate_merge_block)
-    ///
-    /// > Check the parent PoW block of execution payload is a valid terminal PoW block.
-    /// >
-    /// > Note: Unavailable PoW block(s) may later become available,
-    /// > and a client software MAY delay a call to ``validate_merge_block``
-    /// > until the PoW block(s) become available.
-    fn validate_merge_block<E: ExecutionEngine<P>>(
-        &self,
-        block: &Arc<SignedBeaconBlock<P>>,
-        body: &(impl PostBellatrixBeaconBlockBody<P> + ?Sized),
-        execution_engine: E,
-    ) -> Result<PartialBlockAction> {
-        if !self.chain_config.terminal_block_hash.is_zero() {
-            let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
-
-            // > If `TERMINAL_BLOCK_HASH` is used as an override,
-            // > the activation epoch must be reached.
-            ensure!(
-                epoch >= self.chain_config.terminal_block_hash_activation_epoch,
-                Error::MergeBlockBeforeActivationEpoch {
-                    block: block.clone_arc(),
-                },
-            );
-
-            ensure!(
-                body.execution_payload().parent_hash() == self.chain_config.terminal_block_hash,
-                Error::TerminalBlockHashMismatch {
-                    block: block.clone_arc(),
-                },
-            );
-
-            return Ok(PartialBlockAction::Accept);
-        }
-
-        if E::IS_NULL {
-            return Ok(PartialBlockAction::Accept);
-        }
-
-        let pow_block_missing_block_action =
-            if execution_engine.allow_optimistic_merge_block_validation() {
-                // In case PoW block is not found (e.g. execution engine is not synced),
-                // let fork choice optimistically accept beacon block
-                PartialBlockAction::Accept
-            } else {
-                PartialBlockAction::Ignore
-            };
-
-        // > Check if `pow_block` is available
-        let Some(pow_block) = execution_engine.pow_block(body.execution_payload().parent_hash())
-        else {
-            return Ok(pow_block_missing_block_action);
-        };
-
-        // > Check if `pow_parent` is available
-        let Some(pow_parent) = execution_engine.pow_block(pow_block.pow_block.parent_hash) else {
-            return Ok(pow_block_missing_block_action);
-        };
-
-        // > Check if `pow_block` is a valid terminal PoW block
-        self.validate_terminal_pow_block(block, pow_block.pow_block, pow_parent.pow_block)?;
-
-        Ok(PartialBlockAction::Accept)
-    }
-
-    /// [`is_valid_terminal_pow_block`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/bellatrix/fork-choice.md#is_valid_terminal_pow_block)
-    fn validate_terminal_pow_block(
-        &self,
-        block: &Arc<SignedBeaconBlock<P>>,
-        pow_block: PowBlock,
-        parent: PowBlock,
-    ) -> Result<()> {
-        ensure!(
-            pow_block.total_difficulty >= self.chain_config.terminal_total_difficulty,
-            Error::TerminalTotalDifficultyNotReached {
-                block: block.clone_arc(),
-                pow_block: Box::new(pow_block),
-            },
-        );
-
-        ensure!(
-            parent.total_difficulty < self.chain_config.terminal_total_difficulty,
-            Error::TerminalTotalDifficultyReachedByParent {
-                block: block.clone_arc(),
-                pow_block: Box::new(pow_block),
-                parent: Box::new(parent),
-            },
-        );
-
-        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1674,9 +1603,8 @@ impl<P: Preset> Store<P> {
         }
 
         let mut state = self
-            .preprocessed_states
-            .before_or_at_slot(block_header.parent_root, block_header.slot)
-            .cloned()
+            .state_cache
+            .before_or_at_slot(self, block_header.parent_root, block_header.slot)
             .unwrap_or_else(|| {
                 self.chain_link(block_header.parent_root)
                     .or_else(|| self.chain_link_before_or_at(block_header.slot))
@@ -2407,7 +2335,7 @@ impl<P: Preset> Store<P> {
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.prune_checkpoint_states();
-        self.preprocessed_states.prune(finalized_slot);
+        self.state_cache.prune(finalized_slot).ok();
         self.aggregate_and_proof_supersets
             .prune(self.finalized_epoch());
     }
@@ -2783,23 +2711,7 @@ impl<P: Preset> Store<P> {
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
-        self.preprocessed_state_before_or_at_slot(block_root, slot)
-            .cloned()
-            .or_else(|| self.state_by_block_root(block_root))
-            .filter(|state| state.slot() <= slot)
-    }
-
-    #[must_use]
-    pub fn preprocessed_state_before_or_at_slot(
-        &self,
-        block_root: H256,
-        slot: Slot,
-    ) -> Option<&Arc<BeaconState<P>>> {
-        self.preprocessed_states.before_or_at_slot(block_root, slot)
-    }
-
-    pub fn insert_preprocessed_state(&mut self, block_root: H256, state: Arc<BeaconState<P>>) {
-        self.preprocessed_states.insert(block_root, state);
+        self.state_cache.before_or_at_slot(self, block_root, slot)
     }
 
     #[must_use]
@@ -3002,6 +2914,10 @@ impl<P: Preset> Store<P> {
         self.blob_cache.unpersisted_blob_sidecars()
     }
 
+    pub fn state_cache(&self) -> Arc<StateCacheProcessor<P>> {
+        self.state_cache.clone_arc()
+    }
+
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         let type_name = tynm::type_name::<Self>();
 
@@ -3082,7 +2998,7 @@ impl<P: Preset> Store<P> {
             module_path!(),
             &type_name,
             "preprocessed_states",
-            self.preprocessed_states.len(),
+            self.state_cache.len().unwrap_or_default(),
         );
     }
 }

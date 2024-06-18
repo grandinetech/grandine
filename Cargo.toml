@@ -48,6 +48,7 @@ members = [
     'spec_test_utils',
     'ssz',
     'ssz_derive',
+    'state_cache',
     'std_ext',
     'transition_functions',
     'try_from_iterator',
@@ -466,6 +467,7 @@ snapshot_test_utils = { path = 'snapshot_test_utils' }
 spec_test_utils = { path = 'spec_test_utils' }
 ssz = { path = 'ssz' }
 ssz_derive = { path = 'ssz_derive' }
+state_cache = { path = 'state_cache' }
 std_ext = { path = 'std_ext' }
 transition_functions = { path = 'transition_functions' }
 try_from_iterator = { path = 'try_from_iterator' }

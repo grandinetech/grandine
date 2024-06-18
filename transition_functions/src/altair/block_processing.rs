@@ -61,13 +61,14 @@ pub fn process_block<P: Preset>(
     state: &mut BeaconState<P>,
     block: &AltairBeaconBlock<P>,
     mut verifier: impl Verifier,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
     verifier.reserve(count_required_signatures(block));
-    custom_process_block(config, state, block, &mut verifier, NullSlotReport)?;
+    custom_process_block(config, state, block, &mut verifier, slot_report)?;
     verifier.finish()
 }
 

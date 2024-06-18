@@ -25,7 +25,6 @@ pub use crate::{
     misc::{MutatorRejectionReason, VerifyAggregateAndProofResult, VerifyAttestationResult},
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
-    state_cache::Error as StateCacheError,
     storage::{StateLoadStrategy, Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL},
     storage_tool::{export_state_and_blocks, replay_blocks},
     wait::Wait,
@@ -33,13 +32,13 @@ pub use crate::{
 
 pub mod checkpoint_sync;
 
+mod block_processor;
 mod controller;
 mod messages;
 mod misc;
 mod mutator;
 mod queries;
 mod specialized;
-mod state_cache;
 mod storage;
 mod storage_back_sync;
 mod storage_tool;

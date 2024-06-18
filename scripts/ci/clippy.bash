@@ -61,6 +61,7 @@ options=(
     --package spec_test_utils
     --package ssz
     --package ssz_derive
+    --package state_cache
     --package std_ext
     --package transition_functions
     --package try_from_iterator

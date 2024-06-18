@@ -22,7 +22,7 @@ use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, Store, StoreConfig,
+    BlobSidecarOrigin, BlockOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -43,13 +43,13 @@ use types::{
 };
 
 use crate::{
+    block_processor::BlockProcessor,
     messages::{
         ApiMessage, AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage,
         SubnetMessage, SyncMessage, ValidatorMessage,
     },
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
-    state_cache::StateCache,
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
@@ -62,8 +62,9 @@ use crate::{
 pub struct Controller<P: Preset, E, A, W: Wait> {
     // The latest consistent snapshot of the store.
     store_snapshot: Arc<ArcSwap<Store<P>>>,
+    block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
-    state_cache: Arc<StateCache<P, W>>,
+    state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<Storage<P>>,
     thread_pool: ThreadPool<P, E, W>,
     wait_group: W::Swappable,
@@ -106,8 +107,9 @@ where
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
+
         let mut store = Store::new(
-            chain_config,
+            chain_config.clone_arc(),
             store_config,
             anchor_block,
             anchor_state,
@@ -116,18 +118,17 @@ where
 
         store.apply_tick(tick)?;
 
+        let state_cache = store.state_cache();
         let store_snapshot = Arc::new(ArcSwap::from_pointee(store));
         let thread_pool = ThreadPool::new()?;
         let (mutator_tx, mutator_rx) = std::sync::mpsc::channel();
 
-        let state_cache = Arc::new(StateCache::new(
-            store_snapshot.clone_arc(),
-            mutator_tx.clone(),
-        ));
+        let block_processor = Arc::new(BlockProcessor::new(chain_config, state_cache.clone_arc()));
 
         let mut mutator = Mutator::new(
             store_snapshot.clone_arc(),
             state_cache.clone_arc(),
+            block_processor.clone_arc(),
             execution_engine.clone(),
             storage.clone_arc(),
             thread_pool.clone(),
@@ -158,6 +159,7 @@ where
 
         let controller = Arc::new(Self {
             store_snapshot,
+            block_processor,
             execution_engine,
             state_cache,
             storage,
@@ -476,6 +478,7 @@ where
     ) {
         self.spawn(BlockTask {
             store_snapshot: self.owned_store_snapshot(),
+            block_processor: self.block_processor.clone_arc(),
             execution_engine: self.execution_engine.clone(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
@@ -490,7 +493,11 @@ where
         self.thread_pool.spawn(task);
     }
 
-    pub(crate) const fn state_cache(&self) -> &Arc<StateCache<P, W>> {
+    pub const fn block_processor(&self) -> &Arc<BlockProcessor<P>> {
+        &self.block_processor
+    }
+
+    pub(crate) const fn state_cache(&self) -> &Arc<StateCacheProcessor<P>> {
         &self.state_cache
     }
 

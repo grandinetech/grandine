@@ -26,8 +26,8 @@ use execution_engine::{
     ExecutionEngine as _, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadId,
 };
 use features::Feature;
-use fork_choice_control::{StateCacheError, ValidatorMessage, Wait};
-use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink};
+use fork_choice_control::{ValidatorMessage, Wait};
+use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future::{Either as EitherFuture, OptionFuture},
@@ -58,7 +58,7 @@ use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
 use tokio::task::JoinHandle;
-use transition_functions::{capella, combined, unphased};
+use transition_functions::{capella, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -90,7 +90,9 @@ use types::{
         },
         primitives::KzgCommitment,
     },
-    nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
+    nonstandard::{
+        BlockRewards, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+    },
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
@@ -955,7 +957,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         payload_header: ExecutionPayloadHeader<P>,
         blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
         skip_randao_verification: bool,
-    ) -> Option<BlindedBeaconBlock<P>> {
+    ) -> Option<(BlindedBeaconBlock<P>, Option<BlockRewards>)> {
         let without_state_root =
             match beacon_block.into_blinded(payload_header, blob_kzg_commitments) {
                 Ok(block) => block,
@@ -965,37 +967,37 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
             };
 
-        let mut post_state = slot_head.beacon_state.as_ref().clone();
+        let block_processor = self.controller.block_processor();
+        let pre_state = slot_head.beacon_state.clone_arc();
 
         let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-            combined::process_trusted_blinded_block(
-                &self.chain_config,
-                &mut post_state,
-                &without_state_root,
-            )
+            block_processor
+                .process_trusted_blinded_block_with_report(pre_state, &without_state_root)
         } else {
-            combined::process_untrusted_blinded_block(
-                &self.chain_config,
-                &mut post_state,
+            block_processor.process_untrusted_blinded_block_with_report(
+                pre_state,
                 &without_state_root,
                 skip_randao_verification,
             )
         };
 
-        if let Err(error) = result {
-            warn!(
-                "constructed invalid blinded beacon block \
-                 (error: {error:?}, without_state_root: {without_state_root:?})",
-            );
-            return None;
+        let (post_state, block_rewards) = match result {
+            Ok((state, block_rewards)) => (state, block_rewards),
+            Err(error) => {
+                warn!(
+                    "constructed invalid blinded beacon block \
+                    (error: {error:?}, without_state_root: {without_state_root:?})",
+                );
+                return None;
+            }
         };
 
         // Computing and setting the state root could be skipped when `skip_randao_verification`
         // is `true`. The resulting block is invalid either way. The client would have to mix in
         // the real RANDAO reveal and recompute the state root to make it valid.
-        without_state_root
-            .with_state_root(post_state.hash_tree_root())
-            .pipe(Some)
+        let with_state_root = without_state_root.with_state_root(post_state.hash_tree_root());
+
+        Some((with_state_root, block_rewards))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1008,8 +1010,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         execution_payload_header_handle: Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>>,
         skip_randao_verification: bool,
         builder_boost_factor: u64,
-    ) -> Result<Option<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>> {
-        let Some(beacon_block) = self
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
+            Option<BlockRewards>,
+        )>,
+    > {
+        let Some((beacon_block, block_rewards)) = self
             .build_beacon_block(
                 slot_head,
                 Some(proposer_index),
@@ -1029,13 +1036,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
                         let builder_mev = response.mev();
 
-                        if let Some(blinded_block) = self.blinded_block_from_beacon_block(
-                            slot_head,
-                            beacon_block.value.clone(),
-                            response.execution_payload_header(),
-                            blob_kzg_commitments,
-                            skip_randao_verification,
-                        ) {
+                        if let Some((blinded_block, blinded_block_rewards)) = self
+                            .blinded_block_from_beacon_block(
+                                slot_head,
+                                beacon_block.value.clone(),
+                                response.execution_payload_header(),
+                                blob_kzg_commitments,
+                                skip_randao_verification,
+                            )
+                        {
                             if let Some(local_mev) = beacon_block.mev {
                                 let builder_boost_factor = Uint256::from_u64(builder_boost_factor);
 
@@ -1050,9 +1059,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                         boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
                                     );
 
-                                    return Ok(Some(
+                                    return Ok(Some((
                                         beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
-                                    ));
+                                        block_rewards,
+                                    )));
                                 }
                             }
 
@@ -1065,12 +1075,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 ),
                             };
 
-                            return Ok(Some(WithBlobsAndMev::new(
-                                block,
-                                None,
-                                beacon_block.proofs,
-                                beacon_block.blobs,
-                                Some(builder_mev),
+                            return Ok(Some((
+                                WithBlobsAndMev::new(
+                                    block,
+                                    None,
+                                    beacon_block.proofs,
+                                    beacon_block.blobs,
+                                    Some(builder_mev),
+                                ),
+                                blinded_block_rewards,
                             )));
                         }
                     }
@@ -1082,7 +1095,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
 
-        Ok(Some(beacon_block.map(ValidatorBlindedBlock::BeaconBlock)))
+        Ok(Some((
+            beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
+            block_rewards,
+        )))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1093,7 +1109,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         randao_reveal: SignatureBytes,
         graffiti: H256,
         skip_randao_verification: bool,
-    ) -> Result<Option<WithBlobsAndMev<BeaconBlock<P>, P>>> {
+    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         let _block_timer = self
             .metrics
             .as_ref()
@@ -1262,43 +1278,45 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
             .with_execution_payload(execution_payload)?;
 
-            let mut post_state = slot_head.beacon_state.as_ref().clone();
+            let block_processor = self.controller.block_processor();
+            let pre_state = slot_head.beacon_state.clone_arc();
 
             let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-                combined::process_trusted_block(
-                    &self.chain_config,
-                    &mut post_state,
-                    &without_state_root,
-                )
+                block_processor.process_trusted_block_with_report(pre_state, &without_state_root)
             } else {
-                combined::process_untrusted_block(
-                    &self.chain_config,
-                    &mut post_state,
+                block_processor.process_untrusted_block_with_report(
+                    pre_state,
                     &without_state_root,
                     skip_randao_verification,
                 )
             };
 
-            if let Err(error) = result {
-                warn!(
-                    "constructed invalid beacon block \
-                     (error: {error:?}, without_state_root: {without_state_root:?})",
-                );
-                return Ok(None);
-            }
+            let (post_state, block_rewards) = match result {
+                Ok((state, block_rewards)) => (state, block_rewards),
+                Err(error) => {
+                    warn!(
+                        "constructed invalid beacon block \
+                        (error: {error:?}, without_state_root: {without_state_root:?})",
+                    );
+                    return Ok(None);
+                }
+            };
 
             // Computing and setting the state root could be skipped when `skip_randao_verification`
             // is `true`. The resulting block is invalid either way. The client would have to mix in
             // the real RANDAO reveal and recompute the state root to make it valid.
             let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
 
-            Ok(Some(WithBlobsAndMev::new(
-                beacon_block,
-                // Commitments are moved to block.
-                None,
-                proofs,
-                blobs,
-                mev,
+            Ok(Some((
+                WithBlobsAndMev::new(
+                    beacon_block,
+                    // Commitments are moved to block.
+                    None,
+                    proofs,
+                    blobs,
+                    mev,
+                ),
+                block_rewards,
             )))
         })
     }
@@ -1441,12 +1459,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             )
             .await?;
 
-        let Some(WithBlobsAndMev {
-            value: validator_blinded_block,
-            proofs: mut block_proofs,
-            blobs: mut block_blobs,
-            ..
-        }) = beacon_block_option
+        let Some((
+            WithBlobsAndMev {
+                value: validator_blinded_block,
+                proofs: mut block_proofs,
+                blobs: mut block_blobs,
+                ..
+            },
+            _block_rewards,
+        )) = beacon_block_option
         else {
             warn!(
                 "validator {} skipping beacon block proposal in slot {}",
