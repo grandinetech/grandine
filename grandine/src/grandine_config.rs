@@ -44,6 +44,7 @@ pub struct GrandineConfig {
     pub storage_config: StorageConfig,
     pub unfinalized_states_in_memory: u64,
     pub request_timeout: Duration,
+    pub state_cache_lock_timeout: Duration,
     pub command: Option<GrandineCommand>,
     pub slashing_enabled: bool,
     pub slashing_history_limit: u64,

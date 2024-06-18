@@ -26,7 +26,7 @@ use crate::{
     },
     phase0::{
         containers::Attestation,
-        primitives::{Uint256, UnixSeconds, ValidatorIndex, H256},
+        primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -184,6 +184,15 @@ impl AttestationOutcome {
 pub struct BlobSidecarWithId<P: Preset> {
     pub blob_sidecar: Arc<BlobSidecar<P>>,
     pub blob_id: BlobIdentifier,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct BlockRewards {
+    pub total: Gwei,
+    pub attestations: Gwei,
+    pub sync_aggregate: Gwei,
+    pub proposer_slashings: Gwei,
+    pub attester_slashings: Gwei,
 }
 
 #[derive(Clone, Copy)]

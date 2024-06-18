@@ -119,7 +119,6 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_blob_ids: Vec<BlobIdentifier>,
     },
     PreprocessedBeaconState {
-        block_root: H256,
         state: Arc<BeaconState<P>>,
     },
     NotifiedForkChoiceUpdate {

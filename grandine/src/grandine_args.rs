@@ -26,7 +26,7 @@ use eth1_api::AuthOptions;
 use eth2_libp2p::PeerIdSerialized;
 use features::Feature;
 use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
-use fork_choice_store::StoreConfig;
+use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
 use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATION_VERSION};
 use http_api::HttpApiConfig;
 use itertools::{EitherOrBoth, Itertools as _};
@@ -292,6 +292,10 @@ struct BeaconNodeOptions {
     /// Default global request timeout for various services in milliseconds
     #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
     request_timeout: u64,
+
+    /// Default state cache lock timeout in milliseconds
+    #[clap(long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
+    state_cache_lock_timeout: u64,
 
     /// State slot
     /// [default: None]
@@ -853,6 +857,7 @@ impl GrandineArgs {
             prune_storage,
             unfinalized_states_in_memory,
             request_timeout,
+            state_cache_lock_timeout,
             state_slot,
             subscribe_all_subnets,
             suggested_fee_recipient,
@@ -1206,6 +1211,7 @@ impl GrandineArgs {
             storage_config,
             unfinalized_states_in_memory,
             request_timeout: Duration::from_millis(request_timeout),
+            state_cache_lock_timeout: Duration::from_millis(state_cache_lock_timeout),
             command,
             slashing_enabled,
             slashing_history_limit,

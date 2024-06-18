@@ -34,7 +34,7 @@ use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction,
-    Store, ValidAttestation,
+    StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -56,6 +56,7 @@ use types::{
 };
 
 use crate::{
+    block_processor::BlockProcessor,
     messages::{
         AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
         SyncMessage, ValidatorMessage,
@@ -65,7 +66,6 @@ use crate::{
         PendingBlobSidecar, PendingBlock, PendingChainLink, VerifyAggregateAndProofResult,
         VerifyAttestationResult, WaitingForCheckpointState,
     },
-    state_cache::StateCache,
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
@@ -81,7 +81,8 @@ use crate::{
 pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
-    state_cache: Arc<StateCache<P, W>>,
+    state_cache: Arc<StateCacheProcessor<P>>,
+    block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
@@ -136,7 +137,8 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         store_snapshot: Arc<ArcSwap<Store<P>>>,
-        state_cache: Arc<StateCache<P, W>>,
+        state_cache: Arc<StateCacheProcessor<P>>,
+        block_processor: Arc<BlockProcessor<P>>,
         execution_engine: E,
         storage: Arc<Storage<P>>,
         thread_pool: ThreadPool<P, E, W>,
@@ -155,6 +157,7 @@ where
             store: store_snapshot.load_full(),
             store_snapshot,
             state_cache,
+            block_processor,
             execution_engine,
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
@@ -244,8 +247,8 @@ where
                 } => {
                     self.handle_finish_persisting_blob_sidecars(wait_group, persisted_blob_ids);
                 }
-                MutatorMessage::PreprocessedBeaconState { block_root, state } => {
-                    self.handle_preprocessed_beacon_state(block_root, &state);
+                MutatorMessage::PreprocessedBeaconState { state } => {
+                    self.prepare_execution_payload_for_next_slot(&state);
                 }
                 MutatorMessage::NotifiedForkChoiceUpdate {
                     wait_group,
@@ -292,8 +295,9 @@ where
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
             // Other validations may be performed in parallel, but they take very little time.
-            let result = self.store.validate_block(
-                block.clone_arc(),
+            let result = self.block_processor.validate_block(
+                &self.store,
+                &block,
                 origin.state_root_policy(),
                 &self.execution_engine,
                 NullVerifier,
@@ -1139,14 +1143,6 @@ where
         }
     }
 
-    fn handle_preprocessed_beacon_state(&mut self, block_root: H256, state: &Arc<BeaconState<P>>) {
-        self.store_mut()
-            .insert_preprocessed_state(block_root, state.clone_arc());
-        self.update_store_snapshot();
-
-        self.prepare_execution_payload_for_next_slot(state);
-    }
-
     fn handle_notified_forkchoice_update_result(
         &mut self,
         wait_group: &W,
@@ -1899,6 +1895,7 @@ where
 
         self.spawn(BlockTask {
             store_snapshot: self.owned_store(),
+            block_processor: self.block_processor.clone_arc(),
             execution_engine: self.execution_engine.clone(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
@@ -2149,6 +2146,7 @@ where
 
     fn spawn_checkpoint_state_task(&self, wait_group: W, checkpoint: Checkpoint) {
         self.spawn(CheckpointStateTask {
+            store_snapshot: self.owned_store(),
             state_cache: self.state_cache.clone_arc(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
@@ -2163,7 +2161,9 @@ where
         }
 
         self.spawn(PreprocessStateTask {
+            store_snapshot: self.owned_store(),
             state_cache: self.state_cache.clone_arc(),
+            mutator_tx: self.owned_mutator_tx(),
             head_block_root: self.store.head().block_root,
             next_slot: self.store.slot() + 1,
             metrics: self.metrics.clone(),

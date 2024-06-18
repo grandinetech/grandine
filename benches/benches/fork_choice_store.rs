@@ -77,7 +77,7 @@ impl Criterion {
                         .into_iter()
                         .at_most_one()?
                     {
-                        process_block(&mut store, block)?
+                        process_block(&mut store, &block)?
                     }
 
                     for attestation in holesky::aggregate_attestations_by_slot(slot) {
@@ -145,7 +145,7 @@ fn process_slot(store: &mut Store<impl Preset>, slot: Slot) -> Result<()> {
     Ok(())
 }
 
-fn process_block<P: Preset>(store: &mut Store<P>, block: Arc<SignedBeaconBlock<P>>) -> Result<()> {
+fn process_block<P: Preset>(store: &mut Store<P>, block: &Arc<SignedBeaconBlock<P>>) -> Result<()> {
     let slot = block.message().slot();
 
     let block_action = store.validate_block(

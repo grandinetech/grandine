@@ -80,18 +80,21 @@ pub use crate::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-        ChainLink, PayloadAction, ValidAttestation,
+        ChainLink, PartialBlockAction, PayloadAction, ValidAttestation,
     },
     segment::Segment,
+    state_cache_processor::{Error as StateCacheError, StateCacheProcessor},
     store::Store,
-    store_config::StoreConfig,
+    store_config::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS},
+    validations::validate_merge_block,
 };
 
 mod blob_cache;
 mod error;
 mod misc;
 mod segment;
-mod state_cache;
+mod state_cache_processor;
 mod store;
 mod store_config;
 mod supersets;
+mod validations;

@@ -594,35 +594,10 @@ impl<P: Preset> BeaconBlock<P> {
     }
 }
 
-impl<P: Preset> From<BeaconBlock<P>> for SignedBeaconBlock<P> {
-    fn from(beacon_block: BeaconBlock<P>) -> Self {
-        match beacon_block {
-            BeaconBlock::Phase0(message) => Phase0SignedBeaconBlock {
-                message,
-                signature: SignatureBytes::default(),
-            }
-            .into(),
-            BeaconBlock::Altair(message) => AltairSignedBeaconBlock {
-                message,
-                signature: SignatureBytes::default(),
-            }
-            .into(),
-            BeaconBlock::Bellatrix(message) => BellatrixSignedBeaconBlock {
-                message,
-                signature: SignatureBytes::default(),
-            }
-            .into(),
-            BeaconBlock::Capella(message) => CapellaSignedBeaconBlock {
-                message,
-                signature: SignatureBytes::default(),
-            }
-            .into(),
-            BeaconBlock::Deneb(message) => DenebSignedBeaconBlock {
-                message,
-                signature: SignatureBytes::default(),
-            }
-            .into(),
-        }
+impl<P: Preset> From<SignedBeaconBlock<P>> for BeaconBlock<P> {
+    fn from(signed_block: SignedBeaconBlock<P>) -> Self {
+        let (message, _) = signed_block.split();
+        message
     }
 }
 

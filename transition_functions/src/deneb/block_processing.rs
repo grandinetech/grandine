@@ -8,7 +8,7 @@ use helper_functions::{
     error::SignatureKind,
     misc::{compute_epoch_at_slot, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
     predicates::validate_constructed_indexed_attestation,
-    slot_report::{NullSlotReport, SlotReport},
+    slot_report::SlotReport,
     verifier::{Triple, Verifier},
 };
 use prometheus_metrics::METRICS;
@@ -52,6 +52,7 @@ pub fn process_block<P: Preset>(
     state: &mut DenebBeaconState<P>,
     block: &BeaconBlock<P>,
     mut verifier: impl Verifier,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
     let _timer = METRICS
         .get()
@@ -65,7 +66,7 @@ pub fn process_block<P: Preset>(
         block,
         NullExecutionEngine,
         &mut verifier,
-        NullSlotReport,
+        slot_report,
     )?;
 
     verifier.finish()
@@ -343,7 +344,10 @@ mod spec_tests {
     use core::fmt::Debug;
 
     use execution_engine::MockExecutionEngine;
-    use helper_functions::verifier::{NullVerifier, SingleVerifier};
+    use helper_functions::{
+        slot_report::NullSlotReport,
+        verifier::{NullVerifier, SingleVerifier},
+    };
     use serde::Deserialize;
     use spec_test_utils::{BlsSetting, Case};
     use ssz::SszReadDefault;

@@ -5,7 +5,9 @@ use anyhow::{bail, ensure, Result};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
-use fork_choice_store::{AggregateAndProofOrigin, AttestationItem, ChainLink, Segment, Store};
+use fork_choice_store::{
+    AggregateAndProofOrigin, AttestationItem, ChainLink, Segment, StateCacheProcessor, Store,
+};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use serde::Serialize;
@@ -27,7 +29,6 @@ use crate::{
     controller::Controller,
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
-    state_cache::StateCache,
     storage::Storage,
     unbounded_sink::UnboundedSink,
     wait::Wait,
@@ -467,7 +468,7 @@ where
         let head = store.head();
 
         self.state_cache()
-            .state_at_slot(head.block_root, store.slot())
+            .state_at_slot(&store, head.block_root, store.slot())
     }
 
     pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
@@ -475,7 +476,7 @@ where
         let head = store.head();
 
         self.state_cache()
-            .state_at_slot(head.block_root, store.slot() + 1)
+            .state_at_slot(&store, head.block_root, store.slot() + 1)
     }
 
     // The `block_root` and `state` parameters are needed
@@ -485,12 +486,19 @@ where
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
-        if let Some(state) = self.state_cache().try_state_at_slot(block_root, slot)? {
+        let store = self.store_snapshot();
+
+        if let Some(state) = self
+            .state_cache()
+            .try_state_at_slot(&store, block_root, slot)?
+        {
             return Ok(state);
         }
 
         if let Some(state) = self.storage().state_post_block(block_root)? {
-            return self.state_cache().process_slots(state, block_root, slot);
+            return self
+                .state_cache()
+                .process_slots(&store, state, block_root, slot);
         }
 
         bail!(Error::StateNotFound { block_root })
@@ -516,7 +524,8 @@ where
 
         let state = self
             .state_cache()
-            .state_at_slot(head.block_root, requested_slot)?;
+            .state_at_slot(&store, head.block_root, requested_slot)
+            .unwrap_or_else(|_| head.state(&store));
 
         Ok(WithStatus {
             value: state,
@@ -531,7 +540,7 @@ where
     }
 
     #[must_use]
-    pub fn snapshot(&self) -> Snapshot<P, W> {
+    pub fn snapshot(&self) -> Snapshot<P> {
         Snapshot {
             store_snapshot: self.store_snapshot(),
             state_cache: self.state_cache().clone_arc(),
@@ -705,15 +714,15 @@ pub struct BlockWithRoot<P: Preset> {
 /// [docs]: https://docs.rs/rocksdb/0.18.0/rocksdb/struct.SnapshotWithThreadMode.html
 /// [wiki]: https://github.com/facebook/rocksdb/wiki/Snapshot/e09da0053d05583919354cfaf834b8e8edd97be8
 #[allow(clippy::struct_field_names)]
-pub struct Snapshot<'storage, P: Preset, W> {
+pub struct Snapshot<'storage, P: Preset> {
     // Use a `Guard` instead of an owned snapshot unlike in tasks based on the intuition that
     // `Snapshot`s will be less common than tasks.
     store_snapshot: Guard<Arc<Store<P>>>,
-    state_cache: Arc<StateCache<P, W>>,
+    state_cache: Arc<StateCacheProcessor<P>>,
     storage: &'storage Storage<P>,
 }
 
-impl<P: Preset, W> Snapshot<'_, P, W> {
+impl<P: Preset> Snapshot<'_, P> {
     // TODO(Grandine Team): `Snapshot::nonempty_slots` only uses data stored in memory.
     //                      It's enough for builder circuit breaking, but that may change if we
     //                      redesign the fork choice store to keep less data in memory.
@@ -733,7 +742,8 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        self.state_cache.try_state_at_slot(root, slot)
+        self.state_cache
+            .try_state_at_slot(&self.store_snapshot, root, slot)
     }
 
     #[must_use]
@@ -818,7 +828,7 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
             let state = self
                 .state_cache
-                .state_at_slot(chain_link.block_root, slot)?;
+                .state_at_slot(store, chain_link.block_root, slot)?;
 
             return Ok(Some(WithStatus {
                 value: state,
