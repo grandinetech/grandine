@@ -30,6 +30,7 @@ pub struct Metrics {
     system_total_memory: IntGauge,
     total_cpu_percentage: Gauge,
     total_cpu_seconds: IntGauge,
+    grandine_thread_count: IntGauge,
 
     // Collection Lengths
     collection_lengths: IntGaugeVec,
@@ -99,7 +100,7 @@ pub struct Metrics {
     pub prepare_voluntary_exits_times: Histogram,
 
     // Pools
-    pub att_pool_pack_proposable_attestation_task_times: Histogram,
+    att_pool_pack_iterations: Gauge,
     pub att_pool_insert_attestation_task_times: Histogram,
 
     pub sync_pool_add_own_contribution_times: Histogram,
@@ -204,9 +205,9 @@ impl Metrics {
                 "Grandine CPU load usage measured in seconds"
             )?,
 
+            grandine_thread_count: IntGauge::new("GRANDINE_THREAD_COUNT", "Grandine task count")?,
             system_used_memory: IntGauge::new("SYSTEM_USED_MEMORY", "Node memory usage")?,
             system_total_memory: IntGauge::new("SYSTEM_TOTAL_MEMORY", "Total node mmeory")?,
-
 
             // Collection Lengths
             collection_lengths: IntGaugeVec::new(
@@ -305,14 +306,6 @@ impl Metrics {
                 "ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
                 "Attestation verifier active task count",
             )?,
-
-            // attestation_verifier_active_task_count: IntGaugeVec::new(
-            //     opts!(
-            //         "ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
-            //         "Attestation verifier active task count",
-            //     ),
-            //     &["type"],
-            // )?,
 
             attestation_verifier_process_attestation_batch_times: Histogram::with_opts(
                 histogram_opts!(
@@ -443,10 +436,10 @@ impl Metrics {
             ))?,
 
             // Pools
-            att_pool_pack_proposable_attestation_task_times: Histogram::with_opts(histogram_opts!(
-                "ATT_POOL_PACK_PROPOSABLE_ATTESTATION_TASK_TIMES",
-                "Attestation agg pool packing proposable attestation task times",
-            ))?,
+            att_pool_pack_iterations: Gauge::new(
+                "ATT_POOL_PACK_ITERATIONS",
+                "Attestation packer iteration count per slog",
+            )?,
 
             att_pool_insert_attestation_task_times: Histogram::with_opts(histogram_opts!(
                 "ATT_POOL_INSERT_ATTESTATION_TASK_TIMES",
@@ -740,6 +733,7 @@ impl Metrics {
         default_registry.register(Box::new(self.system_total_memory.clone()))?;
         default_registry.register(Box::new(self.total_cpu_percentage.clone()))?;
         default_registry.register(Box::new(self.total_cpu_seconds.clone()))?;
+        default_registry.register(Box::new(self.grandine_thread_count.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
         default_registry.register(Box::new(self.http_api_response_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
@@ -798,9 +792,7 @@ impl Metrics {
         default_registry.register(Box::new(self.prepare_attester_slashings_times.clone()))?;
         default_registry.register(Box::new(self.prepare_proposer_slashings_times.clone()))?;
         default_registry.register(Box::new(self.prepare_voluntary_exits_times.clone()))?;
-        default_registry.register(Box::new(
-            self.att_pool_pack_proposable_attestation_task_times.clone(),
-        ))?;
+        default_registry.register(Box::new(self.att_pool_pack_iterations.clone()))?;
         default_registry.register(Box::new(
             self.att_pool_insert_attestation_task_times.clone(),
         ))?;
@@ -920,6 +912,10 @@ impl Metrics {
 
     pub fn set_system_total_memory(&self, total_memory: u64) {
         self.system_total_memory.set(total_memory as i64)
+    }
+
+    pub fn set_grandine_thread_count(&self, thread_count: usize) {
+        self.grandine_thread_count.set(thread_count as i64)
     }
 
     // Collection Lengths
@@ -1099,5 +1095,10 @@ impl Metrics {
                  of labels that tick_delay_times was created with",
             )
             .set(delay.as_secs_f64())
+    }
+
+    // Pool
+    pub fn set_attestation_packer_iteration_count(&self, iterations: u32) {
+        self.att_pool_pack_iterations.set(iterations as f64)
     }
 }

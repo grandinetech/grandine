@@ -490,10 +490,11 @@ impl<P: Preset> AttestationPacker<P> {
         let mut selected_aggregates = Vec::new();
 
         // Here parallelization is unnecessary, since integer programming is called for each different attestation data
-        problem = problem.set_parallel(HighsParallelType::Off);
+        problem = problem.set_parallel(HighsParallelType::Off).set_threads(1);
 
         problem = problem
             .set_time_limit(self.time_until_deadline_in_seconds()? * TIME_FRACTION_FOR_SUBPROBLEM);
+
         let solution = problem.solve()?;
 
         for (i, is_selected) in is_aggregate_selected.iter().enumerate() {

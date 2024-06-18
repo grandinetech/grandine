@@ -1,6 +1,6 @@
 use core::ops::Not as _;
 
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{anyhow, Error as AnyhowError, Result};
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors,
@@ -67,8 +67,22 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
     };
 
     if let Some(verify_signatures) = verify_signatures {
-        let (signature_result, block_result) = rayon::join(verify_signatures, process_block);
-        signature_result.and(block_result)
+        std::thread::scope(|scope| {
+            let verify_signatures = scope.spawn(verify_signatures);
+            let process_block = scope.spawn(process_block);
+
+            let signature_result = verify_signatures
+                .join()
+                .map_err(|_| anyhow!("failed to verify signatures"))
+                .and_then(|result| result);
+
+            let block_result = process_block
+                .join()
+                .map_err(|_| anyhow!("failed to process block"))
+                .and_then(|result| result);
+
+            signature_result.and(block_result)
+        })
     } else {
         process_block()
     }
