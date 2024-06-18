@@ -82,6 +82,8 @@ pub struct ProcessMetrics {
     pub client_build: i64,
     pub sync_eth2_fallback_configured: bool,
     pub sync_eth2_fallback_connected: bool,
+    #[serde(skip)]
+    pub thread_count: usize,
 }
 
 impl ProcessMetrics {
@@ -123,6 +125,9 @@ impl ProcessMetrics {
             // Grandine does not support Eth2 sync fallbacks.
             sync_eth2_fallback_configured: false,
             sync_eth2_fallback_connected: false,
+            thread_count: num_threads::num_threads()
+                .map(Into::into)
+                .unwrap_or_default(),
         }
     }
 }
@@ -393,6 +398,7 @@ mod tests {
             client_build: 12,
             sync_eth2_fallback_configured: false,
             sync_eth2_fallback_connected: false,
+            thread_count: 32,
         };
 
         [

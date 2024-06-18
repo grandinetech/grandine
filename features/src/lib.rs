@@ -8,7 +8,7 @@ use core::{
 };
 
 use enum_iterator::Sequence;
-use log::info;
+use log::{info, warn};
 use parse_display::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,7 @@ pub enum Feature {
     AlwaysPrepackAttestations,
     AlwaysPrepareExecutionPayload,
     CacheTargetStates,
+    DebugAttestationPacker,
     DebugEth1,
     DebugP2p,
     IgnoreAttestationsForUnknownBlocks,
@@ -97,6 +98,10 @@ impl Feature {
         // This seems like something that would be better done using structured logging.
         // Maybe `log::kv` will be stable someday. Or we could implement it ourselves.
         info!("[{self}] {message}");
+    }
+
+    pub fn warn(self, message: impl Display) {
+        warn!("[{self}] {message}");
     }
 }
 

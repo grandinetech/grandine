@@ -1,9 +1,10 @@
 use core::time::Duration;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth1_api::ApiController;
+use features::Feature::DebugAttestationPacker;
 use fork_choice_control::Wait;
 use helper_functions::accessors;
 use prometheus_metrics::Metrics;
@@ -40,10 +41,17 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
         } = self;
 
         let attestations = pool.best_proposable_attestations(beacon_state.slot()).await;
+        let slot = controller.slot();
 
         if !attestations.is_empty() {
+            features::log!(
+                DebugAttestationPacker,
+                "optimal attestations present for slot: {slot}"
+            );
             return Ok(attestations);
         }
+
+        DebugAttestationPacker.warn("no optimal attestations for slot: {slot}");
 
         let attestation_packer = AttestationPacker::new(
             controller.chain_config().clone_arc(),
@@ -98,6 +106,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
         } = self;
 
         let beacon_state = controller.preprocessed_state_at_next_slot()?;
+        let slot = controller.slot() + 1;
 
         let mut attestation_packer = AttestationPacker::new(
             controller.chain_config().clone_arc(),
@@ -107,19 +116,28 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
         )?;
 
         let mut is_empty = true;
+        let mut iteration: u32 = 0;
 
         loop {
             let PackOutcome {
                 attestations,
                 deadline_reached,
             } = {
-                let _timer = metrics.as_ref().map(|metrics| {
-                    metrics
-                        .att_pool_pack_proposable_attestation_task_times
-                        .start_timer()
-                });
+                let timer = Instant::now();
 
-                pack_attestations_optimally(&attestation_packer, &pool, &beacon_state).await
+                let outcome =
+                    pack_attestations_optimally(&attestation_packer, &pool, &beacon_state).await;
+
+                features::log!(
+                    DebugAttestationPacker,
+                    "pack outcome for slot: {slot}, attestations: {}, iteration: {iteration}, deadline_reached: {}, time: {:?}",
+                    outcome.attestations.len(),
+                    outcome.deadline_reached,
+                    timer.elapsed()
+                );
+
+                iteration += 1;
+                outcome
             };
 
             if is_empty || !deadline_reached {
@@ -129,6 +147,10 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             }
 
             if deadline_reached {
+                if let Some(metrics) = metrics.as_ref() {
+                    metrics.set_attestation_packer_iteration_count(iteration.saturating_sub(1));
+                }
+
                 break;
             }
 
