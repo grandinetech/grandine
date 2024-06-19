@@ -19,7 +19,7 @@ use axum::{
 use axum_extra::extract::Query;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
-use http_api_utils::BlockId;
+use http_api_utils::{BlockId, StateId};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
@@ -39,7 +39,7 @@ use types::{
 };
 use validator::ValidatorProposerData;
 
-use crate::{error::Error, state_id::StateId, validator_status::ValidatorId};
+use crate::{error::Error, validator_status::ValidatorId};
 
 // This has multiple `FromRequest` impls to make error messages more specific.
 // They all use `FromStr`, whereas the one for `Path` uses `DeserializeOwned`.

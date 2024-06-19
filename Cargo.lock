@@ -3558,6 +3558,7 @@ dependencies = [
  "anyhow",
  "axum",
  "features",
+ "hex-literal",
  "hyper",
  "itertools 0.12.1",
  "log",
