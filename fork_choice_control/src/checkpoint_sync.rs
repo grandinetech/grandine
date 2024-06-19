@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use helper_functions::misc;
-use http_api_utils::BlockId;
+use http_api_utils::{BlockId, StateId};
 use log::info;
 use mime::APPLICATION_OCTET_STREAM;
 use reqwest::{header::ACCEPT, Client, StatusCode, Url};
@@ -50,9 +50,8 @@ pub async fn load_finalized_from_remote<P: Preset>(
 
     let slot = block.message().slot();
     let block_root = block.message().hash_tree_root();
-    let state_root = block.message().state_root();
 
-    let state = fetch_state(config, client, url, state_root)
+    let state = fetch_state(config, client, url, StateId::Slot(slot))
         .await?
         .ok_or(Error::MissingPostState { block_root })?;
 
@@ -76,9 +75,9 @@ async fn fetch_state<P: Preset>(
     config: &Config,
     client: &Client,
     url: &Url,
-    state_root: H256,
+    state_id: StateId,
 ) -> Result<Option<Arc<BeaconState<P>>>> {
-    let url = url.join(&format!("/eth/v2/debug/beacon/states/{state_root:?}"))?;
+    let url = url.join(&format!("/eth/v2/debug/beacon/states/{state_id}"))?;
 
     fetch(config, client, url).await
 }
