@@ -1,9 +1,9 @@
 use parse_display::{Display, FromStr};
 use types::phase0::primitives::{Slot, H256};
 
-#[derive(Display, FromStr)]
+#[derive(Clone, Copy, Display, FromStr)]
 #[display(style = "lowercase")]
-#[cfg_attr(test, derive(Clone, Copy, PartialEq, Eq, Debug))]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub enum StateId {
     Head,
     Genesis,

@@ -94,39 +94,16 @@ use crate::{
     misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
     response::{EthResponse, JsonOrSsz},
     state_id,
-    validator_status::{ValidatorId, ValidatorStatus},
+    validator_status::{
+        ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
+        ValidatorIdsAndStatusesQuery, ValidatorStatus,
+    },
 };
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlobSidecarsQuery {
     indices: Option<Vec<BlobIndex>>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ValidatorIdQuery {
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
-    )]
-    id: Vec<ValidatorId>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub struct ValidatorIdOrStatusQuery {
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
-    )]
-    id: Vec<ValidatorId>,
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
-    )]
-    status: Vec<ValidatorStatus>,
 }
 
 #[derive(Deserialize)]
@@ -542,51 +519,33 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators`
-pub async fn state_validators<P: Preset, W: Wait>(
+pub async fn get_state_validators<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
-    EthQuery(query): EthQuery<ValidatorIdOrStatusQuery>,
+    EthQuery(ids_and_statuses): EthQuery<ValidatorIdsAndStatusesQuery>,
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
-    let WithStatus {
-        value: state,
-        optimistic,
-        finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
-
-    let validators = izip!(
-        0..,
-        state.validators(),
-        state.balances().into_iter().copied(),
+    state_validators(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &ids_and_statuses,
     )
-    .filter(|(index, validator, _)| {
-        let validator_status = ValidatorStatus::new(validator, &state);
+}
 
-        let allowed_by_id = query.id.is_empty()
-            || query.id.iter().any(|validator_id| match validator_id {
-                ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
-            });
-
-        let allowed_by_status = query.status.is_empty()
-            || query
-                .status
-                .iter()
-                .any(|status| status.matches(validator_status));
-
-        allowed_by_id && allowed_by_status
-    })
-    .map(|(index, validator, balance)| StateValidatorResponse {
-        index,
-        balance,
-        status: ValidatorStatus::new(validator, &state),
-        validator: validator.clone(),
-    })
-    .collect();
-
-    Ok(EthResponse::json(validators)
-        .execution_optimistic(optimistic)
-        .finalized(finalized))
+/// `POST /eth/v1/beacon/states/{state_id}/validators`
+pub async fn post_state_validators<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    EthJson(ids_and_statuses): EthJson<ValidatorIdsAndStatusesBody>,
+) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
+    state_validators(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &ids_and_statuses,
+    )
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}`
@@ -2381,6 +2340,55 @@ pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
 }
 
+fn state_validators<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+    state_id: StateId,
+    ids_and_statuses: &impl ValidatorIdsAndStatuses,
+) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
+    let WithStatus {
+        value: state,
+        optimistic,
+        finalized,
+    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+
+    let validators = izip!(
+        0..,
+        state.validators(),
+        state.balances().into_iter().copied(),
+    )
+    .filter(|(index, validator, _)| {
+        let validator_status = ValidatorStatus::new(validator, &state);
+
+        let ids = ids_and_statuses.ids();
+        let statuses = ids_and_statuses.statuses();
+
+        let allowed_by_id = ids.is_empty()
+            || ids.iter().any(|validator_id| match validator_id {
+                ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
+                ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
+            });
+
+        let allowed_by_status = statuses.is_empty()
+            || statuses
+                .iter()
+                .any(|status| status.matches(validator_status));
+
+        allowed_by_id && allowed_by_status
+    })
+    .map(|(index, validator, balance)| StateValidatorResponse {
+        index,
+        balance,
+        status: ValidatorStatus::new(validator, &state),
+        validator: validator.clone(),
+    })
+    .collect();
+
+    Ok(EthResponse::json(validators)
+        .execution_optimistic(optimistic)
+        .finalized(finalized))
+}
+
 async fn publish_signed_block<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,
@@ -2580,17 +2588,17 @@ mod tests {
         let status2 = ValidatorStatus::ActiveOngoing;
 
         assert_eq!(
-            extract_query::<ValidatorIdOrStatusQuery>("").await?,
-            ValidatorIdOrStatusQuery {
+            extract_query::<ValidatorIdsAndStatusesQuery>("").await?,
+            ValidatorIdsAndStatusesQuery {
                 id: vec![],
                 status: vec![],
             },
         );
 
         assert_eq!(
-            extract_query::<ValidatorIdOrStatusQuery>(format!("id={pubkey1:?},{pubkey2:?}"))
+            extract_query::<ValidatorIdsAndStatusesQuery>(format!("id={pubkey1:?},{pubkey2:?}"))
                 .await?,
-            ValidatorIdOrStatusQuery {
+            ValidatorIdsAndStatusesQuery {
                 id: vec![
                     ValidatorId::PublicKey(pubkey1),
                     ValidatorId::PublicKey(pubkey2),
@@ -2600,11 +2608,11 @@ mod tests {
         );
 
         assert_eq!(
-            extract_query::<ValidatorIdOrStatusQuery>(format!(
+            extract_query::<ValidatorIdsAndStatusesQuery>(format!(
                 "id={pubkey1:?},{pubkey2:?},{index1},{index2}&status={status1},{status2}",
             ))
             .await?,
-            ValidatorIdOrStatusQuery {
+            ValidatorIdsAndStatusesQuery {
                 id: vec![
                     ValidatorId::PublicKey(pubkey1),
                     ValidatorId::PublicKey(pubkey2),

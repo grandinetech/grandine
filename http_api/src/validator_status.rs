@@ -1,6 +1,7 @@
 use bls::PublicKeyBytes;
 use helper_functions::{accessors, misc};
 use parse_display::{Display, FromStr};
+use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use types::{
     combined::BeaconState,
@@ -8,6 +9,66 @@ use types::{
     preset::Preset,
     traits::BeaconState as _,
 };
+
+pub trait ValidatorIdsAndStatuses {
+    fn ids(&self) -> &[ValidatorId];
+    fn statuses(&self) -> &[ValidatorStatus];
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorIdQuery {
+    #[serde(
+        default,
+        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
+    )]
+    pub id: Vec<ValidatorId>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+pub struct ValidatorIdsAndStatusesQuery {
+    #[serde(
+        default,
+        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
+    )]
+    pub id: Vec<ValidatorId>,
+    #[serde(
+        default,
+        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
+    )]
+    pub status: Vec<ValidatorStatus>,
+}
+
+impl ValidatorIdsAndStatuses for ValidatorIdsAndStatusesQuery {
+    fn ids(&self) -> &[ValidatorId] {
+        self.id.as_slice()
+    }
+
+    fn statuses(&self) -> &[ValidatorStatus] {
+        self.status.as_slice()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorIdsAndStatusesBody {
+    #[serde(default)]
+    ids: Vec<ValidatorId>,
+    #[serde(default)]
+    statuses: Vec<ValidatorStatus>,
+}
+
+impl ValidatorIdsAndStatuses for ValidatorIdsAndStatusesBody {
+    fn ids(&self) -> &[ValidatorId] {
+        self.ids.as_slice()
+    }
+
+    fn statuses(&self) -> &[ValidatorStatus] {
+        self.statuses.as_slice()
+    }
+}
 
 #[derive(Clone, Copy, FromStr, DeserializeFromStr)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug, Display))]
