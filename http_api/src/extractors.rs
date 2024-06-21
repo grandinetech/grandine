@@ -39,7 +39,10 @@ use types::{
 };
 use validator::ValidatorProposerData;
 
-use crate::{error::Error, validator_status::ValidatorId};
+use crate::{
+    error::Error,
+    validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
+};
 
 // This has multiple `FromRequest` impls to make error messages more specific.
 // They all use `FromStr`, whereas the one for `Path` uses `DeserializeOwned`.
@@ -257,6 +260,19 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
             .extract()
             .await
             .map(|Json(indices)| Self(indices))
+            .map_err(Error::InvalidJsonBody)
+    }
+}
+
+#[async_trait]
+impl<S> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
+    type Rejection = Error;
+
+    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
+        request
+            .extract()
+            .await
+            .map(|Json(ids_and_statuses)| Self(ids_and_statuses))
             .map_err(Error::InvalidJsonBody)
     }
 }
