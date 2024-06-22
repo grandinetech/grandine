@@ -38,7 +38,6 @@ impl<P: Preset> BeaconBlock<P> {
             execution_payload: _,
             bls_to_execution_changes,
             blob_kzg_commitments,
-            consolidations,
         } = body;
 
         BlindedBeaconBlock {
@@ -59,7 +58,6 @@ impl<P: Preset> BeaconBlock<P> {
                 execution_payload_header,
                 bls_to_execution_changes,
                 blob_kzg_commitments: kzg_commitments.unwrap_or(blob_kzg_commitments),
-                consolidations,
             },
         }
     }
@@ -88,7 +86,6 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             execution_payload_header: _,
             bls_to_execution_changes,
             blob_kzg_commitments,
-            consolidations,
         } = body;
 
         let body = BeaconBlockBody {
@@ -104,7 +101,6 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             execution_payload,
             bls_to_execution_changes,
             blob_kzg_commitments,
-            consolidations,
         };
 
         BeaconBlock {
@@ -143,15 +139,17 @@ impl<P: Preset> From<&ExecutionPayload<P>> for ExecutionPayloadHeader<P> {
             ref withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            ref deposit_receipts,
+            ref deposit_requests,
             ref withdrawal_requests,
+            ref consolidation_requests,
         } = *payload;
 
         let extra_data = extra_data.clone_arc();
         let transactions_root = transactions.hash_tree_root();
         let withdrawals_root = withdrawals.hash_tree_root();
-        let deposit_receipts_root = deposit_receipts.hash_tree_root();
+        let deposit_requests_root = deposit_requests.hash_tree_root();
         let withdrawal_requests_root = withdrawal_requests.hash_tree_root();
+        let consolidation_requests_root = consolidation_requests.hash_tree_root();
 
         Self {
             parent_hash,
@@ -171,8 +169,9 @@ impl<P: Preset> From<&ExecutionPayload<P>> for ExecutionPayloadHeader<P> {
             withdrawals_root,
             blob_gas_used,
             excess_blob_gas,
-            deposit_receipts_root,
+            deposit_requests_root,
             withdrawal_requests_root,
+            consolidation_requests_root,
         }
     }
 }

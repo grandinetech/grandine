@@ -41,8 +41,8 @@ pub struct AggregateAndProof<P: Preset> {
 pub struct Attestation<P: Preset> {
     pub aggregation_bits: BitList<P::MaxAggregatorsPerSlot>,
     pub data: AttestationData,
-    pub committee_bits: BitVector<P::MaxCommitteesPerSlot>,
     pub signature: AggregateSignatureBytes,
+    pub committee_bits: BitVector<P::MaxCommitteesPerSlot>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
@@ -80,7 +80,6 @@ pub struct BeaconBlockBody<P: Preset> {
     pub bls_to_execution_changes:
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub consolidations: ContiguousList<SignedConsolidation, P::MaxConsolidations>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Ssz)]
@@ -111,23 +110,11 @@ pub struct BlindedBeaconBlockBody<P: Preset> {
     pub bls_to_execution_changes:
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub consolidations: ContiguousList<SignedConsolidation, P::MaxConsolidations>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
-pub struct Consolidation {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub source_index: ValidatorIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub target_index: ValidatorIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub epoch: Epoch,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
-#[serde(deny_unknown_fields)]
-pub struct DepositReceipt {
+pub struct DepositRequest {
     pub pubkey: PublicKeyBytes,
     pub withdrawal_credentials: H256,
     #[serde(with = "serde_utils::string_or_native")]
@@ -139,7 +126,7 @@ pub struct DepositReceipt {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
-pub struct ExecutionLayerWithdrawalRequest {
+pub struct WithdrawalRequest {
     pub source_address: ExecutionAddress,
     pub validator_pubkey: PublicKeyBytes,
     #[serde(with = "serde_utils::string_or_native")]
@@ -176,9 +163,11 @@ pub struct ExecutionPayload<P: Preset> {
     pub blob_gas_used: Gas,
     #[serde(with = "serde_utils::string_or_native")]
     pub excess_blob_gas: Gas,
-    pub deposit_receipts: ContiguousList<DepositReceipt, P::MaxDepositReceiptsPerPayload>,
+    pub deposit_requests: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
     pub withdrawal_requests:
-        ContiguousList<ExecutionLayerWithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+        ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    pub consolidation_requests: 
+        ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
@@ -209,8 +198,9 @@ pub struct ExecutionPayloadHeader<P: Preset> {
     pub blob_gas_used: Gas,
     #[serde(with = "serde_utils::string_or_native")]
     pub excess_blob_gas: Gas,
-    pub deposit_receipts_root: H256,
+    pub deposit_requests_root: H256,
     pub withdrawal_requests_root: H256,
+    pub consolidation_requests_root: H256,
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
@@ -323,7 +313,8 @@ pub struct SignedBlindedBeaconBlock<P: Preset> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
-pub struct SignedConsolidation {
-    pub message: Consolidation,
-    pub signature: SignatureBytes,
+pub struct ConsolidationRequest {
+    pub source_address: ExecutionAddress,
+    pub source_pubkey: PublicKeyBytes,
+    pub target_pubkey: PublicKeyBytes,
 }
