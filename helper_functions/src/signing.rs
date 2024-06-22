@@ -30,7 +30,7 @@ use types::{
         consts::DOMAIN_CONSOLIDATION,
         containers::{
             AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
-            Consolidation,
+            ConsolidationRequest,
         },
     },
     phase0::{
@@ -371,8 +371,9 @@ impl<P: Preset> SignForSingleFork<P> for BlobSidecar<P> {
     }
 }
 
+// TODO: change specs
 // <https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.1/specs/electra/beacon-chain.md#new-process_consolidation>
-impl<P: Preset> SignForAllForksWithGenesis<P> for Consolidation {
+impl<P: Preset> SignForAllForksWithGenesis<P> for ConsolidationRequest {
     const DOMAIN_TYPE: DomainType = DOMAIN_CONSOLIDATION;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Consolidation;
 }
