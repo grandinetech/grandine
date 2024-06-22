@@ -79,10 +79,10 @@ use crate::{
             Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
             BlindedBeaconBlock as ElectraBlindedBeaconBlock,
-            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, DepositReceipt,
-            ExecutionLayerWithdrawalRequest, ExecutionPayload as ElectraExecutionPayload,
+            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, DepositRequest,
+            WithdrawalRequest, ExecutionPayload as ElectraExecutionPayload,
             ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
-            IndexedAttestation as ElectraIndexedAttestation, SignedConsolidation,
+            IndexedAttestation as ElectraIndexedAttestation, ConsolidationRequest
         },
     },
     nonstandard::Phase,
@@ -578,7 +578,7 @@ impl<P: Preset> PostCapellaBeaconState<P> for ElectraBeaconState<P> {
 }
 
 pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
-    fn deposit_receipts_start_index(&self) -> u64;
+    fn deposit_requests_start_index(&self) -> u64;
     fn deposit_balance_to_consume(&self) -> Gwei;
     fn exit_balance_to_consume(&self) -> Gwei;
     fn earliest_exit_epoch(&self) -> Epoch;
@@ -588,7 +588,7 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     fn pending_partial_withdrawals(&self) -> &PendingPartialWithdrawals<P>;
     fn pending_consolidations(&self) -> &PendingConsolidations<P>;
 
-    fn deposit_receipts_start_index_mut(&mut self) -> &mut u64;
+    fn deposit_requests_start_index_mut(&mut self) -> &mut u64;
     fn deposit_balance_to_consume_mut(&mut self) -> &mut Gwei;
     fn exit_balance_to_consume_mut(&mut self) -> &mut Gwei;
     fn earliest_exit_epoch_mut(&mut self) -> &mut Epoch;
@@ -621,7 +621,7 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
 impl<parameters> PostElectraBeaconState<P> for implementor {
     #[duplicate_item(
         field                           return_type;
-        [deposit_receipts_start_index]     [u64];
+        [deposit_requests_start_index]     [u64];
         [deposit_balance_to_consume]       [Gwei];
         [exit_balance_to_consume]          [Gwei];
         [earliest_exit_epoch]              [Epoch];
@@ -644,7 +644,7 @@ impl<parameters> PostElectraBeaconState<P> for implementor {
 
     #[duplicate_item(
         field                              method                                 return_type;
-        [deposit_receipts_start_index]     [deposit_receipts_start_index_mut]     [u64];
+        [deposit_requests_start_index]     [deposit_requests_start_index_mut]     [u64];
         [deposit_balance_to_consume]       [deposit_balance_to_consume_mut]       [Gwei];
         [exit_balance_to_consume]          [exit_balance_to_consume_mut]          [Gwei];
         [earliest_exit_epoch]              [earliest_exit_epoch_mut]              [Epoch];
@@ -1242,7 +1242,6 @@ pub trait PostElectraBeaconBlockBody<P: Preset>: PostDenebBeaconBlockBody<P> {
     fn attester_slashings(
         &self,
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
-    fn consolidations(&self) -> &ContiguousList<SignedConsolidation, P::MaxConsolidations>;
 }
 
 impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
@@ -1255,10 +1254,6 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
         &self.attester_slashings
     }
-
-    fn consolidations(&self) -> &ContiguousList<SignedConsolidation, P::MaxConsolidations> {
-        &self.consolidations
-    }
 }
 
 impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
@@ -1270,10 +1265,6 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<
         &self,
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
         &self.attester_slashings
-    }
-
-    fn consolidations(&self) -> &ContiguousList<SignedConsolidation, P::MaxConsolidations> {
-        &self.consolidations
     }
 }
 
@@ -1474,38 +1465,48 @@ impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for ElectraExecutionPayload
 }
 
 pub trait PostElectraExecutionPayload<P: Preset>: PostCapellaExecutionPayload<P> {
-    fn deposit_receipts(&self) -> &ContiguousList<DepositReceipt, P::MaxDepositReceiptsPerPayload>;
+    fn deposit_requests(&self) -> &ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>;
     fn withdrawal_requests(
         &self,
-    ) -> &ContiguousList<ExecutionLayerWithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>;
+    ) -> &ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>;
+    fn consolidation_requests(&self) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>;
 }
 
 impl<P: Preset> PostElectraExecutionPayload<P> for ElectraExecutionPayload<P> {
-    fn deposit_receipts(&self) -> &ContiguousList<DepositReceipt, P::MaxDepositReceiptsPerPayload> {
-        &self.deposit_receipts
+    fn deposit_requests(&self) -> &ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload> {
+        &self.deposit_requests
     }
 
     fn withdrawal_requests(
         &self,
-    ) -> &ContiguousList<ExecutionLayerWithdrawalRequest, P::MaxWithdrawalRequestsPerPayload> {
+    ) -> &ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload> {
         &self.withdrawal_requests
+    }
+
+    fn consolidation_requests(&self) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload> {
+        &self.consolidation_requests
     }
 }
 
 pub trait PostElectraExecutionPayloadHeader<P: Preset>:
     PostCapellaExecutionPayloadHeader<P>
 {
-    fn deposit_receipts_root(&self) -> H256;
+    fn deposit_requests_root(&self) -> H256;
     fn withdrawal_requests_root(&self) -> H256;
+    fn consolidation_requests_root(&self) -> H256;
 }
 
 impl<P: Preset> PostElectraExecutionPayloadHeader<P> for ElectraExecutionPayloadHeader<P> {
-    fn deposit_receipts_root(&self) -> H256 {
-        self.deposit_receipts_root
+    fn deposit_requests_root(&self) -> H256 {
+        self.deposit_requests_root
     }
 
     fn withdrawal_requests_root(&self) -> H256 {
         self.withdrawal_requests_root
+    }
+
+    fn consolidation_requests_root(&self) -> H256 {
+        self.consolidation_requests_root
     }
 }
 
