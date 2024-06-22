@@ -7,7 +7,7 @@ use crate::{
 };
 
 // Misc
-pub const UNSET_DEPOSIT_RECEIPTS_START_INDEX: u64 = u64::MAX;
+pub const UNSET_DEPOSIT_REQUESTS_START_INDEX: u64 = u64::MAX;
 pub const FULL_EXIT_REQUEST_AMOUNT: u64 = 0;
 
 pub const COMPOUNDING_WITHDRAWAL_PREFIX: &[u8] = &hex!("02");

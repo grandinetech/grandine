@@ -123,9 +123,9 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    Consolidation,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/Consolidation/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/Consolidation/*/*",
+    ConsolidationRequest,
+    "consensus-spec-tests/tests/mainnet/electra/ssz_static/ConsolidationRequest/*/*",
+    "consensus-spec-tests/tests/minimal/electra/ssz_static/ConsolidationRequest/*/*",
 }
 
 tests_for_type! {
@@ -153,21 +153,15 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    DepositReceipt,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/DepositReceipt/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/DepositReceipt/*/*",
+    DepositRequest,
+    "consensus-spec-tests/tests/mainnet/electra/ssz_static/DepositRequest/*/*",
+    "consensus-spec-tests/tests/minimal/electra/ssz_static/DepositRequest/*/*",
 }
 
 tests_for_type! {
     Eth1Data,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/Eth1Data/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/Eth1Data/*/*",
-}
-
-tests_for_type! {
-    ExecutionLayerWithdrawalRequest,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/ExecutionLayerWithdrawalRequest/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/ExecutionLayerWithdrawalRequest/*/*",
 }
 
 tests_for_type! {
@@ -302,11 +296,11 @@ tests_for_type! {
     "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedBLSToExecutionChange/*/*",
 }
 
-tests_for_type! {
-    SignedConsolidation,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedConsolidation/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedConsolidation/*/*",
-}
+// tests_for_type! {
+//     SignedConsolidation,
+//     "consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedConsolidation/*/*",
+//     "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedConsolidation/*/*",
+// }
 
 tests_for_type! {
     SignedContributionAndProof<_>,
@@ -372,4 +366,10 @@ tests_for_type! {
     Withdrawal,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/Withdrawal/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/Withdrawal/*/*",
+}
+
+tests_for_type! {
+    WithdrawalRequest,
+    "consensus-spec-tests/tests/mainnet/electra/ssz_static/WithdrawalRequest/*/*",
+    "consensus-spec-tests/tests/minimal/electra/ssz_static/WithdrawalRequest/*/*",
 }

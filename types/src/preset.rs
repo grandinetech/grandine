@@ -29,8 +29,8 @@ use crate::{
     },
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
-        DepositReceipt, ExecutionLayerWithdrawalRequest, PendingBalanceDeposit,
-        PendingConsolidation, PendingPartialWithdrawal, SignedConsolidation,
+        DepositRequest, WithdrawalRequest, PendingBalanceDeposit,
+        PendingConsolidation, PendingPartialWithdrawal, ConsolidationRequest,
     },
     phase0::{
         containers::{
@@ -128,9 +128,9 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
-    type MaxConsolidations: MerkleElements<SignedConsolidation> + Eq + Debug + Send + Sync;
-    type MaxDepositReceiptsPerPayload: MerkleElements<DepositReceipt> + Eq + Debug + Send + Sync;
-    type MaxWithdrawalRequestsPerPayload: MerkleElements<ExecutionLayerWithdrawalRequest>
+    type MaxConsolidationRequestsPerPayload: MerkleElements<ConsolidationRequest> + Eq + Debug + Send + Sync;
+    type MaxDepositRequestsPerPayload: MerkleElements<DepositRequest> + Eq + Debug + Send + Sync;
+    type MaxWithdrawalRequestsPerPayload: MerkleElements<WithdrawalRequest>
         + Eq
         + Debug
         + Send
@@ -288,8 +288,8 @@ impl Preset for Mainnet {
     // Electra
     type MaxAttestationsElectra = U8;
     type MaxAttesterSlashingsElectra = U1;
-    type MaxConsolidations = U1;
-    type MaxDepositReceiptsPerPayload = U8192;
+    type MaxConsolidationRequestsPerPayload = U1;
+    type MaxDepositRequestsPerPayload = U8192;
     type MaxWithdrawalRequestsPerPayload = U16;
     type PendingBalanceDepositsLimit = U134217728;
     type PendingConsolidationsLimit = U262144;
@@ -361,7 +361,7 @@ impl Preset for Minimal {
         // Electra
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
-        type MaxConsolidations;
+        type MaxConsolidationRequestsPerPayload;
         type PendingBalanceDepositsLimit;
     }
 
@@ -384,7 +384,7 @@ impl Preset for Minimal {
     type KzgCommitmentInclusionProofDepth = U9;
 
     // Electra
-    type MaxDepositReceiptsPerPayload = U4;
+    type MaxDepositRequestsPerPayload = U4;
     type MaxWithdrawalRequestsPerPayload = U2;
     type PendingConsolidationsLimit = U64;
     type PendingPartialWithdrawalsLimit = U64;
@@ -464,8 +464,8 @@ impl Preset for Medalla {
         // Electra
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
-        type MaxConsolidations;
-        type MaxDepositReceiptsPerPayload;
+        type MaxConsolidationRequestsPerPayload;
+        type MaxDepositRequestsPerPayload;
         type MaxWithdrawalRequestsPerPayload;
         type PendingBalanceDepositsLimit;
         type PendingConsolidationsLimit;
@@ -861,9 +861,9 @@ pub struct ElectraPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_attester_slashings_electra: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    max_consolidations: u64,
+    max_consolidation_requests_per_payload: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    max_deposit_receipts_per_payload: u64,
+    max_deposit_requests_per_payload: u64,
     #[serde(with = "serde_utils::string_or_native")]
     max_withdrawal_requests_per_payload: u64,
     #[serde(with = "serde_utils::string_or_native")]
@@ -880,8 +880,8 @@ impl ElectraPreset {
         Self {
             max_attestations_electra: P::MaxAttestationsElectra::U64,
             max_attester_slashings_electra: P::MaxAttesterSlashingsElectra::U64,
-            max_consolidations: P::MaxConsolidations::U64,
-            max_deposit_receipts_per_payload: P::MaxDepositReceiptsPerPayload::U64,
+            max_consolidation_requests_per_payload: P::MaxConsolidationRequestsPerPayload::U64,
+            max_deposit_requests_per_payload: P::MaxDepositRequestsPerPayload::U64,
             max_withdrawal_requests_per_payload: P::MaxWithdrawalRequestsPerPayload::U64,
             pending_balance_deposits_limit: P::PendingBalanceDepositsLimit::U64,
             pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
