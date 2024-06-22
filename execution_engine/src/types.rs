@@ -19,8 +19,7 @@ use types::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::{
-        DepositReceipt, ExecutionLayerWithdrawalRequest,
-        ExecutionPayload as ElectraExecutionPayload,
+        ConsolidationRequest, DepositRequest, ExecutionPayload as ElectraExecutionPayload, WithdrawalRequest
     },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
@@ -392,9 +391,11 @@ pub struct ExecutionPayloadV4<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub excess_blob_gas: Gas,
     #[serde(rename = "depositRequests")]
-    pub deposit_receipts: ContiguousList<DepositReceiptV1, P::MaxDepositReceiptsPerPayload>,
+    pub deposit_requests: ContiguousList<DepositRequestV1, P::MaxDepositRequestsPerPayload>,
     pub withdrawal_requests:
         ContiguousList<WithdrawalRequestV1, P::MaxWithdrawalRequestsPerPayload>,
+    pub consolidation_requests:
+        ContiguousList<ConsolidationRequestV1, P::MaxConsolidationRequestsPerPayload>,
 }
 
 impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
@@ -417,13 +418,15 @@ impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            deposit_receipts,
+            deposit_requests,
             withdrawal_requests,
+            consolidation_requests,
         } = payload;
 
         let withdrawals = withdrawals.map(Into::into);
-        let deposit_receipts = deposit_receipts.map(Into::into);
+        let deposit_requests = deposit_requests.map(Into::into);
         let withdrawal_requests = withdrawal_requests.map(Into::into);
+        let consolidation_requests = consolidation_requests.map(Into::into);
 
         Self {
             parent_hash,
@@ -443,8 +446,9 @@ impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            deposit_receipts,
+            deposit_requests,
             withdrawal_requests,
+            consolidation_requests,
         }
     }
 }
@@ -469,13 +473,15 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for ElectraExecutionPayload<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            deposit_receipts,
+            deposit_requests,
             withdrawal_requests,
+            consolidation_requests,
         } = payload;
 
         let withdrawals = withdrawals.map(Into::into);
-        let deposit_receipts = deposit_receipts.map(Into::into);
+        let deposit_requests = deposit_requests.map(Into::into);
         let withdrawal_requests = withdrawal_requests.map(Into::into);
+        let consolidation_requests = consolidation_requests.map(Into::into);
 
         Self {
             parent_hash,
@@ -495,15 +501,16 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for ElectraExecutionPayload<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            deposit_receipts,
+            deposit_requests,
             withdrawal_requests,
+            consolidation_requests,
         }
     }
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
-pub struct DepositReceiptV1 {
+pub struct DepositRequestV1 {
     pub pubkey: PublicKeyBytes,
     pub withdrawal_credentials: H256,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -513,15 +520,15 @@ pub struct DepositReceiptV1 {
     pub index: u64,
 }
 
-impl From<DepositReceipt> for DepositReceiptV1 {
-    fn from(deposit_receipt: DepositReceipt) -> Self {
-        let DepositReceipt {
+impl From<DepositRequest> for DepositRequestV1 {
+    fn from(deposit_request: DepositRequest) -> Self {
+        let DepositRequest {
             pubkey,
             withdrawal_credentials,
             amount,
             signature,
             index,
-        } = deposit_receipt;
+        } = deposit_request;
 
         Self {
             pubkey,
@@ -533,15 +540,15 @@ impl From<DepositReceipt> for DepositReceiptV1 {
     }
 }
 
-impl From<DepositReceiptV1> for DepositReceipt {
-    fn from(deposit_receipt: DepositReceiptV1) -> Self {
-        let DepositReceiptV1 {
+impl From<DepositRequestV1> for DepositRequest {
+    fn from(deposit_request: DepositRequestV1) -> Self {
+        let DepositRequestV1 {
             pubkey,
             withdrawal_credentials,
             amount,
             signature,
             index,
-        } = deposit_receipt;
+        } = deposit_request;
 
         Self {
             pubkey,
@@ -562,13 +569,13 @@ pub struct WithdrawalRequestV1 {
     pub amount: Gwei,
 }
 
-impl From<ExecutionLayerWithdrawalRequest> for WithdrawalRequestV1 {
-    fn from(execution_layer_withdrawal_request: ExecutionLayerWithdrawalRequest) -> Self {
-        let ExecutionLayerWithdrawalRequest {
+impl From<WithdrawalRequest> for WithdrawalRequestV1 {
+    fn from(withdrawal_request: WithdrawalRequest) -> Self {
+        let WithdrawalRequest {
             source_address,
             validator_pubkey,
             amount,
-        } = execution_layer_withdrawal_request;
+        } = withdrawal_request;
 
         Self {
             source_address,
@@ -578,7 +585,7 @@ impl From<ExecutionLayerWithdrawalRequest> for WithdrawalRequestV1 {
     }
 }
 
-impl From<WithdrawalRequestV1> for ExecutionLayerWithdrawalRequest {
+impl From<WithdrawalRequestV1> for WithdrawalRequest {
     fn from(withdrawal_request: WithdrawalRequestV1) -> Self {
         let WithdrawalRequestV1 {
             source_address,
@@ -590,6 +597,46 @@ impl From<WithdrawalRequestV1> for ExecutionLayerWithdrawalRequest {
             source_address,
             validator_pubkey: validator_public_key,
             amount,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct ConsolidationRequestV1 {
+    pub source_address: ExecutionAddress,
+    pub source_public_key: PublicKeyBytes,
+    pub target_public_key: PublicKeyBytes,
+}
+
+impl From<ConsolidationRequest> for ConsolidationRequestV1 {
+    fn from(consolidation_request: ConsolidationRequest) -> Self {
+        let ConsolidationRequest {
+            source_address,
+            source_pubkey,
+            target_pubkey,
+        } = consolidation_request;
+
+        Self {
+            source_address,
+            source_public_key: source_pubkey,
+            target_public_key: target_pubkey,
+        }
+    }
+}
+
+impl From<ConsolidationRequestV1> for ConsolidationRequest {
+    fn from(consolidation_request: ConsolidationRequestV1) -> Self {
+        let ConsolidationRequestV1 {
+            source_address,
+            source_public_key,
+            target_public_key,
+        } = consolidation_request;
+
+        Self {
+            source_address,
+            source_pubkey: source_public_key,
+            target_pubkey: target_public_key,
         }
     }
 }

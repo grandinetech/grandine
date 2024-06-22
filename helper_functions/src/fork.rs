@@ -22,7 +22,7 @@ use types::{
     },
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
-        consts::UNSET_DEPOSIT_RECEIPTS_START_INDEX,
+        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
         containers::ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
     },
     phase0::{
@@ -584,9 +584,11 @@ pub fn upgrade_to_electra<P: Preset>(
         blob_gas_used,
         excess_blob_gas,
         // > [New in Electra:EIP6110]
-        deposit_receipts_root: H256::default(),
+        deposit_requests_root: H256::default(),
         // > [New in Electra:EIP7002]
         withdrawal_requests_root: H256::default(),
+        // > [New in Electra:EIP7251]
+        consolidation_requests_root: H256::default(),
     };
 
     let earliest_exit_epoch = validators
@@ -639,7 +641,7 @@ pub fn upgrade_to_electra<P: Preset>(
         next_withdrawal_validator_index,
         // > Deep history valid from Capella onwards
         historical_summaries,
-        deposit_receipts_start_index: UNSET_DEPOSIT_RECEIPTS_START_INDEX,
+        deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
         deposit_balance_to_consume: 0,
         exit_balance_to_consume: 0,
         earliest_exit_epoch,
