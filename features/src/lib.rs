@@ -39,6 +39,7 @@ static FEATURES: [AtomicBool; Feature::CARDINALITY] = [FALSE; Feature::CARDINALI
 )]
 pub enum Feature {
     AlwaysPrepackAttestations,
+    AlwaysPrepareExecutionPayload,
     CacheTargetStates,
     DebugEth1,
     DebugP2p,

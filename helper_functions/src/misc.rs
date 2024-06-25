@@ -14,7 +14,7 @@ use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
     cache::PackedIndices,
-    combined::SignedBeaconBlock,
+    combined::{Attestation, SignedBeaconBlock},
     config::Config,
     deneb::{
         consts::{BlobCommitmentTreeDepth, BlobSidecarSubnetCount, VERSIONED_HASH_VERSION_KZG},
@@ -504,6 +504,16 @@ pub fn construct_blob_sidecars<P: Preset>(
             })
         })
         .collect()
+}
+
+#[must_use]
+pub fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeIndex {
+    match attestation {
+        Attestation::Phase0(attestation) => attestation.data.index,
+        Attestation::Electra(attestation) => get_committee_indices::<P>(attestation.committee_bits)
+            .next()
+            .unwrap_or_default(),
+    }
 }
 
 #[must_use]

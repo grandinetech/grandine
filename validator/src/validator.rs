@@ -328,6 +328,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
+                        let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
+                            || self.attestation_agg_pool.has_registered_validators_proposing_in_slots(slot..=slot).await;
+
+                        if !should_prepare_execution_payload {
+                            return Ok(());
+                        }
+
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
@@ -1109,7 +1116,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // TODO(Grandine Team): Move this to a separate task so it prepares the execution payload
         //                      before it is time to propose a block.
         let WithBlobsAndMev {
-            value: execution_payload,
+            value: mut execution_payload,
             commitments,
             proofs,
             blobs,
@@ -1119,6 +1126,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
             .map(|value| value.map(Some))
             .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+
+        // TODO(feature/electra): Decide whether to keep the post-Capella execution payload logic.
+        //                        It exists only for snapshot testing.
+        // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
+        // Construct a superficially valid execution payload for snapshot testing.
+        // It will almost always be invalid in a real network, but so would a default payload.
+        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
+        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
+        if slot_head.phase() >= Phase::Capella && execution_payload.is_none() {
+            execution_payload = Some(factory::execution_payload(
+                &self.chain_config,
+                &slot_head.beacon_state,
+                slot_head.slot(),
+                ExecutionBlockHash::from_low_u64_be(slot_head.slot()),
+            )?);
+        }
 
         let blob_kzg_commitments = commitments.unwrap_or_default();
         let sync_aggregate = self.process_sync_committee_contributions(slot_head).await?;
@@ -1172,7 +1195,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
             let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
 
-            let without_state_root = match slot_head.beacon_state.phase() {
+            let without_state_root = match slot_head.phase() {
                 Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
                     slot,
                     proposer_index,
@@ -1264,20 +1287,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     },
                 }),
                 Phase::Electra => {
-                    // TODO(feature/electra): don't ignore errors
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|attestation| convert_to_electra_attestation(attestation).ok())
-                        .group_by(|attestation| attestation.data);
+                    let attestations = if misc::compute_epoch_at_slot::<P>(slot)
+                        == self.chain_config.electra_fork_epoch
+                    {
+                        ContiguousList::default()
+                    } else {
+                        // TODO(feature/electra): don't ignore errors
+                        let attestations = attestations
+                            .into_iter()
+                            .filter_map(|attestation| {
+                                convert_to_electra_attestation(attestation).ok()
+                            })
+                            .group_by(|attestation| attestation.data);
 
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|(_, attestations)| {
-                            Self::compute_on_chain_aggregate(attestations).ok()
-                        })
-                        .take(P::MaxAttestationsElectra::USIZE);
+                        let attestations = attestations
+                            .into_iter()
+                            .filter_map(|(_, attestations)| {
+                                Self::compute_on_chain_aggregate(attestations).ok()
+                            })
+                            .take(P::MaxAttestationsElectra::USIZE);
 
-                    let attestations = ContiguousList::try_from_iter(attestations)?;
+                        ContiguousList::try_from_iter(attestations)?
+                    };
 
                     BeaconBlock::from(ElectraBeaconBlock {
                         slot,
@@ -1356,31 +1387,31 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             })
             .collect_vec();
 
+        let aggregation_bits = aggregates
+            .iter()
+            .map(|attestation| &attestation.aggregation_bits)
+            .pipe(BitList::concatenate)?;
+
         let data = if let Some(attestation) = aggregates.first() {
             attestation.data
         } else {
             return Err(AnyhowError::msg("no attestations for block aggregate"));
         };
 
-        let mut signature = AggregateSignature::default();
-        let mut aggregation_bits: Vec<u8> = vec![];
         let mut committee_bits = BitVector::default();
+        let mut signature = AggregateSignature::default();
 
         for aggregate in aggregates {
-            if let Some(committee_index) =
-                misc::get_committee_indices::<P>(aggregate.committee_bits).next()
-            {
-                committee_bits.set(committee_index.try_into()?, true);
+            for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
+                let index = committee_index.try_into()?;
+                committee_bits.set(index, true);
             }
-
-            let bits = Vec::<u8>::from(aggregate.aggregation_bits);
-            aggregation_bits.extend_from_slice(&bits);
 
             signature.aggregate_in_place(aggregate.signature.try_into()?);
         }
 
         Ok(ElectraAttestation {
-            aggregation_bits: BitList::try_from(aggregation_bits)?,
+            aggregation_bits,
             data,
             committee_bits,
             signature: signature.into(),
@@ -1755,7 +1786,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             } = own_attestation;
 
-            let committee_index = committee_index(attestation);
+            let committee_index = misc::committee_index(attestation);
 
             debug!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
@@ -1794,7 +1825,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.own_aggregators = accepted_attestations
             .into_iter()
             .filter_map(|own_attestation| {
-                let committee_index = committee_index(&own_attestation.attestation);
+                let committee_index = misc::committee_index(&own_attestation.attestation);
 
                 let member =
                     own_members.get(&(committee_index, own_attestation.validator_index))?;
@@ -1829,7 +1860,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[allow(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&mut self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
-        let phase = config.phase_at_slot::<P>(slot_head.slot());
+        let phase = slot_head.phase();
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -2153,7 +2184,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_attestations);
         }
 
-        let phase = self.chain_config.phase_at_slot::<P>(slot_head.slot());
+        let phase = slot_head.phase();
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {

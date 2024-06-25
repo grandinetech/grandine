@@ -1,3 +1,4 @@
+use core::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::{Context, Error, Result};
@@ -16,7 +17,7 @@ use types::{
     config::Config,
     phase0::{
         containers::{Attestation, AttestationData},
-        primitives::{Epoch, H256},
+        primitives::{Epoch, Slot, H256},
     },
     preset::Preset,
 };
@@ -125,6 +126,15 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             pool: self.pool.clone_arc(),
             beacon_state,
         });
+    }
+
+    pub async fn has_registered_validators_proposing_in_slots(
+        &self,
+        range: impl RangeBounds<Slot> + Send,
+    ) -> bool {
+        self.pool
+            .has_registered_validators_proposing_in_slots(range)
+            .await
     }
 
     pub fn insert_attestation(&self, wait_group: W, attestation: &CombinedAttestation<P>) {

@@ -1333,12 +1333,9 @@ impl<P: Preset> Store<P> {
             }
         }
 
-        let AttestationData {
-            slot,
-            index,
-            target,
-            ..
-        } = attestation.data();
+        let index = misc::committee_index(&attestation);
+
+        let AttestationData { slot, target, .. } = attestation.data();
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.
