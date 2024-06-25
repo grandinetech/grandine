@@ -1,3 +1,4 @@
+use core::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::{Context, Error, Result};
@@ -15,7 +16,7 @@ use types::{
     config::Config,
     phase0::{
         containers::{Attestation, AttestationData},
-        primitives::{Epoch, ValidatorIndex, H256},
+        primitives::{Epoch, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -131,6 +132,15 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             attestation,
             metrics: self.metrics.clone(),
         });
+    }
+
+    pub async fn has_registered_validators_proposing_in_slots(
+        &self,
+        range: impl RangeBounds<Slot> + Send,
+    ) -> bool {
+        self.pool
+            .has_registered_validators_proposing_in_slots(range)
+            .await
     }
 
     pub fn pack_proposable_attestations(&self) {
