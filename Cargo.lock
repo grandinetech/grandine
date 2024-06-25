@@ -2359,7 +2359,9 @@ dependencies = [
  "async-channel 1.9.0",
  "async-std",
  "asynchronous-codec 0.7.0",
+ "base64 0.21.7",
  "bls",
+ "byteorder",
  "bytes",
  "delay_map 0.4.0",
  "dirs",
@@ -2369,11 +2371,15 @@ dependencies = [
  "exit-future",
  "fnv",
  "futures",
+ "futures-ticker",
  "futures-timer",
+ "getrandom",
  "gossipsub",
  "grandine_version",
  "helper_functions",
  "hex",
+ "hex_fmt",
+ "instant",
  "lazy_static",
  "libp2p",
  "libp2p-mplex",
@@ -2402,6 +2408,7 @@ dependencies = [
  "tokio",
  "tokio-io-timeout",
  "tokio-util",
+ "tracing",
  "try_from_iterator",
  "typenum",
  "types",
@@ -3005,6 +3012,7 @@ dependencies = [
  "futures-timer",
  "getrandom",
  "hex_fmt",
+ "instant",
  "libp2p",
  "prometheus-client",
  "quick-protobuf",
@@ -3014,9 +3022,9 @@ dependencies = [
  "regex",
  "serde",
  "sha2 0.10.8",
+ "smallvec",
  "tracing",
  "void",
- "web-time",
 ]
 
 [[package]]
@@ -4089,6 +4097,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
 dependencies = [
  "cfg-if",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -8701,16 +8712,6 @@ name = "web-sys"
 version = "0.3.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26fdeaafd9bd129f65e7c031593c24d62186301e0c72c8978fa1678be7d532c0"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "web-time"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
