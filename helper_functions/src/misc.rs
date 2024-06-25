@@ -176,7 +176,8 @@ pub(crate) fn compute_proposer_index<P: Preset>(
                 .expect("candidate_index was produced by enumerating active validators")
                 .effective_balance;
 
-            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE * random_byte)
+            // > [Modified in Electra:EIP7251]
+            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_byte)
                 .then_some(candidate_index)
         })
         .ok_or(Error::FailedToSelectProposer)
@@ -438,10 +439,7 @@ pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
         body.execution_payload().hash_tree_root(),
     );
 
-    proof[depth - 2] = hashing::hash_256_256(
-        hashing::hash_256_256(body.consolidations().hash_tree_root(), ZERO_HASHES[0]),
-        ZERO_HASHES[1],
-    );
+    proof[depth - 2] = ZERO_HASHES[2];
 
     proof[depth - 1] = hashing::hash_256_256(
         hashing::hash_256_256(

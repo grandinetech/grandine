@@ -1298,8 +1298,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             execution_payload: ElectraExecutionPayload::default(),
                             bls_to_execution_changes,
                             blob_kzg_commitments,
-                            // TODO(feature/electra): implement this
-                            consolidations: ContiguousList::default(),
                         },
                     })
                 }

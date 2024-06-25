@@ -46,11 +46,11 @@ use types::{
     config::Config,
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
-        consts::{FULL_EXIT_REQUEST_AMOUNT, UNSET_DEPOSIT_RECEIPTS_START_INDEX},
+        consts::{FULL_EXIT_REQUEST_AMOUNT, UNSET_DEPOSIT_REQUESTS_START_INDEX},
         containers::{
-            Attestation, BeaconBlock, BeaconBlockBody, DepositReceipt,
-            ExecutionLayerWithdrawalRequest, ExecutionPayloadHeader, PendingBalanceDeposit,
-            PendingConsolidation, PendingPartialWithdrawal, SignedConsolidation,
+            Attestation, BeaconBlock, BeaconBlockBody, DepositRequest,
+            WithdrawalRequest, ExecutionPayloadHeader, PendingBalanceDeposit,
+            PendingConsolidation, PendingPartialWithdrawal, ConsolidationRequest,
         },
     },
     nonstandard::{smallvec, AttestationEpoch, SlashingKind},
@@ -126,8 +126,10 @@ pub fn custom_process_block<P: Preset>(
 
     unphased::process_block_header(state, block)?;
 
+    // > [Modified in Electra:EIP7251]
     process_withdrawals(state, &block.body.execution_payload)?;
 
+    // > [Modified in Electra:EIP6110]
     process_execution_payload(
         config,
         state,
@@ -143,18 +145,22 @@ pub fn custom_process_block<P: Preset>(
     unphased::process_randao(config, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
+    // > [Modified in Electra:EIP6110:EIP7002:EIP7549:EIP7251]
     process_operations(config, state, &block.body, &mut verifier, &mut slot_report)?;
 
+    // > [New in Electra:EIP6110]
+    for deposit_request in &block.body.execution_payload.deposit_requests {
+        process_deposit_request(config, state, *deposit_request, &mut slot_report)?;
+    }
+
+    // > [New in Electra:EIP7002:EIP7251]
     for withdrawal_request in &block.body.execution_payload.withdrawal_requests {
-        process_execution_layer_withdrawal_request(config, state, *withdrawal_request)?;
+        process_withdrawal_request(config, state, *withdrawal_request)?;
     }
 
-    for deposit_receipt in &block.body.execution_payload.deposit_receipts {
-        process_deposit_receipt(config, state, *deposit_receipt, &mut slot_report)?;
-    }
-
-    for signed_consolidation in &block.body.consolidations {
-        process_consolidation(config, state, *signed_consolidation)?;
+    // > [New in Electra:EIP7251]
+    for consolidation_request in &block.body.execution_payload.consolidation_requests {
+        process_consolidation_request(config, state, *consolidation_request)?;
     }
 
     altair::process_sync_aggregate(
@@ -432,7 +438,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     let eth1_deposit_index_limit = state
         .eth1_data()
         .deposit_count
-        .min(state.deposit_receipts_start_index());
+        .min(state.deposit_requests_start_index());
 
     let in_block = body.deposits().len().try_into()?;
 
@@ -474,6 +480,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
         )?;
     }
 
+    // TODO: update on https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.1/specs/electra/beacon-chain.md#modified-process_attestation
     // Parallel iteration with Rayon has some overhead, which is most noticeable when the active
     // thread pool is busy. `ParallelIterator::collect` appears to wait for worker threads to become
     // available even if the current thread is itself a worker thread. This tends to happen when
@@ -888,7 +895,7 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
         verifier,
     )?;
 
-    // > Only exit validator if it has no pending withdrawals in the queue
+    // > [New in Electra:EIP7251] Only exit validator if it has no pending withdrawals in the queue 
     ensure!(
         get_pending_balance_to_withdraw(state, signed_voluntary_exit.message.validator_index) == 0,
         Error::<P>::VoluntaryExitWithPendingWithdrawals,
@@ -897,12 +904,12 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
     Ok(())
 }
 
-fn process_execution_layer_withdrawal_request<P: Preset>(
+fn process_withdrawal_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
-    execution_layer_withdrawal_request: ExecutionLayerWithdrawalRequest,
+    withdrawal_request: WithdrawalRequest,
 ) -> Result<()> {
-    let amount = execution_layer_withdrawal_request.amount;
+    let amount = withdrawal_request.amount;
     let is_full_exit_request = amount == FULL_EXIT_REQUEST_AMOUNT;
 
     // > If partial withdrawal queue is full, only full exits are processed
@@ -913,7 +920,7 @@ fn process_execution_layer_withdrawal_request<P: Preset>(
     }
 
     // > Verify pubkey exists
-    let request_pubkey = execution_layer_withdrawal_request.validator_pubkey;
+    let request_pubkey = withdrawal_request.validator_pubkey;
     let Some(index) = index_of_public_key(state, request_pubkey) else {
         return Ok(());
     };
@@ -928,7 +935,7 @@ fn process_execution_layer_withdrawal_request<P: Preset>(
         .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
         .pipe(ExecutionAddress::from_slice);
     let is_correct_source_address =
-        source_address == execution_layer_withdrawal_request.source_address;
+        source_address == withdrawal_request.source_address;
 
     if !(has_correct_credential && is_correct_source_address) {
         return Ok(());
@@ -986,23 +993,23 @@ fn process_execution_layer_withdrawal_request<P: Preset>(
     Ok(())
 }
 
-fn process_deposit_receipt<P: Preset>(
+fn process_deposit_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
-    deposit_receipt: DepositReceipt,
+    deposit_request: DepositRequest,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
-    let DepositReceipt {
+    let DepositRequest {
         pubkey,
         withdrawal_credentials,
         amount,
         signature,
         index,
-    } = deposit_receipt;
+    } = deposit_request;
 
-    // > Set deposit receipt start index
-    if state.deposit_receipts_start_index() == UNSET_DEPOSIT_RECEIPTS_START_INDEX {
-        *state.deposit_receipts_start_index_mut() = index;
+    // > Set deposit request start index
+    if state.deposit_requests_start_index() == UNSET_DEPOSIT_REQUESTS_START_INDEX {
+        *state.deposit_requests_start_index_mut() = index;
     }
 
     let deposit = Deposit {
@@ -1026,122 +1033,72 @@ fn process_deposit_receipt<P: Preset>(
     Ok(())
 }
 
-pub fn process_consolidation<P: Preset>(
+pub fn process_consolidation_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
-    signed_consolidation: SignedConsolidation,
+    consolidation_request: ConsolidationRequest,
 ) -> Result<()> {
-    // > If the pending consolidations queue is full, no consolidations are allowed in the block
-    ensure!(
-        state.pending_consolidations().len_usize() < P::PendingConsolidationsLimit::USIZE,
-        Error::<P>::PendingConsolidationQueueFull,
-    );
+    let ConsolidationRequest {
+        source_address,
+        source_pubkey,
+        target_pubkey,
+    } = consolidation_request;
 
-    // > If there is too little available consolidation churn limit, no consolidations are allowed in the block
-    ensure!(
-        get_consolidation_churn_limit(config, state) > P::MIN_ACTIVATION_BALANCE,
-        Error::<P>::TooLittleAvailableConsolidationChurnLimit,
-    );
+    // > If the pending consolidations queue is full, consolidation requests are ignored
+    if state.pending_consolidations().len_usize() == P::PendingConsolidationsLimit::USIZE {
+        return Ok(());
+    }
 
-    let consolidation = signed_consolidation.message;
+    // > If there is too little available consolidation churn limit, consolidation requests are ignored
+    if get_consolidation_churn_limit(config, state) <= P::MIN_ACTIVATION_BALANCE {
+        return Ok(());
+    }
+
+    // > Verify pubkeys exists
+    let Some(source_index) = index_of_public_key(state, source_pubkey) else {
+        return Ok(());
+    };
+    let Some(target_index) = index_of_public_key(state, target_pubkey) else {
+        return Ok(());
+    };
+
+    let source_validator = state.validators().get(source_index)?;
+    let target_validator = state.validators().get(target_index)?;
 
     // > Verify that source != target, so a consolidation cannot be used as an exit.
-    ensure!(
-        consolidation.source_index != consolidation.target_index,
-        Error::<P>::ConsolidationIsUsedAsExit,
-    );
+    if source_index == target_index {
+        return Ok(());
+    }
 
-    let source_validator = state.validators().get(consolidation.source_index)?;
-    let target_validator = state.validators().get(consolidation.target_index)?;
-    let current_epoch = get_current_epoch(state);
+    // > Verify source withdrawal credentials
+    let has_correct_credential = has_execution_withdrawal_credential(source_validator);
+    let prefix_len = H256::len_bytes() - ExecutionAddress::len_bytes();
+    let computed_source_address = ExecutionAddress::from_slice(&source_validator.withdrawal_credentials[prefix_len..]);
+    if !(has_correct_credential && computed_source_address == source_address) {
+        return Ok(());
+    }
+
+    // > Verify that target has execution withdrawal credentials
+    if !has_execution_withdrawal_credential(target_validator) {
+        return Ok(());
+    }
 
     // > Verify the source and the target are active
-    ensure!(
-        is_active_validator(source_validator, current_epoch),
-        Error::<P>::ValidatorNotActive {
-            index: consolidation.source_index,
-            validator: source_validator.clone(),
-            current_epoch,
-        },
-    );
-
-    ensure!(
-        is_active_validator(target_validator, current_epoch),
-        Error::<P>::ValidatorNotActive {
-            index: consolidation.target_index,
-            validator: target_validator.clone(),
-            current_epoch,
-        },
-    );
+    let current_epoch = get_current_epoch(state);
+    if !is_active_validator(source_validator, current_epoch) {
+        return Ok(());
+    }
+    if !is_active_validator(target_validator, current_epoch) {
+        return Ok(());
+    }
 
     // > Verify exits for source and target have not been initiated
-    ensure!(
-        source_validator.exit_epoch == FAR_FUTURE_EPOCH,
-        Error::<P>::ValidatorExitAlreadyInitiated {
-            index: consolidation.source_index,
-            exit_epoch: source_validator.exit_epoch,
-        },
-    );
-
-    ensure!(
-        target_validator.exit_epoch == FAR_FUTURE_EPOCH,
-        Error::<P>::ValidatorExitAlreadyInitiated {
-            index: consolidation.target_index,
-            exit_epoch: target_validator.exit_epoch,
-        },
-    );
-
-    // > Consolidations must specify an epoch when they become valid; they are not valid before then
-    ensure!(
-        current_epoch >= consolidation.epoch,
-        Error::<P>::ConsolidationEpochInvalid {
-            epoch: consolidation.epoch,
-            current_epoch,
-        },
-    );
-
-    // > Verify the source and the target have Execution layer withdrawal credentials
-    ensure!(
-        has_execution_withdrawal_credential(source_validator),
-        Error::<P>::NoExecutionWithdrawalCredentials {
-            index: consolidation.source_index,
-            withdrawal_credentials: source_validator.withdrawal_credentials,
-        }
-    );
-
-    ensure!(
-        has_execution_withdrawal_credential(target_validator),
-        Error::<P>::NoExecutionWithdrawalCredentials {
-            index: consolidation.target_index,
-            withdrawal_credentials: target_validator.withdrawal_credentials,
-        }
-    );
-
-    // > Verify the same withdrawal address
-    let prefix_len = H256::len_bytes() - ExecutionAddress::len_bytes();
-    let source_address =
-        ExecutionAddress::from_slice(&source_validator.withdrawal_credentials[prefix_len..]);
-    let target_address =
-        ExecutionAddress::from_slice(&target_validator.withdrawal_credentials[prefix_len..]);
-
-    ensure!(
-        source_address == target_address,
-        Error::<P>::ConsolidationWithdrawalAddressMismatch {
-            source_address,
-            target_address,
-        },
-    );
-
-    // > Verify consolidation is signed by the source and the target
-    SingleVerifier.verify_aggregate(
-        signed_consolidation.message.signing_root(config, state),
-        signed_consolidation.signature,
-        [
-            source_validator.pubkey.decompress()?,
-            target_validator.pubkey.decompress()?,
-        ],
-        SignatureKind::Consolidation,
-    )?;
+    if source_validator.exit_epoch != FAR_FUTURE_EPOCH {
+        return Ok(());
+    }
+    if target_validator.exit_epoch != FAR_FUTURE_EPOCH {
+        return Ok(());
+    }
 
     // > Initiate source validator exit and append pending consolidation
     let exit_epoch = compute_consolidation_epoch_and_update_churn(
@@ -1149,7 +1106,7 @@ pub fn process_consolidation<P: Preset>(
         state,
         source_validator.effective_balance,
     );
-    let source_validator = state.validators_mut().get_mut(consolidation.source_index)?;
+    let source_validator = state.validators_mut().get_mut(source_index)?;
 
     source_validator.exit_epoch = exit_epoch;
     source_validator.withdrawable_epoch =
@@ -1158,8 +1115,8 @@ pub fn process_consolidation<P: Preset>(
     state
         .pending_consolidations_mut()
         .push(PendingConsolidation {
-            source_index: consolidation.source_index,
-            target_index: consolidation.target_index,
+            source_index: source_index,
+            target_index: target_index,
         })?;
 
     Ok(())
@@ -1371,19 +1328,19 @@ mod spec_tests {
     }
 
     processing_tests! {
-        process_deposit_receipt,
-        |config, state, deposit_receipt, _| process_deposit_receipt(config, state, deposit_receipt, NullSlotReport),
-        "deposit_receipt",
-        "consensus-spec-tests/tests/mainnet/electra/operations/deposit_receipt/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/deposit_receipt/*/*",
+        process_deposit_request,
+        |config, state, deposit_request, _| process_deposit_request(config, state, deposit_request, NullSlotReport),
+        "deposit_request",
+        "consensus-spec-tests/tests/mainnet/electra/operations/deposit_request/*/*",
+        "consensus-spec-tests/tests/minimal/electra/operations/deposit_request/*/*",
     }
 
     processing_tests! {
-        process_execution_layer_withdrawal_request,
-        |config, state, withdrawal_request, _| process_execution_layer_withdrawal_request(config, state, withdrawal_request),
-        "execution_layer_withdrawal_request",
-        "consensus-spec-tests/tests/mainnet/electra/operations/execution_layer_withdrawal_request/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/execution_layer_withdrawal_request/*/*",
+        process_withdrawal_request,
+        |config, state, withdrawal_request, _| process_withdrawal_request(config, state, withdrawal_request),
+        "withdrawal_request",
+        "consensus-spec-tests/tests/mainnet/electra/operations/withdrawal_request/*/*",
+        "consensus-spec-tests/tests/minimal/electra/operations/withdrawal_request/*/*",
     }
 
     validation_tests! {

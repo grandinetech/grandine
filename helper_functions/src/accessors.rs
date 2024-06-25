@@ -587,7 +587,8 @@ fn get_next_sync_committee_indices<P: Preset>(
                 .expect("candidate_index was produced by enumerating active validators")
                 .effective_balance;
 
-            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE * random_byte)
+            // > [Modified in Electra:EIP7251]
+            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_byte)
                 .then_some(candidate_index)
         })
         .take(P::SyncCommitteeSize::USIZE)
