@@ -92,7 +92,7 @@ use crate::{
     traits::{
         BeaconBlock as _, BeaconState as _, ExecutionPayload as ExecutionPayloadTrait,
         PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
-        SignedBeaconBlock as _,
+        PostElectraBeaconState, SignedBeaconBlock as _,
     },
 };
 
@@ -293,6 +293,17 @@ impl<P: Preset> BeaconState<P> {
             Self::Phase0(_) | Self::Altair(_) | Self::Bellatrix(_) => None,
             Self::Capella(state) => Some(state),
             Self::Deneb(state) => Some(state),
+            Self::Electra(state) => Some(state),
+        }
+    }
+
+    pub fn post_electra_mut(&mut self) -> Option<&mut dyn PostElectraBeaconState<P>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
         }
     }

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use deposit_tree::DepositTree;
-use helper_functions::accessors;
-use ssz::{PersistentVector, SszHash as _};
+use helper_functions::{accessors, misc, mutators::increase_balance};
+use ssz::{PersistentList, PersistentVector, SszHash as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use transition_functions::combined;
@@ -34,6 +34,7 @@ use types::{
     },
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
+        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
         containers::{
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
         },
@@ -127,6 +128,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 slot,
                 fork,
                 latest_block_header,
+                deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
                 ..ElectraBeaconState::default()
             }
             .into(),
@@ -152,6 +154,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
         data: DepositData,
         deposit_index: DepositIndex,
     ) -> Result<()> {
+        let is_post_electra = self.beacon_state.is_post_electra();
         let eth1_data = self.beacon_state.eth1_data_mut();
 
         eth1_data.deposit_root = self
@@ -160,10 +163,20 @@ impl<'config, P: Preset> Incremental<'config, P> {
 
         eth1_data.deposit_count = self.deposit_tree.deposit_count;
 
-        // See <https://github.com/ethereum/consensus-specs/blame/2fa396f67df35df236b6aa6fe714a59ee1032dc8/specs/phase0/beacon-chain.md#L1193-L1206>.
         if let Some(validator_index) =
             combined::process_deposit_data(self.config, &mut self.beacon_state, data)?
         {
+            if let Some(state) = self.beacon_state.post_electra_mut() {
+                let pending_deposits = state.pending_balance_deposits().clone();
+
+                for deposit in &pending_deposits {
+                    let balance = state.balances_mut().get_mut(deposit.index)?;
+                    increase_balance(balance, deposit.amount);
+                }
+
+                *state.pending_balance_deposits_mut() = PersistentList::default();
+            }
+
             let balance = *self.beacon_state.balances().get(validator_index)?;
 
             let validator = self
@@ -171,13 +184,24 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 .validators_mut()
                 .get_mut(validator_index)?;
 
-            validator.effective_balance = balance
-                .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
-                .min(P::MAX_EFFECTIVE_BALANCE);
+            if is_post_electra {
+                validator.effective_balance = balance
+                    .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
+                    .min(misc::get_validator_max_effective_balance::<P>(validator));
 
-            if validator.effective_balance == P::MAX_EFFECTIVE_BALANCE {
-                validator.activation_eligibility_epoch = GENESIS_EPOCH;
-                validator.activation_epoch = GENESIS_EPOCH;
+                if validator.effective_balance >= P::MIN_ACTIVATION_BALANCE {
+                    validator.activation_eligibility_epoch = GENESIS_EPOCH;
+                    validator.activation_epoch = GENESIS_EPOCH;
+                }
+            } else {
+                validator.effective_balance = balance
+                    .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
+                    .min(P::MAX_EFFECTIVE_BALANCE);
+
+                if validator.effective_balance == P::MAX_EFFECTIVE_BALANCE {
+                    validator.activation_eligibility_epoch = GENESIS_EPOCH;
+                    validator.activation_epoch = GENESIS_EPOCH;
+                }
             }
         }
 
