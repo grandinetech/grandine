@@ -164,10 +164,9 @@ pub struct ExecutionPayload<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub excess_blob_gas: Gas,
     pub deposit_requests: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
-    pub withdrawal_requests:
-        ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    pub consolidation_requests: 
-        ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>
+    pub withdrawal_requests: ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    pub consolidation_requests:
+        ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

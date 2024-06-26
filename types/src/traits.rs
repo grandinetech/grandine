@@ -79,10 +79,10 @@ use crate::{
             Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
             BlindedBeaconBlock as ElectraBlindedBeaconBlock,
-            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, DepositRequest,
-            WithdrawalRequest, ExecutionPayload as ElectraExecutionPayload,
+            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, ConsolidationRequest,
+            DepositRequest, ExecutionPayload as ElectraExecutionPayload,
             ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
-            IndexedAttestation as ElectraIndexedAttestation, ConsolidationRequest
+            IndexedAttestation as ElectraIndexedAttestation, WithdrawalRequest,
         },
     },
     nonstandard::Phase,
@@ -154,6 +154,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // TODO(feature/deneb): Try to come up with some other solution.
     //                      See the TODO in `types::combined`.
     fn is_post_deneb(&self) -> bool;
+    fn is_post_electra(&self) -> bool;
 }
 
 #[duplicate_item(
@@ -164,7 +165,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     get_ref_mut(field, method)
     validators_mut_with_balances_body
     balances_mut_with_slashings_body
-    is_post_deneb_body;
+    is_post_deneb_body
+    is_post_electra_body;
 
     [P: Preset, S: BeaconState<P> + Clone]
     [Arc<S>]
@@ -173,7 +175,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [self.make_mut().method()]
     [self.make_mut().validators_mut_with_balances()]
     [self.make_mut().balances_mut_with_slashings()]
-    [self.as_ref().is_post_deneb()];
+    [self.as_ref().is_post_deneb()]
+    [self.as_ref().is_post_electra()];
 
     [P: Preset, S: BeaconState<P>]
     [Hc<S>]
@@ -182,7 +185,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [self.as_mut().method()]
     [self.as_mut().validators_mut_with_balances()]
     [self.as_mut().balances_mut_with_slashings()]
-    [self.as_ref().is_post_deneb()];
+    [self.as_ref().is_post_deneb()]
+    [self.as_ref().is_post_electra()];
 
     [P: Preset]
     [Phase0BeaconState<P>]
@@ -191,6 +195,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
+    [false]
     [false];
 
     [P: Preset]
@@ -200,6 +205,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
+    [false]
     [false];
 
     [P: Preset]
@@ -209,6 +215,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
+    [false]
     [false];
 
     [P: Preset]
@@ -218,6 +225,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
+    [false]
     [false];
 
     [P: Preset]
@@ -227,7 +235,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
-    [true];
+    [true]
+    [false];
 
     [P: Preset]
     [ElectraBeaconState<P>]
@@ -236,6 +245,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
+    [true]
     [true];
 
     [P: Preset]
@@ -292,6 +302,9 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     ]
     [
         self.phase() >= Phase::Deneb
+    ]
+    [
+        self.phase() >= Phase::Electra
     ];
 )]
 impl<parameters> BeaconState<P> for implementor {
@@ -365,6 +378,10 @@ impl<parameters> BeaconState<P> for implementor {
 
     fn is_post_deneb(&self) -> bool {
         is_post_deneb_body
+    }
+
+    fn is_post_electra(&self) -> bool {
+        is_post_electra_body
     }
 }
 
@@ -1257,7 +1274,9 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
     }
 
     fn consolidation_requests_root(&self) -> H256 {
-        self.execution_payload.consolidation_requests.hash_tree_root()
+        self.execution_payload
+            .consolidation_requests
+            .hash_tree_root()
     }
 }
 
@@ -1478,7 +1497,9 @@ pub trait PostElectraExecutionPayload<P: Preset>: PostCapellaExecutionPayload<P>
     fn withdrawal_requests(
         &self,
     ) -> &ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>;
-    fn consolidation_requests(&self) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>;
+    fn consolidation_requests(
+        &self,
+    ) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>;
 }
 
 impl<P: Preset> PostElectraExecutionPayload<P> for ElectraExecutionPayload<P> {
@@ -1492,7 +1513,9 @@ impl<P: Preset> PostElectraExecutionPayload<P> for ElectraExecutionPayload<P> {
         &self.withdrawal_requests
     }
 
-    fn consolidation_requests(&self) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload> {
+    fn consolidation_requests(
+        &self,
+    ) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload> {
         &self.consolidation_requests
     }
 }

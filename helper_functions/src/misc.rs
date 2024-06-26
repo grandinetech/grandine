@@ -177,7 +177,8 @@ pub(crate) fn compute_proposer_index<P: Preset>(
                 .effective_balance;
 
             // > [Modified in Electra:EIP7251]
-            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_byte)
+            (effective_balance * max_random_byte
+                >= get_state_max_effective_balance(state) * random_byte)
                 .then_some(candidate_index)
         })
         .ok_or(Error::FailedToSelectProposer)
@@ -530,6 +531,15 @@ pub fn get_validator_max_effective_balance<P: Preset>(validator: &Validator) -> 
         P::MAX_EFFECTIVE_BALANCE_ELECTRA
     } else {
         P::MIN_ACTIVATION_BALANCE
+    }
+}
+
+#[must_use]
+pub fn get_state_max_effective_balance<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Gwei {
+    if state.is_post_electra() {
+        P::MAX_EFFECTIVE_BALANCE_ELECTRA
+    } else {
+        P::MAX_EFFECTIVE_BALANCE
     }
 }
 

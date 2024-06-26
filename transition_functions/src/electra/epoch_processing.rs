@@ -18,9 +18,9 @@ use types::{
     capella::containers::HistoricalSummary,
     config::Config,
     electra::beacon_state::BeaconState,
+    phase0::consts::FAR_FUTURE_EPOCH,
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState},
-    phase0::consts::FAR_FUTURE_EPOCH,
 };
 
 use super::epoch_intermediates;
