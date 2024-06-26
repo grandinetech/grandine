@@ -28,6 +28,7 @@ options=(
     --package directories
     --package doppelganger_protection
     --package eip_2335
+    --package eip_7594
     --package eth1
     --package eth1_api
     --package eth2_cache_utils

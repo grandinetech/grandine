@@ -28,6 +28,8 @@ use crate::{
     Copy(bound = ""),
     PartialEq(bound = ""),
     Eq(bound = ""),
+    PartialOrd(bound = ""),
+    Ord(bound = ""),
     Hash(bound = ""),
     Default(bound = "")
 )]

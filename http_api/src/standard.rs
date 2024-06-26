@@ -1368,7 +1368,7 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     let grouped_by_target = attestations
         .into_iter()
         .enumerate()
-        .group_by(|(_, attestation)| attestation.data().target);
+        .chunk_by(|(_, attestation)| attestation.data().target);
 
     let (targets, target_attestations): (Vec<_>, Vec<_>) = grouped_by_target
         .into_iter()

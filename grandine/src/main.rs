@@ -443,6 +443,7 @@ fn try_main() -> Result<()> {
     let client = ClientBuilder::new()
         .timeout(request_timeout)
         .user_agent(APPLICATION_VERSION_WITH_PLATFORM)
+        .connection_verbose(true)
         .build()?;
 
     let mut cache = use_validator_key_cache.then(|| {

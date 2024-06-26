@@ -67,6 +67,8 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub electra_fork_epoch: Epoch,
     pub electra_fork_version: Version,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub eip7594_fork_epoch: Epoch,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -135,12 +137,20 @@ pub struct Config {
     pub min_epochs_for_blob_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub data_column_sidecar_subnet_count: u64,
 
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
     #[serde(with = "serde_utils::string_or_native")]
     pub terminal_block_hash_activation_epoch: Epoch,
     pub terminal_total_difficulty: Difficulty,
+
+    // Custody
+    #[serde(with = "serde_utils::string_or_native")]
+    pub custody_requirement: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub samples_per_slot: u64,
 
     // Later phases and other unknown variables
     //
@@ -181,6 +191,7 @@ impl Default for Config {
             deneb_fork_version: H32(hex!("04000000")),
             electra_fork_epoch: FAR_FUTURE_EPOCH,
             electra_fork_version: H32(hex!("05000000")),
+            eip7594_fork_epoch: FAR_FUTURE_EPOCH,
 
             // Time parameters
             eth1_follow_distance: 2048,
@@ -222,6 +233,7 @@ impl Default for Config {
             max_request_blob_sidecars: 768,
             min_epochs_for_blob_sidecars_requests: 4096,
             blob_sidecar_subnet_count: 6,
+            data_column_sidecar_subnet_count: 64,
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -229,6 +241,10 @@ impl Default for Config {
             terminal_total_difficulty: Difficulty::from_be_bytes(hex!(
                 "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00"
             )),
+
+            // Custody
+            custody_requirement: 4,
+            samples_per_slot: 16,
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
@@ -685,6 +701,16 @@ impl Config {
         self.fork_slots::<P>()
             .find(|(_, fork_slot)| Some(slot) < fork_slot.into_option())
             .map(|(phase, _)| phase)
+    }
+
+    #[must_use]
+    pub const fn is_eip7594_fork(&self, epoch: Epoch) -> bool {
+        epoch >= self.eip7594_fork_epoch
+    }
+
+    #[must_use]
+    pub const fn is_eip7594_fork_epoch_set(&self) -> bool {
+        self.eip7594_fork_epoch != FAR_FUTURE_EPOCH
     }
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {

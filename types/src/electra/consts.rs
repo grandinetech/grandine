@@ -55,7 +55,7 @@ pub type FinalizedRootIndex = ConcatGeneralizedIndices<
 ///  │     └11┬22┬44┬─88 BeaconState.latest_execution_payload_header
 ///  │        │  │  └─89 BeaconState.next_withdrawal_index
 ///  │        │  └45┬─90 BeaconState.next_withdrawal_validator_index
-///  │        │     └─91 BeaconState.deposit_receipts_start_index
+///  │        │     └─91 BeaconState.deposit_requests_start_index
 ///  │        └23┬46┬─92 BeaconState.historical_summaries
 ///  │           │  └─93 BeaconState.deposit_balance_to_consume
 ///  │           └47┬─94 BeaconState.exit_balance_to_consume

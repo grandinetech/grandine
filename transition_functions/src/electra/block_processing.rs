@@ -5,7 +5,7 @@ use bit_field::BitField as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
-        attestation_epoch, get_attestation_participation_flags, get_base_reward,
+        self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
         get_base_reward_per_increment, get_beacon_proposer_index, get_consolidation_churn_limit,
         get_current_epoch, get_pending_balance_to_withdraw, get_randao_mix, index_of_public_key,
         initialize_shuffled_indices,
@@ -28,7 +28,7 @@ use helper_functions::{
         has_execution_withdrawal_credential, is_active_validator,
         is_compounding_withdrawal_credential, validate_constructed_indexed_attestation,
     },
-    signing::{SignForAllForks, SignForAllForksWithGenesis},
+    signing::{SignForAllForks, SignForSingleFork as _},
     slot_report::{NullSlotReport, SlotReport},
     verifier::{SingleVerifier, Triple, Verifier},
 };
@@ -48,9 +48,9 @@ use types::{
         beacon_state::BeaconState as ElectraBeaconState,
         consts::{FULL_EXIT_REQUEST_AMOUNT, UNSET_DEPOSIT_REQUESTS_START_INDEX},
         containers::{
-            Attestation, BeaconBlock, BeaconBlockBody, DepositRequest,
-            WithdrawalRequest, ExecutionPayloadHeader, PendingBalanceDeposit,
-            PendingConsolidation, PendingPartialWithdrawal, ConsolidationRequest,
+            Attestation, BeaconBlock, BeaconBlockBody, ConsolidationRequest, DepositRequest,
+            ExecutionPayloadHeader, PendingBalanceDeposit, PendingConsolidation,
+            PendingPartialWithdrawal, SignedBeaconBlock, WithdrawalRequest,
         },
     },
     nonstandard::{smallvec, AttestationEpoch, SlashingKind},
@@ -90,6 +90,7 @@ pub fn process_block<P: Preset>(
     state: &mut ElectraBeaconState<P>,
     block: &BeaconBlock<P>,
     mut verifier: impl Verifier,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
     let _timer = METRICS
         .get()
@@ -103,10 +104,31 @@ pub fn process_block<P: Preset>(
         block,
         NullExecutionEngine,
         &mut verifier,
-        NullSlotReport,
+        slot_report,
     )?;
 
     verifier.finish()
+}
+
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &ElectraBeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    debug_assert_eq!(state.slot, block.message.slot);
+
+    unphased::process_block_header_for_gossip(state, &block.message)?;
+
+    process_execution_payload_for_gossip(config, state, &block.message.body)?;
+
+    SingleVerifier.verify_singular(
+        block.message.signing_root(config, state),
+        block.signature,
+        accessors::public_key(state, block.message.proposer_index)?,
+        SignatureKind::Block,
+    )?;
+
+    Ok(())
 }
 
 // TODO(feature/electra): Reuse function from `transition_functions::capella::block_processing`.
@@ -170,6 +192,34 @@ pub fn custom_process_block<P: Preset>(
         verifier,
         slot_report,
     )
+}
+
+fn process_execution_payload_for_gossip<P: Preset>(
+    config: &Config,
+    state: &ElectraBeaconState<P>,
+    body: &BeaconBlockBody<P>,
+) -> Result<()> {
+    let payload = &body.execution_payload;
+
+    // > Verify timestamp
+    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let in_block = payload.timestamp;
+
+    ensure!(
+        computed == in_block,
+        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
+    );
+
+    // > [New in Deneb:EIP4844] Verify commitments are under limit
+    let maximum = P::MaxBlobsPerBlock::USIZE;
+    let in_block = body.blob_kzg_commitments.len();
+
+    ensure!(
+        in_block <= maximum,
+        Error::<P>::TooManyBlockKzgCommitments { in_block },
+    );
+
+    Ok(())
 }
 
 fn process_withdrawals<P: Preset>(
@@ -381,23 +431,7 @@ fn process_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
-    // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
-    let in_block = payload.timestamp;
-
-    ensure!(
-        computed == in_block,
-        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
-    );
-
-    // > [New in Deneb:EIP4844] Verify commitments are under limit
-    let maximum = P::MaxBlobsPerBlock::USIZE;
-    let in_block = body.blob_kzg_commitments.len();
-
-    ensure!(
-        in_block <= maximum,
-        Error::<P>::TooManyBlockKzgCommitments { in_block },
-    );
+    process_execution_payload_for_gossip(config, state, body)?;
 
     // TODO(feature/electra): Verify `is_valid_block_hash`.
     // TODO(feature/electra): Verify `versioned_hashes`.
@@ -894,7 +928,7 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
         verifier,
     )?;
 
-    // > [New in Electra:EIP7251] Only exit validator if it has no pending withdrawals in the queue 
+    // > [New in Electra:EIP7251] Only exit validator if it has no pending withdrawals in the queue
     ensure!(
         get_pending_balance_to_withdraw(state, signed_voluntary_exit.message.validator_index) == 0,
         Error::<P>::VoluntaryExitWithPendingWithdrawals,
@@ -933,8 +967,8 @@ fn process_withdrawal_request<P: Preset>(
         .as_bytes()
         .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
         .pipe(ExecutionAddress::from_slice);
-    let is_correct_source_address =
-        source_address == withdrawal_request.source_address;
+
+    let is_correct_source_address = source_address == withdrawal_request.source_address;
 
     if !(has_correct_credential && is_correct_source_address) {
         return Ok(());
@@ -1073,7 +1107,9 @@ pub fn process_consolidation_request<P: Preset>(
     // > Verify source withdrawal credentials
     let has_correct_credential = has_execution_withdrawal_credential(source_validator);
     let prefix_len = H256::len_bytes() - ExecutionAddress::len_bytes();
-    let computed_source_address = ExecutionAddress::from_slice(&source_validator.withdrawal_credentials[prefix_len..]);
+    let computed_source_address =
+        ExecutionAddress::from_slice(&source_validator.withdrawal_credentials[prefix_len..]);
+
     if !(has_correct_credential && computed_source_address == source_address) {
         return Ok(());
     }
@@ -1115,8 +1151,8 @@ pub fn process_consolidation_request<P: Preset>(
     state
         .pending_consolidations_mut()
         .push(PendingConsolidation {
-            source_index: source_index,
-            target_index: target_index,
+            source_index,
+            target_index,
         })?;
 
     Ok(())
@@ -1210,6 +1246,14 @@ mod spec_tests {
         "block",
         "consensus-spec-tests/tests/mainnet/electra/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/electra/operations/block_header/*/*",
+    }
+
+    processing_tests! {
+        process_consolidation_request,
+        |config, state, consolidation_request, _| process_consolidation_request(config, state, consolidation_request),
+        "consolidation_request",
+        "consensus-spec-tests/tests/mainnet/electra/operations/consolidation_request/*/*",
+        "consensus-spec-tests/tests/minimal/electra/operations/consolidation_request/*/*",
     }
 
     processing_tests! {

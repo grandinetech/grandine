@@ -39,17 +39,14 @@ use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
 use log::{debug, error, info, log, warn, Level};
 use once_cell::sync::OnceCell;
-use operation_pools::{
-    convert_to_electra_attestation, AttestationAggPool, Origin, PoolAdditionOutcome,
-    PoolAdditionOutcome, SyncCommitteeAggPool,
-};
+use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
-use ssz::BitList;
+use ssz::{BitList, BitVector};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
@@ -58,13 +55,20 @@ use types::{
         containers::{ContributionAndProof, SignedContributionAndProof, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    combined::BeaconState,
+    combined::{
+        AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
+    },
     config::Config as ChainConfig,
-    nonstandard::{OwnAttestation, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
+    electra::containers::{
+        AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
+        SignedAggregateAndProof as ElectraSignedAggregateAndProof,
+    },
+    nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
-            AggregateAndProof, Attestation, AttestationData, Checkpoint, SignedAggregateAndProof,
+            AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
+            AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
         },
         primitives::{Epoch, Slot, ValidatorIndex, H256},
     },
@@ -79,7 +83,6 @@ use crate::{
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
     validator_config::ValidatorConfig,
-    PayloadIdEntry,
 };
 
 const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
@@ -298,7 +301,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 slashing = slasher_to_validator_rx.select_next_some() => match slashing {
                     SlasherToValidator::AttesterSlashing(attester_slashing) => {
-                        self.block_producer.add_new_attester_slashing(attester_slashing).await;
+                        self.block_producer.add_new_attester_slashing(AttesterSlashing::Phase0(attester_slashing)).await;
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
                         self.block_producer.add_new_proposer_slashing(proposer_slashing).await;
@@ -1008,6 +1011,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
         let phase = slot_head.phase();
@@ -1040,8 +1044,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     selection_proof,
                                 })
                             } else {
-                                let aggregate =
-                                    convert_to_electra_attestation(aggregate.clone()).ok()?;
+                                let aggregate = operation_pools::convert_to_electra_attestation(
+                                    aggregate.clone(),
+                                )
+                                .ok()?;
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
                                     aggregator_index,
@@ -1281,6 +1287,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.signer.load().keys().copied().collect::<HashSet<_>>()
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn own_singular_attestations(
         &self,
         slot_head: &SlotHead<P>,
@@ -1324,7 +1331,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     }
 
-                    let data = AttestationData {
+                    let mut data = AttestationData {
                         slot: slot_head.slot(),
                         index: member.committee_index,
                         beacon_block_root: slot_head.beacon_block_root,
@@ -1376,35 +1383,42 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 let own_attestations = signatures
                     .zip(other_data)
                     .filter_map(|(signature, (data, member))| {
-                        let attestation = if phase < Phase::Electra {
-                            let mut aggregation_bits = BitList::with_length(member.committee_size);
-                            aggregation_bits.set(member.position_in_committee, true);
+                        signature.and_then(|signature| {
+                            let attestation = if phase < Phase::Electra {
+                                let mut aggregation_bits =
+                                    BitList::with_length(member.committee_size);
 
-                            Attestation::from(Phase0Attestation {
-                                aggregation_bits,
-                                data,
-                                signature: signature.into(),
+                                aggregation_bits.set(member.position_in_committee, true);
+
+                                Some(Attestation::from(Phase0Attestation {
+                                    aggregation_bits,
+                                    data,
+                                    signature: signature.into(),
+                                }))
+                            } else {
+                                let mut aggregation_bits =
+                                    BitList::with_length(member.committee_size);
+
+                                aggregation_bits.set(member.position_in_committee, true);
+
+                                // TODO(feature/electra: don't hide error?)
+                                let mut committee_bits = BitVector::default();
+
+                                committee_bits.set(member.committee_index.try_into().ok()?, true);
+
+                                Some(Attestation::from(ElectraAttestation {
+                                    aggregation_bits,
+                                    data,
+                                    committee_bits,
+                                    signature: signature.into(),
+                                }))
+                            };
+
+                            attestation.map(|attestation| OwnAttestation {
+                                validator_index: member.validator_index,
+                                attestation,
+                                signature,
                             })
-                        } else {
-                            let mut aggregation_bits = BitList::with_length(member.committee_size);
-                            aggregation_bits.set(member.position_in_committee, true);
-
-                            // TODO(feature/electra: don't hide error?)
-                            let mut committee_bits = BitVector::default();
-                            committee_bits.set(member.committee_index.try_into().ok()?, true);
-
-                            Attestation::from(ElectraAttestation {
-                                aggregation_bits,
-                                data,
-                                committee_bits,
-                                signature: signature.into(),
-                            })
-                        };
-
-                        Some(OwnAttestation {
-                            validator_index: member.validator_index,
-                            attestation,
-                            signature,
                         })
                     })
                     .collect();

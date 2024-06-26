@@ -65,10 +65,6 @@ impl<P: Preset> StateCacheProcessor<P> {
             .get_or_insert_with(block_root, slot, ignore_missing_rewards, f)
     }
 
-    pub fn len(&self) -> Result<usize> {
-        self.state_cache.len()
-    }
-
     pub fn prune(&self, last_pruned_slot: Slot) -> Result<()> {
         self.state_cache.prune(last_pruned_slot)
     }

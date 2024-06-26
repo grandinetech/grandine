@@ -2,6 +2,8 @@ use hex_literal::hex;
 use ssz::MerkleElements;
 use typenum::{U32, U6};
 
+use crate::{deneb::primitives::KzgCommitment, preset::Preset};
+
 pub const VERSIONED_HASH_VERSION_KZG: &[u8] = &hex!("01");
 
 // TODO(feature/deneb): Can `BlobSidecarSubnetCount` be a `const`?

@@ -92,7 +92,7 @@ use crate::{
     traits::{
         BeaconBlock as _, BeaconState as _, ExecutionPayload as ExecutionPayloadTrait,
         PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
-        SignedBeaconBlock as _,
+        PostElectraBeaconState, SignedBeaconBlock as _,
     },
 };
 
@@ -293,6 +293,17 @@ impl<P: Preset> BeaconState<P> {
             Self::Phase0(_) | Self::Altair(_) | Self::Bellatrix(_) => None,
             Self::Capella(state) => Some(state),
             Self::Deneb(state) => Some(state),
+            Self::Electra(state) => Some(state),
+        }
+    }
+
+    pub fn post_electra_mut(&mut self) -> Option<&mut dyn PostElectraBeaconState<P>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
         }
     }
@@ -620,10 +631,11 @@ impl<P: Preset> BeaconBlock<P> {
 
         match &mut self {
             Self::Deneb(block) => block.body.blob_kzg_commitments = commitments,
+            Self::Electra(block) => block.body.blob_kzg_commitments = commitments,
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 5);
+                const_assert_eq!(Phase::CARDINALITY, 6);
             }
         }
 
@@ -685,10 +697,40 @@ impl<P: Preset> BeaconBlock<P> {
     }
 }
 
-impl<P: Preset> From<SignedBeaconBlock<P>> for BeaconBlock<P> {
-    fn from(signed_block: SignedBeaconBlock<P>) -> Self {
-        let (message, _) = signed_block.split();
-        message
+impl<P: Preset> From<BeaconBlock<P>> for SignedBeaconBlock<P> {
+    fn from(beacon_block: BeaconBlock<P>) -> Self {
+        match beacon_block {
+            BeaconBlock::Phase0(message) => Phase0SignedBeaconBlock {
+                message,
+                signature: SignatureBytes::default(),
+            }
+            .into(),
+            BeaconBlock::Altair(message) => AltairSignedBeaconBlock {
+                message,
+                signature: SignatureBytes::default(),
+            }
+            .into(),
+            BeaconBlock::Bellatrix(message) => BellatrixSignedBeaconBlock {
+                message,
+                signature: SignatureBytes::default(),
+            }
+            .into(),
+            BeaconBlock::Capella(message) => CapellaSignedBeaconBlock {
+                message,
+                signature: SignatureBytes::default(),
+            }
+            .into(),
+            BeaconBlock::Deneb(message) => DenebSignedBeaconBlock {
+                message,
+                signature: SignatureBytes::default(),
+            }
+            .into(),
+            BeaconBlock::Electra(message) => ElectraSignedBeaconBlock {
+                message,
+                signature: SignatureBytes::default(),
+            }
+            .into(),
+        }
     }
 }
 
@@ -1047,17 +1089,6 @@ impl<P: Preset> LightClientBootstrap<P> {
     }
 }
 
-impl<P: Preset> LightClientBootstrap<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum LightClientFinalityUpdate<P: Preset> {
     // Boxed to pass `clippy::large_enum_variant`.
@@ -1111,17 +1142,6 @@ impl<P: Preset> LightClientFinalityUpdate<P> {
             Self::Capella(update) => update.signature_slot,
             Self::Deneb(update) => update.signature_slot,
             Self::Electra(update) => update.signature_slot,
-        }
-    }
-}
-
-impl<P: Preset> LightClientFinalityUpdate<P> {
-    #[must_use]
-    pub fn signature_slot(&self) -> Slot {
-        match self {
-            Self::Altair(update) => update.signature_slot,
-            Self::Capella(update) => update.signature_slot,
-            Self::Deneb(update) => update.signature_slot,
         }
     }
 }
@@ -1461,17 +1481,6 @@ impl<P: Preset> LightClientOptimisticUpdate<P> {
             Self::Capella(update) => update.signature_slot,
             Self::Deneb(update) => update.signature_slot,
             Self::Electra(update) => update.signature_slot,
-        }
-    }
-}
-
-impl<P: Preset> LightClientOptimisticUpdate<P> {
-    #[must_use]
-    pub fn signature_slot(&self) -> Slot {
-        match self {
-            Self::Altair(update) => update.signature_slot,
-            Self::Capella(update) => update.signature_slot,
-            Self::Deneb(update) => update.signature_slot,
         }
     }
 }

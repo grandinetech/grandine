@@ -50,6 +50,10 @@ macro_rules! tests_for_type {
     };
 }
 
+// We do not run `consensus-spec-tests/tests/*/electra/ssz_static/Eth1Block/*/*`.
+// `Eth1Block` as defined in `consensus-specs` is meant as an example (an "abstract object").
+// For whatever reason there are tests for it anyway.
+
 tests_for_type! {
     AggregateAndProof<_>,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/AggregateAndProof/*/*",
@@ -295,12 +299,6 @@ tests_for_type! {
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedBLSToExecutionChange/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedBLSToExecutionChange/*/*",
 }
-
-// tests_for_type! {
-//     SignedConsolidation,
-//     "consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedConsolidation/*/*",
-//     "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedConsolidation/*/*",
-// }
 
 tests_for_type! {
     SignedContributionAndProof<_>,

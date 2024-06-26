@@ -260,7 +260,12 @@ impl Eth1Api {
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
                 ];
-                self.execute("engine_newPayloadV4", params).await
+                self.execute(
+                    "engine_newPayloadV4",
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                )
+                .await
             }
             _ => bail!(Error::InvalidParameters),
         }
@@ -412,9 +417,13 @@ impl Eth1Api {
             PayloadId::Electra(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV4Response<P>>("engine_getPayloadV4", params)
-                    .await
-                    .map(Into::into)
+                self.execute::<EngineGetPayloadV4Response<P>>(
+                    "engine_getPayloadV4",
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                )
+                .await
+                .map(Into::into)
             }
         }
     }

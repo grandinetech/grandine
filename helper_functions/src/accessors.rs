@@ -587,7 +587,8 @@ fn get_next_sync_committee_indices<P: Preset>(
                 .effective_balance;
 
             // > [Modified in Electra:EIP7251]
-            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_byte)
+            (effective_balance * max_random_byte
+                >= misc::get_state_max_effective_balance(state) * random_byte)
                 .then_some(candidate_index)
         })
         .take(P::SyncCommitteeSize::USIZE)

@@ -3134,12 +3134,5 @@ impl<P: Preset> Store<P> {
             "current_slot_attestations",
             self.current_slot_attestations.len(),
         );
-
-        metrics.set_collection_length(
-            module_path!(),
-            &type_name,
-            "preprocessed_states",
-            self.state_cache.len().unwrap_or_default(),
-        );
     }
 }

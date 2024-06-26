@@ -59,7 +59,7 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
     ) -> Result<()> {
         ExecutionServiceMessage::NotifyNewPayload {
             beacon_block_root,
-            payload,
+            payload: Box::new(payload),
             params,
             sender,
         }

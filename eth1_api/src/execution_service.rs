@@ -70,7 +70,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     sender,
                 } => {
                     let response = self
-                        .notify_new_payload(beacon_block_root, payload.clone(), params)
+                        .notify_new_payload(beacon_block_root, *payload.clone(), params)
                         .await;
 
                     match &response {

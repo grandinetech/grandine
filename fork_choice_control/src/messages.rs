@@ -59,26 +59,6 @@ impl<P: Preset, W> AttestationVerifierMessage<P, W> {
     }
 }
 
-pub enum AttestationVerifierMessage<P: Preset, W> {
-    AggregateAndProof {
-        wait_group: W,
-        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
-        origin: AggregateAndProofOrigin<GossipId>,
-    },
-    Attestation {
-        wait_group: W,
-        attestation: AttestationItem<P, GossipId>,
-    },
-}
-
-impl<P: Preset, W> AttestationVerifierMessage<P, W> {
-    pub fn send(self, tx: &impl UnboundedSink<Self>) {
-        if tx.unbounded_send(self).is_err() {
-            debug!("send to attestation verifier failed because the receiver was dropped");
-        }
-    }
-}
-
 // Attestations cannot result in delayed objects being retried, but a `wait_group` field is still
 // needed in the attestation variants to make `Controller::wait_for_tasks` work.
 pub enum MutatorMessage<P: Preset, W> {

@@ -12,7 +12,8 @@ use dedicated_executor::{DedicatedExecutor, Job};
 use eth1::Eth1Chain;
 use eth1_api::{ApiController, Eth1ExecutionEngine};
 use execution_engine::{
-    ExecutionEngine as _, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadId,
+    ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
+    PayloadAttributesV3, PayloadId,
 };
 use features::Feature;
 use fork_choice_control::Wait;
@@ -30,11 +31,11 @@ use operation_pools::{
     SyncCommitteeAggPool,
 };
 use prometheus_metrics::Metrics;
-use ssz::{BitVector, ContiguousList, SszHash};
+use ssz::{BitList, BitVector, ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
-use transition_functions::{capella, unphased};
+use transition_functions::{capella, electra, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -54,8 +55,8 @@ use types::{
         ExecutionPayload as CapellaExecutionPayload, SignedBlsToExecutionChange,
     },
     combined::{
-        BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload, ExecutionPayloadHeader,
-        SignedBlindedBeaconBlock,
+        AttesterSlashing, BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload,
+        ExecutionPayloadHeader, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -65,13 +66,18 @@ use types::{
         },
         primitives::KzgCommitment,
     },
+    electra::containers::{
+        Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
+        BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
+        ExecutionPayload as ElectraExecutionPayload,
+    },
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{
-            Attestation, AttesterSlashing, BeaconBlock as Phase0BeaconBlock,
-            BeaconBlockBody as Phase0BeaconBlockBody, Deposit, Eth1Data, ProposerSlashing,
-            SignedVoluntaryExit,
+            Attestation, AttesterSlashing as Phase0AttesterSlashing,
+            BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Deposit,
+            Eth1Data, ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
             DepositIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
@@ -210,20 +216,37 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .attester_slashings
             .lock()
             .await
-            .retain(|slashing| {
-                accessors::slashable_indices(slashing).any(|attester_index| {
-                    let attester = match finalized_state.validators().get(attester_index) {
-                        Ok(attester) => attester,
-                        Err(error) => {
-                            log_with_feature(format_args!(
-                                "attester slashing is too recent to discard: {error}"
-                            ));
-                            return true;
-                        }
-                    };
+            .retain(|slashing| match slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).any(|attester_index| {
+                        let attester = match finalized_state.validators().get(attester_index) {
+                            Ok(attester) => attester,
+                            Err(error) => {
+                                log_with_feature(format_args!(
+                                    "attester slashing is too recent to discard: {error}"
+                                ));
+                                return true;
+                            }
+                        };
 
-                    predicates::is_slashable_validator(attester, current_epoch)
-                })
+                        predicates::is_slashable_validator(attester, current_epoch)
+                    })
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).any(|attester_index| {
+                        let attester = match finalized_state.validators().get(attester_index) {
+                            Ok(attester) => attester,
+                            Err(error) => {
+                                log_with_feature(format_args!(
+                                    "attester slashing is too recent to discard: {error}"
+                                ));
+                                return true;
+                            }
+                        };
+
+                        predicates::is_slashable_validator(attester, current_epoch)
+                    })
+                }
             });
 
         self.producer_context
@@ -289,12 +312,30 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     ) -> Result<PoolAdditionOutcome> {
         let mut attester_slashings = self.producer_context.attester_slashings.lock().await;
 
-        let seen_indices = attester_slashings
-            .iter()
-            .flat_map(accessors::slashable_indices)
-            .collect::<HashSet<_>>();
+        let mut seen_indices =
+            attester_slashings
+                .iter()
+                .flat_map(|attester_slashing| match attester_slashing {
+                    AttesterSlashing::Phase0(ref attester_slashing) => {
+                        accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                    }
+                    AttesterSlashing::Electra(ref attester_slashing) => {
+                        accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                    }
+                });
 
-        if accessors::slashable_indices(&slashing).all(|index| seen_indices.contains(&index)) {
+        let all_seen = match slashing {
+            AttesterSlashing::Phase0(ref attester_slashing) => {
+                accessors::slashable_indices(attester_slashing)
+                    .all(|index| seen_indices.contains(&index))
+            }
+            AttesterSlashing::Electra(ref attester_slashing) => {
+                accessors::slashable_indices(attester_slashing)
+                    .all(|index| seen_indices.contains(&index))
+            }
+        };
+
+        if all_seen {
             return Ok(PoolAdditionOutcome::Ignore);
         }
 
@@ -303,11 +344,25 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .controller
             .preprocessed_state_at_current_slot()?;
 
-        let outcome = match unphased::validate_attester_slashing(
-            &self.producer_context.chain_config,
-            &state,
-            &slashing,
-        ) {
+        // TODO(feature/electra): implement trait for types::combined::AttesterSlashing
+        let result = match slashing {
+            AttesterSlashing::Phase0(ref attester_slashing) => {
+                unphased::validate_attester_slashing(
+                    &self.producer_context.chain_config,
+                    &state,
+                    attester_slashing,
+                )
+            }
+            AttesterSlashing::Electra(ref attester_slashing) => {
+                unphased::validate_attester_slashing(
+                    &self.producer_context.chain_config,
+                    &state,
+                    attester_slashing,
+                )
+            }
+        };
+
+        let outcome = match result {
             Ok(_) => {
                 attester_slashings.push(slashing);
                 PoolAdditionOutcome::Accept
@@ -662,7 +717,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         //                      slashed once. The code below can handle invalid blocks, but it may
         //                      prevent the validator from proposing.
         let proposer_slashings = self.prepare_proposer_slashings().await;
-        let attester_slashings = self.prepare_attester_slashings().await;
         let voluntary_exits = self.prepare_voluntary_exits().await;
 
         let attestations = self.prepare_attestations().await?;
@@ -690,7 +744,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     eth1_data,
                     graffiti,
                     proposer_slashings,
-                    attester_slashings,
+                    attester_slashings: self.prepare_attester_slashings().await,
                     attestations,
                     deposits,
                     voluntary_exits,
@@ -706,7 +760,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     eth1_data,
                     graffiti,
                     proposer_slashings,
-                    attester_slashings,
+                    attester_slashings: self.prepare_attester_slashings().await,
                     attestations,
                     deposits,
                     voluntary_exits,
@@ -723,7 +777,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     eth1_data,
                     graffiti,
                     proposer_slashings,
-                    attester_slashings,
+                    attester_slashings: self.prepare_attester_slashings().await,
                     attestations,
                     deposits,
                     voluntary_exits,
@@ -741,7 +795,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     eth1_data,
                     graffiti,
                     proposer_slashings,
-                    attester_slashings,
+                    attester_slashings: self.prepare_attester_slashings().await,
                     attestations,
                     deposits,
                     voluntary_exits,
@@ -760,7 +814,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     eth1_data,
                     graffiti,
                     proposer_slashings,
-                    attester_slashings,
+                    attester_slashings: self.prepare_attester_slashings().await,
                     attestations,
                     deposits,
                     voluntary_exits,
@@ -770,8 +824,93 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     blob_kzg_commitments: ContiguousList::default(),
                 },
             }),
+            Phase::Electra => {
+                let attestations = if misc::compute_epoch_at_slot::<P>(slot)
+                    == self.producer_context.chain_config.electra_fork_epoch
+                {
+                    ContiguousList::default()
+                } else {
+                    // TODO(feature/electra): don't ignore errors
+                    let attestations = attestations
+                        .into_iter()
+                        .filter_map(|attestation| {
+                            operation_pools::convert_to_electra_attestation(attestation).ok()
+                        })
+                        .chunk_by(|attestation| attestation.data);
+
+                    let attestations = attestations
+                        .into_iter()
+                        .filter_map(|(_, attestations)| {
+                            Self::compute_on_chain_aggregate(attestations).ok()
+                        })
+                        .take(P::MaxAttestationsElectra::USIZE);
+
+                    ContiguousList::try_from_iter(attestations)?
+                };
+
+                BeaconBlock::from(ElectraBeaconBlock {
+                    slot,
+                    proposer_index,
+                    parent_root,
+                    state_root,
+                    body: ElectraBeaconBlockBody {
+                        randao_reveal,
+                        eth1_data,
+                        graffiti,
+                        proposer_slashings,
+                        attester_slashings: self.prepare_attester_slashings_electra().await,
+                        attestations,
+                        deposits,
+                        voluntary_exits,
+                        sync_aggregate,
+                        execution_payload: ElectraExecutionPayload::default(),
+                        bls_to_execution_changes,
+                        blob_kzg_commitments: ContiguousList::default(),
+                    },
+                })
+            }
         }
         .pipe(Ok)
+    }
+
+    pub fn compute_on_chain_aggregate(
+        attestations: impl Iterator<Item = ElectraAttestation<P>>,
+    ) -> Result<ElectraAttestation<P>> {
+        let aggregates = attestations
+            .sorted_by_key(|attestation| {
+                misc::get_committee_indices::<P>(attestation.committee_bits).next()
+            })
+            .collect_vec();
+
+        let aggregation_bits = aggregates
+            .iter()
+            .map(|attestation| &attestation.aggregation_bits)
+            .pipe(BitList::concatenate)?;
+
+        let data = if let Some(attestation) = aggregates.first() {
+            attestation.data
+        } else {
+            return Err(AnyhowError::msg("no attestations for block aggregate"));
+        };
+
+        let mut committee_bits = BitVector::default();
+        let mut signature = AggregateSignature::default();
+
+        for aggregate in aggregates {
+            for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
+                let index = committee_index.try_into()?;
+                committee_bits.set(index, true);
+            }
+
+            signature.aggregate_in_place(aggregate.signature.try_into()?);
+        }
+
+        Ok(ElectraAttestation {
+            aggregation_bits,
+            data,
+            committee_bits,
+            signature: signature.into(),
+        })
     }
 
     fn blinded_block_from_beacon_block(
@@ -992,7 +1131,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     async fn prepare_attester_slashings(
         &self,
-    ) -> ContiguousList<AttesterSlashing<P>, P::MaxAttesterSlashings> {
+    ) -> ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
         let _timer = self
             .producer_context
             .metrics
@@ -1002,20 +1141,81 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut slashings = self.producer_context.attester_slashings.lock().await;
 
         let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
-            unphased::validate_attester_slashing(
-                &self.producer_context.chain_config,
-                &self.beacon_state,
-                slashing,
-            )
+            match slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                    )
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                    )
+                }
+            }
             .is_ok()
         });
 
         let slashings = ContiguousList::try_from_iter(
-            slashings.drain(0..split_index.min(P::MaxAttesterSlashings::USIZE)),
+            slashings
+                .drain(0..split_index.min(P::MaxAttesterSlashings::USIZE))
+                .filter_map(AttesterSlashing::pre_electra),
         )
         .expect(
             "the call to Vec::drain above limits the \
              iterator to P::MaxAttesterSlashings::USIZE elements",
+        );
+
+        log_with_feature(format_args!(
+            "attester slashings for proposal: {slashings:?}"
+        ));
+
+        slashings
+    }
+
+    async fn prepare_attester_slashings_electra(
+        &self,
+    ) -> ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        let _timer = self
+            .producer_context
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
+
+        let mut slashings = self.producer_context.attester_slashings.lock().await;
+
+        let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
+            match slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                    )
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                    )
+                }
+            }
+            .is_ok()
+        });
+
+        let slashings = ContiguousList::try_from_iter(
+            slashings
+                .drain(0..split_index.min(P::MaxAttesterSlashingsElectra::USIZE))
+                .filter_map(AttesterSlashing::post_electra),
+        )
+        .expect(
+            "the call to Vec::drain above limits the \
+             iterator to P::MaxAttesterSlashingsElectra::USIZE elements",
         );
 
         log_with_feature(format_args!(
@@ -1272,25 +1472,23 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let payload_attributes = match state {
             BeaconState::Phase0(_) | BeaconState::Altair(_) => return Ok(None),
-            BeaconState::Bellatrix(_) => PayloadAttributesV1 {
+            BeaconState::Bellatrix(_) => PayloadAttributes::Bellatrix(PayloadAttributesV1 {
                 timestamp,
                 prev_randao,
                 suggested_fee_recipient,
-            }
-            .into(),
+            }),
             BeaconState::Capella(state) => {
                 let withdrawals = capella::get_expected_withdrawals(state)?
                     .into_iter()
                     .map_into()
                     .pipe(ContiguousList::try_from_iter)?;
 
-                PayloadAttributesV2 {
+                PayloadAttributes::Capella(PayloadAttributesV2 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,
                     withdrawals,
-                }
-                .into()
+                })
             }
             BeaconState::Deneb(state) => {
                 let withdrawals = capella::get_expected_withdrawals(state)?
@@ -1301,14 +1499,32 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let parent_beacon_block_root =
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
-                PayloadAttributesV3 {
+                PayloadAttributes::Deneb(PayloadAttributesV3 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,
                     withdrawals,
                     parent_beacon_block_root,
-                }
-                .into()
+                })
+            }
+            BeaconState::Electra(state) => {
+                let (withdrawals, _) = electra::get_expected_withdrawals(state)?;
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
+                PayloadAttributes::Electra(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
             }
         };
 

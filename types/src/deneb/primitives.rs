@@ -1,7 +1,10 @@
 use primitive_types::H384;
 use ssz::{ByteVector, ContiguousVector};
 
-use crate::{phase0::primitives::H256, preset::BytesPerBlob};
+use crate::{
+    phase0::primitives::H256,
+    preset::{BytesPerBlob, Preset},
+};
 
 // TODO(feature/deneb): KZG-related types should be in the `bls` crate,
 //                      like the types for public keys and signatures.

@@ -373,6 +373,7 @@ mod spec_tests {
     use types::{
         capella::containers::BeaconBlockBody as CapellaBeaconBlockBody,
         deneb::containers::BeaconBlockBody as DenebBeaconBlockBody,
+        electra::containers::BeaconBlockBody as ElectraBeaconBlockBody,
         nonstandard::Phase,
         phase0::containers::SignedBeaconBlockHeader,
         preset::{Mainnet, Minimal},
@@ -400,6 +401,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/capella/light_client/single_merkle_proof/BeaconState/*/"] [capella_minimal_beacon_state]   [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/deneb/light_client/single_merkle_proof/BeaconState/*/"]   [deneb_mainnet_beacon_state]     [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/light_client/single_merkle_proof/BeaconState/*/"]   [deneb_minimal_beacon_state]     [Minimal] [Deneb];
+        ["consensus-spec-tests/tests/mainnet/electra/light_client/single_merkle_proof/BeaconState/*/"] [electra_mainnet_beacon_state]   [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/electra/light_client/single_merkle_proof/BeaconState/*/"] [electra_minimal_beacon_state]   [Minimal] [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -413,6 +416,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/capella/light_client/single_merkle_proof/BeaconBlockBody/*/"] [capella_minimal_beacon_block_body] [CapellaBeaconBlockBody<Minimal>];
         ["consensus-spec-tests/tests/mainnet/deneb/light_client/single_merkle_proof/BeaconBlockBody/*/"]   [deneb_mainnet_beacon_block_body]   [DenebBeaconBlockBody<Mainnet>];
         ["consensus-spec-tests/tests/minimal/deneb/light_client/single_merkle_proof/BeaconBlockBody/*/"]   [deneb_minimal_beacon_block_body]   [DenebBeaconBlockBody<Minimal>];
+        ["consensus-spec-tests/tests/mainnet/electra/light_client/single_merkle_proof/BeaconBlockBody/*/"] [electra_mainnet_beacon_block_body] [ElectraBeaconBlockBody<Mainnet>];
+        ["consensus-spec-tests/tests/minimal/electra/light_client/single_merkle_proof/BeaconBlockBody/*/"] [electra_minimal_beacon_block_body] [ElectraBeaconBlockBody<Minimal>];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -420,9 +425,9 @@ mod spec_tests {
     }
 
     #[duplicate_item(
-        glob                                                                                            function_name                            preset;
-        ["consensus-spec-tests/tests/mainnet/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [deneb_mainnet_beacon_block_body_proofs] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [deneb_minimal_beacon_block_body_proofs] [Minimal];
+        glob                                                                                              function_name                              preset;
+        ["consensus-spec-tests/tests/mainnet/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"]   [deneb_mainnet_beacon_block_body_proofs]   [Mainnet];
+        ["consensus-spec-tests/tests/minimal/deneb/merkle_proof/single_merkle_proof/BeaconBlockBody/*"]   [deneb_minimal_beacon_block_body_proofs]   [Minimal];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -453,11 +458,57 @@ mod spec_tests {
 
         // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
         assert!(is_valid_blob_sidecar_inclusion_proof(
-            &incomplete_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
+            &incomplete_deneb_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
                 .expect("blob sidecar should be constructed successfully")
         ));
 
         let proof = misc::deneb_kzg_commitment_inclusion_proof(&block_body, commitment_index)
+            .expect("inclusion proof should be constructed successfully");
+
+        // > If the implementation supports generating merkle proofs, check that the
+        // > self-generated proof matches the `proof` provided with the test.
+        assert_eq!(proof.as_slice(), branch);
+    }
+
+    #[duplicate_item(
+        glob                                                                                              function_name                              preset;
+        ["consensus-spec-tests/tests/mainnet/electra/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [electra_mainnet_beacon_block_body_proofs] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/electra/merkle_proof/single_merkle_proof/BeaconBlockBody/*"] [electra_minimal_beacon_block_body_proofs] [Minimal];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let Proof {
+            leaf,
+            leaf_index,
+            branch,
+        } = case.yaml("proof");
+
+        // TODO(feature/electra): Review how `commitment_index` is calculated.
+        //                      See if `consensus-specs` has anything similar.
+        //                      Consider rewriting to match `consensus-specs`.
+        // Unlike the name suggests, `leaf_index` is actually a generalized index.
+        // `is_valid_merkle_branch` expects an index that includes only leaves.
+        let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
+        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+
+        let block_body = case.ssz_default::<ElectraBeaconBlockBody<preset>>("object");
+
+        // > Check that `is_valid_merkle_branch` confirms `leaf` at `leaf_index` to verify
+        // > against `has_tree_root(state)` and `proof`.
+        assert!(is_valid_merkle_branch(
+            leaf,
+            branch.iter().copied(),
+            index_at_commitment_depth,
+            block_body.hash_tree_root(),
+        ));
+
+        // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
+        assert!(is_valid_blob_sidecar_inclusion_proof(
+            &incomplete_electra_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
+                .expect("blob sidecar should be constructed successfully")
+        ));
+
+        let proof = misc::electra_kzg_commitment_inclusion_proof(&block_body, commitment_index)
             .expect("inclusion proof should be constructed successfully");
 
         // > If the implementation supports generating merkle proofs, check that the
@@ -498,9 +549,26 @@ mod spec_tests {
 
     // `merkle_proof` test cases do not contain enough information to construct a valid sidecar,
     // but this should be enough to test `is_valid_blob_sidecar_inclusion_proof`.
-    fn incomplete_blob_sidecar<P: Preset>(
+    fn incomplete_deneb_blob_sidecar<P: Preset>(
         commitment_index: BlobIndex,
         body: &DenebBeaconBlockBody<P>,
+        inclusion_proof: impl IntoIterator<Item = H256>,
+    ) -> Result<BlobSidecar<P>> {
+        let mut signed_block_header = SignedBeaconBlockHeader::default();
+        signed_block_header.message.body_root = body.hash_tree_root();
+
+        Ok(BlobSidecar {
+            index: commitment_index,
+            kzg_commitment: body.blob_kzg_commitments[usize::try_from(commitment_index)?],
+            signed_block_header,
+            kzg_commitment_inclusion_proof: ContiguousVector::try_from_iter(inclusion_proof)?,
+            ..BlobSidecar::default()
+        })
+    }
+
+    fn incomplete_electra_blob_sidecar<P: Preset>(
+        commitment_index: BlobIndex,
+        body: &ElectraBeaconBlockBody<P>,
         inclusion_proof: impl IntoIterator<Item = H256>,
     ) -> Result<BlobSidecar<P>> {
         let mut signed_block_header = SignedBeaconBlockHeader::default();

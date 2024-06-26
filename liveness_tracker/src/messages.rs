@@ -4,11 +4,8 @@ use anyhow::Result;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
-    phase0::{
-        containers::Attestation,
-        primitives::{Epoch, ValidatorIndex},
-    },
+    combined::{Attestation, BeaconState, SignedBeaconBlock},
+    phase0::primitives::{Epoch, ValidatorIndex},
     preset::Preset,
 };
 

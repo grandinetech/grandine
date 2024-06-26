@@ -19,7 +19,8 @@ use types::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionPayload as ElectraExecutionPayload, WithdrawalRequest
+        ConsolidationRequest, DepositRequest, ExecutionPayload as ElectraExecutionPayload,
+        WithdrawalRequest,
     },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
@@ -564,7 +565,7 @@ impl From<DepositRequestV1> for DepositRequest {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct WithdrawalRequestV1 {
     pub source_address: ExecutionAddress,
-    pub validator_public_key: PublicKeyBytes,
+    pub validator_pubkey: PublicKeyBytes,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub amount: Gwei,
 }
@@ -579,7 +580,7 @@ impl From<WithdrawalRequest> for WithdrawalRequestV1 {
 
         Self {
             source_address,
-            validator_public_key: validator_pubkey,
+            validator_pubkey,
             amount,
         }
     }
@@ -589,13 +590,13 @@ impl From<WithdrawalRequestV1> for WithdrawalRequest {
     fn from(withdrawal_request: WithdrawalRequestV1) -> Self {
         let WithdrawalRequestV1 {
             source_address,
-            validator_public_key,
+            validator_pubkey,
             amount,
         } = withdrawal_request;
 
         Self {
             source_address,
-            validator_pubkey: validator_public_key,
+            validator_pubkey,
             amount,
         }
     }
@@ -605,8 +606,8 @@ impl From<WithdrawalRequestV1> for WithdrawalRequest {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ConsolidationRequestV1 {
     pub source_address: ExecutionAddress,
-    pub source_public_key: PublicKeyBytes,
-    pub target_public_key: PublicKeyBytes,
+    pub source_pubkey: PublicKeyBytes,
+    pub target_pubkey: PublicKeyBytes,
 }
 
 impl From<ConsolidationRequest> for ConsolidationRequestV1 {
@@ -619,8 +620,8 @@ impl From<ConsolidationRequest> for ConsolidationRequestV1 {
 
         Self {
             source_address,
-            source_public_key: source_pubkey,
-            target_public_key: target_pubkey,
+            source_pubkey,
+            target_pubkey,
         }
     }
 }
@@ -629,14 +630,14 @@ impl From<ConsolidationRequestV1> for ConsolidationRequest {
     fn from(consolidation_request: ConsolidationRequestV1) -> Self {
         let ConsolidationRequestV1 {
             source_address,
-            source_public_key,
-            target_public_key,
+            source_pubkey,
+            target_pubkey,
         } = consolidation_request;
 
         Self {
             source_address,
-            source_pubkey: source_public_key,
-            target_pubkey: target_public_key,
+            source_pubkey,
+            target_pubkey,
         }
     }
 }
@@ -930,39 +931,6 @@ pub enum PayloadId {
     Capella(H64),
     Deneb(H64),
     Electra(H64),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PayloadStatusWithBlockHash {
-    pub block_hash: ExecutionBlockHash,
-    pub payload_status: PayloadStatus,
-}
-
-// `PayloadStatusV1` is deserialized from data containing keys in `camelCase`,
-// whereas `consensus-spec-tests` and `grandine-snapshot-tests` use `snake_case`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PayloadStatus {
-    status: PayloadValidationStatus,
-    latest_valid_hash: Option<ExecutionBlockHash>,
-    validation_error: Option<String>,
-}
-
-impl From<PayloadStatus> for PayloadStatusV1 {
-    fn from(payload_status: PayloadStatus) -> Self {
-        let PayloadStatus {
-            status,
-            latest_valid_hash,
-            validation_error,
-        } = payload_status;
-
-        Self {
-            status,
-            latest_valid_hash,
-            validation_error,
-        }
-    }
 }
 
 #[derive(Deserialize)]

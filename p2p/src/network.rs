@@ -135,7 +135,7 @@ impl<P: Preset> Network<P> {
         metrics: Option<Arc<Metrics>>,
         libp2p_registry: Option<&mut Registry>,
     ) -> Result<Self> {
-        let chain_config = controller.chain_config().as_ref();
+        let chain_config = controller.chain_config();
         let head_state = controller.head_state().value;
 
         let fork_context = Arc::new(ForkContext::new::<P>(
@@ -157,8 +157,13 @@ impl<P: Preset> Network<P> {
         };
 
         // Box the future to pass `clippy::large_futures`.
-        let (service, network_globals) =
-            Box::pin(Service::new(chain_config, executor, context, &logger)).await?;
+        let (service, network_globals) = Box::pin(Service::new(
+            chain_config.clone_arc(),
+            executor,
+            context,
+            &logger,
+        ))
+        .await?;
 
         let mut port_mappings = None;
 
@@ -1317,6 +1322,9 @@ impl<P: Preset> Network<P> {
                     GossipId { source, message_id },
                     block_seen,
                 );
+            }
+            PubsubMessage::DataColumnSidecar(_) => {
+                // TODO
             }
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
                 if let Some(metrics) = self.metrics.as_ref() {

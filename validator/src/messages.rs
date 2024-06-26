@@ -7,7 +7,8 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::warn;
 use types::{
     altair::containers::SignedContributionAndProof,
-    phase0::containers::{AttesterSlashing, ProposerSlashing, SignedVoluntaryExit},
+    combined::AttesterSlashing,
+    phase0::containers::{ProposerSlashing, SignedVoluntaryExit},
     preset::Preset,
 };
 

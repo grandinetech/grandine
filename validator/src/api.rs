@@ -28,7 +28,6 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use axum_extra::extract::{Query, QueryRejection};
 use bls::PublicKeyBytes;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;

@@ -18,9 +18,9 @@ use types::{
     capella::containers::HistoricalSummary,
     config::Config,
     electra::beacon_state::BeaconState,
+    phase0::consts::FAR_FUTURE_EPOCH,
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState},
-    phase0::consts::FAR_FUTURE_EPOCH,
 };
 
 use super::epoch_intermediates;
@@ -207,6 +207,7 @@ fn process_pending_balance_deposits<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
+    let next_epoch = get_current_epoch(state) + 1;
     let available_for_processing =
         state.deposit_balance_to_consume() + get_activation_exit_churn_limit(config, state);
 
@@ -219,7 +220,7 @@ fn process_pending_balance_deposits<P: Preset>(
 
         // > Validator is exiting, postpone the deposit until after withdrawable epoch
         if validator.exit_epoch < FAR_FUTURE_EPOCH {
-            if get_current_epoch(state) <= validator.withdrawable_epoch {
+            if next_epoch <= validator.withdrawable_epoch {
                 deposits_to_postpone.push(*deposit);
             } else {
                 // > Deposited balance will never become active. Increase balance but do not consume churn
@@ -227,15 +228,14 @@ fn process_pending_balance_deposits<P: Preset>(
             }
         } else {
             // > Validator is not exiting, attempt to process deposit
-
             // > Deposit does not fit in the churn, no more deposit processing in this epoch.
             if processed_amount + deposit.amount > available_for_processing {
                 break;
-            } else {
-                // > Deposit fits in the churn, process it. Increase balance and consume churn.
-                increase_balance(balance(state, deposit.index)?, deposit.amount);
-                processed_amount += deposit.amount;
             }
+
+            // > Deposit fits in the churn, process it. Increase balance and consume churn.
+            increase_balance(balance(state, deposit.index)?, deposit.amount);
+            processed_amount += deposit.amount;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.
@@ -269,7 +269,7 @@ fn process_pending_balance_deposits<P: Preset>(
 fn process_pending_consolidations<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
-    let current_epoch = get_current_epoch(state);
+    let next_epoch = get_current_epoch(state) + 1;
     let mut next_pending_consolidation = 0;
 
     for pending_consolidation in &state.pending_consolidations().clone() {
@@ -280,7 +280,7 @@ fn process_pending_consolidations<P: Preset>(
             continue;
         }
 
-        if source_validator.withdrawable_epoch > current_epoch {
+        if source_validator.withdrawable_epoch > next_epoch {
             break;
         }
 

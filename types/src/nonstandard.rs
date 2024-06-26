@@ -24,6 +24,7 @@ use crate::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
@@ -193,6 +194,12 @@ pub struct BlockRewards {
     pub sync_aggregate: Gwei,
     pub proposer_slashings: Gwei,
     pub attester_slashings: Gwei,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataColumnSidecarWithId<P: Preset> {
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub data_column_id: DataColumnIdentifier,
 }
 
 #[derive(Clone, Copy)]

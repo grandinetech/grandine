@@ -5,7 +5,7 @@ use types::{
     combined::Attestation,
     phase0::{
         containers::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, Validator},
-        primitives::{Epoch, ExecutionAddress, Slot, UnixSeconds, ValidatorIndex, H256},
+        primitives::{Epoch, Slot, UnixSeconds, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -42,15 +42,6 @@ pub enum Error<P: Preset> {
         block_slot: Slot,
         block_header_slot: Slot,
     },
-    #[error("consolidation epoch is invalid (consolidation epoch: {epoch}, current epoch: {current_epoch})")]
-    ConsolidationEpochInvalid { epoch: Epoch, current_epoch: Epoch },
-    #[error("consolidation cannot be used as an exit")]
-    ConsolidationIsUsedAsExit,
-    #[error("consolidation withdrawal address mismatch (source withdrawal address: {source_address:?}, target withdrawal address: {target_address:?})")]
-    ConsolidationWithdrawalAddressMismatch {
-        source_address: ExecutionAddress,
-        target_address: ExecutionAddress,
-    },
     #[error("deposit count is incorrect (computed: {computed}, in_block: {in_block})")]
     DepositCountMismatch { computed: u64, in_block: u64 },
     #[error("deposit proof is invalid: {deposit:?}")]
@@ -78,15 +69,8 @@ pub enum Error<P: Preset> {
     },
     #[error("no attesters slashed")]
     NoAttestersSlashed,
-    #[error("validator does not have Execution layer withdrawal credentials (validator: {index}, withdrawal credentials: {withdrawal_credentials}) ")]
-    NoExecutionWithdrawalCredentials {
-        index: ValidatorIndex,
-        withdrawal_credentials: H256,
-    },
     #[error("block parent root ({in_block:?}) does not match latest block header ({computed:?})")]
     ParentRootMismatch { computed: H256, in_block: H256 },
-    #[error("pending consolidation queue is full, no consolidations are allowed in the block")]
-    PendingConsolidationQueueFull,
     #[error("proposer (validator {index}) is slashed")]
     ProposerSlashed { index: ValidatorIndex },
     #[error("proposer index is incorrect (in_block: {in_block}, computed: {computed})")]
@@ -117,8 +101,6 @@ pub enum Error<P: Preset> {
     SlotNotLater { current: Slot, target: Slot },
     #[error("state root in block ({in_block:?}) does not match state ({computed:?})")]
     StateRootMismatch { computed: H256, in_block: H256 },
-    #[error("too little available consolidation churn limit, no consolidations are allowed in the block")]
-    TooLittleAvailableConsolidationChurnLimit,
     #[error(
         "too many blob KZG commitments (maximum: {}, in_block: {in_block})",
         P::MaxBlobsPerBlock::USIZE
@@ -126,13 +108,6 @@ pub enum Error<P: Preset> {
     TooManyBlockKzgCommitments { in_block: usize },
     #[error("validator {index} exited in epoch {exit_epoch}")]
     ValidatorAlreadyExited {
-        index: ValidatorIndex,
-        exit_epoch: Epoch,
-    },
-    #[error(
-        "validator exit has already been initiated (validator: {index}, exit epoch: {exit_epoch})"
-    )]
-    ValidatorExitAlreadyInitiated {
         index: ValidatorIndex,
         exit_epoch: Epoch,
     },

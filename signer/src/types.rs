@@ -193,7 +193,8 @@ impl<'block, P: Preset> SigningBlock<'block, P> {
             SigningBlock::Altair { block } => block.slot,
             SigningBlock::Bellatrix { block_header }
             | SigningBlock::Capella { block_header }
-            | SigningBlock::Deneb { block_header } => block_header.slot,
+            | SigningBlock::Deneb { block_header }
+            | SigningBlock::Electra { block_header } => block_header.slot,
         }
     }
 }

@@ -185,17 +185,17 @@ impl<P: Preset> StateCache<P> {
     }
 
     pub fn len(&self) -> Result<usize> {
-        self.all_state_map_locks()?
+        let lengths = self
+            .all_state_map_locks()?
             .into_iter()
             .map(|(block_root, state_map_lock)| {
                 self.try_lock_map(&state_map_lock, block_root)?
                     .len()
                     .pipe(Ok)
             })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .sum::<usize>()
-            .pipe(Ok)
+            .collect::<Result<Vec<_>>>()?;
+
+        lengths.into_iter().sum::<usize>().pipe(Ok)
     }
 
     pub fn prune(&self, last_pruned_slot: Slot) -> Result<()> {
