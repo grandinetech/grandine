@@ -1213,6 +1213,14 @@ mod spec_tests {
     }
 
     processing_tests! {
+        process_consolidation_request,
+        |config, state, consolidation_request, _| process_consolidation_request(config, state, consolidation_request),
+        "consolidation_request",
+        "consensus-spec-tests/tests/mainnet/electra/operations/consolidation_request/*/*",
+        "consensus-spec-tests/tests/minimal/electra/operations/consolidation_request/*/*",
+    }
+
+    processing_tests! {
         process_proposer_slashing,
         |config, state, proposer_slashing, _| {
             process_proposer_slashing(
