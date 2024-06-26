@@ -3,10 +3,12 @@ use std::error::Error as StdError;
 
 use anyhow::Error as AnyhowError;
 use axum::{
+    extract::rejection::JsonRejection,
     http::StatusCode,
     response::{IntoResponse, Response},
     Extension, Json,
 };
+use axum_extra::extract::QueryRejection;
 use bls::SignatureBytes;
 use futures::channel::oneshot::Canceled;
 use itertools::Itertools as _;
@@ -69,7 +71,7 @@ pub enum Error {
     #[error("invalid epoch")]
     InvalidEpoch(#[source] AnyhowError),
     #[error("invalid JSON body")]
-    InvalidJsonBody(#[source] AnyhowError),
+    InvalidJsonBody(#[source] JsonRejection),
     #[error("invalid peer ID")]
     InvalidPeerId(#[source] AnyhowError),
     #[error(
@@ -84,13 +86,13 @@ pub enum Error {
     #[error("invalid proposer slashing, it will never pass validation so it's rejected")]
     InvalidProposerSlashing(#[source] AnyhowError),
     #[error("invalid query string")]
-    InvalidQuery(#[source] AnyhowError),
+    InvalidQuery(#[source] QueryRejection),
     #[error("invalid voluntary exit, it will never pass validation so it's rejected")]
     InvalidSignedVoluntaryExit(#[source] AnyhowError),
     #[error("invalid sync committee messages")]
     InvalidSyncCommitteeMessages(Vec<IndexedError>),
-    #[error("invalid validator index")]
-    InvalidValidatorIndex(#[source] AnyhowError),
+    #[error("invalid validator indices")]
+    InvalidValidatorIndices(#[source] JsonRejection),
     #[error("invalid validator signatures")]
     InvalidValidatorSignatures(Vec<IndexedError>),
     #[error("invalid BLS to execution changes")]
@@ -158,18 +160,28 @@ impl Error {
         self.sources().format(": ")
     }
 
-    // `StdError::sources` is not stable as of Rust 1.77.2.
+    // `StdError::sources` is not stable as of Rust 1.78.0.
     fn sources(&self) -> impl Iterator<Item = &dyn StdError> {
-        let mut error: Option<&dyn StdError> = Some(self);
+        let first: &dyn StdError = self;
 
-        core::iter::from_fn(move || {
-            let source = error?.source();
-            core::mem::replace(&mut error, source)
-        })
+        let skip_duplicates = || match self {
+            Self::InvalidJsonBody(_) | Self::InvalidValidatorIndices(_) => first.source()?.source(),
+            Self::InvalidQuery(_) => first.source()?.source()?.source(),
+            _ => first.source(),
+        };
+
+        let mut next = skip_duplicates();
+
+        core::iter::once(first).chain(core::iter::from_fn(move || {
+            let source = next?.source();
+            core::mem::replace(&mut next, source)
+        }))
     }
 
-    const fn status_code(&self) -> StatusCode {
+    fn status_code(&self) -> StatusCode {
         match self {
+            Self::InvalidJsonBody(json_rejection)
+            | Self::InvalidValidatorIndices(json_rejection) => json_rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
             | Self::MatchingAttestationHeadBlockNotFound
@@ -191,7 +203,6 @@ impl Error {
             | Self::InvalidBlockId(_)
             | Self::InvalidContributionAndProofs(_)
             | Self::InvalidEpoch(_)
-            | Self::InvalidJsonBody(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidProposerSlashing(_)
@@ -201,7 +212,6 @@ impl Error {
             | Self::InvalidSyncCommitteeMessages(_)
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
-            | Self::InvalidValidatorIndex(_)
             | Self::InvalidValidatorSignatures(_)
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
@@ -266,6 +276,7 @@ struct EthErrorResponse<'error> {
 #[allow(clippy::needless_pass_by_value)]
 #[cfg(test)]
 mod tests {
+    use axum::{extract::rejection::MissingJsonContentType, Error as AxumError};
     use serde_json::{json, Result, Value};
     use test_case::test_case;
 
@@ -298,5 +309,35 @@ mod tests {
         let actual_json = serde_json::to_value(error.body())?;
         assert_eq!(actual_json, expected_json);
         Ok(())
+    }
+
+    // `axum::extract::rejection::JsonRejection` duplicates error sources.
+    // The underlying bug in `axum-core` was fixed in <https://github.com/tokio-rs/axum/pull/2030>.
+    // The fix was backported in <https://github.com/tokio-rs/axum/pull/2098> but not released.
+    #[test]
+    fn error_sources_does_not_yield_duplicates_from_json_rejection() {
+        let error = Error::InvalidJsonBody(JsonRejection::from(MissingJsonContentType::default()));
+
+        assert_eq!(
+            error.sources().map(ToString::to_string).collect_vec(),
+            [
+                "invalid JSON body",
+                "Expected request with `Content-Type: application/json`",
+            ],
+        );
+    }
+
+    // `axum_extra::extract::QueryRejection` and `axum::Error` duplicate error sources.
+    // `axum::Error` has not been fixed in any version yet.
+    // `axum::extract::rejection::QueryRejection` is even worse and harder to work around.
+    #[test]
+    fn error_sources_does_not_yield_triplicates_from_query_rejection() {
+        let axum_error = AxumError::new("error");
+        let error = Error::InvalidQuery(QueryRejection::FailedToDeserializeQueryString(axum_error));
+
+        assert_eq!(
+            error.sources().map(ToString::to_string).collect_vec(),
+            ["invalid query string", "error"],
+        );
     }
 }

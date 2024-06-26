@@ -821,7 +821,6 @@ pub fn get_consolidation_churn_limit<P: Preset>(
     get_balance_churn_limit(config, state) - get_activation_exit_churn_limit(config, state)
 }
 
-#[must_use]
 pub fn get_active_balance<P: Preset>(
     state: &impl BeaconState<P>,
     validator_index: ValidatorIndex,

@@ -351,6 +351,7 @@ fn try_main() -> Result<()> {
         network_config,
         storage_config,
         request_timeout,
+        state_cache_lock_timeout,
         unfinalized_states_in_memory,
         command,
         slashing_enabled,
@@ -403,6 +404,7 @@ fn try_main() -> Result<()> {
 
     let store_config = StoreConfig {
         max_empty_slots,
+        state_cache_lock_timeout,
         unfinalized_states_in_memory,
     };
 
@@ -562,7 +564,7 @@ fn ensure_ports_not_in_use(
         if !network_config.disable_quic_support {
             UdpSocket::bind((addr, quic_port)).context(Error::PortInUse {
                 port: quic_port,
-                service: "libp2p",
+                service: "quic",
                 option: "--quic-port",
             })?;
         }

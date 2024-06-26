@@ -839,13 +839,12 @@ fn apply_deposits<P: Preset>(
 
                 let validator = state.validators().get(validator_index)?;
 
-                if has_eth1_withdrawal_credential(validator) {
-                    if withdrawal_credentials
+                if has_eth1_withdrawal_credential(validator)
+                    && withdrawal_credentials
                         .into_iter()
                         .any(is_compounding_withdrawal_credential)
-                    {
-                        switch_to_compounding_validator(state, validator_index)?;
-                    }
+                {
+                    switch_to_compounding_validator(state, validator_index)?;
                 }
             }
         }
@@ -1026,6 +1025,7 @@ fn process_deposit_receipt<P: Preset>(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn process_consolidation<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,

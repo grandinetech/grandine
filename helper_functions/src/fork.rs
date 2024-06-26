@@ -500,7 +500,6 @@ pub fn upgrade_to_deneb<P: Preset>(
     }
 }
 
-#[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn upgrade_to_electra<P: Preset>(
     config: &Config,

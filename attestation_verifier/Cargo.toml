@@ -1,0 +1,24 @@
+[package]
+name = 'attestation_verifier'
+version = '0.1.0'
+edition.workspace = true
+authors = ['Grandine <info@grandine.io>']
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+dedicated_executor = { workspace = true }
+eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+prometheus_metrics = { workspace = true }
+rayon = { workspace = true }
+std_ext = { workspace = true }
+types = { workspace = true }

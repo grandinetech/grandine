@@ -1,6 +1,7 @@
 use core::num::NonZeroU64;
 
 use bls::{PublicKeyBytes, SignatureBytes};
+use execution_engine::PayloadId;
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, Size, SszHash, SszSize, SszWrite, WriteError, H256};
@@ -28,6 +29,21 @@ pub struct SyncCommitteeMember {
     pub validator_index: ValidatorIndex,
     pub public_key: PublicKeyBytes,
     pub subnets: BitVector<SyncCommitteeSubnetCount>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PayloadIdEntry {
+    Cached(PayloadId),
+    Live(PayloadId),
+}
+
+impl PayloadIdEntry {
+    #[must_use]
+    pub const fn id(self) -> PayloadId {
+        match self {
+            Self::Cached(payload_id) | Self::Live(payload_id) => payload_id,
+        }
+    }
 }
 
 #[derive(Deserialize)]

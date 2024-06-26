@@ -1,0 +1,18 @@
+[package]
+name = 'state_cache'
+version = '0.1.0'
+edition.workspace = true
+authors = ['Grandine <info@grandine.io>']
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+im = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+types = { workspace = true }

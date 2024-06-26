@@ -1,9 +1,12 @@
 avoid-breaking-exported-api = false
 doc-valid-idents = [
+    '..',
     'Eth1Data',
     'PoS',
     'PoW',
     'RocksDB',
+    'UPnP',
+    'Web3Signer',
 ]
 # There appears to be no way to disallow an entire module.
 # There is an issue for it at <https://github.com/rust-lang/rust-clippy/issues/9489>.

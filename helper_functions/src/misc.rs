@@ -516,7 +516,6 @@ pub fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeInde
     }
 }
 
-#[must_use]
 pub fn get_committee_indices<P: Preset>(
     committee_bits: BitVector<P::MaxCommitteesPerSlot>,
 ) -> impl Iterator<Item = CommitteeIndex> {

@@ -19,7 +19,7 @@ use axum::{
 use axum_extra::extract::Query;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
-use http_api_utils::BlockId;
+use http_api_utils::{BlockId, StateId};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
@@ -37,7 +37,10 @@ use types::{
 };
 use validator::ValidatorProposerData;
 
-use crate::{error::Error, state_id::StateId, validator_status::ValidatorId};
+use crate::{
+    error::Error,
+    validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
+};
 
 // This has multiple `FromRequest` impls to make error messages more specific.
 // They all use `FromStr`, whereas the one for `Path` uses `DeserializeOwned`.
@@ -158,7 +161,6 @@ impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
             .extract()
             .await
             .map(|Query(query)| Self(query))
-            .map_err(AnyhowError::msg)
             .map_err(Error::InvalidQuery)
     }
 }
@@ -175,8 +177,7 @@ impl<S> FromRequest<S, Body> for EthJson<Box<ProposerSlashing>> {
             .extract()
             .await
             .map(|Json(slashing)| Self(slashing))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidProposerSlashing)
+            .map_err(Error::InvalidJsonBody)
     }
 }
 
@@ -189,8 +190,7 @@ impl<S> FromRequest<S, Body> for EthJson<Box<SignedVoluntaryExit>> {
             .extract()
             .await
             .map(|Json(slashing)| Self(slashing))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidSignedVoluntaryExit)
+            .map_err(Error::InvalidJsonBody)
     }
 }
 
@@ -203,8 +203,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
             .extract()
             .await
             .map(|Json(slashing)| Self(slashing))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidAttesterSlashing)
+            .map_err(Error::InvalidJsonBody)
     }
 }
 
@@ -217,7 +216,6 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<Attestation<P>>>> {
             .extract()
             .await
             .map(|Json(attestation)| Self(attestation))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -231,7 +229,6 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<Value>> {
             .extract()
             .await
             .map(|Json(values)| Self(values))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -248,8 +245,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorIndex>> {
             .extract()
             .await
             .map(|Json(Wrapper(indices))| Self(indices))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidValidatorIndex)
+            .map_err(Error::InvalidValidatorIndices)
     }
 }
 
@@ -262,8 +258,20 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
             .extract()
             .await
             .map(|Json(indices)| Self(indices))
-            .map_err(AnyhowError::new)
-            .map_err(Error::InvalidValidatorId)
+            .map_err(Error::InvalidJsonBody)
+    }
+}
+
+#[async_trait]
+impl<S> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
+    type Rejection = Error;
+
+    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
+        request
+            .extract()
+            .await
+            .map(|Json(ids_and_statuses)| Self(ids_and_statuses))
+            .map_err(Error::InvalidJsonBody)
     }
 }
 
@@ -276,7 +284,6 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<SyncCommitteeSubscription>> {
             .extract()
             .await
             .map(|Json(subscription)| Self(subscription))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -290,13 +297,12 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<BeaconCommitteeSubscription>> {
             .extract()
             .await
             .map(|Json(subscription)| Self(subscription))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
 
 #[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Box<SignedAggregateAndProof<P>>>> {
+impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<SignedAggregateAndProof<P>>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -304,7 +310,6 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Box<SignedAggregateAndPr
             .extract()
             .await
             .map(|Json(aggregate_and_proof)| Self(aggregate_and_proof))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -318,7 +323,6 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SignedContributionAndPro
             .extract()
             .await
             .map(|Json(contribution_and_proof)| Self(contribution_and_proof))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -332,7 +336,6 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorProposerData>> {
             .extract()
             .await
             .map(|Json(proposer_data)| Self(proposer_data))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -346,7 +349,6 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<SignedValidatorRegistrationV1>> {
             .extract()
             .await
             .map(|Json(registrations)| Self(registrations))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }

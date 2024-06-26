@@ -57,6 +57,7 @@ unwrap_none = { workspace = true }
 validator = { workspace = true }
 
 [dev-dependencies]
+attestation_verifier = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }

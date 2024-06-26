@@ -43,7 +43,6 @@ pub enum Feature {
     CacheTargetStates,
     DebugEth1,
     DebugP2p,
-    DisableBlockVerificationPool,
     IgnoreAttestationsForUnknownBlocks,
     IgnoreFutureAttestations,
     InhibitApplicationRestart,

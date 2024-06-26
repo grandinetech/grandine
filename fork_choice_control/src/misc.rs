@@ -5,13 +5,13 @@ use clock::Tick;
 use educe::Educe;
 use eth2_libp2p::GossipId;
 use fork_choice_store::{
-    AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationOrigin,
-    BlobSidecarOrigin, BlockOrigin, ChainLink,
+    AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
+    AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink,
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
 use types::{
-    combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     phase0::primitives::ValidatorIndex,
     preset::Preset,
@@ -88,15 +88,11 @@ pub struct PendingChainLink<P: Preset> {
 
 #[derive(Debug)]
 pub struct PendingAggregateAndProof<P: Preset> {
-    pub aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+    pub aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
 }
 
-#[derive(Debug)]
-pub struct PendingAttestation<P: Preset> {
-    pub attestation: Arc<Attestation<P>>,
-    pub origin: AttestationOrigin<GossipId>,
-}
+pub type PendingAttestation<P> = AttestationItem<P, GossipId>;
 
 #[derive(Debug)]
 pub struct PendingBlobSidecar<P: Preset> {
@@ -111,10 +107,8 @@ pub struct VerifyAggregateAndProofResult<P: Preset> {
     pub origin: AggregateAndProofOrigin<GossipId>,
 }
 
-pub struct VerifyAttestationResult<P: Preset> {
-    pub result: Result<AttestationAction<P>>,
-    pub origin: AttestationOrigin<GossipId>,
-}
+pub type VerifyAttestationResult<P> =
+    Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>;
 
 #[allow(clippy::enum_variant_names)]
 #[derive(IntoStaticStr, Serialize)]

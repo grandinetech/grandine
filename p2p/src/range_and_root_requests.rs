@@ -138,12 +138,14 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
         let type_name = tynm::type_name::<Self>();
 
         metrics.set_collection_length(
+            module_path!(),
             &type_name,
             "requests_by_root",
             self.requests_by_root.cache_size(),
         );
 
         metrics.set_collection_length(
+            module_path!(),
             &type_name,
             "requests_by_range",
             self.requests_by_range.cache_size(),

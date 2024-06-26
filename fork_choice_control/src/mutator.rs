@@ -24,7 +24,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
 use drain_filter_polyfill::VecExt as _;
@@ -32,8 +32,9 @@ use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
-    AttestationOrigin, AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction,
-    BlockOrigin, ChainLink, PayloadAction, Store, ValidAttestation,
+    AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
+    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction,
+    StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -56,17 +57,20 @@ use types::{
 };
 
 use crate::{
-    messages::{MutatorMessage, P2pMessage, SubnetMessage, SyncMessage, ValidatorMessage},
+    block_processor::BlockProcessor,
+    messages::{
+        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
+        SyncMessage, ValidatorMessage,
+    },
     misc::{
         Delayed, MutatorRejectionReason, PendingAggregateAndProof, PendingAttestation,
         PendingBlobSidecar, PendingBlock, PendingChainLink, VerifyAggregateAndProofResult,
         VerifyAttestationResult, WaitingForCheckpointState,
     },
-    state_cache::StateCache,
     storage::Storage,
     tasks::{
-        AggregateAndProofTask, AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask,
-        CheckpointStateTask, PersistBlobSidecarsTask, PreprocessStateTask,
+        AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
+        PersistBlobSidecarsTask, PreprocessStateTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -75,10 +79,11 @@ use crate::{
 };
 
 #[allow(clippy::struct_field_names)]
-pub struct Mutator<P: Preset, E, W, AS, PS, NS, SS, VS> {
+pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
-    state_cache: Arc<StateCache<P, W>>,
+    state_cache: Arc<StateCacheProcessor<P>>,
+    block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
@@ -109,19 +114,23 @@ pub struct Mutator<P: Preset, E, W, AS, PS, NS, SS, VS> {
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
     api_tx: AS,
+    attestation_verifier_tx: TS,
     p2p_tx: PS,
+    pool_tx: LS,
     subnet_tx: NS,
     sync_tx: SS,
     validator_tx: VS,
 }
 
-impl<P, E, W, AS, PS, NS, SS, VS> Mutator<P, E, W, AS, PS, NS, SS, VS>
+impl<P, E, W, AS, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, AS, TS, PS, LS, NS, SS, VS>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
     W: Wait,
     AS: UnboundedSink<ApiMessage<P>>,
+    TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
+    LS: UnboundedSink<PoolMessage>,
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
@@ -129,7 +138,8 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         store_snapshot: Arc<ArcSwap<Store<P>>>,
-        state_cache: Arc<StateCache<P, W>>,
+        state_cache: Arc<StateCacheProcessor<P>>,
+        block_processor: Arc<BlockProcessor<P>>,
         execution_engine: E,
         storage: Arc<Storage<P>>,
         thread_pool: ThreadPool<P, E, W>,
@@ -137,7 +147,9 @@ where
         mutator_tx: Sender<MutatorMessage<P, W>>,
         mutator_rx: Receiver<MutatorMessage<P, W>>,
         api_tx: AS,
+        attestation_verifier_tx: TS,
         p2p_tx: PS,
+        pool_tx: LS,
         subnet_tx: NS,
         sync_tx: SS,
         validator_tx: VS,
@@ -146,6 +158,7 @@ where
             store: store_snapshot.load_full(),
             store_snapshot,
             state_cache,
+            block_processor,
             execution_engine,
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
@@ -158,7 +171,9 @@ where
             mutator_tx,
             mutator_rx,
             api_tx,
+            attestation_verifier_tx,
             p2p_tx,
+            pool_tx,
             subnet_tx,
             sync_tx,
             validator_tx,
@@ -233,8 +248,8 @@ where
                 } => {
                     self.handle_finish_persisting_blob_sidecars(wait_group, persisted_blob_ids);
                 }
-                MutatorMessage::PreprocessedBeaconState { block_root, state } => {
-                    self.handle_preprocessed_beacon_state(block_root, &state);
+                MutatorMessage::PreprocessedBeaconState { state } => {
+                    self.prepare_execution_payload_for_next_slot(&state);
                 }
                 MutatorMessage::NotifiedForkChoiceUpdate {
                     wait_group,
@@ -281,8 +296,9 @@ where
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
             // Other validations may be performed in parallel, but they take very little time.
-            let result = self.store.validate_block(
-                block.clone_arc(),
+            let result = self.block_processor.validate_block(
+                &self.store,
+                &block,
                 origin.state_root_policy(),
                 &self.execution_engine,
                 NullVerifier,
@@ -343,7 +359,7 @@ where
                             .blob_kzg_commitments()
                             .iter()
                             .copied()
-                            .map(helper_functions::misc::kzg_commitment_to_versioned_hash)
+                            .map(misc::kzg_commitment_to_versioned_hash)
                             .collect();
 
                         params = Some(ExecutionPayloadParams::Deneb {
@@ -374,6 +390,7 @@ where
         self.update_store_snapshot();
 
         ValidatorMessage::Tick(wait_group.clone(), tick).send(&self.validator_tx);
+        PoolMessage::Tick(tick).send(&self.pool_tx);
 
         if changes.is_slot_updated() {
             let slot = tick.slot;
@@ -384,6 +401,7 @@ where
                 self.retry_delayed(delayed, wait_group);
             }
 
+            PoolMessage::Slot(slot).send(&self.pool_tx);
             P2pMessage::Slot(slot).send(&self.p2p_tx);
             SubnetMessage::Slot(wait_group.clone(), slot).send(&self.subnet_tx);
 
@@ -747,10 +765,8 @@ where
     fn handle_attestation(
         &mut self,
         wait_group: &W,
-        verify_result: VerifyAttestationResult<P>,
+        result: VerifyAttestationResult<P>,
     ) -> Result<()> {
-        let VerifyAttestationResult { result, origin } = verify_result;
-
         match result {
             Ok(AttestationAction::Accept {
                 attestation,
@@ -760,20 +776,27 @@ where
                     metrics.register_mutator_attestation(&["accepted"]);
                 }
 
-                debug!("attestation accepted (attestation: {attestation:?}, origin: {origin:?})");
+                debug!("attestation accepted (attestation: {attestation:?})");
 
-                if origin.should_generate_event() {
-                    ApiMessage::AttestationEvent(attestation.clone_arc()).send(&self.api_tx);
+                if attestation.origin.should_generate_event() {
+                    ApiMessage::AttestationEvent(attestation.item.clone_arc()).send(&self.api_tx);
                 }
 
-                if origin.send_to_validator() {
-                    let attestation = attestation.clone_arc();
+                if attestation.origin.send_to_validator() {
+                    let attestation = attestation.item.clone_arc();
 
                     ValidatorMessage::ValidAttestation(wait_group.clone(), attestation)
                         .send(&self.validator_tx);
                 }
 
-                let is_from_block = origin.is_from_block();
+                let is_from_block = attestation.origin.is_from_block();
+
+                let AttestationItem {
+                    item: attestation,
+                    origin,
+                    ..
+                } = attestation;
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -797,12 +820,12 @@ where
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
-            Ok(AttestationAction::Ignore) => {
+            Ok(AttestationAction::Ignore(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["ignored"]);
                 }
 
-                let (gossip_id, sender) = origin.split();
+                let (gossip_id, sender) = attestation.origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
@@ -815,24 +838,14 @@ where
                     metrics.register_mutator_attestation(&["delayed_until_block"]);
                 }
 
-                let pending_attestation = PendingAttestation {
-                    attestation,
-                    origin,
-                };
-
-                self.delay_attestation_until_block(wait_group, pending_attestation, block_root);
+                self.delay_attestation_until_block(wait_group, attestation, block_root);
             }
             Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_slot"]);
                 }
 
-                let pending_attestation = PendingAttestation {
-                    attestation,
-                    origin,
-                };
-
-                self.delay_attestation_until_slot(wait_group, pending_attestation);
+                self.delay_attestation_until_slot(wait_group, attestation);
             }
             Ok(AttestationAction::WaitForTargetState(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -841,13 +854,8 @@ where
 
                 let checkpoint = attestation.data().target;
 
-                let pending_attestation = PendingAttestation {
-                    attestation,
-                    origin,
-                };
-
                 if self.store.contains_checkpoint_state(checkpoint) {
-                    self.retry_attestation(wait_group.clone(), pending_attestation);
+                    self.retry_attestation(wait_group.clone(), attestation);
                 } else {
                     let waiting = self
                         .waiting_for_checkpoint_states
@@ -856,7 +864,7 @@ where
 
                     let new = waiting.is_empty();
 
-                    waiting.attestations.push(pending_attestation);
+                    waiting.attestations.push(attestation);
 
                     if new {
                         self.spawn_checkpoint_state_task(wait_group.clone(), checkpoint);
@@ -868,16 +876,18 @@ where
                     metrics.register_mutator_attestation(&["rejected"]);
                 }
 
-                warn!("attestation rejected (error: {error}, origin: {origin:?})");
+                let source = error.to_string();
+                warn!("attestation rejected (error: {error:?})",);
 
-                let (gossip_id, sender) = origin.split();
+                let attestation = error.attestation();
+                let (gossip_id, sender) = attestation.origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidAttestation)
                         .send(&self.p2p_tx);
                 }
 
-                reply_to_http_api(sender, Err(error));
+                reply_to_http_api(sender, Err(anyhow!(source)));
             }
         }
 
@@ -899,7 +909,9 @@ where
     fn handle_block_attestations(
         &mut self,
         wait_group: &W,
-        results: Vec<Result<AttestationAction<P>>>,
+        results: Vec<
+            Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>,
+        >,
     ) -> Result<()> {
         let accepted = results
             .into_iter()
@@ -912,35 +924,17 @@ where
                     attesting_indices,
                     is_from_block: true,
                 }),
-                Ok(AttestationAction::Ignore) => None,
+                Ok(AttestationAction::Ignore(_)) => None,
                 Ok(AttestationAction::DelayUntilBlock(attestation, block_root)) => {
-                    self.delay_attestation_until_block(
-                        wait_group,
-                        PendingAttestation {
-                            attestation,
-                            origin: AttestationOrigin::Block,
-                        },
-                        block_root,
-                    );
+                    self.delay_attestation_until_block(wait_group, attestation, block_root);
                     None
                 }
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
-                    self.delay_attestation_until_slot(
-                        wait_group,
-                        PendingAttestation {
-                            attestation,
-                            origin: AttestationOrigin::Block,
-                        },
-                    );
+                    self.delay_attestation_until_slot(wait_group, attestation);
                     None
                 }
-                Ok(AttestationAction::WaitForTargetState(attestation)) => {
-                    let checkpoint = attestation.data().target;
-
-                    let pending_attestation = PendingAttestation {
-                        attestation,
-                        origin: AttestationOrigin::Block,
-                    };
+                Ok(AttestationAction::WaitForTargetState(pending_attestation)) => {
+                    let checkpoint = pending_attestation.data().target;
 
                     if self.store.contains_checkpoint_state(checkpoint) {
                         self.retry_attestation(wait_group.clone(), pending_attestation)
@@ -1148,14 +1142,6 @@ where
                 metrics: self.metrics.clone(),
             });
         }
-    }
-
-    fn handle_preprocessed_beacon_state(&mut self, block_root: H256, state: &Arc<BeaconState<P>>) {
-        self.store_mut()
-            .insert_preprocessed_state(block_root, state.clone_arc());
-        self.update_store_snapshot();
-
-        self.prepare_execution_payload_for_next_slot(state);
     }
 
     fn handle_notified_forkchoice_update_result(
@@ -1806,7 +1792,7 @@ where
         wait_group: &W,
         pending_attestation: PendingAttestation<P>,
     ) {
-        let slot = pending_attestation.attestation.data().slot;
+        let slot = pending_attestation.slot();
 
         if slot <= self.store.slot() {
             self.retry_attestation(wait_group.clone(), pending_attestation);
@@ -1822,7 +1808,7 @@ where
             ));
 
             self.delayed_until_slot
-                .entry(pending_attestation.attestation.data().slot)
+                .entry(pending_attestation.slot())
                 .or_default()
                 .attestations
                 .push(pending_attestation);
@@ -1910,6 +1896,7 @@ where
 
         self.spawn(BlockTask {
             store_snapshot: self.owned_store(),
+            block_processor: self.block_processor.clone_arc(),
             execution_engine: self.execution_engine.clone(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
@@ -1920,30 +1907,24 @@ where
         });
     }
 
-    fn retry_attestation(&self, wait_group: W, pending_attestation: PendingAttestation<P>) {
-        debug!("retrying delayed attestation: {pending_attestation:?}");
+    fn retry_attestation(&self, wait_group: W, attestation: PendingAttestation<P>) {
+        debug!("retrying delayed attestation: {attestation:?}");
 
-        let PendingAttestation {
-            attestation,
-            origin,
-        } = pending_attestation;
-
-        if let Some(subnet_id) = origin.subnet_id() {
-            if let Some(gossip_id) = origin.gossip_id_ref() {
-                P2pMessage::ReverifyGossipAttestation(attestation, subnet_id, gossip_id.clone())
-                    .send(&self.p2p_tx);
-                return;
+        if attestation.verify_signatures() {
+            AttestationVerifierMessage::Attestation {
+                wait_group,
+                attestation,
             }
+            .send(&self.attestation_verifier_tx);
+        } else {
+            self.spawn(AttestationTask {
+                store_snapshot: self.owned_store(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group,
+                attestation,
+                metrics: self.metrics.clone(),
+            });
         }
-
-        self.spawn(AttestationTask {
-            store_snapshot: self.owned_store(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            attestation,
-            origin,
-            metrics: self.metrics.clone(),
-        });
     }
 
     fn retry_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
@@ -1964,14 +1945,12 @@ where
             origin,
         } = pending_aggregate_and_proof;
 
-        self.spawn(AggregateAndProofTask {
-            store_snapshot: self.owned_store(),
-            mutator_tx: self.owned_mutator_tx(),
+        AttestationVerifierMessage::AggregateAndProof {
             wait_group,
             aggregate_and_proof,
             origin,
-            metrics: self.metrics.clone(),
-        });
+        }
+        .send(&self.attestation_verifier_tx);
     }
 
     fn retry_blob_sidecar(&self, wait_group: W, pending_blob_sidecar: PendingBlobSidecar<P>) {
@@ -2008,7 +1987,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.77.2.
+        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.78.0.
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
@@ -2045,8 +2024,7 @@ where
             gossip_ids.extend(
                 attestations
                     .drain_filter(|pending| {
-                        let epoch = pending.attestation.data().target.epoch;
-
+                        let epoch = pending.data().target.epoch;
                         epoch < previous_epoch
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
@@ -2082,7 +2060,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.77.2.
+        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.78.0.
         self.waiting_for_checkpoint_states
             .retain(|target, waiting| {
                 let prune = target.epoch < finalized_epoch;
@@ -2168,6 +2146,7 @@ where
 
     fn spawn_checkpoint_state_task(&self, wait_group: W, checkpoint: Checkpoint) {
         self.spawn(CheckpointStateTask {
+            store_snapshot: self.owned_store(),
             state_cache: self.state_cache.clone_arc(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
@@ -2182,7 +2161,9 @@ where
         }
 
         self.spawn(PreprocessStateTask {
+            store_snapshot: self.owned_store(),
             state_cache: self.state_cache.clone_arc(),
+            mutator_tx: self.owned_mutator_tx(),
             head_block_root: self.store.head().block_root,
             next_slot: self.store.slot() + 1,
             metrics: self.metrics.clone(),
@@ -2302,12 +2283,14 @@ where
             let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block",
                 self.delayed_until_block.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block_blocks",
                 self.delayed_until_block
@@ -2317,6 +2300,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block_attestations",
                 self.delayed_until_block
@@ -2326,6 +2310,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_block_aggregates",
                 self.delayed_until_block
@@ -2335,12 +2320,14 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot",
                 self.delayed_until_slot.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot_blocks",
                 self.delayed_until_slot
@@ -2350,6 +2337,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot_attestations",
                 self.delayed_until_slot
@@ -2359,6 +2347,7 @@ where
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "delayed_until_slot_aggregates",
                 self.delayed_until_slot
@@ -2367,8 +2356,19 @@ where
                     .sum(),
             );
 
-            metrics.set_collection_length(&type_name, "high_priority_tasks", high_priority_tasks);
-            metrics.set_collection_length(&type_name, "low_priority_tasks", low_priority_tasks);
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "high_priority_tasks",
+                high_priority_tasks,
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "low_priority_tasks",
+                low_priority_tasks,
+            );
 
             self.store.track_collection_metrics(metrics);
         }

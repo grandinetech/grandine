@@ -4,16 +4,18 @@ use core::{
 };
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Error as AnyhowError, Result};
 use derive_more::DebugCustom;
 use educe::Educe;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
+use serde::{Serialize, Serializer};
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
+use thiserror::Error;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
     combined::{
@@ -267,15 +269,23 @@ impl BlockOrigin {
 #[derive(Debug, AsRefStr)]
 pub enum AggregateAndProofOrigin<I> {
     Gossip(I),
-    GossipBatch(I),
     Api(OneshotSender<Result<ValidationOutcome>>),
+}
+
+impl Serialize for AggregateAndProofOrigin<GossipId> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
 }
 
 impl<I> AggregateAndProofOrigin<I> {
     #[must_use]
     pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
         match self {
-            Self::Gossip(gossip_id) | Self::GossipBatch(gossip_id) => (Some(gossip_id), None),
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, Some(sender)),
         }
     }
@@ -283,7 +293,7 @@ impl<I> AggregateAndProofOrigin<I> {
     #[must_use]
     pub fn gossip_id(self) -> Option<I> {
         match self {
-            Self::Gossip(gossip_id) | Self::GossipBatch(gossip_id) => Some(gossip_id),
+            Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,
         }
     }
@@ -291,7 +301,7 @@ impl<I> AggregateAndProofOrigin<I> {
     #[must_use]
     pub const fn gossip_id_ref(&self) -> Option<&I> {
         match self {
-            Self::Gossip(gossip_id) | Self::GossipBatch(gossip_id) => Some(gossip_id),
+            Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,
         }
     }
@@ -300,14 +310,13 @@ impl<I> AggregateAndProofOrigin<I> {
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,
-            Self::GossipBatch(_) => false,
         }
     }
 
     #[must_use]
     pub const fn send_to_validator(&self) -> bool {
         match self {
-            Self::Gossip(_) | Self::GossipBatch(_) | Self::Api(_) => true,
+            Self::Gossip(_) | Self::Api(_) => true,
         }
     }
 
@@ -316,18 +325,90 @@ impl<I> AggregateAndProofOrigin<I> {
     pub const fn metrics_label(&self) -> &str {
         match self {
             Self::Gossip(_) => "Gossip",
-            Self::GossipBatch(_) => "GossipBatch",
             Self::Api(_) => "Api",
         }
     }
 }
 
+#[derive(Debug)]
+pub struct AttestationItem<P: Preset, I> {
+    pub item: Arc<Attestation<P>>,
+    pub origin: AttestationOrigin<I>,
+    pub signature_status: SignatureStatus,
+}
+
+impl<P: Preset, I> AttestationItem<P, I> {
+    #[must_use]
+    pub fn unverified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+        Self {
+            item,
+            origin,
+            signature_status: SignatureStatus::Unverified,
+        }
+    }
+
+    #[must_use]
+    pub fn verified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+        Self {
+            item,
+            origin,
+            signature_status: SignatureStatus::Verified,
+        }
+    }
+
+    #[must_use]
+    pub fn into_verified(self) -> Self {
+        let Self { item, origin, .. } = self;
+
+        Self {
+            item,
+            origin,
+            signature_status: SignatureStatus::Verified,
+        }
+    }
+
+    #[must_use]
+    pub fn verify_signatures(&self) -> bool {
+        !self.signature_status.is_verified() && self.origin.verify_signatures()
+    }
+
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        self.data().slot
+    }
+
+    #[must_use]
+    pub fn data(&self) -> AttestationData {
+        self.item.data()
+    }
+
+    #[must_use]
+    pub fn item(&self) -> Arc<Attestation<P>> {
+        self.item.clone_arc()
+    }
+}
+
 #[derive(Debug, AsRefStr)]
+pub enum SignatureStatus {
+    Verified,
+    Unverified,
+}
+
+impl SignatureStatus {
+    #[must_use]
+    pub const fn is_verified(&self) -> bool {
+        matches!(self, Self::Verified)
+    }
+}
+
+#[derive(Debug, AsRefStr, Serialize)]
 pub enum AttestationOrigin<I> {
     Gossip(SubnetId, I),
-    GossipBatch(SubnetId, I),
     Own(SubnetId),
-    Api(SubnetId, OneshotSender<Result<ValidationOutcome>>),
+    Api(
+        SubnetId,
+        #[serde(skip)] OneshotSender<Result<ValidationOutcome>>,
+    ),
     Block,
     // Some test cases in `consensus-spec-tests` contain data that cannot occur in normal operation.
     // `fork_choice` test cases contain bare aggregate attestations.
@@ -339,7 +420,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
         match self {
-            Self::Gossip(_, gossip_id) | Self::GossipBatch(_, gossip_id) => (Some(gossip_id), None),
+            Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(_, sender) => (None, Some(sender)),
             Self::Own(_) | Self::Block | Self::Test => (None, None),
         }
@@ -348,10 +429,9 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn subnet_id(&self) -> Option<SubnetId> {
         match *self {
-            Self::Gossip(subnet_id, _)
-            | Self::GossipBatch(subnet_id, _)
-            | Self::Own(subnet_id)
-            | Self::Api(subnet_id, _) => Some(subnet_id),
+            Self::Gossip(subnet_id, _) | Self::Own(subnet_id) | Self::Api(subnet_id, _) => {
+                Some(subnet_id)
+            }
             Self::Block | Self::Test => None,
         }
     }
@@ -359,7 +439,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub fn gossip_id(self) -> Option<I> {
         match self {
-            Self::Gossip(_, gossip_id) | Self::GossipBatch(_, gossip_id) => Some(gossip_id),
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
             _ => None,
         }
     }
@@ -367,7 +447,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn gossip_id_ref(&self) -> Option<&I> {
         match self {
-            Self::Gossip(_, gossip_id) | Self::GossipBatch(_, gossip_id) => Some(gossip_id),
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
             _ => None,
         }
     }
@@ -380,11 +460,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn validate_as_gossip(&self) -> bool {
         match self {
-            Self::Gossip(_, _)
-            | Self::GossipBatch(_, _)
-            | Self::Own(_)
-            | Self::Api(_, _)
-            | Self::Test => true,
+            Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) | Self::Test => true,
             Self::Block => false,
         }
     }
@@ -392,7 +468,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn must_be_singular(&self) -> bool {
         match self {
-            Self::Gossip(_, _) | Self::GossipBatch(_, _) | Self::Own(_) | Self::Api(_, _) => true,
+            Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) => true,
             Self::Block | Self::Test => false,
         }
     }
@@ -403,10 +479,10 @@ impl<I> AttestationOrigin<I> {
     }
 
     #[must_use]
-    pub fn validate_indexed(&self) -> bool {
+    pub fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Api(_, _) | Self::Test => true,
-            Self::GossipBatch(_, _) | Self::Block => false,
+            Self::Block => false,
             Self::Own(_) => !Feature::TrustOwnAttestationSignatures.is_enabled(),
         }
     }
@@ -414,7 +490,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn send_to_validator(&self) -> bool {
         match self {
-            Self::Gossip(_, _) | Self::GossipBatch(_, _) | Self::Api(_, _) => true,
+            Self::Gossip(_, _) | Self::Api(_, _) => true,
             Self::Own(_) | Self::Block | Self::Test => false,
         }
     }
@@ -424,7 +500,6 @@ impl<I> AttestationOrigin<I> {
     pub const fn metrics_label(&self) -> &str {
         match self {
             Self::Gossip(_, _) => "Gossip",
-            Self::GossipBatch(_, _) => "GossipBatch",
             Self::Own(_) => "Own",
             Self::Api(_, _) => "Api",
             Self::Block => "Block",
@@ -497,25 +572,48 @@ pub enum BlockAction<P: Preset> {
 
 pub enum AggregateAndProofAction<P: Preset> {
     Accept {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         attesting_indices: AttestingIndices<P>,
         is_superset: bool,
     },
     Ignore,
-    DelayUntilBlock(Box<SignedAggregateAndProof<P>>, H256),
-    DelayUntilSlot(Box<SignedAggregateAndProof<P>>),
-    WaitForTargetState(Box<SignedAggregateAndProof<P>>),
+    DelayUntilBlock(Arc<SignedAggregateAndProof<P>>, H256),
+    DelayUntilSlot(Arc<SignedAggregateAndProof<P>>),
+    WaitForTargetState(Arc<SignedAggregateAndProof<P>>),
 }
 
-pub enum AttestationAction<P: Preset> {
+pub enum AttestationAction<P: Preset, I> {
     Accept {
-        attestation: Arc<Attestation<P>>,
+        attestation: AttestationItem<P, I>,
         attesting_indices: AttestingIndices<P>,
     },
-    Ignore,
-    DelayUntilBlock(Arc<Attestation<P>>, H256),
-    DelayUntilSlot(Arc<Attestation<P>>),
-    WaitForTargetState(Arc<Attestation<P>>),
+    Ignore(AttestationItem<P, I>),
+    DelayUntilBlock(AttestationItem<P, I>, H256),
+    DelayUntilSlot(AttestationItem<P, I>),
+    WaitForTargetState(AttestationItem<P, I>),
+}
+
+impl<P: Preset, I> AttestationAction<P, I> {
+    #[must_use]
+    pub fn into_verified(self) -> Self {
+        match self {
+            Self::Accept {
+                attestation,
+                attesting_indices,
+            } => Self::Accept {
+                attestation: attestation.into_verified(),
+                attesting_indices,
+            },
+            Self::Ignore(attestation) => Self::Ignore(attestation.into_verified()),
+            Self::DelayUntilBlock(attestation, block_root) => {
+                Self::DelayUntilBlock(attestation.into_verified(), block_root)
+            }
+            Self::DelayUntilSlot(attestation) => Self::DelayUntilSlot(attestation.into_verified()),
+            Self::WaitForTargetState(attestation) => {
+                Self::WaitForTargetState(attestation.into_verified())
+            }
+        }
+    }
 }
 
 pub enum BlobSidecarAction<P: Preset> {
@@ -709,4 +807,35 @@ pub struct LatestMessage {
     // This is named differently than in `consensus-specs` to avoid confusion with FFG vote roots.
     // This is the LMD GHOST vote root and it corresponds to `AttestationData.beacon_block_root`.
     pub beacon_block_root: H256,
+}
+
+#[derive(Error, Debug)]
+pub enum AttestationValidationError<P: Preset, I> {
+    #[error(
+        "singular attestation published on incorrect subnet \
+         (attestation: {attestation:?}, expected: {expected}, actual: {actual})"
+    )]
+    SingularAttestationOnIncorrectSubnet {
+        attestation: AttestationItem<P, I>,
+        expected: SubnetId,
+        actual: SubnetId,
+    },
+    #[error("singular attestation has multiple aggregation bits set: {attestation:?}")]
+    SingularAttestationHasMultipleAggregationBitsSet { attestation: AttestationItem<P, I> },
+    #[error("singular attestation validation error: {attestation:?} {source:}")]
+    Other {
+        source: AnyhowError,
+        attestation: AttestationItem<P, I>,
+    },
+}
+
+impl<P: Preset, I> AttestationValidationError<P, I> {
+    #[must_use]
+    pub fn attestation(self) -> AttestationItem<P, I> {
+        match self {
+            Self::SingularAttestationOnIncorrectSubnet { attestation, .. }
+            | Self::SingularAttestationHasMultipleAggregationBitsSet { attestation }
+            | Self::Other { attestation, .. } => attestation,
+        }
+    }
 }

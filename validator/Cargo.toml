@@ -7,9 +7,10 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
-axum = { workspace = true }
 anyhow = { workspace = true }
 arithmetic = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 cached = { workspace = true }

@@ -79,7 +79,6 @@ pub fn get_indexed_attestation<P: Preset>(
 }
 
 // > Return the set of attesting indices corresponding to ``aggregation_bits`` and ``committee_bits``.
-#[must_use]
 pub fn get_attesting_indices<P: Preset>(
     state: &impl BeaconState<P>,
     attestation: &Attestation<P>,

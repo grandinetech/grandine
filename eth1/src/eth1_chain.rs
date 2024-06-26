@@ -169,6 +169,7 @@ impl Eth1Chain {
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         metrics.set_collection_length(
+            module_path!(),
             &tynm::type_name::<Self>(),
             "unfinalized_blocks",
             self.unfinalized_blocks

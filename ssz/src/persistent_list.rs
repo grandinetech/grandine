@@ -568,6 +568,13 @@ impl<T, B: BundleSize<T>> Node<T, B> {
 
         loop {
             match node {
+                // False positive. See:
+                // - <https://github.com/rust-lang/rust-clippy/issues/12444>
+                // - <https://github.com/rust-lang/rust-clippy/issues/12460>
+                // - <https://github.com/rust-lang/rust-clippy/issues/12467>
+                // - <https://github.com/rust-lang/rust-clippy/issues/12749>
+                // - <https://github.com/rust-lang/rust-clippy/issues/12757>
+                #[allow(clippy::assigning_clones)]
                 Self::Internal {
                     left, left_height, ..
                 } if B::depth_of_length(length) <= *left_height => {

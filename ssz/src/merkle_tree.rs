@@ -237,7 +237,7 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
         // ```
         // See <https://oeis.org/A003817>.
         //
-        // `usize::saturating_shr` does not exist as of Rust 1.77.2.
+        // `usize::saturating_shr` does not exist as of Rust 1.78.0.
         let filled_left_subtree = usize::MAX
             .checked_shr(chunk_indices.start.leading_ones())
             .unwrap_or_default();

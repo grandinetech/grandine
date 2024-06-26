@@ -18,14 +18,14 @@ pub enum Error<P: Preset> {
     AttestationFromMultipleCommittees { attestation: Arc<Attestation<P>> },
     #[error("aggregate attestation has no aggregation bits set: {aggregate_and_proof:?}")]
     AggregateAttestationHasNoAggregationBitsSet {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error(
         "aggregator is not in committee \
          (aggregate_and_proof: {aggregate_and_proof:?}, committee: {committee:?})"
     )]
     AggregatorNotInCommittee {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         committee: Box<[ValidatorIndex]>,
     },
     #[error(
@@ -77,27 +77,16 @@ pub enum Error<P: Preset> {
     },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("LMD GHOST vote is inconsistent with FFG vote target (attestation: {attestation:?})")]
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
-    #[error(
-        "singular attestation published on incorrect subnet \
-         (attestation: {attestation:?}, expected: {expected}, actual: {actual})"
-    )]
-    SingularAttestationOnIncorrectSubnet {
-        attestation: Arc<Attestation<P>>,
-        expected: SubnetId,
-        actual: SubnetId,
-    },
-    #[error("singular attestation has multiple aggregation bits set: {attestation:?}")]
-    SingularAttestationHasMultipleAggregationBitsSet { attestation: Arc<Attestation<P>> },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(
@@ -119,7 +108,7 @@ pub enum Error<P: Preset> {
     },
     #[error("validator is not an aggregator: {aggregate_and_proof:?}")]
     ValidatorNotAggregator {
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
 }
 

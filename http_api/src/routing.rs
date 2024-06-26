@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use axum::{
-    extract::{FromRef, State},
+    extract::{DefaultBodyLimit, FromRef, State},
     routing::{get, patch, post},
     Json, Router,
 };
@@ -30,18 +30,18 @@ use crate::{
     standard::{
         beacon_events, beacon_heads, beacon_state, blob_sidecars, block, block_attestations,
         block_headers, block_id_headers, block_rewards, block_root, config_spec, debug_fork_choice,
-        deposit_contract, expected_withdrawals, fork_schedule, genesis, node_health, node_identity,
-        node_peer, node_peer_count, node_peers, node_syncing_status, node_version,
-        pool_attestations, pool_attester_slashings, pool_bls_to_execution_changes,
-        pool_proposer_slashings, pool_voluntary_exits, publish_blinded_block, publish_block,
-        publish_block_v2, state_committees, state_finality_checkpoints, state_fork, state_randao,
-        state_root, state_sync_committees, state_validator, state_validator_balances,
-        state_validators, submit_pool_attestations, submit_pool_attester_slashing,
-        submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
-        submit_pool_sync_committees, submit_pool_voluntary_exit, sync_committee_rewards,
-        validator_aggregate_attestation, validator_attestation_data, validator_attester_duties,
-        validator_beacon_committee_selections, validator_blinded_block, validator_block,
-        validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
+        deposit_contract, expected_withdrawals, fork_schedule, genesis, get_state_validators,
+        node_health, node_identity, node_peer, node_peer_count, node_peers, node_syncing_status,
+        node_version, pool_attestations, pool_attester_slashings, pool_bls_to_execution_changes,
+        pool_proposer_slashings, pool_voluntary_exits, post_state_validators,
+        publish_blinded_block, publish_block, publish_block_v2, state_committees,
+        state_finality_checkpoints, state_fork, state_randao, state_root, state_sync_committees,
+        state_validator, state_validator_balances, submit_pool_attestations,
+        submit_pool_attester_slashing, submit_pool_bls_to_execution_change,
+        submit_pool_proposer_slashing, submit_pool_sync_committees, submit_pool_voluntary_exit,
+        sync_committee_rewards, validator_aggregate_attestation, validator_attestation_data,
+        validator_attester_duties, validator_beacon_committee_selections, validator_blinded_block,
+        validator_block, validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_publish_aggregate_and_proofs,
         validator_publish_contributions_and_proofs, validator_register_validator,
         validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
@@ -217,6 +217,7 @@ pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
         .merge(eth_v1_validator_routes(state.clone()))
         .merge(eth_v2_validator_routes(state.clone()))
         .merge(eth_v3_validator_routes(state.clone()))
+        .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
 
@@ -333,7 +334,11 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         )
         .route(
             "/eth/v1/beacon/states/:state_id/validators",
-            get(state_validators),
+            get(get_state_validators),
+        )
+        .route(
+            "/eth/v1/beacon/states/:state_id/validators",
+            post(post_state_validators),
         )
         .route(
             "/eth/v1/beacon/states/:state_id/validators/:validator_id",

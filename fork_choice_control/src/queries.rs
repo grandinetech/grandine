@@ -5,19 +5,21 @@ use anyhow::{bail, ensure, Result};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
-use fork_choice_store::{AggregateAndProofOrigin, AttestationOrigin, ChainLink, Segment, Store};
+use fork_choice_store::{
+    AggregateAndProofOrigin, AttestationItem, ChainLink, Segment, StateCacheProcessor, Store,
+};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
 use types::{
-    combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
-        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, UnixSeconds, H256},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -25,9 +27,10 @@ use types::{
 
 use crate::{
     controller::Controller,
+    messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
-    state_cache::StateCache,
     storage::Storage,
+    unbounded_sink::UnboundedSink,
     wait::Wait,
 };
 
@@ -41,10 +44,11 @@ use ::{clock::Tick, types::phase0::consts::GENESIS_SLOT};
 
 // Some of the methods defined here may take a while to execute.
 // Do not call them directly in `async` tasks. Use something like `tokio::task::spawn_blocking`.
-impl<P, E, W> Controller<P, E, W>
+impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
     #[must_use]
@@ -460,7 +464,11 @@ where
     }
 
     pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
-        self.snapshot().preprocessed_state_at_current_slot()
+        let store = self.store_snapshot();
+        let head = store.head();
+
+        self.state_cache()
+            .state_at_slot(&store, head.block_root, store.slot())
     }
 
     pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
@@ -468,7 +476,7 @@ where
         let head = store.head();
 
         self.state_cache()
-            .state_at_slot(head.block_root, store.slot() + 1)
+            .state_at_slot(&store, head.block_root, store.slot() + 1)
     }
 
     // The `block_root` and `state` parameters are needed
@@ -478,12 +486,19 @@ where
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
-        if let Some(state) = self.state_cache().try_state_at_slot(block_root, slot)? {
+        let store = self.store_snapshot();
+
+        if let Some(state) = self
+            .state_cache()
+            .try_state_at_slot(&store, block_root, slot)?
+        {
             return Ok(state);
         }
 
         if let Some(state) = self.storage().state_post_block(block_root)? {
-            return self.state_cache().process_slots(state, block_root, slot);
+            return self
+                .state_cache()
+                .process_slots(&store, state, block_root, slot);
         }
 
         bail!(Error::StateNotFound { block_root })
@@ -509,7 +524,8 @@ where
 
         let state = self
             .state_cache()
-            .state_at_slot(head.block_root, requested_slot)?;
+            .state_at_slot(&store, head.block_root, requested_slot)
+            .unwrap_or_else(|_| head.state(&store));
 
         Ok(WithStatus {
             value: state,
@@ -524,7 +540,7 @@ where
     }
 
     #[must_use]
-    pub fn snapshot(&self) -> Snapshot<P, W> {
+    pub fn snapshot(&self) -> Snapshot<P> {
         Snapshot {
             store_snapshot: self.store_snapshot(),
             state_cache: self.state_cache().clone_arc(),
@@ -534,10 +550,11 @@ where
 }
 
 #[cfg(test)]
-impl<P, E, W> Controller<P, E, W>
+impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
     #[must_use]
@@ -697,15 +714,15 @@ pub struct BlockWithRoot<P: Preset> {
 /// [docs]: https://docs.rs/rocksdb/0.18.0/rocksdb/struct.SnapshotWithThreadMode.html
 /// [wiki]: https://github.com/facebook/rocksdb/wiki/Snapshot/e09da0053d05583919354cfaf834b8e8edd97be8
 #[allow(clippy::struct_field_names)]
-pub struct Snapshot<'storage, P: Preset, W> {
+pub struct Snapshot<'storage, P: Preset> {
     // Use a `Guard` instead of an owned snapshot unlike in tasks based on the intuition that
     // `Snapshot`s will be less common than tasks.
     store_snapshot: Guard<Arc<Store<P>>>,
-    state_cache: Arc<StateCache<P, W>>,
+    state_cache: Arc<StateCacheProcessor<P>>,
     storage: &'storage Storage<P>,
 }
 
-impl<P: Preset, W> Snapshot<'_, P, W> {
+impl<P: Preset> Snapshot<'_, P> {
     // TODO(Grandine Team): `Snapshot::nonempty_slots` only uses data stored in memory.
     //                      It's enough for builder circuit breaking, but that may change if we
     //                      redesign the fork choice store to keep less data in memory.
@@ -725,7 +742,8 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        self.state_cache.try_state_at_slot(root, slot)
+        self.state_cache
+            .try_state_at_slot(&self.store_snapshot, root, slot)
     }
 
     #[must_use]
@@ -779,34 +797,23 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
     }
 
     #[must_use]
-    pub fn prevalidate_gossip_aggregate_and_proof(
+    pub fn prevalidate_verifier_aggregate_and_proof(
         &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
-        gossip_id: GossipId,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
     ) -> VerifyAggregateAndProofResult<P> {
-        let origin = AggregateAndProofOrigin::GossipBatch(gossip_id);
-
-        let result = self
-            .store_snapshot
-            .validate_aggregate_and_proof(aggregate_and_proof, &origin);
+        let result =
+            self.store_snapshot
+                .validate_aggregate_and_proof(aggregate_and_proof, &origin, true);
 
         VerifyAggregateAndProofResult { result, origin }
     }
 
-    #[must_use]
-    pub fn prevalidate_gossip_attestation(
+    pub fn prevalidate_verifier_attestation(
         &self,
-        attestation: Arc<Attestation<P>>,
-        subnet_id: SubnetId,
-        gossip_id: GossipId,
+        attestation: AttestationItem<P, GossipId>,
     ) -> VerifyAttestationResult<P> {
-        let origin = AttestationOrigin::GossipBatch(subnet_id, gossip_id);
-
-        let result = self
-            .store_snapshot
-            .validate_attestation(attestation, &origin);
-
-        VerifyAttestationResult { result, origin }
+        self.store_snapshot.validate_attestation(attestation, true)
     }
 
     // TODO(Grandine Team): If `slot` is empty, this advances the next most recent state to `slot`,
@@ -821,7 +828,7 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
             let state = self
                 .state_cache
-                .state_at_slot(chain_link.block_root, slot)?;
+                .state_at_slot(store, chain_link.block_root, slot)?;
 
             return Ok(Some(WithStatus {
                 value: state,
@@ -836,13 +843,6 @@ impl<P: Preset, W> Snapshot<'_, P, W> {
         };
 
         Ok(None)
-    }
-
-    pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
-        let store = &self.store_snapshot;
-
-        self.state_cache
-            .state_at_slot(store.head().block_root, store.slot())
     }
 
     // This returns blocks ordered oldest to newest, as mandated for `BeaconBlocksByRange`.

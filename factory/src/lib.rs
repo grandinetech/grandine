@@ -12,6 +12,7 @@ use deposit_tree::DepositTree;
 use helper_functions::{
     accessors, misc,
     signing::{RandaoEpoch, SignForSingleFork as _, SignForSingleForkAtSlot as _},
+    slot_report::NullSlotReport,
 };
 use itertools::{Either, Itertools as _};
 use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
@@ -541,7 +542,13 @@ fn block<P: Preset>(
 
     let mut post_state = advanced_state;
 
-    combined::process_untrusted_block(config, post_state.make_mut(), &without_state_root, true)?;
+    combined::process_untrusted_block(
+        config,
+        post_state.make_mut(),
+        &without_state_root,
+        NullSlotReport,
+        true,
+    )?;
 
     let message = without_state_root.with_state_root(post_state.hash_tree_root());
     let signature = message.sign(config, &post_state, &secret_key).into();

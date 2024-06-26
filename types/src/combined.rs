@@ -701,6 +701,13 @@ impl<P: Preset> From<BeaconBlock<P>> for SignedBeaconBlock<P> {
     }
 }
 
+impl<P: Preset> From<SignedBeaconBlock<P>> for BeaconBlock<P> {
+    fn from(signed_block: SignedBeaconBlock<P>) -> Self {
+        let (message, _) = signed_block.split();
+        message
+    }
+}
+
 #[derive(Clone, Debug, From, Deserialize, Serialize)]
 #[serde(bound = "", untagged)]
 #[cfg_attr(test, derive(VariantCount))]
@@ -1007,18 +1014,6 @@ pub enum LightClientBootstrap<P: Preset> {
     Electra(Box<ElectraLightClientBootstrap<P>>),
 }
 
-impl<P: Preset> LightClientBootstrap<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
-        }
-    }
-}
-
 impl<P: Preset> SszSize for LightClientBootstrap<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
@@ -1045,6 +1040,18 @@ impl<P: Preset> SszWrite for LightClientBootstrap<P> {
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
             Self::Electra(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientBootstrap<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
         }
     }
 }
@@ -1090,6 +1097,18 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
             Self::Electra(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientFinalityUpdate<P> {
+    #[must_use]
+    pub fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
         }
     }
 }
@@ -1196,11 +1215,40 @@ pub enum SignedAggregateAndProof<P: Preset> {
     Electra(ElectraSignedAggregateAndProof<P>),
 }
 
+impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
+        Phase0SignedAggregateAndProof::<P>::SIZE,
+        ElectraSignedAggregateAndProof::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszWrite for SignedAggregateAndProof<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Phase0(signed_aggregate_and_proof) => {
+                signed_aggregate_and_proof.write_variable(bytes)
+            }
+            Self::Electra(signed_aggregate_and_proof) => {
+                signed_aggregate_and_proof.write_variable(bytes)
+            }
+        }
+    }
+}
+
 impl<P: Preset> SignedAggregateAndProof<P> {
     pub const fn aggregator_index(&self) -> ValidatorIndex {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
+        }
+    }
+
+    pub const fn signature(&self) -> SignatureBytes {
+        match self {
+            Self::Phase0(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
+            Self::Electra(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
         }
     }
 
@@ -1221,15 +1269,6 @@ impl<P: Preset> SignedAggregateAndProof<P> {
             }
         }
     }
-}
-
-impl<P: Preset> SignedAggregateAndProof<P> {
-    pub const fn signature(&self) -> SignatureBytes {
-        match self {
-            Self::Phase0(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
-            Self::Electra(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
-        }
-    }
 
     // TODO(feature/electra): avoid clone
     pub fn message(&self) -> AggregateAndProof<P> {
@@ -1239,28 +1278,6 @@ impl<P: Preset> SignedAggregateAndProof<P> {
             }
             Self::Electra(signed_aggregate_and_proof) => {
                 AggregateAndProof::Electra(signed_aggregate_and_proof.message.clone())
-            }
-        }
-    }
-}
-
-impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
-    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
-    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
-        Phase0SignedAggregateAndProof::<P>::SIZE,
-        ElectraSignedAggregateAndProof::<P>::SIZE,
-    ]);
-}
-
-impl<P: Preset> SszWrite for SignedAggregateAndProof<P> {
-    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
-        match self {
-            Self::Phase0(signed_aggregate_and_proof) => {
-                signed_aggregate_and_proof.write_variable(bytes)
-            }
-            Self::Electra(signed_aggregate_and_proof) => {
-                signed_aggregate_and_proof.write_variable(bytes)
             }
         }
     }
@@ -1419,6 +1436,18 @@ impl<P: Preset> AttesterSlashing<P> {
         match self {
             Self::Phase0(_) => None,
             Self::Electra(attester_slashing) => Some(attester_slashing),
+        }
+    }
+}
+
+impl<P: Preset> LightClientOptimisticUpdate<P> {
+    #[must_use]
+    pub fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
         }
     }
 }

@@ -5,7 +5,6 @@ use anyhow::Result;
 use database::Database;
 use eth1_api::RealController;
 use eth2_libp2p::{rpc::StatusMessage, PeerId};
-use features::Feature;
 use fork_choice_control::SyncMessage;
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -22,16 +21,13 @@ use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use types::{
-    combined::SignedBeaconBlock,
     deneb::containers::BlobIdentifier,
-    nonstandard::Phase,
     phase0::primitives::{Slot, H256},
     preset::Preset,
 };
 
 use crate::{
     back_sync::{BackSync, Data as BackSyncData, Error as BackSyncError, SyncCheckpoint},
-    block_verification_pool::BlockVerificationPool,
     messages::{ArchiverToSync, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p},
     misc::RequestId,
     sync_manager::{SyncBatch, SyncManager, SyncTarget},
@@ -63,7 +59,6 @@ pub struct BlockSyncService<P: Preset> {
     sync_direction: SyncDirection,
     back_sync: Option<BackSync<P>>,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
-    block_verification_pool: BlockVerificationPool<P>,
     controller: RealController<P>,
     sync_manager: SyncManager,
     metrics: Option<Arc<Metrics>>,
@@ -156,7 +151,6 @@ impl<P: Preset> BlockSyncService<P> {
             sync_direction: SyncDirection::Forward,
             back_sync,
             anchor_checkpoint_provider,
-            block_verification_pool: BlockVerificationPool::new(controller.clone_arc())?,
             controller,
             sync_manager: SyncManager::default(),
             metrics,
@@ -238,19 +232,6 @@ impl<P: Preset> BlockSyncService<P> {
 
                 message = self.p2p_to_sync_rx.select_next_some() => {
                     match message {
-                        P2pToSync::FinalizedEpoch(epoch) => {
-                            if !Feature::DisableBlockVerificationPool.is_enabled() {
-                                self.block_verification_pool.prune_outdated_blocks(epoch);
-                            }
-                        }
-                        P2pToSync::HeadState(state) => {
-                            if !Feature::DisableBlockVerificationPool.is_enabled() {
-                                tokio::task::block_in_place(|| {
-                                    self.block_verification_pool
-                                        .verify_and_process_blocks(&state)
-                                });
-                            }
-                        }
                         P2pToSync::Slot(slot) => {
                             self.slot = slot;
 
@@ -292,11 +273,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 .unwrap_or(self.sync_direction)
                             {
                                 SyncDirection::Forward => {
-                                    if should_push_block_in_verification_pool(&block) {
-                                        self.block_verification_pool.push(block);
-                                    } else {
-                                        self.controller.on_requested_block(block, Some(peer_id));
-                                    }
+                                    self.controller.on_requested_block(block, Some(peer_id));
                                 }
                                 SyncDirection::Back => {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
@@ -640,10 +617,6 @@ impl<P: Preset> BlockSyncService<P> {
 
         Ok(())
     }
-}
-
-fn should_push_block_in_verification_pool<P: Preset>(block: &SignedBeaconBlock<P>) -> bool {
-    block.phase() == Phase::Phase0 && !Feature::DisableBlockVerificationPool.is_enabled()
 }
 
 fn get<V: SszReadDefault>(database: &Database, key: impl AsRef<[u8]>) -> Result<Option<V>> {

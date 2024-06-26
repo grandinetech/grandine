@@ -24,7 +24,7 @@ use eth2_libp2p::{
 };
 use fork_choice_control::P2pMessage;
 use futures::{
-    channel::mpsc::{self, Receiver, UnboundedReceiver, UnboundedSender},
+    channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
     select,
     stream::StreamExt as _,
@@ -55,9 +55,8 @@ use types::{
 
 use crate::{
     messages::{
-        ApiToP2p, P2pToAttestationVerifier, P2pToSlasher, P2pToSync, P2pToValidator,
-        ServiceInboundMessage, ServiceOutboundMessage, SubnetServiceToP2p, SyncToP2p,
-        ValidatorToP2p,
+        ApiToP2p, P2pToSlasher, P2pToSync, P2pToValidator, ServiceInboundMessage,
+        ServiceOutboundMessage, SubnetServiceToP2p, SyncToP2p, ValidatorToP2p,
     },
     misc::{AttestationSubnetActions, RequestId, SubnetPeerDiscovery, SyncCommitteeSubnetAction},
     upnp::PortMappings,
@@ -86,7 +85,6 @@ pub struct Channels<P: Preset> {
     pub api_to_p2p_rx: UnboundedReceiver<ApiToP2p<P>>,
     pub fork_choice_to_p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     pub pool_to_p2p_rx: UnboundedReceiver<PoolToP2pMessage>,
-    pub p2p_to_attestation_verifier_tx: UnboundedSender<P2pToAttestationVerifier<P>>,
     pub p2p_to_sync_tx: UnboundedSender<P2pToSync<P>>,
     pub p2p_to_validator_tx: UnboundedSender<P2pToValidator<P>>,
     pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p>,
@@ -171,8 +169,8 @@ impl<P: Preset> Network<P> {
             }
         }
 
-        let (network_to_service_tx, network_to_service_rx) = mpsc::unbounded();
-        let (service_to_network_tx, service_to_network_rx) = mpsc::unbounded();
+        let (network_to_service_tx, network_to_service_rx) = futures::channel::mpsc::unbounded();
+        let (service_to_network_tx, service_to_network_rx) = futures::channel::mpsc::unbounded();
 
         run_network_service(service, network_to_service_rx, service_to_network_tx);
 
@@ -333,15 +331,9 @@ impl<P: Preset> Network<P> {
                         P2pMessage::FinalizedCheckpoint(finalized_checkpoint) => {
                             self.prune_received_blob_sidecars(finalized_checkpoint.epoch);
                             self.prune_received_block_roots(finalized_checkpoint.epoch);
-
-                            P2pToSync::FinalizedEpoch(self.controller.finalized_epoch()).send(&self.channels.p2p_to_sync_tx);
                         }
-                        P2pMessage::HeadState(state) => {
-                            P2pToSync::HeadState(state).send(&self.channels.p2p_to_sync_tx);
-                        }
-                        P2pMessage::ReverifyGossipAttestation(attestation, subnet_id, gossip_id) => {
-                            P2pToAttestationVerifier::GossipAttestation(attestation, subnet_id, gossip_id)
-                                .send(&self.channels.p2p_to_attestation_verifier_tx);
+                        P2pMessage::HeadState(_state) => {
+                            // This message is only used in tests
                         }
                     }
                 },
@@ -580,7 +572,7 @@ impl<P: Preset> Network<P> {
         self.publish(PubsubMessage::Attestation(subnet_id, attestation));
     }
 
-    fn publish_aggregate_and_proof(&self, aggregate_and_proof: Box<SignedAggregateAndProof<P>>) {
+    fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
         if aggregate_and_proof
             .message()
             .aggregate()
@@ -913,6 +905,22 @@ impl<P: Preset> Network<P> {
                 // TODO(Altair Light Client Sync Protocol)
                 self.log_with_feature(format_args!(
                     "received LightClientBootstrap request (peer_id: {peer_id})",
+                ));
+
+                Ok(())
+            }
+            Request::LightClientFinalityUpdate => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log_with_feature(format_args!(
+                    "received LightClientFinalityUpdate request (peer_id: {peer_id})",
+                ));
+
+                Ok(())
+            }
+            Request::LightClientOptimisticUpdate => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log_with_feature(format_args!(
+                    "received LightClientOptimisticUpdate request (peer_id: {peer_id})",
                 ));
 
                 Ok(())
@@ -1343,8 +1351,6 @@ impl<P: Preset> Network<P> {
 
                 P2pToSync::BlocksByRangeRequestFinished(request_id)
                     .send(&self.channels.p2p_to_sync_tx);
-                P2pToSync::HeadState(self.controller.head_state().value)
-                    .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRoot(Some(block)) => {
                 self.log(
@@ -1388,6 +1394,24 @@ impl<P: Preset> Network<P> {
                     Level::Debug,
                     format_args!(
                         "received LightClientBootstrap response chunk (peer_id: {peer_id})",
+                    ),
+                );
+            }
+            Response::LightClientFinalityUpdate(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received LightClientFinalityUpdate response (peer_id: {peer_id})",
+                    ),
+                );
+            }
+            Response::LightClientOptimisticUpdate(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "received LightClientOptimisticUpdate response (peer_id: {peer_id})",
                     ),
                 );
             }
@@ -1480,8 +1504,8 @@ impl<P: Preset> Network<P> {
 
                 let gossip_id = GossipId { source, message_id };
 
-                P2pToAttestationVerifier::GossipAggregateAndProof(aggregate_and_proof, gossip_id)
-                    .send(&self.channels.p2p_to_attestation_verifier_tx);
+                self.controller
+                    .on_gossip_aggregate_and_proof(aggregate_and_proof, gossip_id);
             }
             PubsubMessage::Attestation(subnet_id, attestation) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1502,8 +1526,8 @@ impl<P: Preset> Network<P> {
 
                 let gossip_id = GossipId { source, message_id };
 
-                P2pToAttestationVerifier::GossipAttestation(attestation, subnet_id, gossip_id)
-                    .send(&self.channels.p2p_to_attestation_verifier_tx);
+                self.controller
+                    .on_gossip_singular_attestation(attestation, subnet_id, gossip_id);
             }
             PubsubMessage::VoluntaryExit(signed_voluntary_exit) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1971,12 +1995,14 @@ impl<P: Preset> Network<P> {
             let type_name = tynm::type_name::<Self>();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "received_blob_sidecars",
                 self.received_blob_sidecars.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "received_block_roots",
                 self.received_block_roots.len(),
@@ -2035,7 +2061,9 @@ fn run_network_service<P: Preset>(
                             );
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
-                            service.send_request(peer_id, request_id, request);
+                            if let Err(error) = service.send_request(peer_id, request_id, request) {
+                                warn!("Unable to send request: {error:?}");
+                            }
                         }
                         ServiceInboundMessage::SendResponse(peer_id, peer_request_id, response) => {
                             service.send_response(peer_id, peer_request_id, *response);

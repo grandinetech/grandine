@@ -550,7 +550,7 @@ impl PresetName {
     }
 
     #[must_use]
-    pub fn electra_preset(self) -> ElectraPreset {
+    pub const fn electra_preset(self) -> ElectraPreset {
         match self {
             Self::Mainnet => ElectraPreset::new::<Mainnet>(),
             Self::Minimal => ElectraPreset::new::<Minimal>(),
@@ -876,7 +876,7 @@ pub struct ElectraPreset {
 
 impl ElectraPreset {
     #[must_use]
-    pub fn new<P: Preset>() -> Self {
+    pub const fn new<P: Preset>() -> Self {
         Self {
             max_attestations_electra: P::MaxAttestationsElectra::U64,
             max_attester_slashings_electra: P::MaxAttesterSlashingsElectra::U64,
