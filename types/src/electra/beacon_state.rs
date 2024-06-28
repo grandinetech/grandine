@@ -25,6 +25,7 @@ use crate::{
 #[derive(Clone, Debug, Default, Educe, Deserialize, Serialize, Ssz)]
 #[educe(PartialEq, Eq)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct BeaconState<P: Preset> {
     // > Versioning
     #[serde(with = "serde_utils::string_or_native")]

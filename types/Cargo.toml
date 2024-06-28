@@ -16,6 +16,7 @@ educe = { workspace = true }
 enum-iterator = { workspace = true }
 enum-map = { workspace = true }
 ethereum-types = { workspace = true }
+hashing = { workspace = true }
 hex-literal = { workspace = true }
 im = { workspace = true }
 nonzero_ext = { workspace = true }

@@ -38,6 +38,7 @@ pub struct AggregateAndProof<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct Attestation<P: Preset> {
     pub aggregation_bits: BitList<P::MaxAggregatorsPerSlot>,
     pub data: AttestationData,
@@ -66,6 +67,7 @@ pub struct BeaconBlock<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct BeaconBlockBody<P: Preset> {
     pub randao_reveal: SignatureBytes,
     pub eth1_data: Eth1Data,
@@ -96,6 +98,7 @@ pub struct BlindedBeaconBlock<P: Preset> {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct BlindedBeaconBlockBody<P: Preset> {
     pub randao_reveal: SignatureBytes,
     pub eth1_data: Eth1Data,
@@ -135,6 +138,7 @@ pub struct WithdrawalRequest {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct ExecutionPayload<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
     pub fee_recipient: ExecutionAddress,
@@ -171,6 +175,7 @@ pub struct ExecutionPayload<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct ExecutionPayloadHeader<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
     pub fee_recipient: ExecutionAddress,
@@ -204,6 +209,7 @@ pub struct ExecutionPayloadHeader<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
 pub struct IndexedAttestation<P: Preset> {
     #[serde(with = "serde_utils::string_or_native_sequence")]
     pub attesting_indices: ContiguousList<ValidatorIndex, P::MaxAggregatorsPerSlot>,

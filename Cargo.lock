@@ -8059,6 +8059,7 @@ dependencies = [
  "enum-iterator",
  "enum-map",
  "ethereum-types",
+ "hashing",
  "hex-literal",
  "im",
  "itertools 0.12.1",
