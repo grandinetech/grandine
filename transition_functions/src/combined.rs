@@ -884,6 +884,11 @@ mod spec_tests {
         state: &BeaconState<P>,
         blocks: impl IntoIterator<Item = SignedBeaconBlock<P>>,
     ) -> bool {
+        // TODO(feature/electa):
+        if state.phase() == Phase::Electra {
+            return false;
+        }
+
         // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
         if state.phase() >= Phase::Capella {
             return true;

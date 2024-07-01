@@ -29,8 +29,8 @@ use crate::{
     },
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
-        DepositRequest, WithdrawalRequest, PendingBalanceDeposit,
-        PendingConsolidation, PendingPartialWithdrawal, ConsolidationRequest,
+        ConsolidationRequest, DepositRequest, PendingBalanceDeposit, PendingConsolidation,
+        PendingPartialWithdrawal, WithdrawalRequest,
     },
     phase0::{
         containers::{
@@ -128,7 +128,11 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
-    type MaxConsolidationRequestsPerPayload: MerkleElements<ConsolidationRequest> + Eq + Debug + Send + Sync;
+    type MaxConsolidationRequestsPerPayload: MerkleElements<ConsolidationRequest>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
     type MaxDepositRequestsPerPayload: MerkleElements<DepositRequest> + Eq + Debug + Send + Sync;
     type MaxWithdrawalRequestsPerPayload: MerkleElements<WithdrawalRequest>
         + Eq

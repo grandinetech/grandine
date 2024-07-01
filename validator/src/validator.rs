@@ -334,7 +334,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             || self.attestation_agg_pool.has_registered_validators_proposing_in_slots(slot..=slot).await;
 
                         if !should_prepare_execution_payload {
-                            return Ok(());
+                            continue;
                         }
 
                         let slot_head = self.safe_slot_head(slot).await;

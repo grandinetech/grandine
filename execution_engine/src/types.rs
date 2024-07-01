@@ -19,7 +19,8 @@ use types::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionPayload as ElectraExecutionPayload, WithdrawalRequest
+        ConsolidationRequest, DepositRequest, ExecutionPayload as ElectraExecutionPayload,
+        WithdrawalRequest,
     },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{

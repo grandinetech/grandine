@@ -18,6 +18,7 @@ use types::{
     capella::containers::HistoricalSummary,
     config::Config,
     electra::beacon_state::BeaconState,
+    phase0::consts::FAR_FUTURE_EPOCH,
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState},
     phase0::consts::FAR_FUTURE_EPOCH,
@@ -227,15 +228,14 @@ fn process_pending_balance_deposits<P: Preset>(
             }
         } else {
             // > Validator is not exiting, attempt to process deposit
-
             // > Deposit does not fit in the churn, no more deposit processing in this epoch.
             if processed_amount + deposit.amount > available_for_processing {
                 break;
-            } else {
-                // > Deposit fits in the churn, process it. Increase balance and consume churn.
-                increase_balance(balance(state, deposit.index)?, deposit.amount);
-                processed_amount += deposit.amount;
             }
+
+            // > Deposit fits in the churn, process it. Increase balance and consume churn.
+            increase_balance(balance(state, deposit.index)?, deposit.amount);
+            processed_amount += deposit.amount;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.

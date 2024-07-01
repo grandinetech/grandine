@@ -410,6 +410,7 @@
         "y": 9
       },
       "id": 11,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -693,12 +694,205 @@
       "type": "timeseries"
     },
     {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 24,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 40,
+      "interval": "1s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "GRANDINE_TOTAL_CPU_PERCENTAGE{instance=~\"$Instance\"}",
+          "instant": false,
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "rate(process_cpu_seconds_total{instance=~\"$Instance\"}[$__rate_interval]) * 100",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "process_cpu_seconds_total {{label_name}} {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "rate(GRANDINE_TOTAL_CPU_SECONDS{instance=~\"$Instance\"}[$__rate_interval]) * 100",
+          "hide": false,
+          "instant": false,
+          "interval": "",
+          "legendFormat": "GRANDINE_TOTAL_CPU_SECONDS {{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Grandine vs Lighthouse CPU ",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 41,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "GRANDINE_THREAD_COUNT{instance=~\"$Instance\"}",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Grandine Thread Count",
+      "type": "timeseries"
+    },
+    {
       "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 41
       },
       "id": 16,
       "panels": [
@@ -759,7 +953,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 26
+            "y": 34
           },
           "id": 18,
           "options": {
@@ -842,7 +1036,7 @@
             "h": 8,
             "w": 8,
             "x": 12,
-            "y": 26
+            "y": 34
           },
           "id": 19,
           "options": {
@@ -895,7 +1089,7 @@
             "h": 8,
             "w": 4,
             "x": 20,
-            "y": 26
+            "y": 34
           },
           "id": 17,
           "options": {
@@ -935,7 +1129,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 42
       },
       "id": 33,
       "panels": [
@@ -997,7 +1191,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 27
+            "y": 35
           },
           "id": 34,
           "options": {
@@ -1082,7 +1276,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 27
+            "y": 35
           },
           "id": 35,
           "options": {
@@ -1167,7 +1361,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 35
+            "y": 43
           },
           "id": 36,
           "options": {
@@ -1252,7 +1446,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 35
+            "y": 43
           },
           "id": 37,
           "options": {
@@ -1337,7 +1531,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 43
+            "y": 51
           },
           "id": 38,
           "options": {
@@ -1422,7 +1616,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 43
+            "y": 51
           },
           "id": 39,
           "options": {
@@ -1459,7 +1653,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 43
       },
       "id": 12,
       "panels": [],
@@ -1508,7 +1702,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1523,7 +1718,7 @@
         "h": 21,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 44
       },
       "id": 13,
       "options": {
@@ -1557,7 +1752,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 65
       },
       "id": 9,
       "panels": [
@@ -1618,7 +1813,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 52
+            "y": 60
           },
           "id": 6,
           "options": {
@@ -1702,7 +1897,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 52
+            "y": 60
           },
           "id": 7,
           "options": {
@@ -1739,7 +1934,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 66
       },
       "id": 14,
       "panels": [
@@ -1800,7 +1995,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 30
+            "y": 38
           },
           "id": 15,
           "options": {
@@ -1837,7 +2032,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 67
       },
       "id": 25,
       "panels": [],
@@ -1866,7 +2061,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 68
       },
       "id": 27,
       "options": {
@@ -1918,7 +2113,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 68
       },
       "id": 26,
       "options": {
@@ -1970,7 +2165,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 76
       },
       "id": 23,
       "options": {
@@ -2022,7 +2217,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 76
       },
       "id": 24,
       "options": {
@@ -2109,7 +2304,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 68
+        "y": 84
       },
       "id": 28,
       "options": {
@@ -2193,7 +2388,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 68
+        "y": 84
       },
       "id": 29,
       "options": {
@@ -2243,7 +2438,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 68
+        "y": 84
       },
       "id": 32,
       "options": {
@@ -2330,7 +2525,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 76
+        "y": 92
       },
       "id": 30,
       "options": {
@@ -2414,7 +2609,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 76
+        "y": 92
       },
       "id": 31,
       "options": {
@@ -2452,10 +2647,10 @@
         "current": {
           "selected": true,
           "text": [
-            "0.0.0.0:5061"
+            "0.0.0.0:5056"
           ],
           "value": [
-            "0.0.0.0:5061"
+            "0.0.0.0:5056"
           ]
         },
         "definition": "label_values(instance)",
@@ -2477,13 +2672,13 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-5m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Overview",
   "uid": "eb977235-e486-4662-9e99-a2631b9eddca",
-  "version": 8,
+  "version": 12,
   "weekStart": ""
 }

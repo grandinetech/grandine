@@ -269,6 +269,7 @@ async fn scrape_system_stats(
 
     let process_metrics = ProcessMetrics::get();
 
+    metrics.set_grandine_thread_count(process_metrics.thread_count);
     metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
 
     Ok(())
