@@ -933,6 +933,7 @@ fn process_withdrawal_request<P: Preset>(
         .as_bytes()
         .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
         .pipe(ExecutionAddress::from_slice);
+
     let is_correct_source_address = source_address == withdrawal_request.source_address;
 
     if !(has_correct_credential && is_correct_source_address) {
@@ -1031,6 +1032,7 @@ fn process_deposit_request<P: Preset>(
     Ok(())
 }
 
+
 #[allow(clippy::too_many_lines)]
 pub fn process_consolidation_request<P: Preset>(
     config: &Config,
@@ -1074,6 +1076,7 @@ pub fn process_consolidation_request<P: Preset>(
     let prefix_len = H256::len_bytes() - ExecutionAddress::len_bytes();
     let computed_source_address =
         ExecutionAddress::from_slice(&source_validator.withdrawal_credentials[prefix_len..]);
+
     if !(has_correct_credential && computed_source_address == source_address) {
         return Ok(());
     }

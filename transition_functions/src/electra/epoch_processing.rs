@@ -227,7 +227,6 @@ fn process_pending_balance_deposits<P: Preset>(
             }
         } else {
             // > Validator is not exiting, attempt to process deposit
-
             // > Deposit does not fit in the churn, no more deposit processing in this epoch.
             if processed_amount + deposit.amount > available_for_processing {
                 break;
