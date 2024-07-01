@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+attestation_verifier = { workspace = true }
 builder_api = { workspace = true }
 bytesize = { workspace = true }
 clock = { workspace = true }

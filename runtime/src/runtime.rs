@@ -2,6 +2,7 @@ use core::{convert::Infallible as Never, future::Future};
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
+use attestation_verifier::AttestationVerifier;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
@@ -26,10 +27,11 @@ use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use log::{info, warn};
 use metrics::{run_metrics_server, MetricsChannels, MetricsService};
-use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
+use operation_pools::{
+    AttestationAggPool, BlsToExecutionChangePool, Manager, SyncCommitteeAggPool,
+};
 use p2p::{
-    AttestationVerifier, BlockSyncService, BlockSyncServiceChannels, Channels, Network,
-    NetworkConfig, SubnetService,
+    BlockSyncService, BlockSyncServiceChannels, Channels, Network, NetworkConfig, SubnetService,
 };
 use signer::Signer;
 use slasher::{Databases, Slasher, SlasherConfig};
@@ -95,11 +97,13 @@ pub async fn run_after_genesis<P: Preset>(
     }
 
     let (execution_service_tx, execution_service_rx) = mpsc::unbounded();
+    let (fork_choice_to_attestation_verifier_tx, fork_choice_to_attestation_verifier_rx) =
+        mpsc::unbounded();
     let (fork_choice_to_p2p_tx, fork_choice_to_p2p_rx) = mpsc::unbounded();
     let (fork_choice_to_subnet_tx, fork_choice_to_subnet_rx) = mpsc::unbounded();
     let (fork_choice_to_validator_tx, fork_choice_to_validator_rx) = mpsc::unbounded();
-    let (p2p_to_attestation_verifier_tx, p2p_to_attestation_verifier_rx) = mpsc::unbounded();
     let (p2p_to_sync_tx, p2p_to_sync_rx) = mpsc::unbounded();
+    let (fork_choice_to_pool_tx, fork_choice_to_pool_rx) = mpsc::unbounded();
     let (p2p_to_validator_tx, p2p_to_validator_rx) = mpsc::unbounded();
     let (sync_to_p2p_tx, sync_to_p2p_rx) = mpsc::unbounded();
     let (validator_to_p2p_tx, validator_to_p2p_rx) = mpsc::unbounded();
@@ -202,7 +206,9 @@ pub async fn run_after_genesis<P: Preset>(
         execution_engine.clone_arc(),
         metrics.clone(),
         fc_to_api_tx,
+        fork_choice_to_attestation_verifier_tx,
         fork_choice_to_p2p_tx,
+        fork_choice_to_pool_tx,
         fork_choice_to_subnet_tx,
         fork_choice_to_sync_tx,
         fork_choice_to_validator_tx,
@@ -217,12 +223,12 @@ pub async fn run_after_genesis<P: Preset>(
 
     let num_of_cpus = num_cpus::get();
 
-    let dedicated_executor_low_priority = DedicatedExecutor::new(
+    let dedicated_executor_low_priority = Arc::new(DedicatedExecutor::new(
         "de-low",
         (num_of_cpus / 4).max(1),
         Some(19),
         metrics.clone(),
-    );
+    ));
 
     let dedicated_executor_normal_priority = Arc::new(DedicatedExecutor::new(
         "de-normal",
@@ -235,7 +241,7 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         dedicated_executor_low_priority,
         metrics.clone(),
-        p2p_to_attestation_verifier_rx,
+        fork_choice_to_attestation_verifier_rx,
     );
 
     let metrics_service = metrics_service_config.map(|metrics_config| {
@@ -466,6 +472,13 @@ pub async fn run_after_genesis<P: Preset>(
             metrics.clone(),
         );
 
+    let pool_manager = Manager::new(
+        attestation_agg_pool.clone_arc(),
+        bls_to_execution_change_pool.clone_arc(),
+        sync_committee_agg_pool.clone_arc(),
+        fork_choice_to_pool_rx,
+    );
+
     let validator_channels = ValidatorChannels {
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
@@ -498,7 +511,6 @@ pub async fn run_after_genesis<P: Preset>(
         api_to_p2p_rx,
         fork_choice_to_p2p_rx,
         pool_to_p2p_rx,
-        p2p_to_attestation_verifier_tx,
         p2p_to_sync_tx,
         p2p_to_validator_tx,
         sync_to_p2p_rx,
@@ -615,6 +627,7 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(run_clock) => result,
         result = spawn_fallible(run_slasher) => result.map(from_never),
         result = spawn_fallible(bls_to_execution_change_pool_service.run()) => result,
+        result = spawn_fallible(pool_manager.run()) => result,
         result = spawn_fallible(run_metrics_server) => result,
         result = spawn_fallible(run_metrics_service) => result,
         result = spawn_fallible(run_liveness_tracker) => result,

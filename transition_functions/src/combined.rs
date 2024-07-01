@@ -514,6 +514,7 @@ pub fn process_untrusted_block<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
+    slot_report: impl SlotReport,
     skip_randao_verification: bool,
 ) -> Result<()> {
     let verifier = if skip_randao_verification {
@@ -522,15 +523,16 @@ pub fn process_untrusted_block<P: Preset>(
         MultiVerifier::default()
     };
 
-    process_block(config, state, block, verifier)
+    process_block(config, state, block, verifier, slot_report)
 }
 
 pub fn process_trusted_block<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
-    process_block(config, state, block, NullVerifier)
+    process_block(config, state, block, NullVerifier, slot_report)
 }
 
 fn process_block<P: Preset>(
@@ -538,22 +540,23 @@ fn process_block<P: Preset>(
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     verifier: impl Verifier,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
     match (state, block) {
         (BeaconState::Phase0(state), BeaconBlock::Phase0(block)) => {
-            phase0::process_block(config, state, block, verifier)
+            phase0::process_block(config, state, block, verifier, slot_report)
         }
         (BeaconState::Altair(state), BeaconBlock::Altair(block)) => {
-            altair::process_block(config, state, block, verifier)
+            altair::process_block(config, state, block, verifier, slot_report)
         }
         (BeaconState::Bellatrix(state), BeaconBlock::Bellatrix(block)) => {
-            bellatrix::process_block(config, state, block, verifier)
+            bellatrix::process_block(config, state, block, verifier, slot_report)
         }
         (BeaconState::Capella(state), BeaconBlock::Capella(block)) => {
-            capella::process_block(config, state, block, verifier)
+            capella::process_block(config, state, block, verifier, slot_report)
         }
         (BeaconState::Deneb(state), BeaconBlock::Deneb(block)) => {
-            deneb::process_block(config, state, block, verifier)
+            deneb::process_block(config, state, block, verifier, slot_report)
         }
         (BeaconState::Electra(state), BeaconBlock::Electra(block)) => {
             electra::process_block(config, state, block, verifier)
@@ -575,6 +578,7 @@ pub fn process_untrusted_blinded_block<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
+    slot_report: impl SlotReport,
     skip_randao_verification: bool,
 ) -> Result<()> {
     let verifier = if skip_randao_verification {
@@ -583,15 +587,16 @@ pub fn process_untrusted_blinded_block<P: Preset>(
         MultiVerifier::default()
     };
 
-    process_blinded_block(config, state, block, verifier)
+    process_blinded_block(config, state, block, verifier, slot_report)
 }
 
 pub fn process_trusted_blinded_block<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
-    process_blinded_block(config, state, block, NullVerifier)
+    process_blinded_block(config, state, block, NullVerifier, slot_report)
 }
 
 fn process_blinded_block<P: Preset>(
@@ -599,9 +604,8 @@ fn process_blinded_block<P: Preset>(
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
     verifier: impl Verifier,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
-    let slot_report = NullSlotReport;
-
     match (state, block) {
         (BeaconState::Bellatrix(state), BlindedBeaconBlock::Bellatrix(block)) => {
             bellatrix::custom_process_blinded_block(config, state, block, verifier, slot_report)
@@ -929,7 +933,13 @@ mod spec_tests {
 
                 let blinded_block = message.into_blinded(header, None)?;
 
-                process_untrusted_blinded_block(config, state, &blinded_block, false)
+                process_untrusted_blinded_block(
+                    config,
+                    state,
+                    &blinded_block,
+                    NullSlotReport,
+                    false,
+                )
             })
             .expect("blinded block processing should succeed");
 

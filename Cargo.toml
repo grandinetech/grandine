@@ -3,6 +3,7 @@ members = [
     'ad_hoc_bench',
     'allocator',
     'arithmetic',
+    'attestation_verifier',
     'benches',
     'binary_utils',
     'bls',
@@ -47,6 +48,7 @@ members = [
     'spec_test_utils',
     'ssz',
     'ssz_derive',
+    'state_cache',
     'std_ext',
     'transition_functions',
     'try_from_iterator',
@@ -88,6 +90,7 @@ let_underscore_drop                    = 'warn'
 macro_use_extern_crate                 = 'warn'
 meta_variable_misuse                   = 'warn'
 non_ascii_idents                       = 'warn'
+non_local_definitions                  = 'warn'
 trivial_casts                          = 'warn'
 trivial_numeric_casts                  = 'warn'
 unit_bindings                          = 'warn'
@@ -140,7 +143,7 @@ wildcard_dependencies   = 'warn'
 #
 # - `clippy::single_call_fn`.
 #   It's unidiomatic and conflicts with lints like `clippy::too_many_lines`.
-#   Public functions are not exempt from it as of Rust 1.77.2.
+#   Public functions are not exempt from it if `avoid-breaking-exported-api` is `false`.
 #
 # - `clippy::std_instead_of_alloc`
 #   It would require adding `extern crate alloc;` everywhere.
@@ -399,7 +402,7 @@ tiny-keccak = '2.0.2'
 tokio = { version = '1.36.0', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
 tokio-io-timeout = '1.2.0'
 tokio-stream = { version = '0.1.14', features = ['sync'] }
-tokio-util = { version = '0.6.10', features = ['codec', 'compat', 'time'] }
+tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.4.13', features = ['timeout'] }
 tower-http = { version = '0.4.4', features = ['cors', 'trace'] }
 tracing = '0.1.40'
@@ -408,7 +411,7 @@ tynm = '0.1.9'
 typenum = '1.17.0'
 unicode-normalization = '0.1.22'
 # 0.7.2 breaks `eth2_libp2p`. Update this is no longer the case.
-unsigned-varint = { version = '= 0.7.1', features = ['codec'] }
+unsigned-varint = { version = '= 0.8', features = ['codec'] }
 unwrap_none = '0.1.2'
 url = '2.5.0'
 uuid = { version = '1.7.0', features = ['serde', 'v4'] }
@@ -419,6 +422,7 @@ zeroize = { version = '1.7.0', features = ['derive', 'serde'] }
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
+attestation_verifier = { path = 'attestation_verifier' }
 binary_utils = { path = 'binary_utils' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
@@ -463,6 +467,7 @@ snapshot_test_utils = { path = 'snapshot_test_utils' }
 spec_test_utils = { path = 'spec_test_utils' }
 ssz = { path = 'ssz' }
 ssz_derive = { path = 'ssz_derive' }
+state_cache = { path = 'state_cache' }
 std_ext = { path = 'std_ext' }
 transition_functions = { path = 'transition_functions' }
 try_from_iterator = { path = 'try_from_iterator' }

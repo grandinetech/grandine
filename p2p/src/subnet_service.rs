@@ -12,7 +12,7 @@ use helper_functions::misc;
 use log::{debug, warn};
 use operation_pools::AttestationAggPool;
 use types::{
-    phase0::primitives::{Epoch, NodeId, Slot},
+    phase0::primitives::{Epoch, NodeId, Slot, ValidatorIndex},
     preset::Preset,
 };
 
@@ -84,8 +84,8 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
 
     fn handle_other_message(&mut self, message: ToSubnetService) {
         match message {
-            ToSubnetService::SetRegisteredValidators(pubkeys) => {
-                self.set_registered_validators(pubkeys);
+            ToSubnetService::SetRegisteredValidators(pubkeys, prepared_proposer_indices) => {
+                self.set_registered_validators(pubkeys, prepared_proposer_indices);
             }
             ToSubnetService::UpdateBeaconCommitteeSubscriptions(
                 current_slot,
@@ -130,8 +130,13 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
         Ok(())
     }
 
-    fn set_registered_validators(&self, pubkeys: Vec<PublicKeyBytes>) {
-        self.attestation_agg_pool.set_registered_validators(pubkeys);
+    fn set_registered_validators(
+        &self,
+        pubkeys: Vec<PublicKeyBytes>,
+        prepared_proposer_indices: Vec<ValidatorIndex>,
+    ) {
+        self.attestation_agg_pool
+            .set_registered_validators(pubkeys, prepared_proposer_indices);
     }
 
     fn update_beacon_committee_subscriptions(

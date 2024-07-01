@@ -13,7 +13,10 @@ use anyhow::{ensure, Error as AnyhowError, Result};
 use axum::{
     async_trait,
     body::Body,
-    extract::{FromRef, FromRequest, FromRequestParts, Path as RequestPath, Query, State},
+    extract::{
+        rejection::JsonRejection, FromRef, FromRequest, FromRequestParts, Path as RequestPath,
+        State,
+    },
     headers::{authorization::Bearer, Authorization},
     http::{request::Parts, Request, StatusCode},
     middleware::Next,
@@ -21,6 +24,7 @@ use axum::{
     routing::{delete, get, post},
     Json, RequestExt as _, RequestPartsExt as _, Router, Server, TypedHeader,
 };
+use axum_extra::extract::{Query, QueryRejection};
 use bls::PublicKeyBytes;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;
@@ -86,11 +90,11 @@ enum Error {
     #[error("internal error")]
     Internal(#[from] AnyhowError),
     #[error("invalid JSON body")]
-    InvalidJsonBody(#[source] AnyhowError),
+    InvalidJsonBody(#[source] JsonRejection),
     #[error("invalid public key")]
     InvalidPublicKey(#[source] AnyhowError),
     #[error("invalid query string")]
-    InvalidQuery(#[source] AnyhowError),
+    InvalidQuery(#[source] QueryRejection),
     #[error("authentication error")]
     Unauthorized,
     #[error("validator {pubkey:?} not found")]
@@ -115,11 +119,10 @@ impl Error {
         ErrorResponse { message: self }
     }
 
-    const fn status_code(&self) -> StatusCode {
+    fn status_code(&self) -> StatusCode {
         match self {
-            Self::InvalidJsonBody(_) | Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidJsonBody(json_rejection) => json_rejection.status(),
+            Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => StatusCode::BAD_REQUEST,
             Self::ValidatorNotFound { pubkey: _ } | Self::ValidatorNotOwned { pubkey: _ } => {
                 StatusCode::NOT_FOUND
             }
@@ -137,14 +140,22 @@ impl Error {
         self.sources().format(": ")
     }
 
-    // `StdError::sources` is not stable as of Rust 1.77.2.
+    // `StdError::sources` is not stable as of Rust 1.78.0.
     fn sources(&self) -> impl Iterator<Item = &dyn StdError> {
-        let mut error: Option<&dyn StdError> = Some(self);
+        let first: &dyn StdError = self;
 
-        core::iter::from_fn(move || {
-            let source = error?.source();
-            core::mem::replace(&mut error, source)
-        })
+        let skip_duplicates = || match self {
+            Self::InvalidJsonBody(_) => first.source()?.source(),
+            Self::InvalidQuery(_) => first.source()?.source()?.source(),
+            _ => first.source(),
+        };
+
+        let mut next = skip_duplicates();
+
+        core::iter::once(first).chain(core::iter::from_fn(move || {
+            let source = next?.source();
+            core::mem::replace(&mut next, source)
+        }))
     }
 }
 
@@ -214,7 +225,6 @@ impl<S> FromRequest<S, Body> for EthJson<SetFeeRecipientQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -228,7 +238,6 @@ impl<S> FromRequest<S, Body> for EthJson<SetGasLimitQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -242,7 +251,6 @@ impl<S> FromRequest<S, Body> for EthJson<SetGraffitiQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -256,7 +264,6 @@ impl<S> FromRequest<S, Body> for EthJson<KeystoreImportQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -270,7 +277,6 @@ impl<S> FromRequest<S, Body> for EthJson<KeystoreDeleteQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -284,7 +290,6 @@ impl<S> FromRequest<S, Body> for EthJson<RemoteKeysImportQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -298,7 +303,6 @@ impl<S> FromRequest<S, Body> for EthJson<RemoteKeysDeleteQuery> {
             .extract()
             .await
             .map(|Json(query)| Self(query))
-            .map_err(AnyhowError::new)
             .map_err(Error::InvalidJsonBody)
     }
 }
@@ -333,7 +337,6 @@ impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
             .extract()
             .await
             .map(|Query(query)| Self(query))
-            .map_err(AnyhowError::msg)
             .map_err(Error::InvalidQuery)
     }
 }
@@ -878,6 +881,7 @@ impl ApiToken {
 #[cfg(test)]
 mod tests {
     use anyhow::Result as AnyhowResult;
+    use axum::{extract::rejection::MissingJsonContentType, Error as AxumError};
     use serde_json::{json, Result, Value};
     use tempfile::{Builder, NamedTempFile};
     use test_case::test_case;
@@ -951,6 +955,36 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    // `axum::extract::rejection::JsonRejection` duplicates error sources.
+    // The underlying bug in `axum-core` was fixed in <https://github.com/tokio-rs/axum/pull/2030>.
+    // The fix was backported in <https://github.com/tokio-rs/axum/pull/2098> but not released.
+    #[test]
+    fn error_sources_does_not_yield_duplicates_from_json_rejection() {
+        let error = Error::InvalidJsonBody(JsonRejection::from(MissingJsonContentType::default()));
+
+        assert_eq!(
+            error.sources().map(ToString::to_string).collect_vec(),
+            [
+                "invalid JSON body",
+                "Expected request with `Content-Type: application/json`",
+            ],
+        );
+    }
+
+    // `axum_extra::extract::QueryRejection` and `axum::Error` duplicate error sources.
+    // `axum::Error` has not been fixed in any version yet.
+    // `axum::extract::rejection::QueryRejection` is even worse and harder to work around.
+    #[test]
+    fn error_sources_does_not_yield_triplicates_from_query_rejection() {
+        let axum_error = AxumError::new("error");
+        let error = Error::InvalidQuery(QueryRejection::FailedToDeserializeQueryString(axum_error));
+
+        assert_eq!(
+            error.sources().map(ToString::to_string).collect_vec(),
+            ["invalid query string", "error"],
+        );
     }
 
     fn token_file() -> AnyhowResult<NamedTempFile> {

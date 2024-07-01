@@ -8,21 +8,20 @@ use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
-    AttestationAction, AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction,
-    BlockOrigin, ChainLink, Store,
+    AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
+    AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
+    ChainLink, Store,
 };
 use helper_functions::{accessors, misc};
 use log::debug;
 use serde::Serialize;
 use tap::Pipe as _;
 use types::{
-    combined::{Attestation, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
     phase0::{
         containers::Checkpoint,
-        primitives::{
-            DepositIndex, Epoch, ExecutionBlockHash, Slot, SubnetId, ValidatorIndex, H256,
-        },
+        primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -39,6 +38,26 @@ use core::fmt::Debug;
 
 #[cfg(test)]
 use educe::Educe;
+
+pub enum AttestationVerifierMessage<P: Preset, W> {
+    AggregateAndProof {
+        wait_group: W,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
+    },
+    Attestation {
+        wait_group: W,
+        attestation: AttestationItem<P, GossipId>,
+    },
+}
+
+impl<P: Preset, W> AttestationVerifierMessage<P, W> {
+    pub fn send(self, tx: &impl UnboundedSink<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to attestation verifier failed because the receiver was dropped");
+        }
+    }
+}
 
 // Attestations cannot result in delayed objects being retried, but a `wait_group` field is still
 // needed in the attestation variants to make `Controller::wait_for_tasks` work.
@@ -72,7 +91,8 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     BlockAttestations {
         wait_group: W,
-        results: Vec<Result<AttestationAction<P>>>,
+        results:
+            Vec<Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>>,
     },
     AttesterSlashing {
         wait_group: W,
@@ -99,7 +119,6 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_blob_ids: Vec<BlobIdentifier>,
     },
     PreprocessedBeaconState {
-        block_root: H256,
         state: Arc<BeaconState<P>>,
     },
     NotifiedForkChoiceUpdate {
@@ -150,7 +169,6 @@ pub enum P2pMessage<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, educe(Debug(ignore)))] Arc<BeaconState<P>>),
-    ReverifyGossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
 }
 
 impl<P: Preset> P2pMessage<P> {
@@ -158,6 +176,19 @@ impl<P: Preset> P2pMessage<P> {
         // Don't log the value because it can contain entire `BeaconState`s.
         if tx.unbounded_send(self).is_err() {
             debug!("send to p2p failed because the receiver was dropped");
+        }
+    }
+}
+
+pub enum PoolMessage {
+    Slot(Slot),
+    Tick(Tick),
+}
+
+impl PoolMessage {
+    pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to operation pools failed because the receiver was dropped");
         }
     }
 }

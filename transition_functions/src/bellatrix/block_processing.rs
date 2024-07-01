@@ -6,7 +6,7 @@ use helper_functions::{
     error::SignatureKind,
     misc::compute_timestamp_at_slot,
     predicates::{is_execution_enabled, is_merge_transition_complete},
-    slot_report::{NullSlotReport, SlotReport},
+    slot_report::SlotReport,
     verifier::{Triple, Verifier},
 };
 use prometheus_metrics::METRICS;
@@ -24,9 +24,7 @@ use types::{
     nonstandard::SlashingKind,
     phase0::{containers::ProposerSlashing, primitives::H256},
     preset::Preset,
-    traits::{
-        AttesterSlashing, BeaconBlockBody, PostBellatrixBeaconState, PreElectraBeaconBlockBody,
-    },
+    traits::{AttesterSlashing, PostBellatrixBeaconState, PreElectraBeaconBlockBody},
 };
 
 use crate::{
@@ -50,6 +48,7 @@ pub fn process_block<P: Preset>(
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     mut verifier: impl Verifier,
+    slot_report: impl SlotReport,
 ) -> Result<()> {
     let _timer = METRICS
         .get()
@@ -63,7 +62,7 @@ pub fn process_block<P: Preset>(
         block,
         NullExecutionEngine,
         &mut verifier,
-        NullSlotReport,
+        slot_report,
     )?;
 
     verifier.finish()
@@ -160,7 +159,7 @@ fn process_execution_payload<P: Preset>(
 pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     state: &mut impl PostBellatrixBeaconState<P>,
-    body: &(impl BeaconBlockBody<P> + PreElectraBeaconBlockBody<P>),
+    body: &impl PreElectraBeaconBlockBody<P>,
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -306,7 +305,10 @@ mod spec_tests {
     use core::fmt::Debug;
 
     use execution_engine::MockExecutionEngine;
-    use helper_functions::verifier::{NullVerifier, SingleVerifier};
+    use helper_functions::{
+        slot_report::NullSlotReport,
+        verifier::{NullVerifier, SingleVerifier},
+    };
     use serde::Deserialize;
     use spec_test_utils::{BlsSetting, Case};
     use ssz::SszReadDefault;

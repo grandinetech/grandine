@@ -2,6 +2,7 @@ use core::{future::Future, net::Ipv4Addr};
 use std::sync::Arc;
 
 use anyhow::Result;
+use attestation_verifier::AttestationVerifier;
 use bls::{PublicKeyBytes, SecretKey};
 use clock::Tick;
 use database::Database;
@@ -87,7 +88,10 @@ impl<P: Preset> Context<P> {
         let (api_to_p2p_tx, api_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (api_to_validator_tx, api_to_validator_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_api_tx, fc_to_api_rx) = futures::channel::mpsc::unbounded();
+        let (fc_to_attestation_verifier_tx, fc_to_attestation_verifier_rx) =
+            futures::channel::mpsc::unbounded();
         let (fc_to_p2p_tx, fc_to_p2p_rx) = futures::channel::mpsc::unbounded();
+        let (fc_to_pool_tx, _) = futures::channel::mpsc::unbounded();
         let (fc_to_subnet_tx, fc_to_subnet_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_sync_tx, fc_to_sync_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_validator_tx, fc_to_validator_rx) = futures::channel::mpsc::unbounded();
@@ -178,7 +182,9 @@ impl<P: Preset> Context<P> {
             execution_engine.clone_arc(),
             None,
             fc_to_api_tx,
+            fc_to_attestation_verifier_tx,
             fc_to_p2p_tx,
+            fc_to_pool_tx,
             fc_to_subnet_tx,
             fc_to_sync_tx,
             fc_to_validator_tx,
@@ -229,6 +235,13 @@ impl<P: Preset> Context<P> {
             None,
             None,
         ));
+
+        let attestation_verifier = AttestationVerifier::new(
+            controller.clone_arc(),
+            dedicated_executor.clone_arc(),
+            None,
+            fc_to_attestation_verifier_rx,
+        );
 
         let attestation_agg_pool =
             AttestationAggPool::new(controller.clone_arc(), dedicated_executor.clone_arc(), None);
@@ -361,6 +374,7 @@ impl<P: Preset> Context<P> {
             result = run_http_api.fuse() => result,
             result = join_mutator.fuse() => result,
             result = execution_service.run().fuse() => result,
+            result = attestation_verifier.run().fuse() => result,
             result = bls_to_execution_change_pool_service.run().fuse() => result,
             result = liveness_tracker.run().fuse() => result,
             result = validator.run().fuse() => result,

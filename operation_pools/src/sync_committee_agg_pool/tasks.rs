@@ -9,7 +9,7 @@ use helper_functions::{
     error::SignatureKind,
     misc, predicates,
     signing::{SignForSingleFork as _, SignForSingleForkAtSlot as _},
-    verifier::{SingleVerifier, Verifier as _},
+    verifier::{MultiVerifier, Verifier as _},
 };
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
@@ -181,6 +181,14 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
 
         let contribution_and_proof = signed_contribution_and_proof.message;
 
+        if pool.is_subset(contribution_and_proof.contribution).await {
+            debug!(
+                "sync committee contribution is a known subset: {signed_contribution_and_proof:?}"
+            );
+
+            return Ok(ValidationOutcome::Ignore);
+        }
+
         let already_exists = pool
             .contribution_and_proof_exists(contribution_and_proof)
             .await;
@@ -334,7 +342,7 @@ impl<P: Preset> PoolTask for HandleSlotTask<P> {
             .as_ref()
             .map(|metrics| metrics.sync_pool_handle_slot_times.start_timer());
 
-        pool.on_slot(slot).await;
+        pool.on_slot(slot, metrics).await;
 
         Ok(())
     }
@@ -391,22 +399,24 @@ fn validate_external_contribution_and_proof<P: Preset>(
         "aggregator is not in the declared subcommittee",
     );
 
-    SyncAggregatorSelectionData {
-        slot: contribution.slot,
-        subcommittee_index: contribution.subcommittee_index,
-    }
-    .verify(
-        config,
-        state,
+    let mut verifier = MultiVerifier::default();
+
+    verifier.verify_singular(
+        SyncAggregatorSelectionData {
+            slot: contribution.slot,
+            subcommittee_index: contribution.subcommittee_index,
+        }
+        .signing_root(config, beacon_state),
         contribution_and_proof.selection_proof,
         &aggregator.pubkey,
+        SignatureKind::SyncCommitteeSelectionProof,
     )?;
 
-    contribution_and_proof.verify(
-        config,
-        state,
+    verifier.verify_singular(
+        contribution_and_proof.signing_root(config, beacon_state),
         signed_contribution_and_proof.signature,
         &aggregator.pubkey,
+        SignatureKind::ContributionAndProof,
     )?;
 
     let participant_pubkeys = subcommittee_pubkeys
@@ -421,13 +431,15 @@ fn validate_external_contribution_and_proof<P: Preset>(
             .signing_root(config, state, contribution.slot);
 
     itertools::process_results(participant_pubkeys, |public_keys| {
-        SingleVerifier.verify_aggregate(
+        verifier.verify_aggregate(
             signing_root,
             contribution.signature,
             public_keys,
             SignatureKind::SyncCommitteeContribution,
         )
     })??;
+
+    verifier.finish()?;
 
     Ok(true)
 }

@@ -14,14 +14,12 @@ use operation_pools::PoolRejectionReason;
 use serde::Serialize;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
-    combined::{
-        Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
-    },
+    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::Phase,
     phase0::{
         containers::{ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, ForkDigest, Slot, SubnetId, H256},
+        primitives::{Epoch, ForkDigest, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -34,22 +32,7 @@ use crate::{
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
 };
 
-pub enum P2pToAttestationVerifier<P: Preset> {
-    GossipAggregateAndProof(Box<SignedAggregateAndProof<P>>, GossipId),
-    GossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
-}
-
-impl<P: Preset> P2pToAttestationVerifier<P> {
-    pub fn send(self, tx: &UnboundedSender<Self>) {
-        if tx.unbounded_send(self).is_err() {
-            debug!("send to attestation verifier failed because the receiver was dropped");
-        }
-    }
-}
-
 pub enum P2pToSync<P: Preset> {
-    FinalizedEpoch(Epoch),
-    HeadState(Arc<BeaconState<P>>),
     Slot(Slot),
     AddPeer(PeerId, StatusMessage),
     RemovePeer(PeerId),
@@ -79,7 +62,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
-    PublishAggregateAndProof(Box<SignedAggregateAndProof<P>>),
+    PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
@@ -159,7 +142,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
-    PublishAggregateAndProof(Box<SignedAggregateAndProof<P>>),
+    PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
@@ -256,7 +239,7 @@ impl SubnetServiceToP2p {
 }
 
 pub enum ToSubnetService {
-    SetRegisteredValidators(Vec<PublicKeyBytes>),
+    SetRegisteredValidators(Vec<PublicKeyBytes>, Vec<ValidatorIndex>),
     UpdateBeaconCommitteeSubscriptions(Slot, Vec<BeaconCommitteeSubscription>, Sender<Result<()>>),
     UpdateSyncCommitteeSubscriptions(Epoch, Vec<SyncCommitteeSubscription>),
 }

@@ -37,6 +37,7 @@ pub fn initialize_logger(
         .filter_module("signer", LevelFilter::Info)
         .filter_module("slasher", LevelFilter::Info)
         .filter_module("slashing_protection", LevelFilter::Info)
+        .filter_module("state_cache", LevelFilter::Info)
         .filter_module("storage", LevelFilter::Info)
         .filter_module("validator", LevelFilter::Info)
         .filter_module("validator_key_cache", LevelFilter::Info)

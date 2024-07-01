@@ -12,7 +12,7 @@ use types::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, ExecutionPayload,
         SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
-    nonstandard::WithBlobsAndMev,
+    nonstandard::{BlockRewards, WithBlobsAndMev},
     phase0::{
         containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, Slot, H256},
@@ -22,9 +22,16 @@ use types::{
 
 use crate::misc::{ProposerData, ValidatorBlindedBlock};
 
-pub type BeaconBlockSender<P> = Sender<Result<Option<WithBlobsAndMev<BeaconBlock<P>, P>>>>;
-pub type BlindedBlockSender<P> =
-    Sender<Result<Option<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>>>;
+pub type BeaconBlockSender<P> =
+    Sender<Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>>>;
+pub type BlindedBlockSender<P> = Sender<
+    Result<
+        Option<(
+            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
+            Option<BlockRewards>,
+        )>,
+    >,
+>;
 
 pub enum ApiToValidator<P: Preset> {
     ProduceBeaconBlock(BeaconBlockSender<P>, H256, SignatureBytes, Slot, bool),

@@ -13,8 +13,8 @@ use easy_ext::ext;
 use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
 use fork_choice_store::{
-    ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationOrigin, BlockAction, Store,
-    StoreConfig, ValidAttestation,
+    ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
+    BlockAction, Store, StoreConfig, ValidAttestation,
 };
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
@@ -77,7 +77,7 @@ impl Criterion {
                         .into_iter()
                         .at_most_one()?
                     {
-                        process_block(&mut store, block)?
+                        process_block(&mut store, &block)?
                     }
 
                     for attestation in holesky::aggregate_attestations_by_slot(slot) {
@@ -148,7 +148,7 @@ fn process_slot(store: &mut Store<impl Preset>, slot: Slot) -> Result<()> {
     Ok(())
 }
 
-fn process_block<P: Preset>(store: &mut Store<P>, block: Arc<SignedBeaconBlock<P>>) -> Result<()> {
+fn process_block<P: Preset>(store: &mut Store<P>, block: &Arc<SignedBeaconBlock<P>>) -> Result<()> {
     let slot = block.message().slot();
 
     let block_action = store.validate_block(
@@ -195,7 +195,8 @@ fn process_attestation<P: Preset>(
 ) -> Result<()> {
     let slot = attestation.data().slot;
     let origin = AttestationOrigin::<Never>::Test;
-    let attestation_action = store.validate_attestation(attestation, &origin)?;
+    let attestation_action =
+        store.validate_attestation(AttestationItem::unverified(attestation, origin), false)?;
 
     let AttestationAction::Accept {
         attestation,

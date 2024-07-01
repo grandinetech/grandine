@@ -38,6 +38,7 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
+state_cache = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
 tap = { workspace = true }

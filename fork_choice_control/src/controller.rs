@@ -21,8 +21,8 @@ use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
-    BlockOrigin, Store, StoreConfig,
+    AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
+    BlobSidecarOrigin, BlockOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -42,12 +42,13 @@ use types::{
 };
 
 use crate::{
+    block_processor::BlockProcessor,
     messages::{
-        ApiMessage, MutatorMessage, P2pMessage, SubnetMessage, SyncMessage, ValidatorMessage,
+        ApiMessage, AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage,
+        SubnetMessage, SyncMessage, ValidatorMessage,
     },
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
-    state_cache::StateCache,
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
@@ -57,29 +58,32 @@ use crate::{
     wait::Wait,
 };
 
-pub struct Controller<P: Preset, E, W: Wait> {
+pub struct Controller<P: Preset, E, A, W: Wait> {
     // The latest consistent snapshot of the store.
     store_snapshot: Arc<ArcSwap<Store<P>>>,
+    block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
-    state_cache: Arc<StateCache<P, W>>,
+    state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<Storage<P>>,
     thread_pool: ThreadPool<P, E, W>,
     wait_group: W::Swappable,
     metrics: Option<Arc<Metrics>>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
+    attestation_verifier_tx: A,
 }
 
-impl<P: Preset, E, W: Wait> Drop for Controller<P, E, W> {
+impl<P: Preset, E, A, W: Wait> Drop for Controller<P, E, A, W> {
     fn drop(&mut self) {
         let save_to_storage = !std::thread::panicking();
         MutatorMessage::Stop { save_to_storage }.send(&self.mutator_tx);
     }
 }
 
-impl<P, E, W> Controller<P, E, W>
+impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
     #[allow(clippy::too_many_arguments)]
@@ -92,7 +96,9 @@ where
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         api_tx: impl UnboundedSink<ApiMessage<P>>,
+        attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        pool_tx: impl UnboundedSink<PoolMessage>,
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
@@ -100,8 +106,9 @@ where
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
+
         let mut store = Store::new(
-            chain_config,
+            chain_config.clone_arc(),
             store_config,
             anchor_block,
             anchor_state,
@@ -110,18 +117,17 @@ where
 
         store.apply_tick(tick)?;
 
+        let state_cache = store.state_cache();
         let store_snapshot = Arc::new(ArcSwap::from_pointee(store));
         let thread_pool = ThreadPool::new()?;
         let (mutator_tx, mutator_rx) = std::sync::mpsc::channel();
 
-        let state_cache = Arc::new(StateCache::new(
-            store_snapshot.clone_arc(),
-            mutator_tx.clone(),
-        ));
+        let block_processor = Arc::new(BlockProcessor::new(chain_config, state_cache.clone_arc()));
 
         let mut mutator = Mutator::new(
             store_snapshot.clone_arc(),
             state_cache.clone_arc(),
+            block_processor.clone_arc(),
             execution_engine.clone(),
             storage.clone_arc(),
             thread_pool.clone(),
@@ -129,7 +135,9 @@ where
             mutator_tx.clone(),
             mutator_rx,
             api_tx,
+            attestation_verifier_tx.clone(),
             p2p_tx,
+            pool_tx,
             subnet_tx,
             sync_tx,
             validator_tx,
@@ -150,6 +158,7 @@ where
 
         let controller = Arc::new(Self {
             store_snapshot,
+            block_processor,
             execution_engine,
             state_cache,
             storage,
@@ -157,6 +166,7 @@ where
             wait_group: W::Swappable::default(),
             metrics,
             mutator_tx: mutator_tx.clone(),
+            attestation_verifier_tx,
         });
 
         let mutator_handle = MutatorHandle {
@@ -246,32 +256,15 @@ where
 
     pub fn on_api_aggregate_and_proof(
         &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         sender: OneshotSender<Result<ValidationOutcome>>,
     ) {
-        self.spawn(AggregateAndProofTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
+        AttestationVerifierMessage::AggregateAndProof {
             wait_group: self.owned_wait_group(),
             aggregate_and_proof,
             origin: AggregateAndProofOrigin::Api(sender),
-            metrics: self.metrics.clone(),
-        })
-    }
-
-    pub fn on_gossip_aggregate_and_proof(
-        &self,
-        aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
-        gossip_id: GossipId,
-    ) {
-        self.spawn(AggregateAndProofTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
-            aggregate_and_proof,
-            origin: AggregateAndProofOrigin::Gossip(gossip_id),
-            metrics: self.metrics.clone(),
-        })
+        }
+        .send(&self.attestation_verifier_tx);
     }
 
     pub fn on_api_singular_attestation(
@@ -280,14 +273,27 @@ where
         subnet_id: SubnetId,
         sender: OneshotSender<Result<ValidationOutcome>>,
     ) {
-        self.spawn(AttestationTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
+        AttestationVerifierMessage::Attestation {
             wait_group: self.owned_wait_group(),
-            attestation,
-            origin: AttestationOrigin::Api(subnet_id, sender),
-            metrics: self.metrics.clone(),
-        })
+            attestation: AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Api(subnet_id, sender),
+            ),
+        }
+        .send(&self.attestation_verifier_tx);
+    }
+
+    pub fn on_gossip_aggregate_and_proof(
+        &self,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        gossip_id: GossipId,
+    ) {
+        AttestationVerifierMessage::AggregateAndProof {
+            wait_group: self.owned_wait_group(),
+            aggregate_and_proof,
+            origin: AggregateAndProofOrigin::Gossip(gossip_id),
+        }
+        .send(&self.attestation_verifier_tx);
     }
 
     pub fn on_gossip_singular_attestation(
@@ -296,36 +302,42 @@ where
         subnet_id: SubnetId,
         gossip_id: GossipId,
     ) {
+        AttestationVerifierMessage::Attestation {
+            wait_group: self.owned_wait_group(),
+            attestation: AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Gossip(subnet_id, gossip_id),
+            ),
+        }
+        .send(&self.attestation_verifier_tx);
+    }
+
+    pub fn on_aggregate_and_proof(
+        &self,
+        aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
+        origin: AggregateAndProofOrigin<GossipId>,
+    ) {
+        self.spawn(AggregateAndProofTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            aggregate_and_proof,
+            origin,
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    pub fn on_singular_attestation(&self, attestation: AttestationItem<P, GossipId>) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             attestation,
-            origin: AttestationOrigin::Gossip(subnet_id, gossip_id),
             metrics: self.metrics.clone(),
         })
     }
 
-    pub fn on_own_singular_attestation(
-        &self,
-        wait_group: W,
-        attestation: Arc<Attestation<P>>,
-        subnet_id: SubnetId,
-    ) {
-        self.spawn(AttestationTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            attestation,
-            origin: AttestationOrigin::Own(subnet_id),
-            metrics: self.metrics.clone(),
-        })
-    }
-
-    pub fn on_gossip_aggregate_and_proof_batch(
-        &self,
-        results: Vec<VerifyAggregateAndProofResult<P>>,
-    ) {
+    pub fn on_aggregate_and_proof_batch(&self, results: Vec<VerifyAggregateAndProofResult<P>>) {
         if results.is_empty() {
             return;
         }
@@ -337,7 +349,7 @@ where
         .send(&self.mutator_tx)
     }
 
-    pub fn on_gossip_attestation_batch(&self, results: Vec<VerifyAttestationResult<P>>) {
+    pub fn on_attestation_batch(&self, results: Vec<VerifyAttestationResult<P>>) {
         if results.is_empty() {
             return;
         }
@@ -465,6 +477,7 @@ where
     ) {
         self.spawn(BlockTask {
             store_snapshot: self.owned_store_snapshot(),
+            block_processor: self.block_processor.clone_arc(),
             execution_engine: self.execution_engine.clone(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
@@ -479,8 +492,16 @@ where
         self.thread_pool.spawn(task);
     }
 
-    pub(crate) const fn state_cache(&self) -> &Arc<StateCache<P, W>> {
+    pub const fn block_processor(&self) -> &Arc<BlockProcessor<P>> {
+        &self.block_processor
+    }
+
+    pub(crate) const fn state_cache(&self) -> &Arc<StateCacheProcessor<P>> {
         &self.state_cache
+    }
+
+    pub fn store_config(&self) -> StoreConfig {
+        self.store_snapshot().store_config()
     }
 
     pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P>>> {
@@ -505,18 +526,6 @@ where
 
     pub(crate) fn owned_mutator_tx(&self) -> Sender<MutatorMessage<P, W>> {
         self.mutator_tx.clone()
-    }
-}
-
-#[cfg(test)]
-impl<P, E, W> Controller<P, E, W>
-where
-    P: Preset,
-    E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
-    W: Wait,
-{
-    pub fn store_config(&self) -> StoreConfig {
-        self.store_snapshot().store_config()
     }
 }
 

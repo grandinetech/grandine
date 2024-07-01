@@ -75,13 +75,13 @@ impl Meta {
 
 #[derive(Clone, Copy, Serialize)]
 pub struct ProcessMetrics {
-    cpu_process_seconds_total: u64,
-    memory_process_bytes: u64,
-    client_name: &'static str,
-    client_version: &'static str,
-    client_build: i64,
-    sync_eth2_fallback_configured: bool,
-    sync_eth2_fallback_connected: bool,
+    pub cpu_process_seconds_total: u64,
+    pub memory_process_bytes: u64,
+    pub client_name: &'static str,
+    pub client_version: &'static str,
+    pub client_build: i64,
+    pub sync_eth2_fallback_configured: bool,
+    pub sync_eth2_fallback_connected: bool,
 }
 
 impl ProcessMetrics {

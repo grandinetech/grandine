@@ -597,8 +597,9 @@ impl SyncManager {
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         let type_name = tynm::type_name::<Self>();
 
-        metrics.set_collection_length(&type_name, "peers", self.peers.len());
+        metrics.set_collection_length(module_path!(), &type_name, "peers", self.peers.len());
         metrics.set_collection_length(
+            module_path!(),
             &type_name,
             "status_updates_cache",
             self.status_updates_cache.cache_size(),

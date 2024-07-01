@@ -23,4 +23,5 @@ tracing = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
+hex-literal = { workspace = true }
 test-case = { workspace = true }

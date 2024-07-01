@@ -1,3 +1,7 @@
+// Adding backquotes to doc comments affects `--help` output.
+// `clap` derive macros preserve backquotes even if `verbatim_doc_comment` is disabled.
+#![allow(clippy::doc_markdown)]
+
 use core::{
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -22,7 +26,7 @@ use eth1_api::AuthOptions;
 use eth2_libp2p::PeerIdSerialized;
 use features::Feature;
 use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
-use fork_choice_store::StoreConfig;
+use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
 use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATION_VERSION};
 use http_api::HttpApiConfig;
 use itertools::{EitherOrBoth, Itertools as _};
@@ -35,7 +39,7 @@ use runtime::{
     MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
     DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
     DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_REQUEST_TIMEOUT,
-    DEFAULT_TARGET_PEERS, DEFAULT_TIMEOUT,
+    DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -293,15 +297,14 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
     request_timeout: u64,
 
+    /// Default state cache lock timeout in milliseconds
+    #[clap(long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
+    state_cache_lock_timeout: u64,
+
     /// State slot
     /// [default: None]
     #[clap(long)]
     state_slot: Option<Slot>,
-
-    /// Disable block signature verification pool
-    /// [default: enabled]
-    #[clap(long)]
-    disable_block_verification_pool: bool,
 
     /// Subscribe to all subnets
     #[clap(long)]
@@ -462,6 +465,10 @@ struct NetworkConfigOptions {
     #[clap(long, default_value_t = DEFAULT_TARGET_PEERS)]
     target_peers: usize,
 
+    /// Target number of subnet peers
+    #[clap(long, default_value_t = DEFAULT_TARGET_SUBNET_PEERS)]
+    target_subnet_peers: usize,
+
     /// List of trusted peers
     #[clap(long, value_delimiter = ',')]
     trusted_peers: Vec<PeerIdSerialized>,
@@ -500,6 +507,7 @@ impl NetworkConfigOptions {
             boot_nodes,
             libp2p_nodes,
             target_peers,
+            target_subnet_peers,
             trusted_peers,
         } = self;
 
@@ -515,6 +523,7 @@ impl NetworkConfigOptions {
         network_config.network_dir = in_memory.not().then_some(network_dir);
         network_config.metrics_enabled = metrics;
         network_config.target_peers = target_peers;
+        network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
 
         if let Some(listen_address_ipv6) = listen_address_ipv6 {
@@ -853,8 +862,8 @@ impl GrandineArgs {
             prune_storage,
             unfinalized_states_in_memory,
             request_timeout,
+            state_cache_lock_timeout,
             state_slot,
-            disable_block_verification_pool,
             subscribe_all_subnets,
             suggested_fee_recipient,
             jwt_id,
@@ -1141,7 +1150,6 @@ impl GrandineArgs {
 
         let features = features
             .into_iter()
-            .chain(disable_block_verification_pool.then_some(Feature::DisableBlockVerificationPool))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
             .collect();
@@ -1215,6 +1223,7 @@ impl GrandineArgs {
             storage_config,
             unfinalized_states_in_memory,
             request_timeout: Duration::from_millis(request_timeout),
+            state_cache_lock_timeout: Duration::from_millis(state_cache_lock_timeout),
             command,
             slashing_enabled,
             slashing_history_limit,

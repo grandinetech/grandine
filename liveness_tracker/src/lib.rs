@@ -228,12 +228,14 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
             let type_name = tynm::type_name::<Self>();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "live_validators_epochs",
                 self.live_validators.keys().len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "live_validators_indexes",
                 self.live_validators.values().map(BitVec::len).sum(),

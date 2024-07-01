@@ -29,6 +29,7 @@ pub struct Metrics {
     system_used_memory: IntGauge,
     system_total_memory: IntGauge,
     total_cpu_percentage: Gauge,
+    total_cpu_seconds: IntGauge,
 
     // Collection Lengths
     collection_lengths: IntGaugeVec,
@@ -60,6 +61,7 @@ pub struct Metrics {
     pub block_post_processing_times: Histogram,
 
     // Attestation Verifier
+    // attestation_verifier_active_task_count: IntGaugeVec,
     attestation_verifier_active_task_count: IntGauge,
 
     pub attestation_verifier_process_attestation_batch_times: Histogram,
@@ -197,13 +199,19 @@ impl Metrics {
                 "Grandine CPU load usage measured in percentage",
             )?,
 
+            total_cpu_seconds: IntGauge::new(
+                "GRANDINE_TOTAL_CPU_SECONDS",
+                "Grandine CPU load usage measured in seconds"
+            )?,
+
             system_used_memory: IntGauge::new("SYSTEM_USED_MEMORY", "Node memory usage")?,
             system_total_memory: IntGauge::new("SYSTEM_TOTAL_MEMORY", "Total node mmeory")?,
+
 
             // Collection Lengths
             collection_lengths: IntGaugeVec::new(
                 opts!("COLLECTION_LENGTHS", "Number of items in each collection"),
-                &["type", "name"],
+                &["module", "type", "name"],
             )?,
 
             // HTTP API metrics
@@ -297,6 +305,14 @@ impl Metrics {
                 "ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
                 "Attestation verifier active task count",
             )?,
+
+            // attestation_verifier_active_task_count: IntGaugeVec::new(
+            //     opts!(
+            //         "ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
+            //         "Attestation verifier active task count",
+            //     ),
+            //     &["type"],
+            // )?,
 
             attestation_verifier_process_attestation_batch_times: Histogram::with_opts(
                 histogram_opts!(
@@ -723,6 +739,7 @@ impl Metrics {
         default_registry.register(Box::new(self.system_used_memory.clone()))?;
         default_registry.register(Box::new(self.system_total_memory.clone()))?;
         default_registry.register(Box::new(self.total_cpu_percentage.clone()))?;
+        default_registry.register(Box::new(self.total_cpu_seconds.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
         default_registry.register(Box::new(self.http_api_response_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
@@ -893,6 +910,10 @@ impl Metrics {
         self.total_cpu_percentage.set(cpu_percentage as f64)
     }
 
+    pub fn set_total_cpu_seconds(&self, total_cpu_seconds: u64) {
+        self.total_cpu_seconds.set(total_cpu_seconds as i64)
+    }
+
     pub fn set_system_used_memory(&self, used_memory: u64) {
         self.system_used_memory.set(used_memory as i64)
     }
@@ -902,9 +923,15 @@ impl Metrics {
     }
 
     // Collection Lengths
-    pub fn set_collection_length(&self, typename: &str, collection_name: &str, value: usize) {
+    pub fn set_collection_length(
+        &self,
+        module_name: &str,
+        typename: &str,
+        collection_name: &str,
+        value: usize,
+    ) {
         self.collection_lengths
-            .get_metric_with_label_values(&[typename, collection_name])
+            .get_metric_with_label_values(&[module_name, typename, collection_name])
             .expect(
                 "the number of label values should match the number \
                  of labels that collection_lengths was created with",

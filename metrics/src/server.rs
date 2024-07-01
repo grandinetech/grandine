@@ -35,7 +35,7 @@ use types::{
     traits::BeaconState as _,
 };
 
-use crate::messages::MetricsToMetrics;
+use crate::{beaconchain::ProcessMetrics, messages::MetricsToMetrics};
 
 #[derive(Clone, Debug)]
 pub struct MetricsServerConfig {
@@ -190,11 +190,17 @@ pub async fn prometheus_metrics<P: Preset, W: Wait>(
             .unwrap_or_default(),
     );
 
-    let epoch = misc::compute_epoch_at_slot::<P>(controller.head().value.slot());
-    // Take state at last slot in epoch
-    let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
-    if let Some(state) = controller.state_at_slot(slot)? {
-        scrape_epoch_statistics(&state.value, &metrics)?;
+    let head_slot = controller.head().value.slot();
+    let store_slot = controller.slot();
+    let max_empty_slots = controller.store_config().max_empty_slots;
+
+    if head_slot + max_empty_slots >= store_slot {
+        let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
+        // Take state at last slot in epoch
+        let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
+        if let Some(state) = controller.state_at_slot(slot)? {
+            scrape_epoch_statistics(&state.value, &metrics)?;
+        }
     }
 
     TextEncoder::new()
@@ -260,6 +266,10 @@ async fn scrape_system_stats(
     metrics.set_total_cpu_percentage(grandine_total_cpu_percentage);
     metrics.set_system_total_memory(system_total_memory);
     metrics.set_system_used_memory(system_used_memory);
+
+    let process_metrics = ProcessMetrics::get();
+
+    metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
 
     Ok(())
 }

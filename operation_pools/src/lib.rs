@@ -6,6 +6,7 @@ pub use crate::{
     bls_to_execution_change_pool::{
         BlsToExecutionChangePool, Service as BlsToExecutionChangePoolService,
     },
+    manager::Manager,
     messages::{PoolToApiMessage, PoolToLivenessMessage, PoolToP2pMessage},
     misc::{Origin, PoolAdditionOutcome, PoolRejectionReason},
     sync_committee_agg_pool::Manager as SyncCommitteeAggPool,
@@ -25,6 +26,7 @@ mod attestation_agg_pool {
 }
 
 mod bls_to_execution_change_pool;
+mod manager;
 mod messages;
 mod misc;
 

@@ -6,6 +6,7 @@ use crossbeam_utils::sync::WaitGroup;
 use database::Database;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use fork_choice_store::StoreConfig;
+use futures::sink::Drain;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -18,7 +19,7 @@ use types::{
 
 use crate::{
     controller::{Controller, MutatorHandle},
-    messages::P2pMessage,
+    messages::{AttestationVerifierMessage, P2pMessage},
     storage::{Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL},
     unbounded_sink::UnboundedSink,
 };
@@ -28,27 +29,34 @@ use std::sync::Mutex;
 
 #[cfg(test)]
 use ::{
-    execution_engine::MockExecutionEngine, fork_choice_store::AttestationOrigin,
+    execution_engine::MockExecutionEngine,
+    fork_choice_store::{AttestationItem, AttestationOrigin},
     types::combined::Attestation,
 };
 
 #[cfg(test)]
 use crate::tasks::AttestationTask;
 
-pub type AdHocBenchController<P> = Controller<P, NullExecutionEngine, WaitGroup>;
+pub type AttestationVerifierDrain<P> = Drain<AttestationVerifierMessage<P, WaitGroup>>;
 
-pub type BenchController<P> = Controller<P, NullExecutionEngine, WaitGroup>;
+pub type AdHocBenchController<P> =
+    Controller<P, NullExecutionEngine, AttestationVerifierDrain<P>, WaitGroup>;
+
+pub type BenchController<P> =
+    Controller<P, NullExecutionEngine, AttestationVerifierDrain<P>, WaitGroup>;
 
 #[cfg(test)]
-pub type TestController<P> = Controller<P, TestExecutionEngine, WaitGroup>;
+pub type TestController<P> =
+    Controller<P, TestExecutionEngine, AttestationVerifierDrain<P>, WaitGroup>;
 
 #[cfg(test)]
 pub type TestExecutionEngine = Arc<Mutex<MockExecutionEngine>>;
 
-impl<P, E> Controller<P, E, WaitGroup>
+impl<P, E, A> Controller<P, E, A, WaitGroup>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+    A: UnboundedSink<AttestationVerifierMessage<P, WaitGroup>>,
 {
     pub fn on_slot(&self, slot: Slot) {
         self.on_tick(Tick::start_of_slot(slot));
@@ -71,7 +79,13 @@ where
 
         wait_group.wait()
     }
+}
 
+impl<P, E> Controller<P, E, AttestationVerifierDrain<P>, WaitGroup>
+where
+    P: Preset,
+    E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
+{
     fn new_internal(
         chain_config: Arc<ChainConfig>,
         store_config: StoreConfig,
@@ -99,7 +113,9 @@ where
             execution_engine,
             metrics,
             futures::sink::drain(),
+            futures::sink::drain(),
             p2p_tx,
+            futures::sink::drain(),
             futures::sink::drain(),
             futures::sink::drain(),
             futures::sink::drain(),
@@ -191,8 +207,7 @@ impl<P: Preset> TestController<P> {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
-            attestation,
-            origin: AttestationOrigin::Test,
+            attestation: AttestationItem::unverified(attestation, AttestationOrigin::Test),
             metrics: None,
         })
     }

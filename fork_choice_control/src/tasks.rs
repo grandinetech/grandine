@@ -9,8 +9,8 @@ use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationOrigin, AttesterSlashingOrigin, BlobSidecarOrigin,
-    BlockOrigin, Store,
+    AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
+    BlobSidecarOrigin, BlockOrigin, StateCacheProcessor, Store,
 };
 use helper_functions::{
     accessors, misc,
@@ -18,9 +18,8 @@ use helper_functions::{
 };
 use log::warn;
 use prometheus_metrics::Metrics;
-use std_ext::ArcExt as _;
 use types::{
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     nonstandard::RelativeEpoch,
     phase0::{
@@ -32,9 +31,7 @@ use types::{
 };
 
 use crate::{
-    messages::MutatorMessage,
-    misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
-    state_cache::StateCache,
+    block_processor::BlockProcessor, messages::MutatorMessage, misc::VerifyAggregateAndProofResult,
     storage::Storage,
 };
 
@@ -56,6 +53,7 @@ pub trait Run {
 
 pub struct BlockTask<P: Preset, E, W> {
     pub store_snapshot: Arc<Store<P>>,
+    pub block_processor: Arc<BlockProcessor<P>>,
     pub execution_engine: E,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
@@ -69,6 +67,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
     fn run(self) {
         let Self {
             store_snapshot,
+            block_processor,
             execution_engine,
             mutator_tx,
             wait_group,
@@ -82,52 +81,53 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             prometheus_metrics::start_timer_vec(&metrics.fc_block_task_times, origin.as_ref())
         });
 
-        let block_arc = block.clone_arc();
-
         // TODO(Grandine Team): Consider moving the `match` into `Store`.
         let result = match origin {
             BlockOrigin::Gossip(_) | BlockOrigin::Requested(_) | BlockOrigin::Api(_) => {
-                store_snapshot.validate_block(
-                    block,
+                block_processor.validate_block(
+                    &store_snapshot,
+                    &block,
                     origin.state_root_policy(),
                     execution_engine,
                     MultiVerifier::default(),
                 )
             }
-            BlockOrigin::SemiVerified => store_snapshot.validate_block(
-                block,
+            BlockOrigin::SemiVerified => block_processor.validate_block(
+                &store_snapshot,
+                &block,
                 origin.state_root_policy(),
                 execution_engine,
                 MultiVerifier::new([VerifierOption::SkipBlockBaseSignatures]),
             ),
             BlockOrigin::Own => {
                 if Feature::TrustOwnBlockSignatures.is_enabled() {
-                    store_snapshot.validate_block(
-                        block,
+                    block_processor.validate_block(
+                        &store_snapshot,
+                        &block,
                         origin.state_root_policy(),
                         execution_engine,
                         NullVerifier,
                     )
                 } else {
-                    store_snapshot.validate_block(
-                        block,
+                    block_processor.validate_block(
+                        &store_snapshot,
+                        &block,
                         origin.state_root_policy(),
                         execution_engine,
                         MultiVerifier::default(),
                     )
                 }
             }
-            BlockOrigin::Persisted => store_snapshot.validate_block(
-                block,
+            BlockOrigin::Persisted => block_processor.validate_block(
+                &store_snapshot,
+                &block,
                 origin.state_root_policy(),
                 NullExecutionEngine,
                 NullVerifier,
             ),
         };
 
-        let rejected_block_root = result
-            .is_err()
-            .then(|| block_arc.message().hash_tree_root());
+        let rejected_block_root = result.is_err().then(|| block.message().hash_tree_root());
 
         MutatorMessage::Block {
             wait_group,
@@ -144,7 +144,7 @@ pub struct AggregateAndProofTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub aggregate_and_proof: Box<SignedAggregateAndProof<P>>,
+    pub aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -167,7 +167,9 @@ impl<P: Preset, W> Run for AggregateAndProofTask<P, W> {
             )
         });
 
-        let result = store_snapshot.validate_aggregate_and_proof(aggregate_and_proof, &origin);
+        let result =
+            store_snapshot.validate_aggregate_and_proof(aggregate_and_proof, &origin, false);
+
         let result = VerifyAggregateAndProofResult { result, origin };
 
         MutatorMessage::AggregateAndProof { wait_group, result }.send(&mutator_tx);
@@ -178,8 +180,7 @@ pub struct AttestationTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub attestation: Arc<Attestation<P>>,
-    pub origin: AttestationOrigin<GossipId>,
+    pub attestation: AttestationItem<P, GossipId>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -190,16 +191,17 @@ impl<P: Preset, W> Run for AttestationTask<P, W> {
             mutator_tx,
             wait_group,
             attestation,
-            origin,
             metrics,
         } = self;
 
         let _timer = metrics.as_ref().map(|metrics| {
-            prometheus_metrics::start_timer_vec(&metrics.fc_attestation_task_times, origin.as_ref())
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_attestation_task_times,
+                attestation.origin.as_ref(),
+            )
         });
 
-        let result = store_snapshot.validate_attestation(attestation, &origin);
-        let result = VerifyAttestationResult { result, origin };
+        let result = store_snapshot.validate_attestation(attestation, false);
 
         MutatorMessage::Attestation { wait_group, result }.send(&mutator_tx);
     }
@@ -234,9 +236,10 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             .body()
             .combined_attestations()
             .map(|attestation| {
-                let attestation = Arc::new(attestation);
-                let origin = AttestationOrigin::<GossipId>::Block;
-                store_snapshot.validate_attestation(attestation, &origin)
+                store_snapshot.validate_attestation(
+                    AttestationItem::verified(Arc::new(attestation), AttestationOrigin::Block),
+                    true,
+                )
             })
             .collect();
 
@@ -369,7 +372,8 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
 }
 
 pub struct CheckpointStateTask<P: Preset, W> {
-    pub state_cache: Arc<StateCache<P, W>>,
+    pub store_snapshot: Arc<Store<P>>,
+    pub state_cache: Arc<StateCacheProcessor<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub checkpoint: Checkpoint,
@@ -379,6 +383,7 @@ pub struct CheckpointStateTask<P: Preset, W> {
 impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
     fn run(self) {
         let Self {
+            store_snapshot,
             state_cache,
             mutator_tx,
             wait_group,
@@ -393,7 +398,7 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        let checkpoint_state = match state_cache.try_state_at_slot(root, slot) {
+        let checkpoint_state = match state_cache.try_state_at_slot(&store_snapshot, root, slot) {
             Ok(state) => state,
             Err(error) => {
                 warn!("failed to compute checkpoint state: {error:?}");
@@ -411,7 +416,9 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
 }
 
 pub struct PreprocessStateTask<P: Preset, W> {
-    pub state_cache: Arc<StateCache<P, W>>,
+    pub store_snapshot: Arc<Store<P>>,
+    pub state_cache: Arc<StateCacheProcessor<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub head_block_root: H256,
     pub next_slot: Slot,
     pub metrics: Option<Arc<Metrics>>,
@@ -420,7 +427,9 @@ pub struct PreprocessStateTask<P: Preset, W> {
 impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
     fn run(self) {
         let Self {
+            store_snapshot,
             state_cache,
+            mutator_tx,
             head_block_root,
             next_slot,
             metrics,
@@ -430,11 +439,13 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_preprocess_state_task_times.start_timer());
 
-        match state_cache.state_at_slot_quiet(head_block_root, next_slot) {
+        match state_cache.state_at_slot_quiet(&store_snapshot, head_block_root, next_slot) {
             Ok(state) => {
                 if let Err(error) = initialize_preprocessed_state_cache(&state) {
                     warn!("failed to initialize preprocessed state's cache values: {error:?}");
                 }
+
+                MutatorMessage::PreprocessedBeaconState { state }.send(&mutator_tx);
             }
             Err(error) => {
                 warn!("failed to preprocess beacon state for the next slot: {error:?}");

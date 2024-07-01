@@ -79,7 +79,6 @@ pub fn get_indexed_attestation<P: Preset>(
 }
 
 // > Return the set of attesting indices corresponding to ``aggregation_bits`` and ``committee_bits``.
-#[must_use]
 pub fn get_attesting_indices<P: Preset>(
     state: &impl BeaconState<P>,
     attestation: &Attestation<P>,
@@ -103,7 +102,10 @@ pub fn get_attesting_indices<P: Preset>(
     // This works the same as `assert len(attestation.aggregation_bits) == participants_count`
     ensure!(
         committee_offset == attestation.aggregation_bits.len(),
-        Error::ParticipantsCountMismatch,
+        Error::ParticipantsCountMismatch {
+            aggregation_bitlist_length: attestation.aggregation_bits.len(),
+            participants_count: committee_offset
+        },
     );
 
     Ok(output)

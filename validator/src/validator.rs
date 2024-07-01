@@ -27,8 +27,8 @@ use execution_engine::{
     PayloadAttributesV3, PayloadId,
 };
 use features::Feature;
-use fork_choice_control::{StateCacheError, ValidatorMessage, Wait};
-use fork_choice_store::ChainLink;
+use fork_choice_control::{ValidatorMessage, Wait};
+use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future::{Either as EitherFuture, OptionFuture},
@@ -59,7 +59,7 @@ use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
 use tokio::task::JoinHandle;
-use transition_functions::{capella, combined, electra, unphased};
+use transition_functions::{capella, electra, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -98,7 +98,9 @@ use types::{
         BeaconBlockBody as ElectraBeaconBlockBody, ExecutionPayload as ElectraExecutionPayload,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
     },
-    nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
+    nonstandard::{
+        BlockRewards, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+    },
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
@@ -109,8 +111,7 @@ use types::{
             SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
-            ValidatorIndex, H256,
+            Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256, ValidatorIndex, H256,
         },
     },
     preset::Preset,
@@ -132,6 +133,7 @@ use crate::{
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
     validator_config::ValidatorConfig,
+    PayloadIdEntry,
 };
 
 const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
@@ -328,6 +330,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
+                        let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
+                            || self.attestation_agg_pool.has_registered_validators_proposing_in_slots(slot..=slot).await;
+
+                        if !should_prepare_execution_payload {
+                            return Ok(());
+                        }
+
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
@@ -700,7 +709,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Tick { slot, kind } = tick;
 
-        let no_validators = self.signer.load().no_keys() && self.registered_validators.is_empty();
+        let no_validators = self.signer.load().no_keys()
+            && self.registered_validators.is_empty()
+            && self.prepared_proposers.is_empty();
 
         log!(
             if no_validators {
@@ -734,8 +745,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.discard_old_registered_validators(current_epoch);
             self.discard_old_attester_slashings(current_epoch);
             self.discard_old_voluntary_exits();
-            self.bls_to_execution_change_pool
-                .discard_old_bls_to_execution_changes();
             self.own_sync_committee_subscriptions
                 .discard_old_subscriptions(current_epoch);
         }
@@ -744,7 +753,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.register_validators(current_epoch);
         }
 
-        self.attestation_agg_pool.on_tick(tick).await;
         self.track_collection_metrics();
 
         let slot_head = if no_validators {
@@ -792,10 +800,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.discard_previous_slot_attestations();
                 self.propose(wait_group, &slot_head).await?;
-                // Sync committee messages and contributions for the previous slot are sometimes
-                // constructed while proposing a block. They must be discarded before the time to
-                // publish new ones comes.
-                self.sync_committee_agg_pool.on_slot(slot_head.slot());
                 self.published_own_sync_committee_messages = false;
             }
             TickKind::Attest => {
@@ -894,7 +898,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let mut payload_id = self
             .payload_id_cache
             .cache_get(&(head_block_root, state.slot()))
-            .copied();
+            .copied()
+            .map(PayloadIdEntry::Cached);
 
         if payload_id.is_none() {
             warn!("payload_id not found in payload_id_cache for {head_block_root:?}");
@@ -907,6 +912,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     proposer_index,
                 )
                 .await?
+                .map(PayloadIdEntry::Live)
         };
 
         let Some(payload_id) = payload_id else {
@@ -917,10 +923,44 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(None);
         };
 
-        let payload = self
+        let payload = match self
             .execution_engine
-            .get_execution_payload(payload_id)
-            .await?;
+            .get_execution_payload(payload_id.id())
+            .await
+        {
+            Ok(payload) => payload,
+            Err(error) => {
+                warn!("unable to retrieve payload with payload_id {payload_id:?}: {error:?}");
+
+                match payload_id {
+                    PayloadIdEntry::Cached(_) => {
+                        let payload_id = self
+                            .prepare_execution_payload(
+                                state,
+                                snapshot.safe_execution_payload_hash(),
+                                snapshot.finalized_execution_payload_hash(),
+                                proposer_index,
+                            )
+                            .await?;
+
+                        if let Some(payload_id) = payload_id {
+                            info!("successfully retrieved non-cached payload_id: {payload_id:?}");
+
+                            self.execution_engine
+                                .get_execution_payload(payload_id)
+                                .await?
+                        } else {
+                            error!(
+                                "payload_id from execution layer was not received; This will lead to missed block"
+                            );
+
+                            return Ok(None);
+                        }
+                    }
+                    PayloadIdEntry::Live(_) => return Err(error),
+                }
+            }
+        };
 
         let payload_root = payload.value.hash_tree_root();
 
@@ -960,7 +1000,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         payload_header: ExecutionPayloadHeader<P>,
         blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
         skip_randao_verification: bool,
-    ) -> Option<BlindedBeaconBlock<P>> {
+    ) -> Option<(BlindedBeaconBlock<P>, Option<BlockRewards>)> {
         let without_state_root =
             match beacon_block.into_blinded(payload_header, blob_kzg_commitments) {
                 Ok(block) => block,
@@ -970,37 +1010,37 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
             };
 
-        let mut post_state = slot_head.beacon_state.as_ref().clone();
+        let block_processor = self.controller.block_processor();
+        let pre_state = slot_head.beacon_state.clone_arc();
 
         let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-            combined::process_trusted_blinded_block(
-                &self.chain_config,
-                &mut post_state,
-                &without_state_root,
-            )
+            block_processor
+                .process_trusted_blinded_block_with_report(pre_state, &without_state_root)
         } else {
-            combined::process_untrusted_blinded_block(
-                &self.chain_config,
-                &mut post_state,
+            block_processor.process_untrusted_blinded_block_with_report(
+                pre_state,
                 &without_state_root,
                 skip_randao_verification,
             )
         };
 
-        if let Err(error) = result {
-            warn!(
-                "constructed invalid blinded beacon block \
-                 (error: {error:?}, without_state_root: {without_state_root:?})",
-            );
-            return None;
+        let (post_state, block_rewards) = match result {
+            Ok((state, block_rewards)) => (state, block_rewards),
+            Err(error) => {
+                warn!(
+                    "constructed invalid blinded beacon block \
+                    (error: {error:?}, without_state_root: {without_state_root:?})",
+                );
+                return None;
+            }
         };
 
         // Computing and setting the state root could be skipped when `skip_randao_verification`
         // is `true`. The resulting block is invalid either way. The client would have to mix in
         // the real RANDAO reveal and recompute the state root to make it valid.
-        without_state_root
-            .with_state_root(post_state.hash_tree_root())
-            .pipe(Some)
+        let with_state_root = without_state_root.with_state_root(post_state.hash_tree_root());
+
+        Some((with_state_root, block_rewards))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1013,8 +1053,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         execution_payload_header_handle: Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>>,
         skip_randao_verification: bool,
         builder_boost_factor: u64,
-    ) -> Result<Option<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>> {
-        let Some(beacon_block) = self
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
+            Option<BlockRewards>,
+        )>,
+    > {
+        let Some((beacon_block, block_rewards)) = self
             .build_beacon_block(
                 slot_head,
                 Some(proposer_index),
@@ -1034,13 +1079,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
                         let builder_mev = response.mev();
 
-                        if let Some(blinded_block) = self.blinded_block_from_beacon_block(
-                            slot_head,
-                            beacon_block.value.clone(),
-                            response.execution_payload_header(),
-                            blob_kzg_commitments,
-                            skip_randao_verification,
-                        ) {
+                        if let Some((blinded_block, blinded_block_rewards)) = self
+                            .blinded_block_from_beacon_block(
+                                slot_head,
+                                beacon_block.value.clone(),
+                                response.execution_payload_header(),
+                                blob_kzg_commitments,
+                                skip_randao_verification,
+                            )
+                        {
                             if let Some(local_mev) = beacon_block.mev {
                                 let builder_boost_factor = Uint256::from_u64(builder_boost_factor);
 
@@ -1055,9 +1102,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                         boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
                                     );
 
-                                    return Ok(Some(
+                                    return Ok(Some((
                                         beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
-                                    ));
+                                        block_rewards,
+                                    )));
                                 }
                             }
 
@@ -1070,12 +1118,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 ),
                             };
 
-                            return Ok(Some(WithBlobsAndMev::new(
-                                block,
-                                None,
-                                beacon_block.proofs,
-                                beacon_block.blobs,
-                                Some(builder_mev),
+                            return Ok(Some((
+                                WithBlobsAndMev::new(
+                                    block,
+                                    None,
+                                    beacon_block.proofs,
+                                    beacon_block.blobs,
+                                    Some(builder_mev),
+                                ),
+                                blinded_block_rewards,
                             )));
                         }
                     }
@@ -1087,7 +1138,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
 
-        Ok(Some(beacon_block.map(ValidatorBlindedBlock::BeaconBlock)))
+        Ok(Some((
+            beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
+            block_rewards,
+        )))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1098,7 +1152,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         randao_reveal: SignatureBytes,
         graffiti: H256,
         skip_randao_verification: bool,
-    ) -> Result<Option<WithBlobsAndMev<BeaconBlock<P>, P>>> {
+    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         let _block_timer = self
             .metrics
             .as_ref()
@@ -1109,7 +1163,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // TODO(Grandine Team): Move this to a separate task so it prepares the execution payload
         //                      before it is time to propose a block.
         let WithBlobsAndMev {
-            value: execution_payload,
+            value: mut execution_payload,
             commitments,
             proofs,
             blobs,
@@ -1119,6 +1173,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
             .map(|value| value.map(Some))
             .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+
+        // TODO(feature/electra): Decide whether to keep the post-Capella execution payload logic.
+        //                        It exists only for snapshot testing.
+        // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
+        // Construct a superficially valid execution payload for snapshot testing.
+        // It will almost always be invalid in a real network, but so would a default payload.
+        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
+        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
+        if slot_head.phase() >= Phase::Capella && execution_payload.is_none() {
+            execution_payload = Some(factory::execution_payload(
+                &self.chain_config,
+                &slot_head.beacon_state,
+                slot_head.slot(),
+                ExecutionBlockHash::from_low_u64_be(slot_head.slot()),
+            )?);
+        }
 
         let blob_kzg_commitments = commitments.unwrap_or_default();
         let sync_aggregate = self.process_sync_committee_contributions(slot_head).await?;
@@ -1172,7 +1242,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
             let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
 
-            let without_state_root = match slot_head.beacon_state.phase() {
+            let without_state_root = match slot_head.phase() {
                 Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
                     slot,
                     proposer_index,
@@ -1264,20 +1334,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     },
                 }),
                 Phase::Electra => {
-                    // TODO(feature/electra): don't ignore errors
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|attestation| convert_to_electra_attestation(attestation).ok())
-                        .group_by(|attestation| attestation.data);
+                    let attestations = if misc::compute_epoch_at_slot::<P>(slot)
+                        == self.chain_config.electra_fork_epoch
+                    {
+                        ContiguousList::default()
+                    } else {
+                        // TODO(feature/electra): don't ignore errors
+                        let attestations = attestations
+                            .into_iter()
+                            .filter_map(|attestation| {
+                                convert_to_electra_attestation(attestation).ok()
+                            })
+                            .group_by(|attestation| attestation.data);
 
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|(_, attestations)| {
-                            Self::compute_on_chain_aggregate(attestations).ok()
-                        })
-                        .take(P::MaxAttestationsElectra::USIZE);
+                        let attestations = attestations
+                            .into_iter()
+                            .filter_map(|(_, attestations)| {
+                                Self::compute_on_chain_aggregate(attestations).ok()
+                            })
+                            .take(P::MaxAttestationsElectra::USIZE);
 
-                    let attestations = ContiguousList::try_from_iter(attestations)?;
+                        ContiguousList::try_from_iter(attestations)?
+                    };
 
                     BeaconBlock::from(ElectraBeaconBlock {
                         slot,
@@ -1304,43 +1382,45 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
             .with_execution_payload(execution_payload)?;
 
-            let mut post_state = slot_head.beacon_state.as_ref().clone();
+            let block_processor = self.controller.block_processor();
+            let pre_state = slot_head.beacon_state.clone_arc();
 
             let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-                combined::process_trusted_block(
-                    &self.chain_config,
-                    &mut post_state,
-                    &without_state_root,
-                )
+                block_processor.process_trusted_block_with_report(pre_state, &without_state_root)
             } else {
-                combined::process_untrusted_block(
-                    &self.chain_config,
-                    &mut post_state,
+                block_processor.process_untrusted_block_with_report(
+                    pre_state,
                     &without_state_root,
                     skip_randao_verification,
                 )
             };
 
-            if let Err(error) = result {
-                warn!(
-                    "constructed invalid beacon block \
-                     (error: {error:?}, without_state_root: {without_state_root:?})",
-                );
-                return Ok(None);
-            }
+            let (post_state, block_rewards) = match result {
+                Ok((state, block_rewards)) => (state, block_rewards),
+                Err(error) => {
+                    warn!(
+                        "constructed invalid beacon block \
+                        (error: {error:?}, without_state_root: {without_state_root:?})",
+                    );
+                    return Ok(None);
+                }
+            };
 
             // Computing and setting the state root could be skipped when `skip_randao_verification`
             // is `true`. The resulting block is invalid either way. The client would have to mix in
             // the real RANDAO reveal and recompute the state root to make it valid.
             let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
 
-            Ok(Some(WithBlobsAndMev::new(
-                beacon_block,
-                // Commitments are moved to block.
-                None,
-                proofs,
-                blobs,
-                mev,
+            Ok(Some((
+                WithBlobsAndMev::new(
+                    beacon_block,
+                    // Commitments are moved to block.
+                    None,
+                    proofs,
+                    blobs,
+                    mev,
+                ),
+                block_rewards,
             )))
         })
     }
@@ -1354,31 +1434,31 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             })
             .collect_vec();
 
+        let aggregation_bits = aggregates
+            .iter()
+            .map(|attestation| &attestation.aggregation_bits)
+            .pipe(BitList::concatenate)?;
+
         let data = if let Some(attestation) = aggregates.first() {
             attestation.data
         } else {
             return Err(AnyhowError::msg("no attestations for block aggregate"));
         };
 
-        let mut signature = AggregateSignature::default();
-        let mut aggregation_bits: Vec<u8> = vec![];
         let mut committee_bits = BitVector::default();
+        let mut signature = AggregateSignature::default();
 
         for aggregate in aggregates {
-            if let Some(committee_index) =
-                misc::get_committee_indices::<P>(aggregate.committee_bits).next()
-            {
-                committee_bits.set(committee_index.try_into()?, true);
+            for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
+                let index = committee_index.try_into()?;
+                committee_bits.set(index, true);
             }
-
-            let bits = Vec::<u8>::from(aggregate.aggregation_bits);
-            aggregation_bits.extend_from_slice(&bits);
 
             signature.aggregate_in_place(aggregate.signature.try_into()?);
         }
 
         Ok(ElectraAttestation {
-            aggregation_bits: BitList::try_from(aggregation_bits)?,
+            aggregation_bits,
             data,
             committee_bits,
             signature: signature.into(),
@@ -1523,12 +1603,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             )
             .await?;
 
-        let Some(WithBlobsAndMev {
-            value: validator_blinded_block,
-            proofs: mut block_proofs,
-            blobs: mut block_blobs,
-            ..
-        }) = beacon_block_option
+        let Some((
+            WithBlobsAndMev {
+                value: validator_blinded_block,
+                proofs: mut block_proofs,
+                blobs: mut block_blobs,
+                ..
+            },
+            _block_rewards,
+        )) = beacon_block_option
         else {
             warn!(
                 "validator {} skipping beacon block proposal in slot {}",
@@ -1753,7 +1836,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             } = own_attestation;
 
-            let committee_index = committee_index(attestation);
+            let committee_index = misc::committee_index(attestation);
 
             debug!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
@@ -1769,11 +1852,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let attestation = Arc::new(attestation.clone());
             let subnet_id = slot_head.subnet_id(attestation.data().slot, committee_index)?;
 
-            self.controller.on_own_singular_attestation(
-                wait_group.clone(),
-                attestation.clone_arc(),
-                subnet_id,
-            );
+            self.controller
+                .on_singular_attestation(AttestationItem::unverified(
+                    attestation.clone_arc(),
+                    AttestationOrigin::Own(subnet_id),
+                ));
 
             ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
                 .send(&self.p2p_tx);
@@ -1792,7 +1875,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.own_aggregators = accepted_attestations
             .into_iter()
             .filter_map(|own_attestation| {
-                let committee_index = committee_index(&own_attestation.attestation);
+                let committee_index = misc::committee_index(&own_attestation.attestation);
 
                 let member =
                     own_members.get(&(committee_index, own_attestation.validator_index))?;
@@ -1827,7 +1910,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[allow(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&mut self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
-        let phase = config.phase_at_slot::<P>(slot_head.slot());
+        let phase = slot_head.phase();
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -1941,7 +2024,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         for aggregate_and_proof in aggregates_and_proofs {
             let attestation = Arc::new(aggregate_and_proof.aggregate());
-            let aggregate_and_proof = Box::new(aggregate_and_proof);
+            let aggregate_and_proof = Arc::new(aggregate_and_proof);
 
             self.attestation_agg_pool
                 .insert_attestation(wait_group.clone(), &attestation);
@@ -2151,7 +2234,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_attestations);
         }
 
-        let phase = self.chain_config.phase_at_slot::<P>(slot_head.slot());
+        let phase = slot_head.phase();
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {
@@ -3256,6 +3339,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let chain_config = self.chain_config.clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
+        let prepared_proposer_indices = self.prepared_proposers.keys().copied().collect();
         let registered_validators = self.registered_validators.clone();
         let subnet_service_tx = self.subnet_service_tx.clone();
 
@@ -3270,6 +3354,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .copied()
                     .chain(pubkeys.iter().copied())
                     .collect(),
+                prepared_proposer_indices,
             )
             .send(&subnet_service_tx);
 
@@ -3398,6 +3483,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let type_name = tynm::type_name::<Self>();
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "own_singular_attestations",
                 self.own_singular_attestations
@@ -3407,24 +3493,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "proposer_slashings",
                 self.proposer_slashings.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "attester_slashings",
                 self.attester_slashings.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "voluntary_exits",
                 self.voluntary_exits.len(),
             );
 
             metrics.set_collection_length(
+                module_path!(),
                 &type_name,
                 "validator_votes",
                 self.validator_votes.values().map(Vec::len).sum(),
@@ -3498,16 +3588,5 @@ async fn update_beacon_committee_subscriptions(
 
     if let Err(error) = receiver.await {
         warn!("failed to update beacon committee subscriptions: {error:?}");
-    }
-}
-
-fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeIndex {
-    match attestation {
-        Attestation::Phase0(attestation) => attestation.data.index,
-        Attestation::Electra(attestation) => {
-            misc::get_committee_indices::<P>(attestation.committee_bits)
-                .next()
-                .unwrap_or_default()
-        }
     }
 }

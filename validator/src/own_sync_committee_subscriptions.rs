@@ -31,7 +31,7 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
         let next_period = current_period + 1;
         let next_period_start = misc::start_of_sync_committee_period::<P>(next_period);
 
-        if self.subscriptions.get(&current_period).is_none() {
+        if self.subscriptions.contains_key(&current_period) {
             let subscriptions = core::iter::repeat(current_epoch)
                 .zip(sync_committee_subscriptions(
                     state,
@@ -44,7 +44,7 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
             self.subscriptions.insert(current_period, subscriptions);
         }
 
-        if self.subscriptions.get(&next_period).is_none() {
+        if self.subscriptions.contains_key(&next_period) {
             let next_period_expiration = misc::start_of_sync_committee_period::<P>(next_period + 1);
 
             let mut rng = rand::thread_rng();

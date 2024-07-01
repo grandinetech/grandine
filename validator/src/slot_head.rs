@@ -37,6 +37,11 @@ impl<P: Preset> SlotHead<P> {
     }
 
     #[must_use]
+    pub fn phase(&self) -> Phase {
+        self.beacon_state.phase()
+    }
+
+    #[must_use]
     pub fn current_epoch(&self) -> Epoch {
         accessors::get_current_epoch(&self.beacon_state)
     }

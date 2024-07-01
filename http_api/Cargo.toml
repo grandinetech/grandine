@@ -57,6 +57,7 @@ unwrap_none = { workspace = true }
 validator = { workspace = true }
 
 [dev-dependencies]
+attestation_verifier = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }
@@ -64,6 +65,7 @@ dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }
 eth1 = { workspace = true }
 eth2_cache_utils = { workspace = true }
+execution_engine = { workspace = true }
 factory = { workspace = true }
 fork_choice_store = { workspace = true }
 hex-literal = { workspace = true }

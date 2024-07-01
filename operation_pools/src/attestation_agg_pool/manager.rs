@@ -1,3 +1,4 @@
+use core::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::{Context, Error, Result};
@@ -16,7 +17,7 @@ use types::{
     config::Config,
     phase0::{
         containers::{Attestation, AttestationData},
-        primitives::{Epoch, H256},
+        primitives::{Epoch, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -127,6 +128,15 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
+    pub async fn has_registered_validators_proposing_in_slots(
+        &self,
+        range: impl RangeBounds<Slot> + Send,
+    ) -> bool {
+        self.pool
+            .has_registered_validators_proposing_in_slots(range)
+            .await
+    }
+
     pub fn insert_attestation(&self, wait_group: W, attestation: &CombinedAttestation<P>) {
         match convert_attestation_for_pool((*attestation).clone()) {
             Ok(attestation) => {
@@ -151,11 +161,16 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
-    pub fn set_registered_validators(&self, pubkeys: Vec<PublicKeyBytes>) {
+    pub fn set_registered_validators(
+        &self,
+        pubkeys: Vec<PublicKeyBytes>,
+        prepared_proposer_indices: Vec<ValidatorIndex>,
+    ) {
         self.spawn_detached(SetRegisteredValidatorsTask {
             pool: self.pool.clone_arc(),
             controller: self.controller.clone_arc(),
             pubkeys,
+            prepared_proposer_indices,
         });
     }
 

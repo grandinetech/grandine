@@ -68,7 +68,6 @@ use crate::{
             BlindedBeaconBlock as ElectraBlindedBeaconBlock,
             ExecutionPayload as ElectraExecutionPayload,
             ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
-            IndexedAttestation as ElectraIndexedAttestation,
             LightClientBootstrap as ElectraLightClientBootstrap,
             LightClientFinalityUpdate as ElectraLightClientFinalityUpdate,
             LightClientOptimisticUpdate as ElectraLightClientOptimisticUpdate,
@@ -83,7 +82,7 @@ use crate::{
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, AttesterSlashing as Phase0AttesterSlashing,
-            BeaconBlock as Phase0BeaconBlock, IndexedAttestation as Phase0IndexedAttestation,
+            BeaconBlock as Phase0BeaconBlock,
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock, SignedBeaconBlockHeader,
         },
@@ -702,6 +701,13 @@ impl<P: Preset> From<BeaconBlock<P>> for SignedBeaconBlock<P> {
     }
 }
 
+impl<P: Preset> From<SignedBeaconBlock<P>> for BeaconBlock<P> {
+    fn from(signed_block: SignedBeaconBlock<P>) -> Self {
+        let (message, _) = signed_block.split();
+        message
+    }
+}
+
 #[derive(Clone, Debug, From, Deserialize, Serialize)]
 #[serde(bound = "", untagged)]
 #[cfg_attr(test, derive(VariantCount))]
@@ -1008,18 +1014,6 @@ pub enum LightClientBootstrap<P: Preset> {
     Electra(Box<ElectraLightClientBootstrap<P>>),
 }
 
-impl<P: Preset> LightClientBootstrap<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
-        }
-    }
-}
-
 impl<P: Preset> SszSize for LightClientBootstrap<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
@@ -1046,6 +1040,18 @@ impl<P: Preset> SszWrite for LightClientBootstrap<P> {
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
             Self::Electra(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientBootstrap<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
         }
     }
 }
@@ -1091,6 +1097,18 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
             Self::Electra(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientFinalityUpdate<P> {
+    #[must_use]
+    pub fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
         }
     }
 }
@@ -1197,54 +1215,6 @@ pub enum SignedAggregateAndProof<P: Preset> {
     Electra(ElectraSignedAggregateAndProof<P>),
 }
 
-impl<P: Preset> SignedAggregateAndProof<P> {
-    pub const fn aggregator_index(&self) -> ValidatorIndex {
-        match self {
-            Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
-            Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
-        }
-    }
-
-    pub const fn slot(&self) -> Slot {
-        match self {
-            Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
-            Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
-        }
-    }
-
-    pub fn aggregate(&self) -> Attestation<P> {
-        match self {
-            Self::Phase0(aggregate_and_proof) => {
-                Attestation::from(aggregate_and_proof.message.aggregate.clone())
-            }
-            Self::Electra(aggregate_and_proof) => {
-                Attestation::from(aggregate_and_proof.message.aggregate.clone())
-            }
-        }
-    }
-}
-
-impl<P: Preset> SignedAggregateAndProof<P> {
-    pub const fn signature(&self) -> SignatureBytes {
-        match self {
-            Self::Phase0(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
-            Self::Electra(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
-        }
-    }
-
-    // TODO(feature/electra): avoid clone
-    pub fn message(&self) -> AggregateAndProof<P> {
-        match self {
-            Self::Phase0(signed_aggregate_and_proof) => {
-                AggregateAndProof::Phase0(signed_aggregate_and_proof.message.clone())
-            }
-            Self::Electra(signed_aggregate_and_proof) => {
-                AggregateAndProof::Electra(signed_aggregate_and_proof.message.clone())
-            }
-        }
-    }
-}
-
 impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
@@ -1267,6 +1237,52 @@ impl<P: Preset> SszWrite for SignedAggregateAndProof<P> {
     }
 }
 
+impl<P: Preset> SignedAggregateAndProof<P> {
+    pub const fn aggregator_index(&self) -> ValidatorIndex {
+        match self {
+            Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
+            Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
+        }
+    }
+
+    pub const fn signature(&self) -> SignatureBytes {
+        match self {
+            Self::Phase0(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
+            Self::Electra(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
+        }
+    }
+
+    pub const fn slot(&self) -> Slot {
+        match self {
+            Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
+            Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
+        }
+    }
+
+    pub fn aggregate(&self) -> Attestation<P> {
+        match self {
+            Self::Phase0(aggregate_and_proof) => {
+                Attestation::from(aggregate_and_proof.message.aggregate.clone())
+            }
+            Self::Electra(aggregate_and_proof) => {
+                Attestation::from(aggregate_and_proof.message.aggregate.clone())
+            }
+        }
+    }
+
+    // TODO(feature/electra): avoid clone
+    pub fn message(&self) -> AggregateAndProof<P> {
+        match self {
+            Self::Phase0(signed_aggregate_and_proof) => {
+                AggregateAndProof::Phase0(signed_aggregate_and_proof.message.clone())
+            }
+            Self::Electra(signed_aggregate_and_proof) => {
+                AggregateAndProof::Electra(signed_aggregate_and_proof.message.clone())
+            }
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum AttestingIndices<P: Preset> {
@@ -1284,13 +1300,6 @@ impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {
             AttestingIndices::Electra(list) => list.iter(),
         }
     }
-}
-
-// #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
-// #[serde(bound = "", untagged)]
-pub enum IndexedAttestation<P: Preset> {
-    Phase0(Phase0IndexedAttestation<P>),
-    Electra(ElectraIndexedAttestation<P>),
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
@@ -1320,11 +1329,9 @@ impl<P: Preset> SszRead<Config> for Attestation<P> {
         let phase = config.phase_at_slot::<P>(slot);
 
         let attestation = match phase {
-            Phase::Phase0 => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Altair => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Bellatrix => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Capella => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Deneb => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
+            }
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
 
@@ -1392,30 +1399,10 @@ pub enum AttesterSlashing<P: Preset> {
     Electra(ElectraAttesterSlashing<P>),
 }
 
-impl<P: Preset> SszRead<Config> for AttesterSlashing<P> {
-    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        // There are 3 fixed parts before `attester_slashing.attestation_1.data.slot`:
-        // - The offset of `attester_slashing.attestation_1`.
-        // - The offset of `attester_slashing.attestation_2`.
-        // - The offset of `attester_slashing.attestation_1.attesting_indices`.
-        let slot_start = 3 * Offset::SIZE.get();
-        let slot_end = slot_start + Slot::SIZE.get();
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
-        let phase = config.phase_at_slot::<P>(slot);
-
-        let attester_slashing = match phase {
-            Phase::Phase0 => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Altair => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Bellatrix => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Capella => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Deneb => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
-        };
-
-        Ok(attester_slashing)
-    }
-}
+// It appears to be impossible to implement `SszRead` for the combined `AttesterSlashing`.
+// `AttesterSlashing` does not contain any field that can be used to determine its phase.
+// The attestations inside `AttesterSlashing` may be from a different phase.
+assert_not_impl_any!(AttesterSlashing<Mainnet>: SszRead<Config>);
 
 impl<P: Preset> SszSize for AttesterSlashing<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
@@ -1431,17 +1418,6 @@ impl<P: Preset> SszWrite for AttesterSlashing<P> {
         match self {
             Self::Phase0(attester_slashing) => attester_slashing.write_variable(bytes),
             Self::Electra(attester_slashing) => attester_slashing.write_variable(bytes),
-        }
-    }
-}
-
-impl<P: Preset> SszHash for AttesterSlashing<P> {
-    type PackingFactor = U1;
-
-    fn hash_tree_root(&self) -> H256 {
-        match self {
-            Self::Phase0(attester_slashing) => attester_slashing.hash_tree_root(),
-            Self::Electra(attester_slashing) => attester_slashing.hash_tree_root(),
         }
     }
 }
@@ -1462,13 +1438,16 @@ impl<P: Preset> AttesterSlashing<P> {
             Self::Electra(attester_slashing) => Some(attester_slashing),
         }
     }
+}
 
-    #[cfg(test)]
+impl<P: Preset> LightClientOptimisticUpdate<P> {
     #[must_use]
-    pub const fn phase(&self) -> Phase {
+    pub fn signature_slot(&self) -> Slot {
         match self {
-            Self::Phase0(_) => Phase::Phase0,
-            Self::Electra(_) => Phase::Electra,
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
         }
     }
 }
@@ -1510,48 +1489,36 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/phase0/ssz_static/SignedBeaconBlock/*/*"]    [phase0_minimal_signed_beacon_block]    [SignedBeaconBlock] [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/Attestation/*/*"]          [phase0_mainnet_attestation]            [Attestation]       [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/phase0/ssz_static/Attestation/*/*"]          [phase0_minimal_attestation]            [Attestation]       [Minimal] [Phase0];
-        ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/AttesterSlashing/*/*"]     [phase0_mainnet_attester_slashing]      [AttesterSlashing]  [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/phase0/ssz_static/AttesterSlashing/*/*"]     [phase0_minimal_attester_slashing]      [AttesterSlashing]  [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/BeaconState/*/*"]          [altair_mainnet_beacon_state]           [BeaconState]       [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/BeaconState/*/*"]          [altair_minimal_beacon_state]           [BeaconState]       [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/SignedBeaconBlock/*/*"]    [altair_mainnet_signed_beacon_block]    [SignedBeaconBlock] [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/SignedBeaconBlock/*/*"]    [altair_minimal_signed_beacon_block]    [SignedBeaconBlock] [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/Attestation/*/*"]          [altair_mainnet_attestation]            [Attestation]       [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/Attestation/*/*"]          [altair_minimal_attestation]            [Attestation]       [Minimal] [Phase0];
-        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/AttesterSlashing/*/*"]     [altair_mainnet_attester_slashing]      [AttesterSlashing]  [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/altair/ssz_static/AttesterSlashing/*/*"]     [altair_minimal_attester_slashing]      [AttesterSlashing]  [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/BeaconState/*/*"]       [bellatrix_mainnet_beacon_state]        [BeaconState]       [Mainnet] [Bellatrix];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/BeaconState/*/*"]       [bellatrix_minimal_beacon_state]        [BeaconState]       [Minimal] [Bellatrix];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/SignedBeaconBlock/*/*"] [bellatrix_mainnet_signed_beacon_block] [SignedBeaconBlock] [Mainnet] [Bellatrix];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/SignedBeaconBlock/*/*"] [bellatrix_minimal_signed_beacon_block] [SignedBeaconBlock] [Minimal] [Bellatrix];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/Attestation/*/*"]       [bellatrix_mainnet_attestation]         [Attestation]       [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/Attestation/*/*"]       [bellatrix_minimal_attestation]         [Attestation]       [Minimal] [Phase0];
-        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/AttesterSlashing/*/*"]  [bellatrix_mainnet_attester_slashing]   [AttesterSlashing]  [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/AttesterSlashing/*/*"]  [bellatrix_minimal_attester_slashing]   [AttesterSlashing]  [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/BeaconState/*/*"]         [capella_mainnet_beacon_state]          [BeaconState]       [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/BeaconState/*/*"]         [capella_minimal_beacon_state]          [BeaconState]       [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/SignedBeaconBlock/*/*"]   [capella_mainnet_signed_beacon_block]   [SignedBeaconBlock] [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/SignedBeaconBlock/*/*"]   [capella_minimal_signed_beacon_block]   [SignedBeaconBlock] [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/Attestation/*/*"]         [capella_mainnet_attestation]           [Attestation]       [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/Attestation/*/*"]         [capella_minimal_attestation]           [Attestation]       [Minimal] [Phase0];
-        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/AttesterSlashing/*/*"]    [capella_mainnet_attester_slashing]     [AttesterSlashing]  [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/capella/ssz_static/AttesterSlashing/*/*"]    [capella_minimal_attester_slashing]     [AttesterSlashing]  [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/BeaconState/*/*"]           [deneb_mainnet_beacon_state]            [BeaconState]       [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/BeaconState/*/*"]           [deneb_minimal_beacon_state]            [BeaconState]       [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/SignedBeaconBlock/*/*"]     [deneb_mainnet_signed_beacon_block]     [SignedBeaconBlock] [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/SignedBeaconBlock/*/*"]     [deneb_minimal_signed_beacon_block]     [SignedBeaconBlock] [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/Attestation/*/*"]           [deneb_mainnet_attestation]             [Attestation]       [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/Attestation/*/*"]           [deneb_minimal_attestation]             [Attestation]       [Minimal] [Phase0];
-        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/AttesterSlashing/*/*"]      [deneb_mainnet_attester_slashing]       [AttesterSlashing]  [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/AttesterSlashing/*/*"]      [deneb_minimal_attester_slashing]       [AttesterSlashing]  [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/BeaconState/*/*"]         [electra_mainnet_beacon_state]          [BeaconState]       [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/BeaconState/*/*"]         [electra_minimal_beacon_state]          [BeaconState]       [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedBeaconBlock/*/*"]   [electra_mainnet_signed_beacon_block]   [SignedBeaconBlock] [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/SignedBeaconBlock/*/*"]   [electra_minimal_signed_beacon_block]   [SignedBeaconBlock] [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/Attestation/*/*"]         [electra_mainnet_attestation]           [Attestation]       [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/Attestation/*/*"]         [electra_minimal_attestation]           [Attestation]       [Minimal] [Electra];
-        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/AttesterSlashing/*/*"]    [electra_mainnet_attester_slashing]     [AttesterSlashing]  [Mainnet] [Electra];
-        ["consensus-spec-tests/tests/minimal/electra/ssz_static/AttesterSlashing/*/*"]    [electra_minimal_attester_slashing]     [AttesterSlashing]  [Minimal] [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -1608,6 +1575,37 @@ mod spec_tests {
             .expect("SSZ decoding should succeed");
 
         let combined_value = combined_type::<preset>::phase(Box::new(phase_specific_value));
+
+        let actual_ssz_bytes = combined_value
+            .to_ssz()
+            .expect("SSZ encoding should succeed");
+
+        assert_eq!(actual_ssz_bytes, expected_ssz_bytes);
+    }
+
+    #[duplicate_item(
+        glob                                                                             function_name                         preset    phase;
+        ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/AttesterSlashing/*/*"]    [phase0_mainnet_attester_slashing]    [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/phase0/ssz_static/AttesterSlashing/*/*"]    [phase0_minimal_attester_slashing]    [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/AttesterSlashing/*/*"]    [altair_mainnet_attester_slashing]    [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/altair/ssz_static/AttesterSlashing/*/*"]    [altair_minimal_attester_slashing]    [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/AttesterSlashing/*/*"] [bellatrix_mainnet_attester_slashing] [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/AttesterSlashing/*/*"] [bellatrix_minimal_attester_slashing] [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/AttesterSlashing/*/*"]   [capella_mainnet_attester_slashing]   [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/capella/ssz_static/AttesterSlashing/*/*"]   [capella_minimal_attester_slashing]   [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/AttesterSlashing/*/*"]     [deneb_mainnet_attester_slashing]     [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/AttesterSlashing/*/*"]     [deneb_minimal_attester_slashing]     [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/AttesterSlashing/*/*"]   [electra_mainnet_attester_slashing]   [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/electra/ssz_static/AttesterSlashing/*/*"]   [electra_minimal_attester_slashing]   [Minimal] [Electra];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let expected_ssz_bytes = case.bytes("serialized.ssz_snappy");
+
+        let phase_specific_value = SszReadDefault::from_ssz_default(expected_ssz_bytes.as_slice())
+            .expect("SSZ decoding should succeed");
+
+        let combined_value = AttesterSlashing::<preset>::phase(phase_specific_value);
 
         let actual_ssz_bytes = combined_value
             .to_ssz()

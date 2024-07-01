@@ -16,6 +16,7 @@ options=(
     --package ad_hoc_bench
     --package allocator
     --package arithmetic
+    --package attestation_verifier
     --package benches
     --package binary_utils
     --package bls
@@ -60,6 +61,7 @@ options=(
     --package spec_test_utils
     --package ssz
     --package ssz_derive
+    --package state_cache
     --package std_ext
     --package transition_functions
     --package try_from_iterator

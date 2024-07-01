@@ -28,8 +28,8 @@ use futures::{
     stream::{FuturesOrdered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
-use helper_functions::{accessors, misc, slot_report::SyncAggregateRewards};
-use http_api_utils::BlockId;
+use helper_functions::{accessors, misc};
+use http_api_utils::{BlockId, StateId};
 use itertools::{izip, Either, Itertools as _};
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
@@ -67,7 +67,7 @@ use types::{
         primitives::BlobIndex,
     },
     nonstandard::{
-        Phase, RelativeEpoch, SlashingKind, ValidationOutcome, WithBlobsAndMev, WithStatus,
+        BlockRewards, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev, WithStatus,
         WEI_IN_GWEI,
     },
     phase0::{
@@ -82,7 +82,7 @@ use types::{
         },
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
     ApiToValidator, ValidatorBlindedBlock, ValidatorConfig, ValidatorProposerData,
@@ -97,40 +97,17 @@ use crate::{
     full_config::FullConfig,
     misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
     response::{EthResponse, JsonOrSsz},
-    state_id::StateId,
-    validator_status::{ValidatorId, ValidatorStatus},
+    state_id,
+    validator_status::{
+        ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
+        ValidatorIdsAndStatusesQuery, ValidatorStatus,
+    },
 };
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlobSidecarsQuery {
     indices: Option<Vec<BlobIndex>>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ValidatorIdQuery {
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
-    )]
-    id: Vec<ValidatorId>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub struct ValidatorIdOrStatusQuery {
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
-    )]
-    id: Vec<ValidatorId>,
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
-    )]
-    status: Vec<ValidatorStatus>,
 }
 
 #[derive(Deserialize)]
@@ -342,6 +319,36 @@ pub struct MetaPeersResponse {
 }
 
 #[derive(Serialize)]
+pub struct NodePeerCountResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    connected: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    connecting: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    disconnected: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    disconnecting: u64,
+}
+
+impl From<NodePeerCount> for NodePeerCountResponse {
+    fn from(node_peer_count: NodePeerCount) -> Self {
+        let NodePeerCount {
+            connected,
+            connecting,
+            disconnected,
+            disconnecting,
+        } = node_peer_count;
+
+        Self {
+            connected,
+            connecting,
+            disconnected,
+            disconnecting,
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct NodeVersionResponse<'version> {
     version: Option<&'version str>,
 }
@@ -428,7 +435,7 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let proposal_slot = query.proposal_slot.unwrap_or_else(|| state.slot() + 1);
 
@@ -466,7 +473,7 @@ pub async fn state_root<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let root = state.hash_tree_root();
 
@@ -485,7 +492,7 @@ pub async fn state_fork<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     Ok(EthResponse::json(state.fork())
         .execution_optimistic(optimistic)
@@ -502,7 +509,7 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let response = StateFinalityCheckpointsResponse {
         previous_justified: state.previous_justified_checkpoint(),
@@ -516,51 +523,33 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators`
-pub async fn state_validators<P: Preset, W: Wait>(
+pub async fn get_state_validators<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
-    EthQuery(query): EthQuery<ValidatorIdOrStatusQuery>,
+    EthQuery(ids_and_statuses): EthQuery<ValidatorIdsAndStatusesQuery>,
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
-    let WithStatus {
-        value: state,
-        optimistic,
-        finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
-
-    let validators = izip!(
-        0..,
-        state.validators(),
-        state.balances().into_iter().copied(),
+    state_validators(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &ids_and_statuses,
     )
-    .filter(|(index, validator, _)| {
-        let validator_status = ValidatorStatus::new(validator, &state);
+}
 
-        let allowed_by_id = query.id.is_empty()
-            || query.id.iter().any(|validator_id| match validator_id {
-                ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
-            });
-
-        let allowed_by_status = query.status.is_empty()
-            || query
-                .status
-                .iter()
-                .any(|status| status.matches(validator_status));
-
-        allowed_by_id && allowed_by_status
-    })
-    .map(|(index, validator, balance)| StateValidatorResponse {
-        index,
-        balance,
-        status: ValidatorStatus::new(validator, &state),
-        validator: validator.clone(),
-    })
-    .collect();
-
-    Ok(EthResponse::json(validators)
-        .execution_optimistic(optimistic)
-        .finalized(finalized))
+/// `POST /eth/v1/beacon/states/{state_id}/validators`
+pub async fn post_state_validators<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    EthJson(ids_and_statuses): EthJson<ValidatorIdsAndStatusesBody>,
+) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
+    state_validators(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &ids_and_statuses,
+    )
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}`
@@ -573,7 +562,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let validator_index = validator_id
         .validator_index(&state)
@@ -613,7 +602,7 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let balances = izip!(
         0..,
@@ -646,7 +635,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
         value: mut state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
     let epoch = query.epoch.unwrap_or(state_epoch);
@@ -714,7 +703,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let Some(state) = state.post_altair() else {
         return Ok(EthResponse::json(StateSyncCommitteeResponse::default())
@@ -770,7 +759,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     // If `epoch` is in the future, return the RANDAO mix for the current epoch.
     // This matches how RANDAO mixes are updated during epoch transitions.
@@ -1072,20 +1061,51 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/beacon/rewards/blocks/{block_id}`
 pub async fn block_rewards<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<BlockRewardsResponse>, Error> {
     let WithStatus {
-        value: block,
+        value: signed_block,
         optimistic,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
-    let rewards = calculate_block_rewards(&chain_config, &controller, &block)?;
+    let block: BeaconBlock<P> = Arc::unwrap_or_clone(signed_block).into();
+    let block_slot = block.slot();
 
-    Ok(EthResponse::json(rewards)
+    let block_rewards = (block_slot > GENESIS_SLOT)
+        .then(|| {
+            let parent_root = block.parent_root();
+
+            let state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
+
+            controller
+                .block_processor()
+                .process_trusted_block_with_report(state, &block)
+        })
+        .transpose()?
+        .and_then(|(_, rewards)| rewards)
+        .unwrap_or_default();
+
+    let BlockRewards {
+        total,
+        attestations,
+        sync_aggregate,
+        proposer_slashings,
+        attester_slashings,
+    } = block_rewards;
+
+    let rewards_response = BlockRewardsResponse {
+        proposer_index: block.proposer_index(),
+        total,
+        attestations,
+        sync_aggregate,
+        proposer_slashings,
+        attester_slashings,
+    };
+
+    Ok(EthResponse::json(rewards_response)
         .execution_optimistic(optimistic)
         .finalized(finalized))
 }
@@ -1529,7 +1549,7 @@ pub async fn beacon_state<P: Preset, W: Wait>(
         value: state,
         optimistic,
         finalized,
-    } = state_id.state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = state.phase();
 
@@ -1612,14 +1632,14 @@ pub async fn node_peer<P: Preset>(
 /// `GET /eth/v1/node/peer_count`
 pub async fn node_peer_count<P: Preset>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-) -> Result<EthResponse<NodePeerCount>, Error> {
+) -> Result<EthResponse<NodePeerCountResponse>, Error> {
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     ApiToP2p::RequestPeerCount(sender).send(&api_to_p2p_tx);
 
     let data = receiver.await?;
 
-    Ok(EthResponse::json(data))
+    Ok(EthResponse::json(data.into()))
 }
 
 /// `GET /eth/v1/node/version`
@@ -1787,7 +1807,11 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
         optimistic,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
-    } = StateId::Slot(start_slot).state(&controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(
+        &StateId::Slot(start_slot),
+        &controller,
+        &anchor_checkpoint_provider,
+    )?;
 
     let Some(state) = state.post_altair() else {
         return Ok(EthResponse::json(vec![]).execution_optimistic(optimistic));
@@ -1898,6 +1922,7 @@ pub async fn validator_blinded_block<P: Preset>(
     let blinded_block = receiver
         .await??
         .ok_or(Error::UnableToProduceBlindedBlock)?
+        .0
         .value
         .into_blinded();
 
@@ -1935,16 +1960,14 @@ pub async fn validator_block<P: Preset>(
     )
     .send(&api_to_validator_tx);
 
-    let beacon_block = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
+    let (beacon_block, _) = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
     let version = beacon_block.value.phase();
 
     Ok(EthResponse::json_or_ssz(beacon_block.into(), &headers).version(version))
 }
 
 /// `GET /eth/v3/validator/blocks/{slot}`
-pub async fn validator_block_v3<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
-    State(controller): State<ApiController<P, W>>,
+pub async fn validator_block_v3<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV3>,
@@ -1974,7 +1997,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     )
     .send(&api_to_validator_tx);
 
-    let validator_block = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
+    let (validator_block, block_rewards) =
+        receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
 
     let mev = validator_block.mev;
     let version = validator_block.value.phase();
@@ -1982,27 +2006,25 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
     // 'Uplift' validator block to signed beacon block for consensus reward calculation
     let signed_beacon_block = match validator_block.value.clone() {
-        ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.into(),
+        ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.with_zero_signature(),
         ValidatorBlindedBlock::BlindedBeaconBlock {
             blinded_block,
             execution_payload,
-        } => {
-            let beacon_block = blinded_block
-                .with_execution_payload(*execution_payload)
-                .map_err(AnyhowError::new)?;
-
-            beacon_block.into()
-        }
+        } => blinded_block
+            .with_execution_payload(*execution_payload)
+            .map_err(AnyhowError::new)?
+            .with_zero_signature(),
     };
 
-    let consensus_block_value =
-        match calculate_block_rewards(&chain_config, &controller, &Arc::new(signed_beacon_block)) {
-            Ok(rewards) => Some(Uint256::from_u64(rewards.total) * WEI_IN_GWEI),
-            Err(error) => {
-                warn!("unable to calculate block rewards for validator block: {error:?}");
-                None
-            }
-        };
+    let consensus_block_value = block_rewards
+        .map(|rewards| Uint256::from_u64(rewards.total) * WEI_IN_GWEI)
+        .or_else(|| {
+            warn!(
+                "unable to calculate block rewards for validator block {:?} at slot {slot}",
+                signed_beacon_block.message().hash_tree_root(),
+            );
+            None
+        });
 
     Ok(EthResponse::json_or_ssz(validator_block.into(), &headers)
         .version(version)
@@ -2194,7 +2216,7 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJson(aggregate_and_proofs): EthJson<Vec<Box<SignedAggregateAndProof<P>>>>,
+    EthJson(aggregate_and_proofs): EthJson<Vec<Arc<SignedAggregateAndProof<P>>>>,
 ) -> Result<(), Error> {
     let (successes, failures): (Vec<_>, Vec<_>) = aggregate_and_proofs
         .into_iter()
@@ -2202,7 +2224,7 @@ pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
         .map(|(index, aggregate_and_proof)| {
             let (sender, receiver) = futures::channel::oneshot::channel();
 
-            controller.on_api_aggregate_and_proof(aggregate_and_proof.clone(), sender);
+            controller.on_api_aggregate_and_proof(aggregate_and_proof.clone_arc(), sender);
 
             async move {
                 let run = async {
@@ -2341,51 +2363,53 @@ pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
 }
 
-pub fn calculate_block_rewards<P: Preset, W: Wait>(
-    chain_config: &Arc<ChainConfig>,
+fn state_validators<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
-    block: &Arc<SignedBeaconBlock<P>>,
-) -> Result<BlockRewardsResponse> {
-    let block_slot = block.message().slot();
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+    state_id: StateId,
+    ids_and_statuses: &impl ValidatorIdsAndStatuses,
+) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
+    let WithStatus {
+        value: state,
+        optimistic,
+        finalized,
+    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
 
-    let slot_report = (block_slot > GENESIS_SLOT)
-        .then(|| {
-            let parent_root = block.message().parent_root();
+    let validators = izip!(
+        0..,
+        state.validators(),
+        state.balances().into_iter().copied(),
+    )
+    .filter(|(index, validator, _)| {
+        let validator_status = ValidatorStatus::new(validator, &state);
 
-            let mut state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
+        let ids = ids_and_statuses.ids();
+        let statuses = ids_and_statuses.statuses();
 
-            transition_functions::combined::state_transition_for_report(
-                chain_config,
-                state.make_mut(),
-                block,
-            )
-        })
-        .transpose()?
-        .unwrap_or_default();
+        let allowed_by_id = ids.is_empty()
+            || ids.iter().any(|validator_id| match validator_id {
+                ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
+                ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
+            });
 
-    let attestations = slot_report.attestation_rewards.iter().sum();
+        let allowed_by_status = statuses.is_empty()
+            || statuses
+                .iter()
+                .any(|status| status.matches(validator_status));
 
-    let sync_aggregate = slot_report
-        .sync_aggregate_rewards
-        .map(SyncAggregateRewards::total)
-        .unwrap_or_default();
-
-    let proposer_slashings = slot_report.slashing_rewards[SlashingKind::Proposer]
-        .iter()
-        .sum();
-
-    let attester_slashings = slot_report.slashing_rewards[SlashingKind::Attester]
-        .iter()
-        .sum();
-
-    Ok(BlockRewardsResponse {
-        proposer_index: block.message().proposer_index(),
-        total: attestations + sync_aggregate + proposer_slashings + attester_slashings,
-        attestations,
-        sync_aggregate,
-        proposer_slashings,
-        attester_slashings,
+        allowed_by_id && allowed_by_status
     })
+    .map(|(index, validator, balance)| StateValidatorResponse {
+        index,
+        balance,
+        status: ValidatorStatus::new(validator, &state),
+        validator: validator.clone(),
+    })
+    .collect();
+
+    Ok(EthResponse::json(validators)
+        .execution_optimistic(optimistic)
+        .finalized(finalized))
 }
 
 async fn publish_signed_block<P: Preset, W: Wait>(
@@ -2587,17 +2611,17 @@ mod tests {
         let status2 = ValidatorStatus::ActiveOngoing;
 
         assert_eq!(
-            extract_query::<ValidatorIdOrStatusQuery>("").await?,
-            ValidatorIdOrStatusQuery {
+            extract_query::<ValidatorIdsAndStatusesQuery>("").await?,
+            ValidatorIdsAndStatusesQuery {
                 id: vec![],
                 status: vec![],
             },
         );
 
         assert_eq!(
-            extract_query::<ValidatorIdOrStatusQuery>(format!("id={pubkey1:?},{pubkey2:?}"))
+            extract_query::<ValidatorIdsAndStatusesQuery>(format!("id={pubkey1:?},{pubkey2:?}"))
                 .await?,
-            ValidatorIdOrStatusQuery {
+            ValidatorIdsAndStatusesQuery {
                 id: vec![
                     ValidatorId::PublicKey(pubkey1),
                     ValidatorId::PublicKey(pubkey2),
@@ -2607,11 +2631,11 @@ mod tests {
         );
 
         assert_eq!(
-            extract_query::<ValidatorIdOrStatusQuery>(format!(
+            extract_query::<ValidatorIdsAndStatusesQuery>(format!(
                 "id={pubkey1:?},{pubkey2:?},{index1},{index2}&status={status1},{status2}",
             ))
             .await?,
-            ValidatorIdOrStatusQuery {
+            ValidatorIdsAndStatusesQuery {
                 id: vec![
                     ValidatorId::PublicKey(pubkey1),
                     ValidatorId::PublicKey(pubkey2),
