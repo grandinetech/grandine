@@ -28,7 +28,7 @@ use helper_functions::{
         has_execution_withdrawal_credential, is_active_validator,
         is_compounding_withdrawal_credential, validate_constructed_indexed_attestation,
     },
-    signing::{SignForAllForks, SignForAllForksWithGenesis},
+    signing::SignForAllForks,
     slot_report::{NullSlotReport, SlotReport},
     verifier::{SingleVerifier, Triple, Verifier},
 };
