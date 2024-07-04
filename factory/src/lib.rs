@@ -358,6 +358,7 @@ pub fn execution_payload<P: Preset>(
             prev_randao,
             timestamp,
             block_hash,
+            withdrawals,
             ..DenebExecutionPayload::default()
         }
         .into(),
@@ -452,6 +453,7 @@ fn block<P: Preset>(
                 eth1_data,
                 graffiti,
                 attestations,
+                deposits,
                 sync_aggregate,
                 ..CapellaBeaconBlockBody::default()
             },
@@ -466,6 +468,7 @@ fn block<P: Preset>(
                 eth1_data,
                 graffiti,
                 attestations,
+                deposits,
                 sync_aggregate,
                 ..DenebBeaconBlockBody::default()
             },
