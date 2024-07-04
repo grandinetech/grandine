@@ -7,10 +7,9 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use enum_iterator::Sequence;
 use log::{info, warn};
 use parse_display::{Display, FromStr};
-use serde::{Deserialize, Serialize};
+use variant_count::VariantCount;
 
 // This is the only way to initialize a static array without repeating the value. See:
 // - <https://github.com/rust-lang/rust/pull/79270>
@@ -21,22 +20,9 @@ use serde::{Deserialize, Serialize};
 #[allow(clippy::declare_interior_mutable_const)]
 const FALSE: AtomicBool = AtomicBool::new(false);
 
-static FEATURES: [AtomicBool; Feature::CARDINALITY] = [FALSE; Feature::CARDINALITY];
+static FEATURES: [AtomicBool; Feature::VARIANT_COUNT] = [FALSE; Feature::VARIANT_COUNT];
 
-#[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    Sequence,
-    Display,
-    FromStr,
-    Deserialize,
-    Serialize,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, FromStr, VariantCount)]
 pub enum Feature {
     AlwaysPrepackAttestations,
     AlwaysPrepareExecutionPayload,
@@ -56,7 +42,6 @@ pub enum Feature {
     PublishAttestationsEarly,
     PublishSyncCommitteeMessagesEarly,
     ServeCostlyEndpoints,
-    ServeEffectfulEndpoints,
     ServeLeakyEndpoints,
     SubscribeToAllAttestationSubnets,
     SubscribeToAllSyncCommitteeSubnets,
@@ -86,12 +71,7 @@ impl Feature {
 
     #[inline]
     pub fn enable(self) {
-        self.set_enabled(true)
-    }
-
-    #[inline]
-    pub fn set_enabled(self, value: bool) {
-        FEATURES[self as usize].store(value, Self::ORDERING)
+        FEATURES[self as usize].store(true, Self::ORDERING)
     }
 
     pub fn log(self, message: impl Display) {

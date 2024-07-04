@@ -70,7 +70,6 @@ impl<P: Preset> Context<P> {
     #[allow(clippy::too_many_lines)]
     async fn try_run_case(self, case: Case<'_>) -> Result<()> {
         Feature::ServeCostlyEndpoints.enable();
-        Feature::ServeEffectfulEndpoints.enable();
         Feature::ServeLeakyEndpoints.enable();
 
         let Self {

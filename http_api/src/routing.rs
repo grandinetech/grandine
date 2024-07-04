@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use axum::{
     extract::{DefaultBodyLimit, FromRef, State},
-    routing::{get, patch, post},
+    routing::{get, post},
     Json, Router,
 };
 use bls::PublicKeyBytes;
@@ -283,24 +283,6 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
                 Feature::ServeCostlyEndpoints,
                 middleware::feature_is_enabled,
             )),
-        )
-        .route(
-            "/features",
-            get(|| async { Json(global::get_features()) }).route_layer(
-                axum::middleware::map_request_with_state(
-                    Feature::ServeLeakyEndpoints,
-                    middleware::feature_is_enabled,
-                ),
-            ),
-        )
-        .route(
-            "/features",
-            patch(|Json(features)| async { global::patch_features(features) }).route_layer(
-                axum::middleware::map_request_with_state(
-                    Feature::ServeEffectfulEndpoints,
-                    middleware::feature_is_enabled,
-                ),
-            ),
         )
         .route(
             "/system/stats",

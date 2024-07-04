@@ -1064,11 +1064,9 @@ impl GrandineArgs {
         // `--metrics` option (for tracking prometheus metrics) is not enabled and
         // `ServeLeakyEndpoints` (for `GET /system/stats`) is not enabled,
         // there is no need to run the metrics service.
-        // However, `ServeLeakyEndpoints` can be enabled after startup through `PATCH /features`.
         let metrics_service_config = (remote_metrics_url.is_some()
             || features.contains(&Feature::PrometheusMetrics)
-            || features.contains(&Feature::ServeLeakyEndpoints)
-            || features.contains(&Feature::ServeEffectfulEndpoints))
+            || features.contains(&Feature::ServeLeakyEndpoints))
         .then(|| MetricsServiceConfig {
             remote_metrics_url,
             directories: directories.clone_arc(),
