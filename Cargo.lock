@@ -3517,6 +3517,7 @@ dependencies = [
  "metrics",
  "mime",
  "num_cpus",
+ "once_cell",
  "operation_pools",
  "p2p",
  "parse-display",
