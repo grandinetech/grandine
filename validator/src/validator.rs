@@ -1127,7 +1127,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // TODO(Grandine Team): Move this to a separate task so it prepares the execution payload
         //                      before it is time to propose a block.
         let WithBlobsAndMev {
-            value: execution_payload,
+            value: mut execution_payload,
             commitments,
             proofs,
             blobs,
@@ -1137,6 +1137,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
             .map(|value| value.map(Some))
             .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+
+        // Starting with Capella, all blocks must be post-Merge.
+        // Construct a superficially valid execution payload for snapshot testing.
+        // It will almost always be invalid in a real network, but so would a default payload.
+        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
+        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
+        if slot_head.beacon_state.phase() >= Phase::Capella && execution_payload.is_none() {
+            execution_payload = Some(factory::execution_payload(
+                &self.chain_config,
+                &slot_head.beacon_state,
+                slot_head.slot(),
+                ExecutionBlockHash::from_low_u64_be(slot_head.slot()),
+            )?);
+        }
 
         let blob_kzg_commitments = commitments.unwrap_or_default();
         let sync_aggregate = self.process_sync_committee_contributions(slot_head).await?;

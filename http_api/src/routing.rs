@@ -561,6 +561,10 @@ pub fn test_routes<P: Preset>(
 ) -> Router {
     Router::new()
         .route("/test/tick", post(test_endpoints::post_tick))
+        .route(
+            "/test/payload_status",
+            post(test_endpoints::post_payload_status),
+        )
         .with_state(normal_state)
         .route(
             "/test/take_messages",

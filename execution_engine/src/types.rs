@@ -610,6 +610,39 @@ pub enum PayloadId {
     Deneb(H64),
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadStatusWithBlockHash {
+    pub block_hash: ExecutionBlockHash,
+    pub payload_status: PayloadStatus,
+}
+
+// `PayloadStatusV1` is deserialized from data containing keys in `camelCase`,
+// whereas `consensus-spec-tests` and `grandine-snapshot-tests` use `snake_case`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadStatus {
+    status: PayloadValidationStatus,
+    latest_valid_hash: Option<ExecutionBlockHash>,
+    validation_error: Option<String>,
+}
+
+impl From<PayloadStatus> for PayloadStatusV1 {
+    fn from(payload_status: PayloadStatus) -> Self {
+        let PayloadStatus {
+            status,
+            latest_valid_hash,
+            validation_error,
+        } = payload_status;
+
+        Self {
+            status,
+            latest_valid_hash,
+            validation_error,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
