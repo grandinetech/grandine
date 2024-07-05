@@ -1,0 +1,45 @@
+[package]
+name = 'block_producer'
+version = '0.1.0'
+edition.workspace = true
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arithmetic = { workspace = true }
+bls = { workspace = true }
+builder_api = { workspace = true }
+cached = { workspace = true }
+deposit_tree = { workspace = true }
+eth1 = { workspace = true }
+eth1_api = { workspace = true }
+execution_engine = { workspace = true }
+factory = { workspace = true }
+features = { workspace = true }
+fork_choice_control = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+keymanager = { workspace = true }
+log = { workspace = true }
+nonzero_ext = { workspace = true }
+operation_pools = { workspace = true }
+prometheus_metrics = { workspace = true }
+serde = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+tap = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+transition_functions = { workspace = true }
+try_from_iterator = { workspace = true }
+tynm = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+factory = { workspace = true }
+interop = { workspace = true }

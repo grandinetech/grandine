@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
+use block_producer::BlockProducer;
 use bls::{PublicKeyBytes, SecretKey};
 use clock::Tick;
 use database::Database;
@@ -269,6 +270,18 @@ impl<P: Preset> Context<P> {
             validator_to_liveness_rx,
         );
 
+        let block_producer = Arc::new(BlockProducer::new(
+            keymanager.proposer_configs().clone_arc(),
+            None,
+            controller.clone_arc(),
+            eth1_chain,
+            execution_engine,
+            attestation_agg_pool.clone_arc(),
+            bls_to_execution_change_pool.clone_arc(),
+            sync_committee_agg_pool.clone_arc(),
+            None,
+        ));
+
         let validator_channels = ValidatorChannels {
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
@@ -282,17 +295,15 @@ impl<P: Preset> Context<P> {
         };
 
         let validator = Validator::new(
-            eth1_chain,
             validator_config.clone_arc(),
+            block_producer.clone_arc(),
             controller.clone_arc(),
-            execution_engine,
             attestation_agg_pool.clone_arc(),
             None,
             keymanager.proposer_configs().clone_arc(),
             signer,
             slashing_protector,
             sync_committee_agg_pool.clone_arc(),
-            bls_to_execution_change_pool.clone_arc(),
             None,
             validator_channels,
         );
@@ -326,6 +337,7 @@ impl<P: Preset> Context<P> {
         };
 
         let http_api = HttpApi {
+            block_producer,
             controller,
             anchor_checkpoint_provider,
             validator_keys,

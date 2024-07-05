@@ -6,6 +6,7 @@ members = [
     'attestation_verifier',
     'benches',
     'binary_utils',
+    'block_producer',
     'bls',
     'builder_api',
     'clock',
@@ -425,6 +426,7 @@ allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
 attestation_verifier = { path = 'attestation_verifier' }
 binary_utils = { path = 'binary_utils' }
+block_producer = { path = 'block_producer' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
 clock = { path = 'clock' }
