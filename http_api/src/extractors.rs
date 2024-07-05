@@ -37,10 +37,10 @@ use types::{
     },
     preset::Preset,
 };
-use validator::ValidatorProposerData;
 
 use crate::{
     error::Error,
+    misc::ProposerData,
     validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
 };
 
@@ -330,7 +330,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SignedContributionAndPro
 }
 
 #[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorProposerData>> {
+impl<S> FromRequest<S, Body> for EthJson<Vec<ProposerData>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {

@@ -232,6 +232,18 @@ impl<P: Preset> Network<P> {
                             self.publish_sync_committee_message(message);
                             true
                         }
+                        ApiToP2p::PublishProposerSlashing(proposer_slashing) => {
+                            self.publish_proposer_slashing(proposer_slashing);
+                            true
+                        }
+                        ApiToP2p::PublishAttesterSlashing(attester_slashing) => {
+                            self.publish_attester_slashing(attester_slashing);
+                            true
+                        }
+                        ApiToP2p::PublishVoluntaryExit(voluntary_exit) => {
+                            self.publish_voluntary_exit(voluntary_exit);
+                            true
+                        }
                         ApiToP2p::RequestIdentity(receiver) => {
                             receiver.send(self.node_identity()).is_ok()
                         },
@@ -369,15 +381,6 @@ impl<P: Preset> Network<P> {
                         }
                         ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof) => {
                             self.publish_aggregate_and_proof(aggregate_and_proof);
-                        }
-                        ValidatorToP2p::PublishProposerSlashing(proposer_slashing) => {
-                            self.publish_proposer_slashing(proposer_slashing);
-                        }
-                        ValidatorToP2p::PublishAttesterSlashing(attester_slashing) => {
-                            self.publish_attester_slashing(attester_slashing);
-                        }
-                        ValidatorToP2p::PublishVoluntaryExit(voluntary_exit) => {
-                            self.publish_voluntary_exit(voluntary_exit);
                         }
                         ValidatorToP2p::PublishSyncCommitteeMessage(message) => {
                             self.publish_sync_committee_message(message);

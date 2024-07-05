@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
+use block_producer::BlockProducer;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
@@ -479,6 +480,18 @@ pub async fn run_after_genesis<P: Preset>(
         fork_choice_to_pool_rx,
     );
 
+    let block_producer = Arc::new(BlockProducer::new(
+        keymanager.proposer_configs().clone_arc(),
+        builder_api.clone(),
+        controller.clone_arc(),
+        eth1_chain,
+        execution_engine,
+        attestation_agg_pool.clone_arc(),
+        bls_to_execution_change_pool.clone_arc(),
+        sync_committee_agg_pool.clone_arc(),
+        metrics.clone(),
+    ));
+
     let validator_channels = ValidatorChannels {
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
@@ -492,17 +505,15 @@ pub async fn run_after_genesis<P: Preset>(
     };
 
     let validator = Validator::new(
-        eth1_chain,
         validator_config.clone_arc(),
+        block_producer.clone_arc(),
         controller.clone_arc(),
-        execution_engine,
         attestation_agg_pool.clone_arc(),
         builder_api,
         keymanager.proposer_configs().clone_arc(),
         signer.clone_arc(),
         slashing_protector,
         sync_committee_agg_pool.clone_arc(),
-        bls_to_execution_change_pool.clone_arc(),
         metrics.clone(),
         validator_channels,
     );
@@ -559,6 +570,7 @@ pub async fn run_after_genesis<P: Preset>(
     };
 
     let http_api = HttpApi {
+        block_producer,
         controller: controller.clone_arc(),
         anchor_checkpoint_provider,
         validator_keys,

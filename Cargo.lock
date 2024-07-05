@@ -901,6 +901,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "block_producer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arithmetic",
+ "bls",
+ "builder_api",
+ "cached",
+ "deposit_tree",
+ "eth1",
+ "eth1_api",
+ "execution_engine",
+ "factory",
+ "features",
+ "fork_choice_control",
+ "futures",
+ "helper_functions",
+ "interop",
+ "itertools 0.12.1",
+ "keymanager",
+ "log",
+ "nonzero_ext",
+ "operation_pools",
+ "prometheus_metrics",
+ "serde",
+ "ssz",
+ "std_ext",
+ "tap",
+ "thiserror",
+ "tokio",
+ "transition_functions",
+ "try_from_iterator",
+ "tynm",
+ "typenum",
+ "types",
+]
+
+[[package]]
 name = "blocking"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3484,6 +3522,7 @@ dependencies = [
  "attestation_verifier",
  "axum",
  "axum-extra",
+ "block_producer",
  "bls",
  "builder_api",
  "byteorder",
@@ -6448,6 +6487,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "attestation_verifier",
+ "block_producer",
  "builder_api",
  "bytesize",
  "clock",
@@ -8236,22 +8276,18 @@ name = "validator"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "arithmetic",
  "axum",
  "axum-extra",
+ "block_producer",
  "bls",
  "builder_api",
- "cached",
  "clock",
  "constant_time_eq",
- "deposit_tree",
  "derive_more",
  "directories",
  "educe",
- "eth1",
  "eth1_api",
  "eth2_libp2p",
- "execution_engine",
  "factory",
  "features",
  "fork_choice_control",
@@ -8265,7 +8301,6 @@ dependencies = [
  "itertools 0.12.1",
  "keymanager",
  "log",
- "nonzero_ext",
  "once_cell",
  "operation_pools",
  "p2p",
@@ -8288,8 +8323,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower-http",
- "transition_functions",
- "try_from_iterator",
  "tynm",
  "typenum",
  "types",

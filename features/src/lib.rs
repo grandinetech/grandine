@@ -28,6 +28,7 @@ pub enum Feature {
     AlwaysPrepareExecutionPayload,
     CacheTargetStates,
     DebugAttestationPacker,
+    DebugBlockProducer,
     DebugEth1,
     DebugP2p,
     IgnoreAttestationsForUnknownBlocks,

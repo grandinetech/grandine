@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use axum::{Router, Server};
+use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::ApiController;
 use fork_choice_control::{ApiMessage, Wait};
@@ -48,6 +49,7 @@ pub struct Channels<P: Preset> {
 
 #[allow(clippy::struct_field_names)]
 pub struct HttpApi<P: Preset, W: Wait> {
+    pub block_producer: Arc<BlockProducer<P, W>>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
@@ -78,6 +80,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         incoming: AddrIncoming,
     ) -> Result<()> {
         let Self {
+            block_producer,
             controller,
             anchor_checkpoint_provider,
             validator_keys,
@@ -116,6 +119,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
 
         let state = NormalState {
             chain_config: controller.chain_config().clone_arc(),
+            block_producer,
             controller,
             anchor_checkpoint_provider,
             validator_keys,
