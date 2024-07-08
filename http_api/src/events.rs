@@ -1,6 +1,5 @@
-use axum::response::sse::Event;
+use axum::{response::sse::Event, Error};
 use serde::Serialize;
-use serde_json::Result;
 use serde_with::DeserializeFromStr;
 use strum::{AsRefStr, EnumString};
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -19,7 +18,7 @@ pub enum Topic {
 }
 
 impl Topic {
-    pub fn build(self, data: impl Serialize) -> Result<Event> {
+    pub fn build(self, data: impl Serialize) -> Result<Event, Error> {
         Event::default().event(self).json_data(data)
     }
 }

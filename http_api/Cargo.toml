@@ -25,7 +25,6 @@ futures = { workspace = true }
 genesis = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
-hyper = { workspace = true }
 itertools = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }

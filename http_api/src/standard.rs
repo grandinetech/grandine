@@ -2583,7 +2583,7 @@ mod tests {
     use axum::{
         extract::Query,
         http::{header::CONTENT_TYPE, Request},
-        Json, RequestExt as _,
+        Json, RequestExt as _, RequestPartsExt as _,
     };
     use hex_literal::hex;
     use mime::APPLICATION_JSON;
@@ -2702,8 +2702,9 @@ mod tests {
     }
 
     async fn extract_query<T: DeserializeOwned + 'static>(query: impl Display + Send) -> Result<T> {
-        Request::get(format!("/?{query}"))
-            .body(())?
+        let (mut parts, ()) = Request::get(format!("/?{query}")).body(())?.into_parts();
+
+        parts
             .extract()
             .await
             .map(|Query(query)| query)
@@ -2715,7 +2716,7 @@ mod tests {
 
         Request::get("/")
             .header(CONTENT_TYPE, APPLICATION_JSON.as_ref())
-            .body(json)?
+            .body(json.into())?
             .extract()
             .await
             .map(|Json(body)| body)

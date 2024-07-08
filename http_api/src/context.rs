@@ -321,8 +321,8 @@ impl<P: Preset> Context<P> {
         );
 
         let http_api_config = HttpApiConfig::with_address(Ipv4Addr::LOCALHOST, 0);
-        let incoming = http_api_config.incoming()?;
-        let actual_address = incoming.local_addr();
+        let listener = http_api_config.listener().await?;
+        let actual_address = listener.local_addr()?;
 
         let channels = Channels {
             api_to_liveness_tx: Some(api_to_liveness_tx),
@@ -370,7 +370,7 @@ impl<P: Preset> Context<P> {
                         middleware::wait_for_tasks,
                     ))
             },
-            incoming,
+            listener,
         );
 
         let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };

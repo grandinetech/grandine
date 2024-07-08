@@ -3,8 +3,9 @@ use core::{
     time::Duration,
 };
 
+use anyhow::Result;
 use educe::Educe;
-use hyper::{server::conn::AddrIncoming, Result};
+use tokio::net::TcpListener;
 use tower_http::cors::AllowOrigin;
 
 #[derive(Clone, Debug, Educe)]
@@ -34,7 +35,7 @@ impl HttpApiConfig {
         }
     }
 
-    pub(crate) fn incoming(&self) -> Result<AddrIncoming> {
-        AddrIncoming::bind(&self.address)
+    pub(crate) async fn listener(&self) -> Result<TcpListener> {
+        TcpListener::bind(&self.address).await.map_err(Into::into)
     }
 }

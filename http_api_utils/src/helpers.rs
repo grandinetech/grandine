@@ -8,9 +8,9 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use crate::{logging, middleware, misc::ApiMetrics};
+use crate::{logging, middleware, misc::ApiMetrics, ApiError};
 
-pub fn extend_router_with_middleware(
+pub fn extend_router_with_middleware<E: ApiError + Send + Sync + 'static>(
     mut router: Router,
     timeout: Option<Duration>,
     allowed_origins: AllowOrigin,
@@ -41,7 +41,7 @@ pub fn extend_router_with_middleware(
         router = router.layer(
             TraceLayer::new_for_http()
                 .on_request(logging::log_request)
-                .on_response(logging::log_response(api_metrics)),
+                .on_response(logging::log_response::<E>(api_metrics)),
         );
     }
 
