@@ -212,7 +212,7 @@ impl Tick {
             None => slot.checked_add(1).ok_or(Error::RanOutOfSlots)?,
         };
 
-        let next_kind = enum_iterator::next_cycle(&kind).expect("TickKind is not an empty enum");
+        let next_kind = enum_iterator::next_cycle(&kind);
 
         Ok(Self::new(next_slot, next_kind))
     }
