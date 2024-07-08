@@ -1,8 +1,8 @@
-use core::net::SocketAddr;
+use core::{future::IntoFuture as _, net::SocketAddr};
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::Result;
-use axum::{Router, Server};
+use anyhow::{Error as AnyhowError, Result};
+use axum::Router;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::ApiController;
@@ -15,7 +15,6 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::ApiMetrics;
-use hyper::server::conn::AddrIncoming;
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info};
 use metrics::ApiToMetrics;
@@ -25,10 +24,12 @@ use operation_pools::{
 use p2p::{ApiToP2p, NetworkConfig, SyncToApi, ToSubnetService};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
+use tokio::net::TcpListener;
 use types::preset::Preset;
 use validator::{ApiToValidator, ValidatorConfig, ValidatorToApi};
 
 use crate::{
+    error::Error,
     events::{EventChannels, Topic},
     http_api_config::HttpApiConfig,
     misc::{BackSyncedStatus, SyncedStatus},
@@ -65,8 +66,8 @@ pub struct HttpApi<P: Preset, W: Wait> {
 
 impl<P: Preset, W: Wait> HttpApi<P, W> {
     pub async fn run(self) -> Result<()> {
-        let incoming = self.http_api_config.incoming()?;
-        self.run_internal(|_, router| router, incoming).await
+        let listener = self.http_api_config.listener().await?;
+        self.run_internal(|_, router| router, listener).await
     }
 
     // This is needed for snapshot testing.
@@ -77,7 +78,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
     pub(crate) async fn run_internal(
         self,
         extend_router: impl FnOnce(NormalState<P, W>, Router) -> Router + Send,
-        incoming: AddrIncoming,
+        listener: TcpListener,
     ) -> Result<()> {
         let Self {
             block_producer,
@@ -140,7 +141,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         };
 
         let router = extend_router(state.clone(), routing::normal_routes(state));
-        let router = http_api_utils::extend_router_with_middleware(
+        let router = http_api_utils::extend_router_with_middleware::<Error>(
             router,
             timeout,
             allow_origin,
@@ -148,7 +149,10 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         );
 
         let service = router.into_make_service_with_connect_info::<SocketAddr>();
-        let serve_requests = Server::builder(incoming).serve(service).err_into();
+
+        let serve_requests = axum::serve(listener, service)
+            .into_future()
+            .map_err(AnyhowError::new);
 
         let handle_events = handle_events(
             is_synced,

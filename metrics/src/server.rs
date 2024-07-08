@@ -4,7 +4,7 @@ use core::{
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
-use std::sync::Arc;
+use std::{error::Error as StdError, sync::Arc};
 
 use anyhow::{anyhow, Error as AnyhowError, Result};
 use axum::{
@@ -12,7 +12,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Router, Server,
+    Router,
 };
 use directories::Directories;
 use eth1_api::ApiController;
@@ -20,6 +20,7 @@ use eth2_libp2p::NetworkGlobals;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
 use helper_functions::misc;
+use http_api_utils::ApiError;
 use log::{info, warn};
 use prometheus::TextEncoder;
 use prometheus_client::registry::Registry;
@@ -103,6 +104,17 @@ pub enum Error {
     Internal(#[from] AnyhowError),
 }
 
+impl ApiError for Error {
+    fn sources(&self) -> impl Iterator<Item = &dyn StdError> {
+        let mut error: Option<&dyn StdError> = Some(self);
+
+        core::iter::from_fn(move || {
+            let source = error?.source();
+            core::mem::replace(&mut error, source)
+        })
+    }
+}
+
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -136,17 +148,21 @@ pub async fn run_metrics_server<P: Preset, W: Wait>(
         .route("/metrics", get(prometheus_metrics))
         .with_state(state);
 
-    let router = http_api_utils::extend_router_with_middleware(
+    let router = http_api_utils::extend_router_with_middleware::<Error>(
         router,
         Some(Duration::from_millis(config.timeout)),
         AllowOrigin::any(),
         None,
     );
 
-    Server::bind(&addr)
-        .serve(router.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .map_err(AnyhowError::new)
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(AnyhowError::new)
 }
 
 /// `GET /metrics`
