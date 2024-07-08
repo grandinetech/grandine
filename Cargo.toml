@@ -370,7 +370,7 @@ rc-box = '1.2.0'
 refinery = { version = '0.8.14', features = ['rusqlite']}
 regex = '1.10.5'
 replace_with = '0.1.7'
-reqwest = { version = '0.12.5', features = ['blocking', 'json', 'native-tls-vendored'] }
+reqwest = { version = '0.12.5', features = ['json', 'native-tls-vendored'] }
 rusqlite = { version = '0.31.0', features = ['bundled'] }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw' }
 scrypt = '0.11.0'
