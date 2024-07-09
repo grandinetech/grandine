@@ -565,7 +565,7 @@ impl From<DepositRequestV1> for DepositRequest {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct WithdrawalRequestV1 {
     pub source_address: ExecutionAddress,
-    pub validator_public_key: PublicKeyBytes,
+    pub validator_pubkey: PublicKeyBytes,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub amount: Gwei,
 }
@@ -580,7 +580,7 @@ impl From<WithdrawalRequest> for WithdrawalRequestV1 {
 
         Self {
             source_address,
-            validator_public_key: validator_pubkey,
+            validator_pubkey,
             amount,
         }
     }
@@ -590,13 +590,13 @@ impl From<WithdrawalRequestV1> for WithdrawalRequest {
     fn from(withdrawal_request: WithdrawalRequestV1) -> Self {
         let WithdrawalRequestV1 {
             source_address,
-            validator_public_key,
+            validator_pubkey,
             amount,
         } = withdrawal_request;
 
         Self {
             source_address,
-            validator_pubkey: validator_public_key,
+            validator_pubkey,
             amount,
         }
     }
