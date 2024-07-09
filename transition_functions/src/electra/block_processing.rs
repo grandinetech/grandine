@@ -1032,7 +1032,6 @@ fn process_deposit_request<P: Preset>(
     Ok(())
 }
 
-
 #[allow(clippy::too_many_lines)]
 pub fn process_consolidation_request<P: Preset>(
     config: &Config,
