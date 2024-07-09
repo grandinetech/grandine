@@ -130,20 +130,12 @@ pub struct Config {
     pub min_epochs_for_blob_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub data_column_sidecar_subnet_count: u64,
 
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
     #[serde(with = "serde_utils::string_or_native")]
     pub terminal_block_hash_activation_epoch: Epoch,
     pub terminal_total_difficulty: Difficulty,
-
-    // Custody
-    #[serde(with = "serde_utils::string_or_native")]
-    pub custody_requirement: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub samples_per_slot: u64,
 
     // Later phases and other unknown variables
     //
@@ -222,7 +214,6 @@ impl Default for Config {
             max_request_blob_sidecars: 768,
             min_epochs_for_blob_sidecars_requests: 4096,
             blob_sidecar_subnet_count: 6,
-            data_column_sidecar_subnet_count: 64,
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -230,10 +221,6 @@ impl Default for Config {
             terminal_total_difficulty: Difficulty::from_be_bytes(hex!(
                 "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00"
             )),
-
-            // Custody
-            custody_requirement: 4,
-            samples_per_slot: 16,
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
