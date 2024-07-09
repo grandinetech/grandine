@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
+block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 byteorder = { workspace = true }
@@ -24,7 +25,6 @@ futures = { workspace = true }
 genesis = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
-hyper = { workspace = true }
 itertools = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }
@@ -72,6 +72,7 @@ hex-literal = { workspace = true }
 interop = { workspace = true }
 keymanager = { workspace = true }
 num_cpus = { workspace = true }
+once_cell = { workspace = true }
 predefined_chains = { workspace = true }
 reqwest = { workspace = true }
 signer = { workspace = true }

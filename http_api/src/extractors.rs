@@ -10,13 +10,12 @@ use std::sync::Arc;
 use anyhow::{Error as AnyhowError, Result};
 use axum::{
     async_trait,
-    body::Body,
-    extract::{FromRef, FromRequest, FromRequestParts, Path, RawBody},
-    headers::ContentType,
+    body::{Body, Bytes},
+    extract::{FromRef, FromRequest, FromRequestParts, Path},
     http::{request::Parts, Request},
-    Json, RequestExt as _, RequestPartsExt as _, TypedHeader,
+    Json, RequestExt as _, RequestPartsExt as _,
 };
-use axum_extra::extract::Query;
+use axum_extra::{extract::Query, headers::ContentType, TypedHeader};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
 use http_api_utils::{BlockId, StateId};
@@ -35,10 +34,10 @@ use types::{
     },
     preset::Preset,
 };
-use validator::ValidatorProposerData;
 
 use crate::{
     error::Error,
+    misc::ProposerData,
     validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
 };
 
@@ -328,7 +327,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SignedContributionAndPro
 }
 
 #[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorProposerData>> {
+impl<S> FromRequest<S, Body> for EthJson<Vec<ProposerData>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -359,7 +358,7 @@ pub struct EthJsonOrSsz<T>(pub T);
 impl<S, T> FromRequest<S, Body> for EthJsonOrSsz<T>
 where
     Arc<Config>: FromRef<S>,
-    S: Sync,
+    S: Send + Sync,
     T: SszRead<Config> + DeserializeOwned + 'static,
 {
     type Rejection = Error;
@@ -371,8 +370,7 @@ where
 
             if content_type == ContentType::octet_stream() {
                 let config = Arc::from_ref(state);
-                let RawBody(body) = request.extract().await?;
-                let bytes = hyper::body::to_bytes(body).await?;
+                let bytes = Bytes::from_request(request, state).await?;
                 let block = T::from_ssz(&config, bytes)?;
                 return Ok(Self(block));
             }

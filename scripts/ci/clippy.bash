@@ -19,6 +19,7 @@ options=(
     --package attestation_verifier
     --package benches
     --package binary_utils
+    --package block_producer
     --package bls
     --package builder_api
     --package clock

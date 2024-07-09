@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
+use block_producer::BlockProducer;
 use bls::{PublicKeyBytes, SecretKey};
 use clock::Tick;
 use database::Database;
@@ -22,6 +23,7 @@ use futures::{future::FutureExt as _, lock::Mutex, select_biased};
 use genesis::AnchorCheckpointProvider;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
+use once_cell::sync::OnceCell;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{NetworkConfig, SubnetService, SyncToApi};
 use reqwest::Client;
@@ -62,15 +64,13 @@ pub struct Context<P: Preset> {
 }
 
 impl<P: Preset> Context<P> {
-    pub fn run_case(self, case: Case, update_responses: bool) {
-        block_on(self.try_run_case(case, update_responses))
-            .unwrap_or_else(|error| panic!("{error:?}"))
+    pub fn run_case(self, case: Case) {
+        block_on(self.try_run_case(case)).unwrap_or_else(|error| panic!("{error:?}"))
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn try_run_case(self, case: Case<'_>, update_responses: bool) -> Result<()> {
+    async fn try_run_case(self, case: Case<'_>) -> Result<()> {
         Feature::ServeCostlyEndpoints.enable();
-        Feature::ServeEffectfulEndpoints.enable();
         Feature::ServeLeakyEndpoints.enable();
 
         let Self {
@@ -270,6 +270,18 @@ impl<P: Preset> Context<P> {
             validator_to_liveness_rx,
         );
 
+        let block_producer = Arc::new(BlockProducer::new(
+            keymanager.proposer_configs().clone_arc(),
+            None,
+            controller.clone_arc(),
+            eth1_chain,
+            execution_engine,
+            attestation_agg_pool.clone_arc(),
+            bls_to_execution_change_pool.clone_arc(),
+            sync_committee_agg_pool.clone_arc(),
+            None,
+        ));
+
         let validator_channels = ValidatorChannels {
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
@@ -283,17 +295,15 @@ impl<P: Preset> Context<P> {
         };
 
         let validator = Validator::new(
-            eth1_chain,
             validator_config.clone_arc(),
+            block_producer.clone_arc(),
             controller.clone_arc(),
-            execution_engine,
             attestation_agg_pool.clone_arc(),
             None,
             keymanager.proposer_configs().clone_arc(),
             signer,
             slashing_protector,
             sync_committee_agg_pool.clone_arc(),
-            bls_to_execution_change_pool.clone_arc(),
             None,
             validator_channels,
         );
@@ -311,8 +321,8 @@ impl<P: Preset> Context<P> {
         );
 
         let http_api_config = HttpApiConfig::with_address(Ipv4Addr::LOCALHOST, 0);
-        let incoming = http_api_config.incoming()?;
-        let actual_address = incoming.local_addr();
+        let listener = http_api_config.listener().await?;
+        let actual_address = listener.local_addr()?;
 
         let channels = Channels {
             api_to_liveness_tx: Some(api_to_liveness_tx),
@@ -327,6 +337,7 @@ impl<P: Preset> Context<P> {
         };
 
         let http_api = HttpApi {
+            block_producer,
             controller,
             anchor_checkpoint_provider,
             validator_keys,
@@ -359,11 +370,11 @@ impl<P: Preset> Context<P> {
                         middleware::wait_for_tasks,
                     ))
             },
-            incoming,
+            listener,
         );
 
         let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
-        let submit_requests = case.run(update_responses, actual_address);
+        let submit_requests = case.run(should_update_responses(), actual_address);
 
         SyncToApi::SyncStatus(true).send(&sync_to_api_tx);
         SyncToApi::BackSyncStatus(true).send(&sync_to_api_tx);
@@ -601,6 +612,23 @@ impl Context<Minimal> {
         factory::min_genesis_state(chain_config)
             .expect("configurations used in this impl block should be valid")
     }
+}
+
+// Responses can be updated by setting the `UPDATE_RESPONSES` environment variable to `true`:
+// ```shell
+// UPDATE_RESPONSES=true cargo test
+// ```
+// Setting it to any other value has the same effect as leaving it unset.
+#[must_use]
+pub fn should_update_responses() -> bool {
+    static UPDATE_RESPONSES: OnceCell<bool> = OnceCell::new();
+
+    *UPDATE_RESPONSES.get_or_init(|| {
+        std::env::var("UPDATE_RESPONSES")
+            .ok()
+            .and_then(|string| string.parse().ok())
+            .unwrap_or_default()
+    })
 }
 
 // This is roughly what `#[tokio::test(flavor = "multi_thread", worker_threads = 1)]` expands to.

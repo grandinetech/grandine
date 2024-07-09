@@ -196,7 +196,7 @@ impl<P: Preset> AttestationPacker<P> {
             .take_while(|_| !self.deadline_reached())
             .filter(|aggregate| self.is_valid_for_inclusion(aggregate))
             .map(|aggregate| (aggregate.data, aggregate))
-            .group_by(|&(data, _)| data)
+            .chunk_by(|&(data, _)| data)
             .into_iter()
             .map(|(_, group)| group.map(|(_, y)| y.clone()).collect())
             .collect_vec()

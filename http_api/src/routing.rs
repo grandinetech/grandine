@@ -2,9 +2,10 @@ use std::{collections::HashSet, sync::Arc};
 
 use axum::{
     extract::{DefaultBodyLimit, FromRef, State},
-    routing::{get, patch, post},
+    routing::{get, post},
     Json, Router,
 };
+use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::ApiController;
 use features::Feature;
@@ -64,6 +65,7 @@ use crate::{misc::SpyReceiver, test_endpoints};
 #[derive(Clone)]
 pub struct NormalState<P: Preset, W: Wait> {
     pub chain_config: Arc<ChainConfig>,
+    pub block_producer: Arc<BlockProducer<P, W>>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
@@ -88,6 +90,12 @@ pub struct NormalState<P: Preset, W: Wait> {
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<ChainConfig> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.chain_config.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<BlockProducer<P, W>> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.block_producer.clone_arc()
     }
 }
 
@@ -283,24 +291,6 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
                 Feature::ServeCostlyEndpoints,
                 middleware::feature_is_enabled,
             )),
-        )
-        .route(
-            "/features",
-            get(|| async { Json(global::get_features()) }).route_layer(
-                axum::middleware::map_request_with_state(
-                    Feature::ServeLeakyEndpoints,
-                    middleware::feature_is_enabled,
-                ),
-            ),
-        )
-        .route(
-            "/features",
-            patch(|Json(features)| async { global::patch_features(features) }).route_layer(
-                axum::middleware::map_request_with_state(
-                    Feature::ServeEffectfulEndpoints,
-                    middleware::feature_is_enabled,
-                ),
-            ),
         )
         .route(
             "/system/stats",

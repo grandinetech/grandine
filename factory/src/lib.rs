@@ -321,8 +321,8 @@ pub fn singular_attestation<P: Preset>(
                     Attestation::from(ElectraAttestation {
                         aggregation_bits,
                         data,
-                        committee_bits,
                         signature,
+                        committee_bits,
                     })
                 };
 
@@ -667,8 +667,8 @@ fn full_block_attestations<P: Preset>(
             attestations.push(Attestation::from(ElectraAttestation {
                 aggregation_bits,
                 data,
-                committee_bits,
                 signature,
+                committee_bits,
             }));
         }
     }

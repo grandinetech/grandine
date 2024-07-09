@@ -1,52 +1,19 @@
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::{Error, Result};
-use bls::{PublicKeyBytes, SignatureBytes};
+use anyhow::Error;
+use bls::PublicKeyBytes;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::warn;
-use operation_pools::PoolAdditionOutcome;
 use types::{
     altair::containers::SignedContributionAndProof,
-    combined::{
-        Attestation, AttesterSlashing, BeaconBlock, BeaconState, ExecutionPayload,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
-    },
-    nonstandard::{BlockRewards, WithBlobsAndMev},
-    phase0::{
-        containers::{ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, Slot, H256},
-    },
+    combined::{Attestation, BeaconState, SignedBeaconBlock},
+    phase0::{containers::SignedVoluntaryExit, primitives::Epoch},
     preset::Preset,
 };
 
-use crate::misc::{ProposerData, ValidatorBlindedBlock};
-
-pub type BeaconBlockSender<P> =
-    Sender<Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>>>;
-pub type BlindedBlockSender<P> = Sender<
-    Result<
-        Option<(
-            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
-            Option<BlockRewards>,
-        )>,
-    >,
->;
-
 pub enum ApiToValidator<P: Preset> {
-    ProduceBeaconBlock(BeaconBlockSender<P>, H256, SignatureBytes, Slot, bool),
-    ProduceBlindedBeaconBlock(BlindedBlockSender<P>, H256, SignatureBytes, Slot, bool, u64),
-    AttesterSlashing(Sender<PoolAdditionOutcome>, Box<AttesterSlashing<P>>),
-    ProposerSlashing(Sender<PoolAdditionOutcome>, Box<ProposerSlashing>),
-    PublishSignedBlindedBlock(
-        Sender<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>>,
-        Box<SignedBlindedBeaconBlock<P>>,
-    ),
     RegisteredValidators(Sender<HashSet<PublicKeyBytes>>),
-    RequestAttesterSlashings(Sender<Vec<AttesterSlashing<P>>>),
-    RequestProposerSlashings(Sender<Vec<ProposerSlashing>>),
-    RequestSignedVoluntaryExits(Sender<Vec<SignedVoluntaryExit>>),
-    SignedVoluntaryExit(Sender<PoolAdditionOutcome>, Box<SignedVoluntaryExit>),
     SignedValidatorRegistrations(
         Sender<Vec<(usize, Error)>>,
         Vec<SignedValidatorRegistrationV1>,
@@ -55,7 +22,6 @@ pub enum ApiToValidator<P: Preset> {
         Sender<Option<Vec<(usize, Error)>>>,
         Vec<SignedContributionAndProof<P>>,
     ),
-    ValidatorProposerData(Vec<ProposerData>),
 }
 
 impl<P: Preset> ApiToValidator<P> {

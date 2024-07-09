@@ -2502,7 +2502,7 @@ impl<P: Preset> Store<P> {
         for (segment_id, group) in &self
             .propagate_and_dissolve_differences(differences)?
             .into_iter()
-            .group_by(|dissolved_difference| dissolved_difference.segment_id)
+            .chunk_by(|dissolved_difference| dissolved_difference.segment_id)
         {
             let segment = &mut self.unfinalized[&segment_id];
 

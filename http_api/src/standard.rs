@@ -17,6 +17,7 @@ use axum::{
     },
     Json,
 };
+use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
@@ -84,10 +85,7 @@ use types::{
     preset::Preset,
     traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
-use validator::{
-    ApiToValidator, ValidatorBlindedBlock, ValidatorConfig, ValidatorProposerData,
-    DEFAULT_BUILDER_BOOST_FACTOR,
-};
+use validator::{ApiToValidator, ValidatorConfig};
 
 use crate::{
     block_id,
@@ -95,7 +93,9 @@ use crate::{
     events::{EventChannels, Topic},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
-    misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
+    misc::{
+        APIBlock, BackSyncedStatus, BroadcastValidation, ProposerData, SignedAPIBlock, SyncedStatus,
+    },
     response::{EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
@@ -999,23 +999,23 @@ pub async fn publish_block<P: Preset, W: Wait>(
 
 /// `POST /eth/v1/beacon/blinded_blocks`
 pub async fn publish_blinded_block<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthJsonOrSsz(signed_blinded_block): EthJsonOrSsz<Box<SignedBlindedBeaconBlock<P>>>,
 ) -> Result<StatusCode, Error> {
-    let (message, signature) = signed_blinded_block.as_ref().clone().split();
-    let (sender, receiver) = futures::channel::oneshot::channel();
-
-    ApiToValidator::PublishSignedBlindedBlock(sender, signed_blinded_block)
-        .send(&api_to_validator_tx);
+    let execution_payload = block_producer
+        .publish_signed_blinded_block(&signed_blinded_block)
+        .await;
 
     let WithBlobsAndMev {
         value: execution_payload,
         proofs,
         blobs,
         ..
-    } = receiver.await?.ok_or(Error::ExecutionPayloadNotAvailable)?;
+    } = execution_payload.ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+    let (message, signature) = signed_blinded_block.split();
 
     let signed_beacon_block = message
         .with_execution_payload(execution_payload)
@@ -1211,15 +1211,20 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/proposer_slashings`
-pub async fn submit_pool_proposer_slashing<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(proposer_slashing): EthJson<Box<ProposerSlashing>>,
 ) -> Result<(), Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
+    let outcome = block_producer
+        .handle_external_proposer_slashing(*proposer_slashing)
+        .await?;
 
-    ApiToValidator::ProposerSlashing(sender, proposer_slashing).send(&api_to_validator_tx);
+    if outcome.is_publishable() {
+        ApiToP2p::PublishProposerSlashing(proposer_slashing).send(&api_to_p2p_tx);
+    }
 
-    if let PoolAdditionOutcome::Reject(_, error) = receiver.await? {
+    if let PoolAdditionOutcome::Reject(_, error) = outcome {
         return Err(Error::InvalidProposerSlashing(error));
     }
 
@@ -1227,28 +1232,29 @@ pub async fn submit_pool_proposer_slashing<P: Preset>(
 }
 
 /// `GET /eth/v1/beacon/pool/proposer_slashings`
-pub async fn pool_proposer_slashings<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn pool_proposer_slashings<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
 ) -> Result<EthResponse<Vec<ProposerSlashing>>, Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
-
-    ApiToValidator::RequestProposerSlashings(sender).send(&api_to_validator_tx);
-
-    let data = receiver.await?;
+    let data = block_producer.get_proposer_slashings().await;
 
     Ok(EthResponse::json(data))
 }
 
 /// `POST /eth/v1/beacon/pool/voluntary_exits`
-pub async fn submit_pool_voluntary_exit<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(signed_voluntary_exit): EthJson<Box<SignedVoluntaryExit>>,
 ) -> Result<(), Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
+    let outcome = block_producer
+        .handle_external_voluntary_exit(*signed_voluntary_exit)
+        .await?;
 
-    ApiToValidator::SignedVoluntaryExit(sender, signed_voluntary_exit).send(&api_to_validator_tx);
+    if outcome.is_publishable() {
+        ApiToP2p::PublishVoluntaryExit(signed_voluntary_exit).send(&api_to_p2p_tx);
+    }
 
-    if let PoolAdditionOutcome::Reject(_, error) = receiver.await? {
+    if let PoolAdditionOutcome::Reject(_, error) = outcome {
         return Err(Error::InvalidSignedVoluntaryExit(error));
     }
 
@@ -1256,28 +1262,29 @@ pub async fn submit_pool_voluntary_exit<P: Preset>(
 }
 
 /// `GET /eth/v1/beacon/pool/voluntary_exits`
-pub async fn pool_voluntary_exits<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn pool_voluntary_exits<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
 ) -> Result<EthResponse<Vec<SignedVoluntaryExit>>, Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
-
-    ApiToValidator::RequestSignedVoluntaryExits(sender).send(&api_to_validator_tx);
-
-    let data = receiver.await?;
+    let data = block_producer.get_voluntary_exits().await;
 
     Ok(EthResponse::json(data))
 }
 
 /// `POST /eth/v1/beacon/pool/attester_slashings`
-pub async fn submit_pool_attester_slashing<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attester_slashing): EthJson<Box<AttesterSlashing<P>>>,
 ) -> Result<(), Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
+    let outcome = block_producer
+        .handle_external_attester_slashing(*attester_slashing.clone())
+        .await?;
 
-    ApiToValidator::AttesterSlashing(sender, attester_slashing).send(&api_to_validator_tx);
+    if outcome.is_publishable() {
+        ApiToP2p::PublishAttesterSlashing(attester_slashing).send(&api_to_p2p_tx);
+    }
 
-    if let PoolAdditionOutcome::Reject(_, error) = receiver.await? {
+    if let PoolAdditionOutcome::Reject(_, error) = outcome {
         return Err(Error::InvalidAttesterSlashing(error));
     }
 
@@ -1285,14 +1292,10 @@ pub async fn submit_pool_attester_slashing<P: Preset>(
 }
 
 /// `GET /eth/v1/beacon/pool/attester_slashings`
-pub async fn pool_attester_slashings<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn pool_attester_slashings<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
 ) -> Result<EthResponse<Vec<AttesterSlashing<P>>>, Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
-
-    ApiToValidator::RequestAttesterSlashings(sender).send(&api_to_validator_tx);
-
-    let data = receiver.await?;
+    let data = block_producer.get_attester_slashings().await;
 
     Ok(EthResponse::json(data))
 }
@@ -1306,7 +1309,7 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     let grouped_by_target = attestations
         .into_iter()
         .enumerate()
-        .group_by(|(_, attestation)| attestation.data().target);
+        .chunk_by(|(_, attestation)| attestation.data().target);
 
     let (targets, target_attestations): (Vec<_>, Vec<_>) = grouped_by_target
         .into_iter()
@@ -1887,8 +1890,9 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/blinded_blocks/{slot}`
-pub async fn validator_blinded_block<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn validator_blinded_block<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQuery>,
 ) -> Result<EthResponse<ValidatorBlindedBlock<P>>, Error> {
@@ -1902,25 +1906,35 @@ pub async fn validator_blinded_block<P: Preset>(
         return Err(Error::InvalidRandaoReveal);
     }
 
+    let block_root = controller.head().value.block_root;
+    let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
+
+    let Ok(proposer_index) = accessors::get_beacon_proposer_index(&beacon_state) else {
+        // accessors::get_beacon_proposer_index can only fail if head state has no active validators.
+        warn!("failed to produce blinded beacon block: head state has no active validators");
+        return Err(Error::UnableToProduceBlindedBlock);
+    };
+
     let graffiti = graffiti.unwrap_or_default();
-    let (sender, receiver) = futures::channel::oneshot::channel();
+    let public_key = accessors::public_key(&beacon_state, proposer_index)?;
 
-    ApiToValidator::ProduceBlindedBeaconBlock(
-        sender,
-        graffiti,
-        randao_reveal,
-        slot,
-        skip_randao_verification,
-        DEFAULT_BUILDER_BOOST_FACTOR.get(),
-    )
-    .send(&api_to_validator_tx);
+    let block_build_context = block_producer.new_build_context(
+        beacon_state.clone_arc(),
+        block_root,
+        proposer_index,
+        BlockBuildOptions {
+            graffiti,
+            skip_randao_verification,
+            ..BlockBuildOptions::default()
+        },
+    );
 
-    // The Eth Beacon Node API specification says:
-    // > Pre-Bellatrix, this endpoint will return a BeaconBlock.
-    //
-    // Post-Bellatrix the endpoint should always return a `BlindedBeaconBlock`.
-    let blinded_block = receiver
-        .await??
+    let execution_payload_header_handle =
+        block_build_context.get_execution_payload_header(public_key.to_bytes());
+
+    let blinded_block = block_build_context
+        .build_blinded_beacon_block(randao_reveal, execution_payload_header_handle)
+        .await?
         .ok_or(Error::UnableToProduceBlindedBlock)?
         .0
         .value
@@ -1932,8 +1946,9 @@ pub async fn validator_blinded_block<P: Preset>(
 }
 
 /// `GET /eth/v2/validator/blocks/{slot}`
-pub async fn validator_block<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn validator_block<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQuery>,
     headers: HeaderMap,
@@ -1948,27 +1963,36 @@ pub async fn validator_block<P: Preset>(
         return Err(Error::InvalidRandaoReveal);
     }
 
+    let block_root = controller.head().value.block_root;
+    let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
+    let proposer_index = accessors::get_beacon_proposer_index(&beacon_state)?;
     let graffiti = graffiti.unwrap_or_default();
-    let (sender, receiver) = futures::channel::oneshot::channel();
 
-    ApiToValidator::ProduceBeaconBlock(
-        sender,
-        graffiti,
-        randao_reveal,
-        slot,
-        skip_randao_verification,
-    )
-    .send(&api_to_validator_tx);
+    let block_build_context = block_producer.new_build_context(
+        beacon_state.clone_arc(),
+        block_root,
+        proposer_index,
+        BlockBuildOptions {
+            graffiti,
+            skip_randao_verification,
+            ..BlockBuildOptions::default()
+        },
+    );
 
-    let (beacon_block, _) = receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
+    let (beacon_block, _) = block_build_context
+        .build_beacon_block(randao_reveal)
+        .await?
+        .ok_or(Error::UnableToProduceBeaconBlock)?;
+
     let version = beacon_block.value.phase();
 
     Ok(EthResponse::json_or_ssz(beacon_block.into(), &headers).version(version))
 }
 
 /// `GET /eth/v3/validator/blocks/{slot}`
-pub async fn validator_block_v3<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
+pub async fn validator_block_v3<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV3>,
     headers: HeaderMap,
@@ -1984,21 +2008,36 @@ pub async fn validator_block_v3<P: Preset>(
         return Err(Error::InvalidRandaoReveal);
     }
 
+    let block_root = controller.head().value.block_root;
+    let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
+
+    let Ok(proposer_index) = accessors::get_beacon_proposer_index(&beacon_state) else {
+        // accessors::get_beacon_proposer_index can only fail if head state has no active validators.
+        warn!("failed to produce blinded beacon block: head state has no active validators");
+        return Err(Error::UnableToProduceBeaconBlock);
+    };
+
     let graffiti = graffiti.unwrap_or_default();
-    let (sender, receiver) = futures::channel::oneshot::channel();
+    let public_key = accessors::public_key(&beacon_state, proposer_index)?;
 
-    ApiToValidator::ProduceBlindedBeaconBlock(
-        sender,
-        graffiti,
-        randao_reveal,
-        slot,
-        skip_randao_verification,
-        builder_boost_factor.unwrap_or_else(|| DEFAULT_BUILDER_BOOST_FACTOR.get()),
-    )
-    .send(&api_to_validator_tx);
+    let block_build_context = block_producer.new_build_context(
+        beacon_state.clone_arc(),
+        block_root,
+        proposer_index,
+        BlockBuildOptions {
+            graffiti,
+            skip_randao_verification,
+            builder_boost_factor,
+        },
+    );
 
-    let (validator_block, block_rewards) =
-        receiver.await??.ok_or(Error::UnableToProduceBeaconBlock)?;
+    let execution_payload_header_handle =
+        block_build_context.get_execution_payload_header(public_key.to_bytes());
+
+    let (validator_block, block_rewards) = block_build_context
+        .build_blinded_beacon_block(randao_reveal, execution_payload_header_handle)
+        .await?
+        .ok_or(Error::UnableToProduceBeaconBlock)?;
 
     let mev = validator_block.mev;
     let version = validator_block.value.phase();
@@ -2294,11 +2333,21 @@ pub async fn validator_publish_contributions_and_proofs<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/validator/prepare_beacon_proposer`
-pub async fn validator_prepare_beacon_proposer<P: Preset>(
-    State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
-    EthJson(proposers): EthJson<Vec<ValidatorProposerData>>,
+pub async fn validator_prepare_beacon_proposer<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    EthJson(proposers): EthJson<Vec<ProposerData>>,
 ) -> Result<(), Error> {
-    ApiToValidator::ValidatorProposerData(proposers).send(&api_to_validator_tx);
+    for proposer in proposers {
+        let ProposerData {
+            validator_index,
+            fee_recipient,
+        } = proposer;
+
+        block_producer
+            .add_new_prepared_proposer(validator_index, fee_recipient)
+            .await;
+    }
+
     Ok(())
 }
 
@@ -2557,7 +2606,7 @@ mod tests {
     use axum::{
         extract::Query,
         http::{header::CONTENT_TYPE, Request},
-        Json, RequestExt as _,
+        Json, RequestExt as _, RequestPartsExt as _,
     };
     use hex_literal::hex;
     use mime::APPLICATION_JSON;
@@ -2676,8 +2725,9 @@ mod tests {
     }
 
     async fn extract_query<T: DeserializeOwned + 'static>(query: impl Display + Send) -> Result<T> {
-        Request::get(format!("/?{query}"))
-            .body(())?
+        let (mut parts, ()) = Request::get(format!("/?{query}")).body(())?.into_parts();
+
+        parts
             .extract()
             .await
             .map(|Query(query)| query)
@@ -2689,7 +2739,7 @@ mod tests {
 
         Request::get("/")
             .header(CONTENT_TYPE, APPLICATION_JSON.as_ref())
-            .body(json)?
+            .body(json.into())?
             .extract()
             .await
             .map(|Json(body)| body)

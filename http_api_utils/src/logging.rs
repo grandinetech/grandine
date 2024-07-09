@@ -1,4 +1,5 @@
 use core::{net::SocketAddr, time::Duration};
+use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -10,7 +11,7 @@ use features::Feature;
 use log::{info, warn};
 use tracing::Span;
 
-use crate::{error::Error, misc::ApiMetrics};
+use crate::{misc::ApiMetrics, ApiError};
 
 // `TraceLayer` already logs most of this out of the box, but we still use `log`.
 // We have to duplicate some of the information because `log` does not have spans.
@@ -41,7 +42,7 @@ pub fn log_request(request: &Request<Body>, _span: &Span) {
     }
 }
 
-pub fn log_response(
+pub fn log_response<E: ApiError + Send + Sync + 'static>(
     api_metrics: Option<ApiMetrics>,
 ) -> impl Fn(&Response, Duration, &Span) + Clone {
     move |response: &Response, latency: Duration, _span: &Span| {
@@ -70,7 +71,7 @@ pub fn log_response(
                     to ({method} {original_uri} {version:?}) \
                     for {remote} in {latency:?}",
                 ),
-                response.extensions().get::<Error>(),
+                response.extensions().get::<Arc<E>>(),
             ) {
                 (shared, Some(error)) => info!("{shared} (error: {})", error.format_sources()),
                 (shared, None) => info!("{shared}"),

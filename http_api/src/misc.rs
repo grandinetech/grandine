@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use block_producer::ValidatorBlindedBlock;
 use bls::SignatureBytes;
 use educe::Educe;
 use enum_iterator::Sequence as _;
@@ -20,10 +21,12 @@ use types::{
     },
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
     nonstandard::{Phase, WithBlobsAndMev},
-    phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::Slot},
+    phase0::{
+        containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
+        primitives::{ExecutionAddress, Slot, ValidatorIndex},
+    },
     preset::Preset,
 };
-use validator::ValidatorBlindedBlock;
 
 #[cfg(test)]
 use std::sync::Arc;
@@ -300,4 +303,11 @@ pub enum BroadcastValidation {
     Gossip,
     Consensus,
     ConsensusAndEquivocation,
+}
+
+#[derive(Deserialize)]
+pub struct ProposerData {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    pub fee_recipient: ExecutionAddress,
 }

@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::ops::{ControlFlow, Div as _};
+use core::ops::ControlFlow;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     error::Error as StdError,
@@ -9,23 +9,17 @@ use std::{
 };
 
 use anyhow::{Error as AnyhowError, Result};
-use bls::{AggregateSignature, PublicKeyBytes, Signature, SignatureBytes};
+use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
+use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
-    combined::SignedBuilderBid,
     consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},
     BuilderApi,
 };
-use cached::{Cached as _, SizedCache};
 use clock::{Tick, TickKind};
 use derive_more::Display;
-use eth1::Eth1Chain;
-use eth1_api::{ApiController, Eth1ExecutionEngine};
+use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
-use execution_engine::{
-    ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadId,
-};
 use features::Feature;
 use fork_choice_control::{ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
@@ -37,103 +31,58 @@ use futures::{
     stream::{FuturesOrdered, StreamExt as _},
 };
 use helper_functions::{
-    accessors, misc, predicates,
+    accessors, misc,
     signing::{RandaoEpoch, SignForAllForks, SignForSingleFork},
 };
-use itertools::{Either, Itertools as _};
+use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
 use log::{debug, error, info, log, warn, Level};
 use once_cell::sync::OnceCell;
-use operation_pools::{
-    convert_to_electra_attestation, AttestationAggPool, BlsToExecutionChangePool, Origin,
-    PoolAdditionOutcome, PoolRejectionReason, SyncCommitteeAggPool,
-};
+use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::{BlockProposal, SlashingProtector, SlashingValidationOutcome};
-use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
+use ssz::{BitList, BitVector};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
-use tokio::task::JoinHandle;
-use transition_functions::{capella, electra, unphased};
-use try_from_iterator::TryFromIterator as _;
-use typenum::Unsigned as _;
 use types::{
     altair::{
-        consts::SyncCommitteeSubnetCount,
-        containers::{
-            BeaconBlock as AltairBeaconBlock, BeaconBlockBody as AltairBeaconBlockBody,
-            ContributionAndProof, SignedContributionAndProof, SyncAggregate, SyncCommitteeMessage,
-        },
+        containers::{ContributionAndProof, SignedContributionAndProof, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    bellatrix::containers::{
-        BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
-        ExecutionPayload as BellatrixExecutionPayload,
-    },
-    capella::containers::{
-        BeaconBlock as CapellaBeaconBlock, BeaconBlockBody as CapellaBeaconBlockBody,
-        ExecutionPayload as CapellaExecutionPayload, SignedBlsToExecutionChange,
-    },
     combined::{
-        AggregateAndProof, Attestation, AttesterSlashing, BeaconBlock, BeaconState,
-        BlindedBeaconBlock, ExecutionPayload, ExecutionPayloadHeader, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
+        AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
     config::Config as ChainConfig,
-    deneb::{
-        containers::{
-            BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody,
-            ExecutionPayload as DenebExecutionPayload,
-        },
-        primitives::KzgCommitment,
-    },
     electra::containers::{
         AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
-        AttesterSlashing as ElectraAttesterSlashing, BeaconBlock as ElectraBeaconBlock,
-        BeaconBlockBody as ElectraBeaconBlockBody, ExecutionPayload as ElectraExecutionPayload,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
     },
-    nonstandard::{
-        BlockRewards, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
-    },
+    nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH, GENESIS_SLOT},
+        consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
-            AttestationData, AttesterSlashing as Phase0AttesterSlashing,
-            BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Checkpoint,
-            ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
-            SignedVoluntaryExit,
+            AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
         },
-        primitives::{
-            Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256, ValidatorIndex, H256,
-        },
+        primitives::{Epoch, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
-    traits::{
-        BeaconState as _, PostAltairBeaconState, PostBellatrixBeaconState, SignedBeaconBlock as _,
-    },
+    traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
 };
 
 use crate::{
-    eth1_storage::Eth1Storage as _,
-    messages::{
-        ApiToValidator, BeaconBlockSender, BlindedBlockSender, ValidatorToApi, ValidatorToLiveness,
-    },
-    misc::{
-        Aggregator, ProposerData, SyncCommitteeMember, ValidatorBlindedBlock,
-        DEFAULT_BUILDER_BOOST_FACTOR,
-    },
+    messages::{ApiToValidator, ValidatorToApi, ValidatorToLiveness},
+    misc::{Aggregator, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
     validator_config::ValidatorConfig,
-    PayloadIdEntry,
 };
 
 const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
@@ -145,9 +94,6 @@ const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
 // That didn't work because processing registrations for 1000 validators takes around 3 seconds,
 // which happens to be the default timeout for validator registration requests in `mev-boost`.
 const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
-
-const PAYLOAD_CACHE_SIZE: usize = 20;
-const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
 #[derive(Display)]
 #[display(fmt = "too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
@@ -176,10 +122,9 @@ pub struct Channels<P: Preset, W> {
 #[allow(clippy::struct_field_names)]
 pub struct Validator<P: Preset, W: Wait> {
     chain_config: Arc<ChainConfig>,
-    eth1_chain: Eth1Chain,
     validator_config: Arc<ValidatorConfig>,
+    block_producer: Arc<BlockProducer<P, W>>,
     controller: ApiController<P, W>,
-    execution_engine: Arc<Eth1ExecutionEngine<P>>,
     api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
     fork_choice_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
     p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
@@ -201,16 +146,9 @@ pub struct Validator<P: Preset, W: Wait> {
     slashing_protector: Arc<Mutex<SlashingProtector>>,
     slasher_to_validator_rx: Option<UnboundedReceiver<SlasherToValidator<P>>>,
     subnet_service_tx: UnboundedSender<ToSubnetService>,
-    prepared_proposers: HashMap<ValidatorIndex, ExecutionAddress>,
-    proposer_slashings: Vec<ProposerSlashing>,
     registered_validators:
         BTreeMap<Epoch, BTreeMap<PublicKeyBytes, (ValidatorRegistrationV1, Signature)>>,
-    attester_slashings: Vec<AttesterSlashing<P>>,
-    voluntary_exits: Vec<SignedVoluntaryExit>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
-    bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
-    payload_cache: SizedCache<H256, WithBlobsAndMev<ExecutionPayload<P>, P>>,
-    payload_id_cache: SizedCache<(H256, Slot), PayloadId>,
     metrics: Option<Arc<Metrics>>,
     validator_to_api_tx: UnboundedSender<ValidatorToApi<P>>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
@@ -221,17 +159,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        eth1_chain: Eth1Chain,
         validator_config: Arc<ValidatorConfig>,
+        block_producer: Arc<BlockProducer<P, W>>,
         controller: ApiController<P, W>,
-        execution_engine: Arc<Eth1ExecutionEngine<P>>,
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
         proposer_configs: Arc<ProposerConfigs>,
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
-        bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         metrics: Option<Arc<Metrics>>,
         channels: Channels<P, W>,
     ) -> Self {
@@ -254,10 +190,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         Self {
             chain_config: controller.chain_config().clone_arc(),
-            eth1_chain,
             validator_config,
+            block_producer,
             controller,
-            execution_engine,
             api_to_validator_rx,
             fork_choice_rx,
             p2p_tx,
@@ -278,16 +213,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             signer,
             slashing_protector,
             sync_committee_agg_pool,
-            bls_to_execution_change_pool,
             slasher_to_validator_rx,
             subnet_service_tx,
-            prepared_proposers: HashMap::new(),
-            proposer_slashings: vec![],
             registered_validators: BTreeMap::new(),
-            attester_slashings: vec![],
-            voluntary_exits: vec![],
-            payload_cache: SizedCache::with_size(PAYLOAD_CACHE_SIZE),
-            payload_id_cache: SizedCache::with_size(PAYLOAD_ID_CACHE_SIZE),
             metrics,
             validator_to_api_tx,
             validator_to_liveness_tx,
@@ -310,7 +238,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_tick(wait_group, tick).await?;
                     }
                     ValidatorMessage::FinalizedEth1Data(finalized_eth1_deposit_index) => {
-                        self.eth1_chain.finalize_deposits(finalized_eth1_deposit_index)?;
+                        self.block_producer.finalize_deposits(finalized_eth1_deposit_index)?;
                     },
                     ValidatorMessage::Head(wait_group, head) => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
@@ -340,124 +268,62 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
-                            let proposer_index = slot_head.proposer_index()?;
-                            let head_root = slot_head.beacon_block_root;
-                            let head_slot = slot_head.slot();
+                            let block_build_context = self.block_producer.new_build_context(
+                                slot_head.beacon_state.clone_arc(),
+                                slot_head.beacon_block_root,
+                                slot_head.proposer_index()?,
+                                BlockBuildOptions::default(),
+                            );
 
-                            let payload_id = self
-                                .prepare_execution_payload(
-                                    &slot_head.beacon_state,
-                                    safe_execution_payload_hash,
-                                    finalized_execution_payload_hash,
-                                    proposer_index,
-                                )
-                                .await;
-
-                            match payload_id {
-                                Ok(payload_id_option) => {
-                                    match payload_id_option {
-                                        Some(payload_id) => {
-                                            info!(
-                                                "started work on execution payload with id {payload_id:?} \
-                                                 for head {head_root:?} at slot {head_slot}",
-                                            );
-                                            self.payload_id_cache.cache_set((head_root, head_slot), payload_id);
-                                        }
-                                        // If we have no block at 4th-second mark, we preprocess new state without the block.
-                                        // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
-                                        // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
-                                        None => warn!(
-                                            "could not prepare execution payload: payload_id is None; \
-                                             ensure that multiple consensus clients are not driving the same execution client",
-                                        ),
-                                    }
-                                }
-                                Err(error) => warn!("error while preparing execution payload: {error:?}"),
-                            }
-                        };
+                            block_build_context.prepare_execution_payload_for_slot(
+                                slot,
+                                safe_execution_payload_hash,
+                                finalized_execution_payload_hash,
+                            ).await;
+                        }
                     }
                 },
 
                 slashing = slasher_to_validator_rx.select_next_some() => match slashing {
                     SlasherToValidator::AttesterSlashing(attester_slashing) => {
-                        self.attester_slashings.push(AttesterSlashing::Phase0(attester_slashing));
+                        self.block_producer.add_new_attester_slashing(AttesterSlashing::Phase0(attester_slashing)).await;
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
-                        self.proposer_slashings.push(proposer_slashing);
+                        self.block_producer.add_new_proposer_slashing(proposer_slashing).await;
                     }
                 },
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
-                        let outcome = self.handle_external_attester_slashing(*slashing)?;
+                        let outcome = self
+                            .block_producer
+                            .handle_external_attester_slashing(*slashing)
+                            .await?;
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
-                        let outcome = self.handle_external_proposer_slashing(*slashing)?;
+                        let outcome = self
+                            .block_producer
+                            .handle_external_proposer_slashing(*slashing)
+                            .await?;
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
-                        let outcome = self.handle_external_voluntary_exit(voluntary_exit)?;
+                        let outcome = self
+                            .block_producer
+                            .handle_external_voluntary_exit(*voluntary_exit)
+                            .await?;
+
+                        if matches!(outcome, PoolAdditionOutcome::Accept) {
+                            ValidatorToApi::VoluntaryExit(voluntary_exit).send(&self.validator_to_api_tx);
+                        }
+
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                 },
 
                 api_message = self.api_to_validator_rx.select_next_some() => {
                     let success = match api_message {
-                        ApiToValidator::AttesterSlashing(sender, attester_slashing) => {
-                            let result = self.handle_external_attester_slashing(*attester_slashing.clone())?;
-
-                            if result.is_publishable() {
-                                ValidatorToP2p::PublishAttesterSlashing(attester_slashing).send(&self.p2p_tx);
-                            }
-
-                            sender.send(result).is_ok()
-                        },
-                        ApiToValidator::PublishSignedBlindedBlock(sender, signed_blinded_block) => {
-                            let result = self.publish_signed_blinded_block(&signed_blinded_block).await;
-                            sender.send(result).is_ok()
-                        },
-                        ApiToValidator::ProduceBeaconBlock(
-                            sender,
-                            graffiti,
-                            randao_reveal,
-                            slot,
-                            skip_randao_verification,
-                        ) => {
-                            self.produce_beacon_block(
-                                sender,
-                                graffiti,
-                                randao_reveal,
-                                slot,
-                                skip_randao_verification,
-                            ).await
-                        },
-                        ApiToValidator::ProduceBlindedBeaconBlock(
-                            sender,
-                            graffiti,
-                            randao_reveal,
-                            slot,
-                            skip_randao_verification,
-                            builder_boost_factor,
-                        ) => {
-                            self.produce_blinded_beacon_block(
-                                sender,
-                                graffiti,
-                                randao_reveal,
-                                slot,
-                                skip_randao_verification,
-                                builder_boost_factor,
-                            ).await
-                        },
-                        ApiToValidator::ProposerSlashing(sender, proposer_slashing) => {
-                            let result = self.handle_external_proposer_slashing(*proposer_slashing)?;
-
-                            if result.is_publishable() {
-                                ValidatorToP2p::PublishProposerSlashing(proposer_slashing).send(&self.p2p_tx);
-                            }
-
-                            sender.send(result).is_ok()
-                        },
                         ApiToValidator::RegisteredValidators(sender) => {
                             let registered_pubkeys = self
                                 .registered_validators
@@ -468,15 +334,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             sender.send(registered_pubkeys).is_ok()
                         },
-                        ApiToValidator::RequestAttesterSlashings(sender) => {
-                            sender.send(self.attester_slashings.clone()).is_ok()
-                        }
-                        ApiToValidator::RequestProposerSlashings(sender) => {
-                            sender.send(self.proposer_slashings.clone()).is_ok()
-                        }
-                        ApiToValidator::RequestSignedVoluntaryExits(sender) => {
-                            sender.send(self.voluntary_exits.clone()).is_ok()
-                        }
                         ApiToValidator::SignedValidatorRegistrations(sender, registrations) => {
                             let (registered_validators, errors): (Vec<_>, Vec<_>) = registrations
                                 .into_iter()
@@ -512,15 +369,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             sender.send(errors).is_ok()
                         },
-                        ApiToValidator::SignedVoluntaryExit(sender, voluntary_exit) => {
-                            let result = self.handle_external_voluntary_exit(voluntary_exit.clone())?;
-
-                            if result.is_publishable() {
-                                ValidatorToP2p::PublishVoluntaryExit(voluntary_exit).send(&self.p2p_tx);
-                            }
-
-                            sender.send(result).is_ok()
-                        }
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
                             let current_slot = self.controller.slot();
 
@@ -537,14 +385,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 .await;
 
                             sender.send(failures).is_ok()
-                        },
-                        ApiToValidator::ValidatorProposerData(proposers) => {
-                            for proposer in proposers {
-                                let ProposerData { validator_index, fee_recipient } = proposer;
-                                self.prepared_proposers.insert(validator_index, fee_recipient);
-                            }
-
-                            true
                         }
                     };
 
@@ -574,129 +414,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         message.send(&self.p2p_tx);
     }
 
-    fn handle_external_voluntary_exit(
-        &mut self,
-        exit: Box<SignedVoluntaryExit>,
-    ) -> Result<PoolAdditionOutcome> {
-        let index_seen = self
-            .voluntary_exits
-            .iter()
-            .map(|voluntary_exit| voluntary_exit.message.validator_index)
-            .contains(&exit.message.validator_index);
-
-        if index_seen {
-            return Ok(PoolAdditionOutcome::Ignore);
-        }
-
-        let state = self.controller.preprocessed_state_at_current_slot()?;
-
-        let outcome = match unphased::validate_voluntary_exit(&self.chain_config, &state, *exit) {
-            Ok(()) => {
-                self.voluntary_exits.push(*exit);
-                ValidatorToApi::VoluntaryExit(exit).send(&self.validator_to_api_tx);
-                PoolAdditionOutcome::Accept
-            }
-            Err(error) => {
-                debug!("external voluntary exit rejected (error: {error}, exit: {exit:?})");
-                PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidVoluntaryExit, error)
-            }
-        };
-
-        Ok(outcome)
-    }
-
-    fn handle_external_proposer_slashing(
-        &mut self,
-        slashing: ProposerSlashing,
-    ) -> Result<PoolAdditionOutcome> {
-        let index_seen = self
-            .proposer_slashings
-            .iter()
-            .map(|proposer_slashing| proposer_slashing.signed_header_1.message.proposer_index)
-            .contains(&slashing.signed_header_1.message.proposer_index);
-
-        if index_seen {
-            return Ok(PoolAdditionOutcome::Ignore);
-        }
-
-        let state = self.controller.preprocessed_state_at_current_slot()?;
-
-        let outcome =
-            match unphased::validate_proposer_slashing(&self.chain_config, &state, slashing) {
-                Ok(()) => {
-                    self.proposer_slashings.push(slashing);
-                    PoolAdditionOutcome::Accept
-                }
-                Err(error) => {
-                    warn!(
-                    "external proposer slashing rejected (error: {error}, slashing: {slashing:?})",
-                );
-                    PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidProposerSlashing, error)
-                }
-            };
-
-        Ok(outcome)
-    }
-
-    fn handle_external_attester_slashing(
-        &mut self,
-        slashing: AttesterSlashing<P>,
-    ) -> Result<PoolAdditionOutcome> {
-        let mut seen_indices = self
-            .attester_slashings
-            .iter()
-            .flat_map(|attester_slashing| match attester_slashing {
-                AttesterSlashing::Phase0(ref attester_slashing) => {
-                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
-                }
-                AttesterSlashing::Electra(ref attester_slashing) => {
-                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
-                }
-            });
-
-        let all_seen = match slashing {
-            AttesterSlashing::Phase0(ref attester_slashing) => {
-                accessors::slashable_indices(attester_slashing)
-                    .all(|index| seen_indices.contains(&index))
-            }
-            AttesterSlashing::Electra(ref attester_slashing) => {
-                accessors::slashable_indices(attester_slashing)
-                    .all(|index| seen_indices.contains(&index))
-            }
-        };
-
-        if all_seen {
-            return Ok(PoolAdditionOutcome::Ignore);
-        }
-
-        let state = self.controller.preprocessed_state_at_current_slot()?;
-
-        // TODO(feature/electra): implement trait for types::combined::AttesterSlashing
-        let result = match slashing {
-            AttesterSlashing::Phase0(ref attester_slashing) => {
-                unphased::validate_attester_slashing(&self.chain_config, &state, attester_slashing)
-            }
-            AttesterSlashing::Electra(ref attester_slashing) => {
-                unphased::validate_attester_slashing(&self.chain_config, &state, attester_slashing)
-            }
-        };
-
-        let outcome = match result {
-            Ok(_) => {
-                self.attester_slashings.push(slashing);
-                PoolAdditionOutcome::Accept
-            }
-            Err(error) => {
-                debug!(
-                    "external attester slashing rejected (error: {error}, slashing: {slashing:?})",
-                );
-                PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
-            }
-        };
-
-        Ok(outcome)
-    }
-
     #[allow(clippy::too_many_lines)]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
         if let Some(metrics) = self.metrics.as_ref() {
@@ -711,7 +428,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let no_validators = self.signer.load().no_keys()
             && self.registered_validators.is_empty()
-            && self.prepared_proposers.is_empty();
+            && self.block_producer.no_prepared_proposers().await;
 
         log!(
             if no_validators {
@@ -730,7 +447,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .as_ref()
                 .map(|metrics| metrics.validator_epoch_processing_times.start_timer());
 
-            self.register_validators(current_epoch);
+            self.register_validators(current_epoch).await;
 
             if let Some(validator_to_slasher_tx) = &self.validator_to_slasher_tx {
                 ValidatorToSlasher::Epoch(current_epoch).send(validator_to_slasher_tx);
@@ -741,19 +458,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
 
             self.process_validator_votes(current_epoch)?;
-            self.discard_old_proposer_slashings(current_epoch);
             self.discard_old_registered_validators(current_epoch);
-            self.discard_old_attester_slashings(current_epoch);
-            self.discard_old_voluntary_exits();
+            self.block_producer.discard_old_data(current_epoch).await;
             self.own_sync_committee_subscriptions
                 .discard_old_subscriptions(current_epoch);
         }
 
         if self.last_registration_epoch.is_none() {
-            self.register_validators(current_epoch);
+            self.register_validators(current_epoch).await;
         }
 
-        self.track_collection_metrics();
+        self.track_collection_metrics().await;
 
         let slot_head = if no_validators {
             None
@@ -887,648 +602,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }))
     }
 
-    async fn local_execution_payload_result(
-        &mut self,
-        state: &BeaconState<P>,
-        head_block_root: H256,
-        proposer_index: ValidatorIndex,
-    ) -> Result<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
-        let snapshot = self.controller.snapshot();
-
-        let mut payload_id = self
-            .payload_id_cache
-            .cache_get(&(head_block_root, state.slot()))
-            .copied()
-            .map(PayloadIdEntry::Cached);
-
-        if payload_id.is_none() {
-            warn!("payload_id not found in payload_id_cache for {head_block_root:?}");
-
-            payload_id = self
-                .prepare_execution_payload(
-                    state,
-                    snapshot.safe_execution_payload_hash(),
-                    snapshot.finalized_execution_payload_hash(),
-                    proposer_index,
-                )
-                .await?
-                .map(PayloadIdEntry::Live)
-        };
-
-        let Some(payload_id) = payload_id else {
-            error!(
-                "payload_id from execution layer was not received; This will lead to missed block"
-            );
-
-            return Ok(None);
-        };
-
-        let payload = match self
-            .execution_engine
-            .get_execution_payload(payload_id.id())
-            .await
-        {
-            Ok(payload) => payload,
-            Err(error) => {
-                warn!("unable to retrieve payload with payload_id {payload_id:?}: {error:?}");
-
-                match payload_id {
-                    PayloadIdEntry::Cached(_) => {
-                        let payload_id = self
-                            .prepare_execution_payload(
-                                state,
-                                snapshot.safe_execution_payload_hash(),
-                                snapshot.finalized_execution_payload_hash(),
-                                proposer_index,
-                            )
-                            .await?;
-
-                        if let Some(payload_id) = payload_id {
-                            info!("successfully retrieved non-cached payload_id: {payload_id:?}");
-
-                            self.execution_engine
-                                .get_execution_payload(payload_id)
-                                .await?
-                        } else {
-                            error!(
-                                "payload_id from execution layer was not received; This will lead to missed block"
-                            );
-
-                            return Ok(None);
-                        }
-                    }
-                    PayloadIdEntry::Live(_) => return Err(error),
-                }
-            }
-        };
-
-        let payload_root = payload.value.hash_tree_root();
-
-        self.payload_cache.cache_set(payload_root, payload.clone());
-
-        Ok(Some(payload))
-    }
-
-    // If the local execution engine fails, a block can still be constructed with a payload received
-    // from an external block builder or even the default payload, though blocks with default
-    // payloads are only valid before the Merge.
-    async fn local_execution_payload_option(
-        &mut self,
-        slot_head: &SlotHead<P>,
-        proposer_index: ValidatorIndex,
-    ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
-        let _timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.local_execution_payload_times.start_timer());
-
-        self.local_execution_payload_result(
-            &slot_head.beacon_state,
-            slot_head.beacon_block_root,
-            proposer_index,
-        )
-        .await
-        .map_err(|error| warn!("execution engine failed to produce payload: {error:?}"))
-        .ok()
-        .flatten()
-    }
-
-    fn blinded_block_from_beacon_block(
-        &self,
-        slot_head: &SlotHead<P>,
-        beacon_block: BeaconBlock<P>,
-        payload_header: ExecutionPayloadHeader<P>,
-        blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-        skip_randao_verification: bool,
-    ) -> Option<(BlindedBeaconBlock<P>, Option<BlockRewards>)> {
-        let without_state_root =
-            match beacon_block.into_blinded(payload_header, blob_kzg_commitments) {
-                Ok(block) => block,
-                Err(error) => {
-                    warn!("constructed invalid blinded beacon block (error: {error:?})");
-                    return None;
-                }
-            };
-
-        let block_processor = self.controller.block_processor();
-        let pre_state = slot_head.beacon_state.clone_arc();
-
-        let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-            block_processor
-                .process_trusted_blinded_block_with_report(pre_state, &without_state_root)
-        } else {
-            block_processor.process_untrusted_blinded_block_with_report(
-                pre_state,
-                &without_state_root,
-                skip_randao_verification,
-            )
-        };
-
-        let (post_state, block_rewards) = match result {
-            Ok((state, block_rewards)) => (state, block_rewards),
-            Err(error) => {
-                warn!(
-                    "constructed invalid blinded beacon block \
-                    (error: {error:?}, without_state_root: {without_state_root:?})",
-                );
-                return None;
-            }
-        };
-
-        // Computing and setting the state root could be skipped when `skip_randao_verification`
-        // is `true`. The resulting block is invalid either way. The client would have to mix in
-        // the real RANDAO reveal and recompute the state root to make it valid.
-        let with_state_root = without_state_root.with_state_root(post_state.hash_tree_root());
-
-        Some((with_state_root, block_rewards))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn build_blinded_beacon_block(
-        &mut self,
-        slot_head: &SlotHead<P>,
-        proposer_index: ValidatorIndex,
-        randao_reveal: SignatureBytes,
-        graffiti: H256,
-        execution_payload_header_handle: Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>>,
-        skip_randao_verification: bool,
-        builder_boost_factor: u64,
-    ) -> Result<
-        Option<(
-            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
-            Option<BlockRewards>,
-        )>,
-    > {
-        let Some((beacon_block, block_rewards)) = self
-            .build_beacon_block(
-                slot_head,
-                Some(proposer_index),
-                randao_reveal,
-                graffiti,
-                skip_randao_verification,
-            )
-            .await?
-        else {
-            return Ok(None);
-        };
-
-        if beacon_block.value.phase() >= Phase::Bellatrix {
-            if let Some(header_handle) = execution_payload_header_handle {
-                match header_handle.await? {
-                    Ok(Some(response)) => {
-                        let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
-                        let builder_mev = response.mev();
-
-                        if let Some((blinded_block, blinded_block_rewards)) = self
-                            .blinded_block_from_beacon_block(
-                                slot_head,
-                                beacon_block.value.clone(),
-                                response.execution_payload_header(),
-                                blob_kzg_commitments,
-                                skip_randao_verification,
-                            )
-                        {
-                            if let Some(local_mev) = beacon_block.mev {
-                                let builder_boost_factor = Uint256::from_u64(builder_boost_factor);
-
-                                let boosted_builder_mev = builder_mev
-                                    .div(DEFAULT_BUILDER_BOOST_FACTOR)
-                                    .saturating_mul(builder_boost_factor);
-
-                                if local_mev >= boosted_builder_mev {
-                                    info!(
-                                        "using more profitable local payload: \
-                                        local MEV: {local_mev}, builder MEV: {builder_mev}, \
-                                        boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
-                                    );
-
-                                    return Ok(Some((
-                                        beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
-                                        block_rewards,
-                                    )));
-                                }
-                            }
-
-                            let block = ValidatorBlindedBlock::BlindedBeaconBlock {
-                                blinded_block,
-                                execution_payload: Box::new(
-                                    beacon_block.value.execution_payload().expect(
-                                        "post-Bellatrix blocks should have execution payload",
-                                    ),
-                                ),
-                            };
-
-                            return Ok(Some((
-                                WithBlobsAndMev::new(
-                                    block,
-                                    None,
-                                    beacon_block.proofs,
-                                    beacon_block.blobs,
-                                    Some(builder_mev),
-                                ),
-                                blinded_block_rewards,
-                            )));
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        warn!("failed to get execution payload header: {error}");
-                    }
-                };
-            }
-        }
-
-        Ok(Some((
-            beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
-            block_rewards,
-        )))
-    }
-
-    #[allow(clippy::too_many_lines)]
-    async fn build_beacon_block(
-        &mut self,
-        slot_head: &SlotHead<P>,
-        proposer_index: Option<ValidatorIndex>,
-        randao_reveal: SignatureBytes,
-        graffiti: H256,
-        skip_randao_verification: bool,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
-        let _block_timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.build_beacon_block_times.start_timer());
-
-        let proposer_index = proposer_index.map_or_else(|| slot_head.proposer_index(), Ok)?;
-
-        // TODO(Grandine Team): Move this to a separate task so it prepares the execution payload
-        //                      before it is time to propose a block.
-        let WithBlobsAndMev {
-            value: mut execution_payload,
-            commitments,
-            proofs,
-            blobs,
-            mev,
-        } = self
-            .local_execution_payload_option(slot_head, proposer_index)
-            .await
-            .map(|value| value.map(Some))
-            .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
-
-        // TODO(feature/electra): Decide whether to keep the post-Capella execution payload logic.
-        //                        It exists only for snapshot testing.
-        // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
-        // Construct a superficially valid execution payload for snapshot testing.
-        // It will almost always be invalid in a real network, but so would a default payload.
-        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
-        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
-        if slot_head.phase() >= Phase::Capella && execution_payload.is_none() {
-            execution_payload = Some(factory::execution_payload(
-                &self.chain_config,
-                &slot_head.beacon_state,
-                slot_head.slot(),
-                ExecutionBlockHash::from_low_u64_be(slot_head.slot()),
-            )?);
-        }
-
-        let blob_kzg_commitments = commitments.unwrap_or_default();
-        let sync_aggregate = self.process_sync_committee_contributions(slot_head).await?;
-
-        let bls_to_execution_changes = self
-            .prepare_bls_to_execution_changes_for_proposal(slot_head)
-            .await;
-
-        let attestations = self
-            .attestation_agg_pool
-            .best_proposable_attestations(slot_head.beacon_state.clone_arc())
-            .await?;
-
-        tokio::task::block_in_place(|| -> Result<_> {
-            let eth1_data = match self.eth1_chain.eth1_vote(
-                &self.chain_config,
-                self.metrics.as_ref(),
-                &slot_head.beacon_state,
-            ) {
-                Ok(eth1_data) => eth1_data,
-                Err(error) => {
-                    warn!("{error:?}");
-                    slot_head.beacon_state.eth1_data()
-                }
-            };
-
-            let deposits = match self.eth1_chain.pending_deposits(
-                &slot_head.beacon_state,
-                eth1_data,
-                self.metrics.as_ref(),
-            ) {
-                Ok(deposits) => deposits,
-                Err(error) => {
-                    warn!("{error:?}");
-                    return Ok(None);
-                }
-            };
-
-            let slot = slot_head.slot();
-            let parent_root = slot_head.beacon_block_root;
-
-            // This is a placeholder that is overwritten later using `with_state_root`.
-            // We define this explicitly instead of using struct update syntax to ensure
-            // we fill all fields when constructing a block.
-            let state_root = H256::zero();
-
-            // TODO(Grandine Team): Preparing slashings and voluntary exits independently may result
-            //                      in an invalid block because a validator can only exit or be
-            //                      slashed once. The code below can handle invalid blocks, but it may
-            //                      prevent the validator from proposing.
-            let proposer_slashings = self.prepare_proposer_slashings_for_proposal(slot_head);
-            let voluntary_exits = self.prepare_voluntary_exits_for_proposal(slot_head);
-
-            let without_state_root = match slot_head.phase() {
-                Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: Phase0BeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                    },
-                }),
-                Phase::Altair => BeaconBlock::from(AltairBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: AltairBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                    },
-                }),
-                Phase::Bellatrix => BeaconBlock::from(BellatrixBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: BellatrixBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                        execution_payload: BellatrixExecutionPayload::default(),
-                    },
-                }),
-                Phase::Capella => BeaconBlock::from(CapellaBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: CapellaBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                        execution_payload: CapellaExecutionPayload::default(),
-                        bls_to_execution_changes,
-                    },
-                }),
-                Phase::Deneb => BeaconBlock::from(DenebBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: DenebBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_for_proposal(slot_head),
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                        execution_payload: DenebExecutionPayload::default(),
-                        bls_to_execution_changes,
-                        blob_kzg_commitments,
-                    },
-                }),
-                Phase::Electra => {
-                    let attestations = if misc::compute_epoch_at_slot::<P>(slot)
-                        == self.chain_config.electra_fork_epoch
-                    {
-                        ContiguousList::default()
-                    } else {
-                        // TODO(feature/electra): don't ignore errors
-                        let attestations = attestations
-                            .into_iter()
-                            .filter_map(|attestation| {
-                                convert_to_electra_attestation(attestation).ok()
-                            })
-                            .group_by(|attestation| attestation.data);
-
-                        let attestations = attestations
-                            .into_iter()
-                            .filter_map(|(_, attestations)| {
-                                Self::compute_on_chain_aggregate(attestations).ok()
-                            })
-                            .take(P::MaxAttestationsElectra::USIZE);
-
-                        ContiguousList::try_from_iter(attestations)?
-                    };
-
-                    BeaconBlock::from(ElectraBeaconBlock {
-                        slot,
-                        proposer_index,
-                        parent_root,
-                        state_root,
-                        body: ElectraBeaconBlockBody {
-                            randao_reveal,
-                            eth1_data,
-                            graffiti,
-                            proposer_slashings,
-                            attester_slashings: self
-                                .prepare_attester_slashings_for_proposal_electra(slot_head),
-                            attestations,
-                            deposits,
-                            voluntary_exits,
-                            sync_aggregate,
-                            execution_payload: ElectraExecutionPayload::default(),
-                            bls_to_execution_changes,
-                            blob_kzg_commitments,
-                        },
-                    })
-                }
-            }
-            .with_execution_payload(execution_payload)?;
-
-            let block_processor = self.controller.block_processor();
-            let pre_state = slot_head.beacon_state.clone_arc();
-
-            let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-                block_processor.process_trusted_block_with_report(pre_state, &without_state_root)
-            } else {
-                block_processor.process_untrusted_block_with_report(
-                    pre_state,
-                    &without_state_root,
-                    skip_randao_verification,
-                )
-            };
-
-            let (post_state, block_rewards) = match result {
-                Ok((state, block_rewards)) => (state, block_rewards),
-                Err(error) => {
-                    warn!(
-                        "constructed invalid beacon block \
-                        (error: {error:?}, without_state_root: {without_state_root:?})",
-                    );
-                    return Ok(None);
-                }
-            };
-
-            // Computing and setting the state root could be skipped when `skip_randao_verification`
-            // is `true`. The resulting block is invalid either way. The client would have to mix in
-            // the real RANDAO reveal and recompute the state root to make it valid.
-            let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
-
-            Ok(Some((
-                WithBlobsAndMev::new(
-                    beacon_block,
-                    // Commitments are moved to block.
-                    None,
-                    proofs,
-                    blobs,
-                    mev,
-                ),
-                block_rewards,
-            )))
-        })
-    }
-
-    pub fn compute_on_chain_aggregate(
-        attestations: impl Iterator<Item = ElectraAttestation<P>>,
-    ) -> Result<ElectraAttestation<P>> {
-        let aggregates = attestations
-            .sorted_by_key(|attestation| {
-                misc::get_committee_indices::<P>(attestation.committee_bits).next()
-            })
-            .collect_vec();
-
-        let aggregation_bits = aggregates
-            .iter()
-            .map(|attestation| &attestation.aggregation_bits)
-            .pipe(BitList::concatenate)?;
-
-        let data = if let Some(attestation) = aggregates.first() {
-            attestation.data
-        } else {
-            return Err(AnyhowError::msg("no attestations for block aggregate"));
-        };
-
-        let mut committee_bits = BitVector::default();
-        let mut signature = AggregateSignature::default();
-
-        for aggregate in aggregates {
-            for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
-                let index = committee_index.try_into()?;
-                committee_bits.set(index, true);
-            }
-
-            signature.aggregate_in_place(aggregate.signature.try_into()?);
-        }
-
-        Ok(ElectraAttestation {
-            aggregation_bits,
-            data,
-            committee_bits,
-            signature: signature.into(),
-        })
-    }
-
-    // TODO(Grandine Team): move block building flow to a separate service
-    async fn produce_beacon_block(
-        &mut self,
-        sender: BeaconBlockSender<P>,
-        graffiti: H256,
-        randao_reveal: SignatureBytes,
-        slot: Slot,
-        skip_randao_verification: bool,
-    ) -> bool {
-        let Some(slot_head) = self.safe_slot_head(slot).await else {
-            return sender.send(Ok(None)).is_ok();
-        };
-
-        let result = self
-            .build_beacon_block(
-                &slot_head,
-                None,
-                randao_reveal,
-                graffiti,
-                skip_randao_verification,
-            )
-            .await;
-
-        sender.send(result).is_ok()
-    }
-
-    async fn produce_blinded_beacon_block(
-        &mut self,
-        sender: BlindedBlockSender<P>,
-        graffiti: H256,
-        randao_reveal: SignatureBytes,
-        slot: Slot,
-        skip_randao_verification: bool,
-        builder_boost_factor: u64,
-    ) -> bool {
-        let Some(slot_head) = self.safe_slot_head(slot).await else {
-            return sender.send(Ok(None)).is_ok();
-        };
-
-        let Ok(proposer_index) = slot_head.proposer_index() else {
-            // Slot_head::proposer index can only fail if head state has no active validators.
-            warn!("failed to produce blinded beacon block: head state has no active validators");
-            return sender.send(Ok(None)).is_ok();
-        };
-
-        let public_key = slot_head.public_key(proposer_index);
-        let execution_payload_header_handle =
-            self.get_execution_payload_header(&slot_head, public_key.to_bytes());
-
-        let result = self
-            .build_blinded_beacon_block(
-                &slot_head,
-                proposer_index,
-                randao_reveal,
-                graffiti,
-                execution_payload_header_handle,
-                skip_randao_verification,
-                builder_boost_factor,
-            )
-            .await;
-
-        sender.send(result).is_ok()
-    }
-
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
     #[allow(clippy::too_many_lines)]
     async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
@@ -1559,8 +632,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_ref()
             .map(|metrics| metrics.validator_propose_times.start_timer());
 
+        let graffiti = self
+            .proposer_configs
+            .graffiti_bytes(public_key.to_bytes())?
+            .unwrap_or_else(|| self.next_graffiti());
+
+        let block_build_context = self.block_producer.new_build_context(
+            slot_head.beacon_state.clone_arc(),
+            slot_head.beacon_block_root,
+            proposer_index,
+            BlockBuildOptions {
+                graffiti,
+                ..BlockBuildOptions::default()
+            },
+        );
+
         let execution_payload_header_handle =
-            self.get_execution_payload_header(slot_head, public_key.to_bytes());
+            block_build_context.get_execution_payload_header(public_key.to_bytes());
 
         let epoch = slot_head.current_epoch();
 
@@ -1586,21 +674,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        let graffiti = self
-            .proposer_configs
-            .graffiti_bytes(public_key.to_bytes())?
-            .unwrap_or_else(|| self.next_graffiti());
-
-        let beacon_block_option = self
-            .build_blinded_beacon_block(
-                slot_head,
-                proposer_index,
-                randao_reveal,
-                graffiti,
-                execution_payload_header_handle,
-                false,
-                DEFAULT_BUILDER_BOOST_FACTOR.get(),
-            )
+        let beacon_block_option = block_build_context
+            .build_blinded_beacon_block(randao_reveal, execution_payload_header_handle)
             .await?;
 
         let Some((
@@ -1940,8 +1015,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     selection_proof,
                                 })
                             } else {
-                                let aggregate =
-                                    convert_to_electra_attestation(aggregate.clone()).ok()?;
+                                let aggregate = operation_pools::convert_to_electra_attestation(
+                                    aggregate.clone(),
+                                )
+                                .ok()?;
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
                                     aggregator_index,
@@ -2561,81 +1638,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn discard_old_attester_slashings(&mut self, current_epoch: Epoch) {
-        let finalized_state = self.controller.last_finalized_state().value;
-
-        self.attester_slashings.retain(|slashing| match slashing {
-            AttesterSlashing::Phase0(attester_slashing) => {
-                accessors::slashable_indices(attester_slashing).any(|attester_index| {
-                    let attester = match finalized_state.validators().get(attester_index) {
-                        Ok(attester) => attester,
-                        Err(error) => {
-                            debug!("attester slashing is too recent to discard: {error}");
-                            return true;
-                        }
-                    };
-
-                    predicates::is_slashable_validator(attester, current_epoch)
-                })
-            }
-            AttesterSlashing::Electra(attester_slashing) => {
-                accessors::slashable_indices(attester_slashing).any(|attester_index| {
-                    let attester = match finalized_state.validators().get(attester_index) {
-                        Ok(attester) => attester,
-                        Err(error) => {
-                            debug!("attester slashing is too recent to discard: {error}");
-                            return true;
-                        }
-                    };
-
-                    predicates::is_slashable_validator(attester, current_epoch)
-                })
-            }
-        });
-    }
-
-    fn discard_old_proposer_slashings(&mut self, current_epoch: Epoch) {
-        let finalized_state = self.controller.last_finalized_state().value;
-
-        self.proposer_slashings.retain(|slashing| {
-            let proposer_index = slashing.signed_header_1.message.proposer_index;
-
-            let proposer = match finalized_state.validators().get(proposer_index) {
-                Ok(proposer) => proposer,
-                Err(error) => {
-                    debug!("proposer slashing is too recent to discard: {error}");
-                    return true;
-                }
-            };
-
-            predicates::is_slashable_validator(proposer, current_epoch)
-        });
-    }
-
     fn discard_old_registered_validators(&mut self, current_epoch: Epoch) {
         if let Some(epoch_boundary) =
             current_epoch.checked_sub(EPOCHS_TO_KEEP_REGISTERED_VALIDATORS)
         {
             self.registered_validators = self.registered_validators.split_off(&epoch_boundary);
         }
-    }
-
-    fn discard_old_voluntary_exits(&mut self) {
-        let finalized_state = self.controller.last_finalized_state().value;
-
-        self.voluntary_exits.retain(|voluntary_exit| {
-            let validator_index = voluntary_exit.message.validator_index;
-
-            let validator = match finalized_state.validators().get(validator_index) {
-                Ok(validator) => validator,
-                Err(error) => {
-                    debug!("voluntary exit is too recent to discard: {error}");
-                    return true;
-                }
-            };
-
-            validator.exit_epoch == FAR_FUTURE_EPOCH
-        })
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2904,376 +1912,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
     }
 
-    fn prepare_voluntary_exits_for_proposal(
-        &mut self,
-        slot_head: &SlotHead<P>,
-    ) -> ContiguousList<SignedVoluntaryExit, P::MaxVoluntaryExits> {
-        let _timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.prepare_voluntary_exits_times.start_timer());
-
-        let split_index = itertools::partition(&mut self.voluntary_exits, |voluntary_exit| {
-            unphased::validate_voluntary_exit(
-                &self.chain_config,
-                &slot_head.beacon_state,
-                *voluntary_exit,
-            )
-            .is_ok()
-        });
-
-        let voluntary_exits = ContiguousList::try_from_iter(
-            self.voluntary_exits
-                .drain(0..split_index.min(P::MaxVoluntaryExits::USIZE)),
-        )
-        .expect(
-            "the call to Vec::drain above limits the \
-             iterator to P::MaxVoluntaryExits::USIZE elements",
-        );
-
-        debug!("voluntary exits for proposal: {voluntary_exits:?}");
-
-        voluntary_exits
-    }
-
-    fn prepare_attester_slashings_for_proposal(
-        &mut self,
-        slot_head: &SlotHead<P>,
-    ) -> ContiguousList<Phase0AttesterSlashing<P>, P::MaxAttesterSlashings> {
-        let _timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
-
-        let split_index = itertools::partition(&mut self.attester_slashings, |slashing| {
-            match slashing {
-                AttesterSlashing::Phase0(attester_slashing) => {
-                    unphased::validate_attester_slashing(
-                        &slot_head.config,
-                        &slot_head.beacon_state,
-                        attester_slashing,
-                    )
-                }
-                AttesterSlashing::Electra(attester_slashing) => {
-                    unphased::validate_attester_slashing(
-                        &slot_head.config,
-                        &slot_head.beacon_state,
-                        attester_slashing,
-                    )
-                }
-            }
-            .is_ok()
-        });
-
-        let attester_slashings = ContiguousList::try_from_iter(
-            self.attester_slashings
-                .drain(0..split_index.min(P::MaxAttesterSlashings::USIZE))
-                .filter_map(AttesterSlashing::pre_electra),
-        )
-        .expect(
-            "the call to Vec::drain above limits the \
-             iterator to P::MaxAttesterSlashings::USIZE elements",
-        );
-
-        debug!("attester slashings for proposal: {attester_slashings:?}");
-
-        attester_slashings
-    }
-
-    fn prepare_attester_slashings_for_proposal_electra(
-        &mut self,
-        slot_head: &SlotHead<P>,
-    ) -> ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
-        let _timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
-
-        let split_index = itertools::partition(&mut self.attester_slashings, |slashing| {
-            match slashing {
-                AttesterSlashing::Phase0(attester_slashing) => {
-                    unphased::validate_attester_slashing(
-                        &slot_head.config,
-                        &slot_head.beacon_state,
-                        attester_slashing,
-                    )
-                }
-                AttesterSlashing::Electra(attester_slashing) => {
-                    unphased::validate_attester_slashing(
-                        &slot_head.config,
-                        &slot_head.beacon_state,
-                        attester_slashing,
-                    )
-                }
-            }
-            .is_ok()
-        });
-
-        let attester_slashings = ContiguousList::try_from_iter(
-            self.attester_slashings
-                .drain(0..split_index.min(P::MaxAttesterSlashingsElectra::USIZE))
-                .filter_map(AttesterSlashing::post_electra),
-        )
-        .expect(
-            "the call to Vec::drain above limits the \
-             iterator to P::MaxAttesterSlashingsElectra::USIZE elements",
-        );
-
-        debug!("attester slashings for proposal: {attester_slashings:?}");
-
-        attester_slashings
-    }
-
-    async fn prepare_execution_payload(
-        &self,
-        state: &BeaconState<P>,
-        safe_block_hash: ExecutionBlockHash,
-        finalized_block_hash: ExecutionBlockHash,
-        proposer_index: ValidatorIndex,
-    ) -> Result<Option<PayloadId>> {
-        if state.post_bellatrix().is_none() {
-            return Ok(None);
-        }
-
-        let suggested_fee_recipient = self.fee_recipient(state, proposer_index)?;
-
-        let epoch = accessors::get_current_epoch(state);
-        let timestamp = misc::compute_timestamp_at_slot(&self.chain_config, state, state.slot());
-
-        // > [Modified in Capella] Removed `is_merge_transition_complete` check in Capella
-        //
-        // See <https://github.com/ethereum/consensus-specs/pull/3350>.
-        let parent_hash = if let Some(state) = state.post_capella() {
-            state.latest_execution_payload_header().block_hash()
-        } else if let Some(state) = post_merge_state(state) {
-            state.latest_execution_payload_header().block_hash()
-        } else {
-            let is_terminal_block_hash_set = !self.chain_config.terminal_block_hash.is_zero();
-            let is_activation_epoch_reached =
-                epoch >= self.chain_config.terminal_block_hash_activation_epoch;
-
-            if is_terminal_block_hash_set && !is_activation_epoch_reached {
-                return Ok(None);
-            }
-
-            let Some(terminal_pow_block) = self.execution_engine.get_terminal_pow_block().await?
-            else {
-                return Ok(None);
-            };
-
-            // If the terminal PoW block was found by difficulty, ensure that
-            // `terminal_pow_block.timestamp < timestamp` to avoid making the payload invalid. See:
-            // - <https://github.com/ethereum/hive/pull/569>
-            // - <https://github.com/sigp/lighthouse/issues/3316>
-            // - <https://github.com/prysmaticlabs/prysm/issues/11069>
-            // The root cause of this is a conflict between execution and consensus specifications.
-            if self.chain_config.terminal_block_hash.is_zero()
-                && terminal_pow_block.timestamp >= timestamp
-            {
-                return Ok(None);
-            }
-
-            terminal_pow_block.pow_block.block_hash
-        };
-
-        let prev_randao = accessors::get_randao_mix(state, epoch);
-
-        let payload_attributes = match state {
-            BeaconState::Phase0(_) | BeaconState::Altair(_) => return Ok(None),
-            BeaconState::Bellatrix(_) => PayloadAttributes::Bellatrix(PayloadAttributesV1 {
-                timestamp,
-                prev_randao,
-                suggested_fee_recipient,
-            }),
-            BeaconState::Capella(state) => {
-                let withdrawals = capella::get_expected_withdrawals(state)?
-                    .into_iter()
-                    .map_into()
-                    .pipe(ContiguousList::try_from_iter)?;
-
-                PayloadAttributes::Capella(PayloadAttributesV2 {
-                    timestamp,
-                    prev_randao,
-                    suggested_fee_recipient,
-                    withdrawals,
-                })
-            }
-            BeaconState::Deneb(state) => {
-                let withdrawals = capella::get_expected_withdrawals(state)?
-                    .into_iter()
-                    .map_into()
-                    .pipe(ContiguousList::try_from_iter)?;
-
-                let parent_beacon_block_root =
-                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
-
-                PayloadAttributes::Deneb(PayloadAttributesV3 {
-                    timestamp,
-                    prev_randao,
-                    suggested_fee_recipient,
-                    withdrawals,
-                    parent_beacon_block_root,
-                })
-            }
-            BeaconState::Electra(state) => {
-                let (withdrawals, _) = electra::get_expected_withdrawals(state)?;
-
-                let withdrawals = withdrawals
-                    .into_iter()
-                    .map_into()
-                    .pipe(ContiguousList::try_from_iter)?;
-
-                let parent_beacon_block_root =
-                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
-
-                PayloadAttributes::Electra(PayloadAttributesV3 {
-                    timestamp,
-                    prev_randao,
-                    suggested_fee_recipient,
-                    withdrawals,
-                    parent_beacon_block_root,
-                })
-            }
-        };
-
-        let (sender, receiver) = futures::channel::oneshot::channel();
-
-        self.execution_engine.notify_forkchoice_updated(
-            parent_hash,
-            safe_block_hash,
-            finalized_block_hash,
-            Either::Right(payload_attributes),
-            Some(sender),
-        );
-
-        receiver.await.map_err(Into::into)
-    }
-
-    fn prepare_proposer_slashings_for_proposal(
-        &mut self,
-        slot_head: &SlotHead<P>,
-    ) -> ContiguousList<ProposerSlashing, P::MaxProposerSlashings> {
-        let _timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.prepare_proposer_slashings_times.start_timer());
-
-        let split_index = itertools::partition(&mut self.proposer_slashings, |slashing| {
-            unphased::validate_proposer_slashing(
-                &slot_head.config,
-                &slot_head.beacon_state,
-                *slashing,
-            )
-            .is_ok()
-        });
-
-        let proposer_slashings = ContiguousList::try_from_iter(
-            self.proposer_slashings
-                .drain(0..split_index.min(P::MaxProposerSlashings::USIZE)),
-        )
-        .expect(
-            "the call to Vec::drain above limits the \
-             iterator to P::MaxProposerSlashings::USIZE elements",
-        );
-
-        debug!("proposer slashings for proposal: {proposer_slashings:?}");
-
-        proposer_slashings
-    }
-
-    async fn prepare_bls_to_execution_changes_for_proposal(
-        &self,
-        slot_head: &SlotHead<P>,
-    ) -> ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges> {
-        let _timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.prepare_bls_to_execution_changes_times.start_timer());
-
-        let Some(state) = slot_head.beacon_state.post_capella() else {
-            return ContiguousList::default();
-        };
-
-        self.bls_to_execution_change_pool
-            .signed_bls_to_execution_changes()
-            .await
-            .map_err(|error| {
-                warn!("unable to retrieve BLS to execution changes from operation pool: {error:?}");
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|bls_to_execution_change| {
-                capella::validate_bls_to_execution_change(
-                    &self.chain_config,
-                    state,
-                    *bls_to_execution_change,
-                )
-                .is_ok()
-            })
-            .take(P::MaxBlsToExecutionChanges::USIZE)
-            .pipe(ContiguousList::try_from_iter)
-            .expect(
-                "the call to Iterator::take limits the number of \
-                 BlsToExecutionChange to P::MaxBlsToExecutionChanges::USIZE",
-            )
-    }
-
-    async fn process_sync_committee_contributions(
-        &self,
-        slot_head: &SlotHead<P>,
-    ) -> Result<SyncAggregate<P>> {
-        let _timer = self.metrics.as_ref().map(|metrics| {
-            metrics
-                .process_sync_committee_contribution_times
-                .start_timer()
-        });
-
-        if slot_head.beacon_state.post_altair().is_none() {
-            return Ok(SyncAggregate::empty());
-        }
-
-        // TODO(Grandine Team): `SyncAggregate` participation could be made higher by aggregating
-        //                      `SyncCommitteeMessage`s just like `AttestationPacker` does with
-        //                      singular attestations.
-
-        let beacon_block_root = slot_head.beacon_block_root;
-        let message_slot = slot_head.slot().saturating_sub(1).max(GENESIS_SLOT);
-        let best_subcommittee_contributions = (0..SyncCommitteeSubnetCount::U64)
-            .map(|subcommittee_index| {
-                self.sync_committee_agg_pool.best_subcommittee_contribution(
-                    message_slot,
-                    beacon_block_root,
-                    subcommittee_index,
-                )
-            })
-            .collect::<FuturesOrdered<_>>()
-            .collect::<Vec<_>>()
-            .await;
-
-        let mut sync_committee_bits = BitVector::default();
-        let mut sync_committee_signature = AggregateSignature::default();
-
-        for contribution in best_subcommittee_contributions {
-            let subcommittee_index = contribution.subcommittee_index;
-
-            for (index, participated) in contribution.aggregation_bits.into_iter().enumerate() {
-                if participated {
-                    let participant_index = P::SyncSubcommitteeSize::USIZE
-                        * usize::try_from(subcommittee_index)?
-                        + index;
-                    sync_committee_bits.set(participant_index, true);
-                }
-            }
-
-            sync_committee_signature.aggregate_in_place(contribution.signature.try_into()?);
-        }
-
-        Ok(SyncAggregate {
-            sync_committee_bits,
-            sync_committee_signature: sync_committee_signature.into(),
-        })
-    }
-
     const fn start_of_epoch(epoch: Epoch) -> Slot {
         misc::compute_start_slot_at_epoch::<P>(epoch)
     }
@@ -3286,46 +1924,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         });
     }
 
-    fn get_execution_payload_header(
-        &self,
-        slot_head: &SlotHead<P>,
-        public_key: PublicKeyBytes,
-    ) -> Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>> {
-        if let Some(state) = slot_head.beacon_state.post_bellatrix() {
-            if let Some(builder_api) = self.builder_api.clone() {
-                if let Err(error) = builder_api.can_use_builder_api::<P>(
-                    slot_head.slot(),
-                    self.controller
-                        .snapshot()
-                        .nonempty_slots(slot_head.beacon_block_root),
-                ) {
-                    warn!("cannot use Builder API for execution payload header: {error}");
-                    return None;
-                }
-
-                let chain_config = self.chain_config.clone_arc();
-                let slot = slot_head.slot();
-                let parent_hash = state.latest_execution_payload_header().block_hash();
-
-                let handle = tokio::spawn(async move {
-                    builder_api
-                        .get_execution_payload_header::<P>(
-                            &chain_config,
-                            slot,
-                            parent_hash,
-                            public_key,
-                        )
-                        .await
-                });
-
-                return Some(handle);
-            }
-        };
-
-        None
-    }
-
-    fn register_validators(&mut self, current_epoch: Epoch) {
+    async fn register_validators(&mut self, current_epoch: Epoch) {
         if let Some(last_registration_epoch) = self.last_registration_epoch {
             let next_registration_epoch =
                 last_registration_epoch + EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION;
@@ -3339,7 +1938,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let chain_config = self.chain_config.clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
-        let prepared_proposer_indices = self.prepared_proposers.keys().copied().collect();
+        let prepared_proposer_indices = self.block_producer.get_prepared_proposer_indices().await;
         let registered_validators = self.registered_validators.clone();
         let subnet_service_tx = self.subnet_service_tx.clone();
 
@@ -3414,71 +2013,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.last_registration_epoch = Some(current_epoch);
     }
 
-    fn fee_recipient(
-        &self,
-        state: &BeaconState<P>,
-        proposer_index: ValidatorIndex,
-    ) -> Result<ExecutionAddress> {
-        self.prepared_proposers
-            .get(&proposer_index)
-            .copied()
-            .map(Result::Ok)
-            .unwrap_or_else(|| {
-                let proposer_pubkey = accessors::public_key(state, proposer_index)?;
-                self.proposer_configs
-                    .fee_recipient(proposer_pubkey.to_bytes())
-            })
-    }
-
-    async fn publish_signed_blinded_block(
-        &mut self,
-        block: &SignedBlindedBeaconBlock<P>,
-    ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
-        let header_root = block.execution_payload_header().hash_tree_root();
-        let local_payload = self.payload_cache.cache_get(&header_root);
-
-        match local_payload {
-            Some(payload) => Some(payload.clone()),
-            None => self.publish_signed_blinded_block_using_builder(block).await,
-        }
-    }
-
-    async fn publish_signed_blinded_block_using_builder(
-        &mut self,
-        block: &SignedBlindedBeaconBlock<P>,
-    ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
-        let builder_api = self.builder_api.as_deref()?;
-        let current_slot = self.controller.slot();
-        let head_block_root = self.controller.head_block_root().value;
-
-        if let Err(error) = builder_api.can_use_builder_api::<P>(
-            current_slot,
-            self.controller.snapshot().nonempty_slots(head_block_root),
-        ) {
-            warn!("cannot use Builder API for execution payload: {error}");
-            return None;
-        }
-
-        let execution_payload = match builder_api
-            .post_blinded_block(&self.chain_config, self.controller.genesis_time(), block)
-            .await
-        {
-            Ok(execution_payload) => execution_payload,
-            Err(error) => {
-                warn!("failed to post blinded block to the builder node: {error:?}");
-                return None;
-            }
-        };
-
-        debug!(
-            "received execution payload from the builder node: {:?}",
-            execution_payload.value
-        );
-
-        Some(execution_payload)
-    }
-
-    fn track_collection_metrics(&self) {
+    async fn track_collection_metrics(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
 
@@ -3495,32 +2030,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             metrics.set_collection_length(
                 module_path!(),
                 &type_name,
-                "proposer_slashings",
-                self.proposer_slashings.len(),
-            );
-
-            metrics.set_collection_length(
-                module_path!(),
-                &type_name,
-                "attester_slashings",
-                self.attester_slashings.len(),
-            );
-
-            metrics.set_collection_length(
-                module_path!(),
-                &type_name,
-                "voluntary_exits",
-                self.voluntary_exits.len(),
-            );
-
-            metrics.set_collection_length(
-                module_path!(),
-                &type_name,
                 "validator_votes",
                 self.validator_votes.values().map(Vec::len).sum(),
             );
 
-            self.eth1_chain.track_collection_metrics(metrics);
+            self.block_producer.track_collection_metrics().await;
         }
     }
 }
@@ -3562,12 +2076,6 @@ fn group_into_btreemap<K: Ord, V>(pairs: impl IntoIterator<Item = (K, V)>) -> BT
     }
 
     groups
-}
-
-fn post_merge_state<P: Preset>(state: &BeaconState<P>) -> Option<&dyn PostBellatrixBeaconState<P>> {
-    state
-        .post_bellatrix()
-        .filter(|state| predicates::is_merge_transition_complete(*state))
 }
 
 async fn update_beacon_committee_subscriptions(
