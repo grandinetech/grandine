@@ -44,6 +44,16 @@ impl<P: Preset> StateCacheProcessor<P> {
             .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
     }
 
+    pub fn existing_state_at_slot(
+        &self,
+        store: &Store<P>,
+        block_root: H256,
+        slot: Slot,
+    ) -> Option<Arc<BeaconState<P>>> {
+        self.before_or_at_slot(store, block_root, slot)
+            .filter(|state| state.slot() == slot)
+    }
+
     pub fn get_or_insert_with(
         &self,
         block_root: H256,
