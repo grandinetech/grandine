@@ -286,6 +286,11 @@ impl Api {
                     .message
                     .verify(chain_config, signature, &public_key)?
             }
+            SignedBuilderBid::Fulu(builder_bid) => {
+                builder_bid
+                    .message
+                    .verify(chain_config, signature, &public_key)?
+            }
         }
 
         info!("received execution payload header from builder for slot {slot}");

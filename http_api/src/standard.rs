@@ -68,6 +68,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{
         BlockRewards, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev, WithStatus,
         WEI_IN_GWEI,
@@ -1150,7 +1151,8 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
-    let max_blobs_per_block = version.max_blobs_per_block(controller.chain_config());
+    let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
+    let max_blobs_per_block = version.max_blobs_per_block(epoch, controller.chain_config())?;
 
     let blob_identifiers = query
         .indices
@@ -1162,12 +1164,47 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
-    let blob_sidecars = DynamicList::try_from_iter_with_maximum(
-        blob_sidecars.into_iter(),
-        usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
-    )
-    .map_err(AnyhowError::new)?;
+    let blob_sidecars = if version.is_peerdas_activated() {
+        let half_columns = controller
+            .chain_config()
+            .number_of_columns
+            .saturating_div(2);
+        let column_identifiers = (0..half_columns)
+            .map(|index| DataColumnIdentifier { block_root, index })
+            .collect::<Vec<_>>();
+        let data_column_sidecars = controller.data_column_sidecars_by_ids(column_identifiers)?;
+
+        // TODO(peerdas-fulu): with validator custody, node should reconstruct with any 64 columns,
+        // then construct requested blobs, serve to the request
+        if data_column_sidecars.len()
+            == controller
+                .chain_config()
+                .number_of_columns()
+                .saturating_div(2)
+        {
+            let blob_sidecars = misc::construct_blob_sidecars_from_data_column_sidecars(
+                &block,
+                data_column_sidecars.into_iter(),
+            )?;
+
+            DynamicList::try_from_iter_with_maximum(
+                blob_sidecars.into_iter().filter(|blob_sidecar| {
+                    blob_identifiers.contains(&blob_sidecar.as_ref().into())
+                }),
+                usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+            )
+            .map_err(AnyhowError::new)?
+        } else {
+            DynamicList::empty()
+        }
+    } else {
+        let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
+        DynamicList::try_from_iter_with_maximum(
+            blob_sidecars.into_iter(),
+            usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+        )
+        .map_err(AnyhowError::new)?
+    };
 
     Ok(EthResponse::json_or_ssz(blob_sidecars, &headers)?
         .execution_optimistic(status.is_optimistic())
@@ -1182,17 +1219,45 @@ pub async fn publish_block<P: Preset, W: Wait>(
     EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
+    let slot = signed_beacon_block.to_header().message.slot;
 
-    let blob_sidecars =
-        misc::construct_blob_sidecars(&signed_beacon_block, blobs.into_iter(), proofs.into_iter())?;
+    if controller
+        .chain_config()
+        .phase_at_slot::<P>(slot)
+        .is_peerdas_activated()
+    {
+        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+            blobs.as_ref(),
+            controller.store_config().kzg_backend,
+        )?;
+        let data_column_sidecars = eip_7594::construct_data_column_sidecars(
+            &signed_beacon_block,
+            &cells_and_kzg_proofs,
+            controller.chain_config(),
+        )?;
 
-    publish_signed_block(
-        Arc::new(signed_beacon_block),
-        blob_sidecars,
-        controller,
-        api_to_p2p_tx,
-    )
-    .await
+        publish_signed_block_with_data_column_sidecar(
+            Arc::new(signed_beacon_block),
+            data_column_sidecars,
+            controller,
+            api_to_p2p_tx,
+        )
+        .await
+    } else {
+        let blob_sidecars = misc::construct_blob_sidecars(
+            &signed_beacon_block,
+            blobs.into_iter(),
+            proofs.into_iter(),
+        )?;
+
+        publish_signed_block(
+            Arc::new(signed_beacon_block),
+            blob_sidecars,
+            controller,
+            api_to_p2p_tx,
+        )
+        .await
+    }
 }
 
 /// `POST /eth/v1/beacon/blinded_blocks`
@@ -1221,19 +1286,45 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .with_signature(signature)
         .pipe(Arc::new);
 
-    let blob_sidecars = misc::construct_blob_sidecars(
-        &signed_beacon_block,
-        blobs.unwrap_or_default().into_iter(),
-        proofs.unwrap_or_default().into_iter(),
-    )?;
+    let slot = signed_beacon_block.to_header().message.slot;
 
-    publish_signed_block(
-        signed_beacon_block,
-        blob_sidecars,
-        controller,
-        api_to_p2p_tx,
-    )
-    .await
+    if controller
+        .chain_config()
+        .phase_at_slot::<P>(slot)
+        .is_peerdas_activated()
+    {
+        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+            blobs.unwrap_or_default().as_ref(),
+            controller.store_config().kzg_backend,
+        )?;
+        let data_column_sidecars = eip_7594::construct_data_column_sidecars(
+            &signed_beacon_block,
+            &cells_and_kzg_proofs,
+            controller.chain_config(),
+        )?;
+
+        publish_signed_block_with_data_column_sidecar(
+            signed_beacon_block,
+            data_column_sidecars,
+            controller,
+            api_to_p2p_tx,
+        )
+        .await
+    } else {
+        let blob_sidecars = misc::construct_blob_sidecars(
+            &signed_beacon_block,
+            blobs.unwrap_or_default().into_iter(),
+            proofs.unwrap_or_default().into_iter(),
+        )?;
+
+        publish_signed_block(
+            signed_beacon_block,
+            blob_sidecars,
+            controller,
+            api_to_p2p_tx,
+        )
+        .await
+    }
 }
 
 /// `POST /eth/v2/beacon/blinded_blocks`
@@ -1287,18 +1378,47 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
+    let slot = signed_beacon_block.to_header().message.slot;
 
-    let blob_sidecars =
-        misc::construct_blob_sidecars(&signed_beacon_block, blobs.into_iter(), proofs.into_iter())?;
+    if controller
+        .chain_config()
+        .phase_at_slot::<P>(slot)
+        .is_peerdas_activated()
+    {
+        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+            blobs.as_ref(),
+            controller.store_config().kzg_backend,
+        )?;
+        let data_column_sidecars = eip_7594::construct_data_column_sidecars(
+            &signed_beacon_block,
+            &cells_and_kzg_proofs,
+            controller.chain_config(),
+        )?;
 
-    publish_signed_block_v2(
-        Arc::new(signed_beacon_block),
-        blob_sidecars,
-        query.broadcast_validation.unwrap_or_default(),
-        controller,
-        api_to_p2p_tx,
-    )
-    .await
+        publish_signed_block_v2_with_data_column_sidecar(
+            Arc::new(signed_beacon_block),
+            data_column_sidecars,
+            query.broadcast_validation.unwrap_or_default(),
+            controller,
+            api_to_p2p_tx,
+        )
+        .await
+    } else {
+        let blob_sidecars = misc::construct_blob_sidecars(
+            &signed_beacon_block,
+            blobs.into_iter(),
+            proofs.into_iter(),
+        )?;
+
+        publish_signed_block_v2(
+            Arc::new(signed_beacon_block),
+            blob_sidecars,
+            query.broadcast_validation.unwrap_or_default(),
+            controller,
+            api_to_p2p_tx,
+        )
+        .await
+    }
 }
 
 /// `GET /eth/v1/beacon/rewards/blocks/{block_id}`
@@ -1586,7 +1706,7 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
                 .map(|slashing| AttesterSlashing::Phase0(slashing))
                 .collect()
         }
-        Phase::Electra => slashings
+        Phase::Electra | Phase::Fulu => slashings
             .into_iter()
             .filter_map(AttesterSlashing::post_electra)
             .map(|slashing| AttesterSlashing::Electra(slashing))
@@ -2869,6 +2989,49 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
     Ok(None)
 }
 
+async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    block: Arc<SignedBeaconBlock<P>>,
+    data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+) -> Result<Option<StatusCode>, Error> {
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_block_for_gossip(block.clone_arc(), sender);
+
+    match receiver.next().await.transpose() {
+        Ok(Some(ValidationOutcome::Accept)) => {
+            publish_block_to_network_with_data_column_sidecars(
+                block,
+                data_column_sidecars,
+                api_to_p2p_tx,
+            );
+        }
+        Ok(Some(ValidationOutcome::Ignore(true))) => {
+            publish_block_to_network_with_data_column_sidecars(
+                block,
+                data_column_sidecars,
+                api_to_p2p_tx,
+            );
+            return Ok(Some(StatusCode::ACCEPTED));
+        }
+        Ok(Some(ValidationOutcome::Ignore(false))) => {
+            return Err(Error::UnableToPublishBlock);
+        }
+        Ok(None) => {
+            warn!(
+                "received no block validation response for gossip validation via HTTP API \
+                (block: {block:?})"
+            );
+
+            return Err(Error::UnableToPublishBlock);
+        }
+        Err(error) => return Err(Error::InvalidBlock(error)),
+    }
+
+    Ok(None)
+}
+
 fn publish_block_to_network<P: Preset>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: &[Arc<BlobSidecar<P>>],
@@ -2879,6 +3042,67 @@ fn publish_block_to_network<P: Preset>(
     }
 
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
+}
+
+fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
+    block: Arc<SignedBeaconBlock<P>>,
+    data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+) {
+    for data_column_sidecar in data_column_sidecars {
+        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar.clone_arc()).send(api_to_p2p_tx);
+    }
+
+    ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
+}
+
+// TODO(feature/fulu): merge with `publish_signed_block`
+async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
+    block: Arc<SignedBeaconBlock<P>>,
+    data_column_sidecars: Vec<DataColumnSidecar<P>>,
+    controller: ApiController<P, W>,
+    api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
+) -> Result<StatusCode, Error> {
+    let data_column_sidecars = data_column_sidecars.into_iter().map(Arc::new).collect_vec();
+
+    submit_data_column_sidecars(controller.clone_arc(), &data_column_sidecars).await?;
+
+    if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
+        controller.clone_arc(),
+        block.clone_arc(),
+        &data_column_sidecars,
+        &api_to_p2p_tx,
+    )
+    .await?
+    {
+        return Ok(status_code);
+    }
+
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_block(block.clone_arc(), sender);
+
+    let status_code = match receiver.next().await.transpose() {
+        Ok(Some(ValidationOutcome::Accept)) => StatusCode::OK,
+        Ok(Some(ValidationOutcome::Ignore(_))) => {
+            // We log only the root with `info!` because this is not an exceptional case.
+            // Vouch submits blocks it constructs to all beacon nodes it is connected to.
+            // The blocks often reach our application through gossip faster than through the API.
+            let block_root = block.message().hash_tree_root();
+            info!("block received through HTTP API was ignored (block root: {block_root:?})");
+            StatusCode::ACCEPTED
+        }
+        Ok(None) => {
+            warn!("received no block validation response for HTTP API (block: {block:?})");
+            StatusCode::ACCEPTED
+        }
+        Err(error) => {
+            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
+            StatusCode::ACCEPTED
+        }
+    };
+
+    Ok(status_code)
 }
 
 async fn publish_signed_block_v2<P: Preset, W: Wait>(
@@ -2960,6 +3184,107 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
         Err(error) => {
             warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
 
+            if broadcast_validation == BroadcastValidation::Gossip {
+                StatusCode::ACCEPTED
+            } else {
+                return Err(Error::InvalidBlock(error));
+            }
+        }
+    };
+
+    Ok(status_code)
+}
+
+// TODO(feature/fulu): merge with `publish_signed_block_v2`
+async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
+    block: Arc<SignedBeaconBlock<P>>,
+    data_column_sidecars: Vec<DataColumnSidecar<P>>,
+    broadcast_validation: BroadcastValidation,
+    controller: ApiController<P, W>,
+    api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
+) -> Result<StatusCode, Error> {
+    let data_column_sidecars = data_column_sidecars.into_iter().map(Arc::new).collect_vec();
+
+    submit_data_column_sidecars(controller.clone_arc(), &data_column_sidecars).await?;
+
+    if broadcast_validation == BroadcastValidation::Gossip {
+        if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
+            controller.clone_arc(),
+            block.clone_arc(),
+            &data_column_sidecars,
+            &api_to_p2p_tx,
+        )
+        .await?
+        {
+            return Ok(status_code);
+        }
+    }
+
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_block(block.clone_arc(), sender);
+
+    let status_code = match receiver.next().await.transpose() {
+        Ok(Some(accept_or_ignore_status)) => {
+            match accept_or_ignore_status {
+                ValidationOutcome::Accept => match broadcast_validation {
+                    BroadcastValidation::Gossip => StatusCode::OK,
+                    BroadcastValidation::Consensus => {
+                        publish_block_to_network_with_data_column_sidecars(
+                            block,
+                            &data_column_sidecars,
+                            &api_to_p2p_tx,
+                        );
+                        StatusCode::OK
+                    }
+                    BroadcastValidation::ConsensusAndEquivocation => {
+                        if controller.exibits_equivocation(&block) {
+                            return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
+                        }
+
+                        publish_block_to_network_with_data_column_sidecars(
+                            block,
+                            &data_column_sidecars,
+                            &api_to_p2p_tx,
+                        );
+                        StatusCode::OK
+                    }
+                },
+                ValidationOutcome::Ignore(publishable) => {
+                    // We log only the root with `info!` because this is not an exceptional case.
+                    // Vouch submits blocks it constructs to all beacon nodes it is connected to.
+                    // The blocks often reach our application through gossip faster than through the API.
+                    let block_root = block.message().hash_tree_root();
+
+                    info!(
+                        "block received through HTTP API was ignored (block root: {block_root:?})"
+                    );
+
+                    if broadcast_validation == BroadcastValidation::Gossip {
+                        StatusCode::ACCEPTED
+                    } else if publishable {
+                        publish_block_to_network_with_data_column_sidecars(
+                            block,
+                            &data_column_sidecars,
+                            &api_to_p2p_tx,
+                        );
+                        StatusCode::ACCEPTED
+                    } else {
+                        return Err(Error::UnableToPublishBlock);
+                    }
+                }
+            }
+        }
+        Ok(None) => {
+            warn!("received no block validation response for HTTP API (block: {block:?})");
+            if broadcast_validation == BroadcastValidation::Gossip {
+                StatusCode::ACCEPTED
+            } else {
+                return Err(Error::UnableToPublishBlock);
+            }
+        }
+        Err(error) => {
+            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
             if broadcast_validation == BroadcastValidation::Gossip {
                 StatusCode::ACCEPTED
             } else {
@@ -3185,6 +3510,47 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
         .collect();
 
     match blob_sidecar_results {
+        Ok(results) => {
+            if results
+                .iter()
+                .any(|outcome| *outcome == ValidationOutcome::Ignore(false))
+            {
+                return Err(Error::UnableToPublishBlock);
+            }
+        }
+        Err(error) => return Err(Error::InvalidBlock(error)),
+    }
+
+    Ok(())
+}
+
+async fn submit_data_column_sidecar<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    data_column_sidecar: Arc<DataColumnSidecar<P>>,
+) -> Result<ValidationOutcome> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    controller.on_api_data_column_sidecar(data_column_sidecar.clone_arc(), Some(sender));
+
+    receiver.await?
+}
+
+async fn submit_data_column_sidecars<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
+) -> Result<(), Error> {
+    let results: Result<Vec<_>> = data_column_sidecars
+        .iter()
+        .map(|data_column_sidecar| {
+            submit_data_column_sidecar(controller.clone_arc(), data_column_sidecar.clone_arc())
+        })
+        .collect::<FuturesUnordered<_>>()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect();
+
+    match results {
         Ok(results) => {
             if results
                 .iter()

@@ -6,7 +6,8 @@ use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::GossipId;
 use execution_engine::{
-    ExecutionServiceMessage, MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
+    EngineGetBlobsParams, ExecutionServiceMessage, MockExecutionEngine, PayloadStatusV1,
+    PayloadValidationStatus,
 };
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
@@ -320,10 +321,14 @@ impl<P: Preset> Context<P> {
         match self.next_execution_service_message() {
             Some(ExecutionServiceMessage::GetBlobs {
                 block: block_with_missing_blobs,
-                blob_identifiers,
+                params,
                 peer_id: _,
             }) => {
-                assert_eq!(blob_identifiers, identifiers);
+                // Only check when calling `engine_getBlobsV1` since V2 we need/request all blobs
+                // in the block
+                if let EngineGetBlobsParams::Blobs(blob_identifiers) = params {
+                    assert_eq!(blob_identifiers, identifiers);
+                }
                 assert_eq!(block_with_missing_blobs, *block);
             }
             _ => panic!("ExecutionServiceMessage::GetBlobs expected"),

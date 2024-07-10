@@ -31,14 +31,14 @@ use crate::{
     config::Config,
     deneb::{
         consts::BytesPerFieldElement,
-        primitives::{Blob, KzgCommitment},
+        primitives::{Blob, KzgCommitment, KzgProof},
     },
-    eip7594::Cell,
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
         ConsolidationRequest, DepositRequest, PendingConsolidation, PendingDeposit,
         PendingPartialWithdrawal, WithdrawalRequest,
     },
+    fulu::primitives::Cell,
     phase0::{
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
@@ -138,7 +138,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Eq;
     type MaxBlobCommitmentsPerBlock: MerkleElements<Blob<Self>>
-        + MerkleElements<Cell>
+        + MerkleElements<Cell<Self>>
         + MerkleElements<KzgCommitment>
         + Eq
         + Debug
@@ -171,6 +171,24 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
 
+    // Fulu
+    type FieldElementsPerCell: Unsigned
+        + NonZero
+        + Mul<BytesPerFieldElement, Output: ByteVectorBytes + MerkleElements<u8>>;
+    type KzgCommitmentsInclusionProofDepth: ContiguousVectorElements<H256>
+        + MerkleElements<H256>
+        + ArrayLength<H256, ArrayType: Copy>
+        + Debug
+        + Eq;
+    type FieldElementsPerExtBlob: Unsigned
+        + NonZero
+        + Mul<BytesPerFieldElement, Output: ByteVectorBytes + MerkleElements<u8>>;
+    type CellsPerExtBlob: ContiguousVectorElements<KzgProof>
+        + ContiguousVectorElements<Cell<Self>>
+        + ArrayLength<KzgProof, ArrayType: Copy>
+        + Debug
+        + Eq;
+
     // Derived type-level variables
     type MaxAggregatorsPerSlot: MerkleElements<ValidatorIndex>
         + MerkleBits
@@ -180,6 +198,10 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
+
+    // Maximum possible number of cell proofs per blocks:
+    // FieldElementsPerExtBlob * MaxBlobCommitmentsPerBlock
+    type MaxCellProofsPerBlock: MerkleElements<KzgProof> + Unsigned + Eq + Debug + Send + Sync;
 
     // Meta
     const NAME: PresetName;
@@ -291,8 +313,16 @@ impl Preset for Mainnet {
     type PendingConsolidationsLimit = U262144;
     type PendingPartialWithdrawalsLimit = U134217728;
 
+    // Fulu
+    type FieldElementsPerCell = U64;
+    type KzgCommitmentsInclusionProofDepth = U4;
+    type FieldElementsPerExtBlob = U8192;
+
     // Derived type-level variables
     type MaxAggregatorsPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
+    type MaxCellProofsPerBlock =
+        Prod<Self::FieldElementsPerExtBlob, Self::MaxBlobCommitmentsPerBlock>;
+    type CellsPerExtBlob = Quot<Self::FieldElementsPerExtBlob, Self::FieldElementsPerCell>;
 
     // Meta
     const NAME: PresetName = PresetName::Mainnet;
@@ -355,6 +385,12 @@ impl Preset for Minimal {
         type MaxDepositRequestsPerPayload;
         type MaxWithdrawalRequestsPerPayload;
         type PendingDepositsLimit;
+
+        // Fulu
+        type FieldElementsPerCell;
+        type KzgCommitmentsInclusionProofDepth;
+        type FieldElementsPerExtBlob;
+        type CellsPerExtBlob;
     }
 
     // Phase 0
@@ -381,6 +417,8 @@ impl Preset for Minimal {
 
     // Derived type-level variables
     type MaxAggregatorsPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
+    type MaxCellProofsPerBlock =
+        Prod<Self::FieldElementsPerExtBlob, Self::MaxBlobCommitmentsPerBlock>;
 
     // Meta
     const NAME: PresetName = PresetName::Minimal;
@@ -455,8 +493,15 @@ impl Preset for Medalla {
         type PendingConsolidationsLimit;
         type PendingPartialWithdrawalsLimit;
 
+        // Fulu
+        type FieldElementsPerCell;
+        type KzgCommitmentsInclusionProofDepth;
+        type FieldElementsPerExtBlob;
+        type CellsPerExtBlob;
+
         // Derived type-level variables
         type MaxAggregatorsPerSlot;
+        type MaxCellProofsPerBlock;
     }
 
     // Phase 0
@@ -473,6 +518,8 @@ impl Preset for Medalla {
 
 // Derived type-level variables
 pub type BytesPerBlob<P> = Prod<<P as Preset>::FieldElementsPerBlob, BytesPerFieldElement>;
+
+pub type BytesPerCell<P> = Prod<<P as Preset>::FieldElementsPerCell, BytesPerFieldElement>;
 
 pub type MaxAttestationsPerEpoch<P> =
     Prod<<P as Preset>::MaxAttestations, <P as Preset>::SlotsPerEpoch>;
@@ -548,6 +595,15 @@ impl PresetName {
             Self::Mainnet => ElectraPreset::new::<Mainnet>(),
             Self::Minimal => ElectraPreset::new::<Minimal>(),
             Self::Medalla => ElectraPreset::new::<Medalla>(),
+        }
+    }
+
+    #[must_use]
+    pub const fn fulu_preset(self) -> FuluPreset {
+        match self {
+            Self::Mainnet => FuluPreset::new::<Mainnet>(),
+            Self::Minimal => FuluPreset::new::<Minimal>(),
+            Self::Medalla => FuluPreset::new::<Medalla>(),
         }
     }
 
@@ -897,6 +953,22 @@ impl ElectraPreset {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct FuluPreset {
+    #[serde(with = "serde_utils::string_or_native")]
+    kzg_commitments_inclusion_proof_depth: u64,
+}
+
+impl FuluPreset {
+    #[must_use]
+    pub const fn new<P: Preset>() -> Self {
+        Self {
+            kzg_commitments_inclusion_proof_depth: P::KzgCommitmentsInclusionProofDepth::U64,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::ops::Deref;
@@ -951,6 +1023,7 @@ mod tests {
                 &preset_name.capella_preset(),
                 &preset_name.deneb_preset(),
                 &preset_name.electra_preset(),
+                &preset_name.fulu_preset(),
             ];
         }
     }
