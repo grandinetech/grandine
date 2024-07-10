@@ -22,6 +22,7 @@ use crate::{
         SignedBuilderBid as DenebSignedBuilderBid,
     },
     electra::containers::SignedBuilderBid as ElectraSignedBuilderBid,
+    fulu::containers::SignedBuilderBid as FuluSignedBuilderBid,
 };
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +38,7 @@ pub enum SignedBuilderBid<P: Preset> {
     Capella(CapellaSignedBuilderBid<P>),
     Deneb(DenebSignedBuilderBid<P>),
     Electra(ElectraSignedBuilderBid<P>),
+    Fulu(FuluSignedBuilderBid<P>),
 }
 
 impl<P: Preset> SszSize for SignedBuilderBid<P> {
@@ -47,6 +49,7 @@ impl<P: Preset> SszSize for SignedBuilderBid<P> {
         CapellaSignedBuilderBid::<P>::SIZE,
         DenebSignedBuilderBid::<P>::SIZE,
         ElectraSignedBuilderBid::<P>::SIZE,
+        FuluSignedBuilderBid::<P>::SIZE,
     ]);
 }
 
@@ -67,6 +70,7 @@ impl<P: Preset> SszRead<Phase> for SignedBuilderBid<P> {
             Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(block)
@@ -81,6 +85,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Capella(response) => response.message.pubkey,
             Self::Deneb(response) => response.message.pubkey,
             Self::Electra(response) => response.message.pubkey,
+            Self::Fulu(response) => response.message.pubkey,
         }
     }
 
@@ -91,6 +96,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Capella(response) => response.signature,
             Self::Deneb(response) => response.signature,
             Self::Electra(response) => response.signature,
+            Self::Fulu(response) => response.signature,
         }
     }
 
@@ -101,6 +107,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
             Self::Electra(_) => Phase::Electra,
+            Self::Fulu(_) => Phase::Fulu,
         }
     }
 
@@ -113,6 +120,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Capella(response) => ExecutionPayloadHeader::Capella(*response.message.header),
             Self::Deneb(response) => ExecutionPayloadHeader::Deneb(*response.message.header),
             Self::Electra(response) => ExecutionPayloadHeader::Deneb(*response.message.header),
+            Self::Fulu(response) => ExecutionPayloadHeader::Deneb(*response.message.header),
         }
     }
 
@@ -121,6 +129,7 @@ impl<P: Preset> SignedBuilderBid<P> {
         match self {
             Self::Bellatrix(_) | Self::Capella(_) | Self::Deneb(_) => None,
             Self::Electra(response) => Some(&response.message.execution_requests),
+            Self::Fulu(response) => Some(&response.message.execution_requests),
         }
     }
 
@@ -132,6 +141,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Bellatrix(_) | Self::Capella(_) => None,
             Self::Deneb(response) => Some(&response.message.blob_kzg_commitments),
             Self::Electra(response) => Some(&response.message.blob_kzg_commitments),
+            Self::Fulu(response) => Some(&response.message.blob_kzg_commitments),
         }
     }
 
@@ -142,6 +152,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Capella(response) => response.message.value,
             Self::Deneb(response) => response.message.value,
             Self::Electra(response) => response.message.value,
+            Self::Fulu(response) => response.message.value,
         }
     }
 }
@@ -159,12 +170,13 @@ pub enum ExecutionPayloadAndBlobsBundle<P: Preset> {
     Capella(CapellaExecutionPayload<P>),
     Deneb(DenebExecutionPayloadAndBlobsBundle<P>),
     Electra(DenebExecutionPayloadAndBlobsBundle<P>),
+    Fulu(DenebExecutionPayloadAndBlobsBundle<P>),
 }
 
 impl<P: Preset> SszSize for ExecutionPayloadAndBlobsBundle<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
         BellatrixExecutionPayload::<P>::SIZE,
         CapellaExecutionPayload::<P>::SIZE,
         DenebExecutionPayloadAndBlobsBundle::<P>::SIZE,
@@ -188,6 +200,7 @@ impl<P: Preset> SszRead<Phase> for ExecutionPayloadAndBlobsBundle<P> {
             Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(block)
@@ -206,7 +219,8 @@ impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>
                 Self::with_default(execution_payload.into())
             }
             ExecutionPayloadAndBlobsBundle::Deneb(payload_with_blobs_bundle)
-            | ExecutionPayloadAndBlobsBundle::Electra(payload_with_blobs_bundle) => {
+            | ExecutionPayloadAndBlobsBundle::Electra(payload_with_blobs_bundle)
+            | ExecutionPayloadAndBlobsBundle::Fulu(payload_with_blobs_bundle) => {
                 let DenebExecutionPayloadAndBlobsBundle {
                     execution_payload,
                     blobs_bundle,
@@ -239,6 +253,7 @@ impl<P: Preset> ExecutionPayloadAndBlobsBundle<P> {
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
             Self::Electra(_) => Phase::Electra,
+            Self::Fulu(_) => Phase::Fulu,
         }
     }
 }

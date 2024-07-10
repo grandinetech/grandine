@@ -821,6 +821,7 @@ dependencies = [
  "bls",
  "clock",
  "criterion",
+ "dashmap",
  "database",
  "easy-ext",
  "eth2_cache_utils",
@@ -1257,19 +1258,6 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3c8f83209414aacf0eeae3cf730b18d6981697fba62f200fcfb92b9f082acba"
 dependencies = [
- "serde",
-]
-
-[[package]]
-name = "c-kzg"
-version = "1.0.0"
-source = "git+https://github.com/ethereum/c-kzg-4844?branch=das#7027b082ee6a647f44de61646813aa58e955093e"
-dependencies = [
- "blst",
- "cc",
- "glob",
- "hex",
- "libc",
  "serde",
 ]
 
@@ -2363,12 +2351,13 @@ name = "eip_7594"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "c-kzg",
  "duplicate",
- "hashing",
  "helper_functions",
- "kzg",
+ "itertools 0.14.0",
+ "kzg_utils",
  "num-traits",
+ "prometheus_metrics",
+ "rayon",
  "serde",
  "sha2",
  "spec_test_utils",
@@ -2376,7 +2365,6 @@ dependencies = [
  "test-generator",
  "thiserror 2.0.12",
  "try_from_iterator",
- "typenum",
  "types",
 ]
 
@@ -2632,6 +2620,7 @@ dependencies = [
  "dashmap",
  "dedicated_executor",
  "derive_more 2.0.1",
+ "eip_7594",
  "either",
  "enum-iterator",
  "eth2_libp2p",
@@ -2663,6 +2652,7 @@ dependencies = [
  "test-case",
  "thiserror 2.0.12",
  "tokio",
+ "try_from_iterator",
  "typenum",
  "types",
  "unwrap_none",
@@ -2710,6 +2700,7 @@ dependencies = [
  "libp2p-mplex",
  "local-ip-address",
  "lru 0.16.0",
+ "num-traits",
  "once_cell",
  "parking_lot",
  "prometheus",
@@ -2731,6 +2722,7 @@ dependencies = [
  "std_ext",
  "strum",
  "tempfile",
+ "thiserror 2.0.12",
  "tiny-keccak",
  "tokio",
  "tokio-io-timeout",
@@ -3025,7 +3017,6 @@ dependencies = [
  "tokio",
  "transition_functions",
  "tynm",
- "typenum",
  "types",
  "unwrap_none",
 ]
@@ -3038,6 +3029,7 @@ dependencies = [
  "arithmetic",
  "clock",
  "crossbeam-skiplist",
+ "dashmap",
  "derivative",
  "derive_more 2.0.1",
  "eip_7594",
@@ -3051,7 +3043,6 @@ dependencies = [
  "itertools 0.14.0",
  "kzg_utils",
  "log",
- "primitive-types",
  "prometheus_metrics",
  "pubkey_cache",
  "serde",
@@ -3870,9 +3861,11 @@ dependencies = [
  "byteorder",
  "clock",
  "crossbeam-utils",
+ "dashmap",
  "database",
  "dedicated_executor",
  "deposit_tree",
+ "eip_7594",
  "enum-iterator",
  "eth1",
  "eth1_api",
@@ -4658,8 +4651,10 @@ dependencies = [
  "serde",
  "serde_yaml",
  "spec_test_utils",
+ "ssz",
  "test-generator",
  "thiserror 2.0.12",
+ "try_from_iterator",
  "types",
 ]
 
@@ -5980,7 +5975,9 @@ dependencies = [
  "serde_utils",
  "serde_with",
  "slog",
+ "slog-async",
  "slog-stdlog",
+ "slog-term",
  "ssz",
  "std_ext",
  "strum",
@@ -9105,7 +9102,6 @@ dependencies = [
  "directories",
  "doppelganger_protection",
  "eip_7594",
- "eth1",
  "eth1_api",
  "eth2_cache_utils",
  "eth2_libp2p",

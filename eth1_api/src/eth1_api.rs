@@ -6,10 +6,10 @@ use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
 use execution_engine::{
-    BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
-    EngineGetPayloadV3Response, EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
-    PayloadStatusV1, RawExecutionRequests,
+    BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
+    EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
+    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
+    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1, RawExecutionRequests,
 };
 use futures::{channel::mpsc::UnboundedSender, Future};
 use log::warn;
@@ -55,10 +55,12 @@ pub const ENGINE_FORKCHOICE_UPDATED_V2: &str = "engine_forkchoiceUpdatedV2";
 pub const ENGINE_FORKCHOICE_UPDATED_V3: &str = "engine_forkchoiceUpdatedV3";
 pub const ENGINE_GET_CLIENT_VERSION_V1: &str = "engine_getClientVersionV1";
 pub const ENGINE_GET_EL_BLOBS_V1: &str = "engine_getBlobsV1";
+pub const ENGINE_GET_EL_BLOBS_V2: &str = "engine_getBlobsV2";
 pub const ENGINE_GET_PAYLOAD_V1: &str = "engine_getPayloadV1";
 pub const ENGINE_GET_PAYLOAD_V2: &str = "engine_getPayloadV2";
 pub const ENGINE_GET_PAYLOAD_V3: &str = "engine_getPayloadV3";
 pub const ENGINE_GET_PAYLOAD_V4: &str = "engine_getPayloadV4";
+pub const ENGINE_GET_PAYLOAD_V5: &str = "engine_getPayloadV5";
 pub const ENGINE_NEW_PAYLOAD_V1: &str = "engine_newPayloadV1";
 pub const ENGINE_NEW_PAYLOAD_V2: &str = "engine_newPayloadV2";
 pub const ENGINE_NEW_PAYLOAD_V3: &str = "engine_newPayloadV3";
@@ -70,10 +72,12 @@ pub const CAPABILITIES: &[&str] = &[
     ENGINE_FORKCHOICE_UPDATED_V3,
     ENGINE_GET_CLIENT_VERSION_V1,
     ENGINE_GET_EL_BLOBS_V1,
+    ENGINE_GET_EL_BLOBS_V2,
     ENGINE_GET_PAYLOAD_V1,
     ENGINE_GET_PAYLOAD_V2,
     ENGINE_GET_PAYLOAD_V3,
     ENGINE_GET_PAYLOAD_V4,
+    ENGINE_GET_PAYLOAD_V5,
     ENGINE_NEW_PAYLOAD_V1,
     ENGINE_NEW_PAYLOAD_V2,
     ENGINE_NEW_PAYLOAD_V3,
@@ -167,7 +171,39 @@ impl Eth1Api {
         Ok(None)
     }
 
-    pub(crate) async fn get_blobs<P: Preset>(
+    // pub(crate) async fn get_blobs<P: Preset>(
+    //     &self,
+    //     blob_versioned_hashes: BlobVersionedHashes,
+    // ) -> Result<EngineGetBlobsResponse<P>> {
+    //     match blob_versioned_hashes {
+    //         BlobVersionedHashes::V1(versioned_hashes) => {
+    //             let params = vec![serde_json::to_value(versioned_hashes)?];
+
+    //             self.execute::<GetBlobsV1Response<P>>(
+    //                 ENGINE_GET_EL_BLOBS_V1,
+    //                 params,
+    //                 Some(ENGINE_GET_BLOBS_TIMEOUT),
+    //                 Some(ENGINE_GET_EL_BLOBS_V1),
+    //             )
+    //             .await
+    //             .map(Into::into)
+    //         }
+    //         BlobVersionedHashes::V2(versioned_hashes) => {
+    //             let params = vec![serde_json::to_value(versioned_hashes)?];
+
+    //             self.execute::<GetBlobsV2Response<P>>(
+    //                 ENGINE_GET_EL_BLOBS_V2,
+    //                 params,
+    //                 Some(ENGINE_GET_BLOBS_TIMEOUT),
+    //                 Some(ENGINE_GET_EL_BLOBS_V2),
+    //             )
+    //             .await
+    //             .map(Into::into)
+    //         }
+    //     }
+    // }
+
+    pub(crate) async fn get_blobs_v1<P: Preset>(
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Vec<Option<BlobAndProofV1<P>>>> {
@@ -178,6 +214,22 @@ impl Eth1Api {
             params,
             Some(ENGINE_GET_BLOBS_TIMEOUT),
             Some(ENGINE_GET_EL_BLOBS_V1),
+        )
+        .await
+        .map(WithClientVersions::result)
+    }
+
+    pub(crate) async fn get_blobs_v2<P: Preset>(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Option<Vec<BlobAndProofV2<P>>>> {
+        let params = vec![serde_json::to_value(versioned_hashes)?];
+
+        self.execute(
+            ENGINE_GET_EL_BLOBS_V2,
+            params,
+            Some(ENGINE_GET_BLOBS_TIMEOUT),
+            Some(ENGINE_GET_EL_BLOBS_V2),
         )
         .await
         .map(WithClientVersions::result)
@@ -412,10 +464,20 @@ impl Eth1Api {
                 .await?
                 .result
             }
+            Phase::Fulu => {
+                self.execute(
+                    ENGINE_FORKCHOICE_UPDATED_V3,
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                    None,
+                )
+                .await?
+                .result
+            }
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 6);
+                const_assert_eq!(Phase::CARDINALITY, 7);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -426,10 +488,11 @@ impl Eth1Api {
             Phase::Capella => payload_id.map(PayloadId::Capella),
             Phase::Deneb => payload_id.map(PayloadId::Deneb),
             Phase::Electra => payload_id.map(PayloadId::Electra),
+            Phase::Fulu => payload_id.map(PayloadId::Fulu),
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 6);
+                const_assert_eq!(Phase::CARDINALITY, 7);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -441,7 +504,7 @@ impl Eth1Api {
         })
     }
 
-    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] depending on `payload_id`.
+    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] or [`engine_getPayloadV5`] depending on `payload_id`.
     ///
     /// Newer versions of the method may be used to request payloads from all prior versions,
     /// but using the old methods allows the application to work with old execution clients.
@@ -450,6 +513,7 @@ impl Eth1Api {
     /// [`engine_getPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_getpayloadv2
     /// [`engine_getPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_getpayloadv3
     /// [`engine_getPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_getpayloadv4
+    /// [`engine_getPayloadV5`]: https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#engine_getpayloadv5
     pub async fn get_payload<P: Preset>(
         &self,
         payload_id: PayloadId,
@@ -496,6 +560,18 @@ impl Eth1Api {
 
                 self.execute::<EngineGetPayloadV4Response<P>>(
                     ENGINE_GET_PAYLOAD_V4,
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(|with_client_info| with_client_info.map(Into::into))
+            }
+            PayloadId::Fulu(payload_id) => {
+                let params = vec![serde_json::to_value(payload_id)?];
+
+                self.execute::<EngineGetPayloadV5Response<P>>(
+                    ENGINE_GET_PAYLOAD_V5,
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
                     None,

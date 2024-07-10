@@ -12,7 +12,9 @@ rust-kzg-blst = { workspace = true, optional = true }
 rust-kzg-constantine = { workspace = true, optional = true }
 rust-kzg-mcl = { workspace = true, optional = true }
 rust-kzg-zkcrypto = { workspace = true, optional = true }
+ssz = { workspace = true }
 thiserror = { workspace = true }
+try_from_iterator = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]

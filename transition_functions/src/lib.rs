@@ -186,11 +186,43 @@ pub mod deneb {
 }
 
 pub mod electra {
-    pub(crate) use blinded_block_processing::custom_process_blinded_block;
-    pub use block_processing::{get_expected_withdrawals, validate_voluntary_exit};
-    pub(crate) use block_processing::{
-        process_block, process_block_for_gossip, process_deposit_data,
+    pub(crate) use blinded_block_processing::{
+        custom_process_blinded_block, process_withdrawals_root,
     };
+    pub use block_processing::{
+        add_validator_to_registry, get_expected_withdrawals, validate_attestation_with_verifier,
+        validate_voluntary_exit, validate_voluntary_exit_with_verifier,
+    };
+
+    pub(crate) use block_processing::{
+        process_block, process_block_for_gossip, process_consolidation_request,
+        process_deposit_data, process_deposit_request, process_operations,
+        process_withdrawal_request, process_withdrawals,
+    };
+    pub(crate) use epoch_processing::{
+        epoch_report, process_effective_balance_updates, process_epoch,
+        process_pending_consolidations, process_pending_deposits, process_slashings,
+    };
+    pub(crate) use slot_processing::process_slots;
+    pub(crate) use state_transition::{state_transition, verify_signatures};
+
+    #[cfg(test)]
+    pub(crate) use block_processing::{
+        apply_attestation, apply_deposits, process_attester_slashing, process_proposer_slashing,
+        process_voluntary_exit,
+    };
+
+    mod blinded_block_processing;
+    mod block_processing;
+    mod epoch_intermediates;
+    mod epoch_processing;
+    mod slot_processing;
+    mod state_transition;
+}
+
+pub mod fulu {
+    pub(crate) use blinded_block_processing::custom_process_blinded_block;
+    pub(crate) use block_processing::{process_block, process_block_for_gossip};
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
