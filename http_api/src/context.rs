@@ -6,6 +6,7 @@ use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use clock::Tick;
+use dashmap::DashMap;
 use database::Database;
 use dedicated_executor::DedicatedExecutor;
 use deposit_tree::DepositTree;
@@ -167,6 +168,8 @@ impl<P: Preset> Context<P> {
 
         let event_channels = Arc::new(EventChannels::default());
 
+        let sidecars_construction_started = Arc::new(DashMap::new());
+
         let (controller, mutator_handle) = Controller::new(
             chain_config,
             pubkey_cache,
@@ -187,6 +190,7 @@ impl<P: Preset> Context<P> {
             core::iter::empty(),
             true,
             [].into(),
+            sidecars_construction_started,
         )?;
 
         for block in extra_blocks {

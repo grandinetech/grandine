@@ -12,6 +12,7 @@ use transition_functions::combined;
 use types::{
     combined::SignedBeaconBlock,
     deneb::containers::BlobSidecar,
+    fulu::containers::DataColumnSidecar,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
     phase0::primitives::Slot,
     preset::Preset,
@@ -143,14 +144,13 @@ impl<P: Preset> Storage<P> {
         Ok(())
     }
 
-    // TODO(feature/fulu): enable this once `append_data_column_sidecars` implemented
-    // pub(crate) fn store_back_sync_data_column_sidecars(
-    //     &self,
-    //     data_column_sidecars: impl IntoIterator<Item = Arc<DataColumnSidecar<P>>>,
-    // ) -> Result<()> {
-    //     self.append_data_column_sidecars(data_column_sidecars.into_iter().map(Into::into))?;
-    //     Ok(())
-    // }
+    pub(crate) fn store_back_sync_data_column_sidecars(
+        &self,
+        data_column_sidecars: impl IntoIterator<Item = Arc<DataColumnSidecar<P>>>,
+    ) -> Result<()> {
+        self.append_data_column_sidecars(data_column_sidecars.into_iter().map(Into::into))?;
+        Ok(())
+    }
 
     pub(crate) fn store_back_sync_blocks(
         &self,

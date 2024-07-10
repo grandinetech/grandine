@@ -135,6 +135,17 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/withholding/*/*"]        [electra_minimal_withholding]        [Minimal] [Electra];
     ["consensus-spec-tests/tests/mainnet/electra/sync/*/*/*"]                         [electra_sync_mainnet]               [Mainnet] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/sync/*/*/*"]                         [electra_sync_minimal]               [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/ex_ante/*/*"]               [fulu_mainnet_ex_ante]               [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/get_head/*/*"]              [fulu_mainnet_get_head]              [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/on_block/*/*"]              [fulu_mainnet_on_block]              [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/deposit_with_reorg/*/*"]    [fulu_deposit_with_reorg_minimal]    [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/ex_ante/*/*"]               [fulu_minimal_ex_ante]               [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/get_head/*/*"]              [fulu_minimal_get_head]              [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/on_block/*/*"]              [fulu_minimal_on_block]              [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/reorg/*/*"]                 [fulu_minimal_reorg]                 [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/withholding/*/*"]           [fulu_minimal_withholding]           [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/sync/*/*/*"]                            [fulu_sync_mainnet]                  [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/sync/*/*/*"]                            [fulu_sync_minimal]                  [Minimal] [Fulu];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case) {
@@ -268,7 +279,9 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     | Phase::Bellatrix
                     | Phase::Capella
                     | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
-                    Phase::Electra => AttesterSlashing::Electra(case.ssz(config, file_name)),
+                    Phase::Electra | Phase::Fulu => {
+                        AttesterSlashing::Electra(case.ssz(config, file_name))
+                    }
                 };
 
                 context.on_attester_slashing(attester_slashing);
