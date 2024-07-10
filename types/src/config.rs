@@ -1,13 +1,12 @@
 use core::{cmp::Ordering, num::NonZeroU64};
 use std::{borrow::Cow, collections::BTreeMap};
 
+use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
 use nonzero_ext::nonzero;
-use serde::{
-    de::IgnoredAny,
-    {Deserialize, Serialize},
-};
+use serde::{de::IgnoredAny, Deserialize, Serialize};
+use serde_utils::shared::Sortable;
 use thiserror::Error;
 use typenum::Unsigned as _;
 
@@ -73,7 +72,8 @@ pub struct Config {
     pub electra_fork_epoch: Epoch,
     pub electra_fork_version: Version,
     #[serde(with = "serde_utils::string_or_native")]
-    pub eip7594_fork_epoch: Epoch,
+    pub fulu_fork_epoch: Epoch,
+    pub fulu_fork_version: Version,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -149,11 +149,17 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub min_epochs_for_data_column_sidecars_requests: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub data_column_sidecar_subnet_count: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars_electra: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_request_blob_sidecars_fulu: u64,
+    #[serde(with = "serde_utils::sorted_list_desc_by_key")]
+    pub blob_schedule: Vec<BlobScheduleEntry>,
 
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
@@ -164,6 +170,10 @@ pub struct Config {
     // Custody
     #[serde(with = "serde_utils::string_or_native")]
     pub custody_requirement: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub number_of_columns: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub number_of_custody_groups: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub samples_per_slot: u64,
 
@@ -210,7 +220,8 @@ impl Default for Config {
             deneb_fork_version: H32(hex!("04000000")),
             electra_fork_epoch: FAR_FUTURE_EPOCH,
             electra_fork_version: H32(hex!("05000000")),
-            eip7594_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_version: H32(hex!("06000000")),
 
             // Time parameters
             eth1_follow_distance: 2048,
@@ -254,9 +265,12 @@ impl Default for Config {
             min_epochs_for_blob_sidecars_requests: 4096,
             min_epochs_for_block_requests: 33024,
             blob_sidecar_subnet_count: nonzero!(6_u64),
-            data_column_sidecar_subnet_count: 64,
+            min_epochs_for_data_column_sidecars_requests: 4096,
+            data_column_sidecar_subnet_count: 128,
             max_request_blob_sidecars_electra: 1152,
             blob_sidecar_subnet_count_electra: nonzero!(9_u64),
+            max_request_blob_sidecars_fulu: 1536,
+            blob_schedule: Vec::new(),
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -267,13 +281,30 @@ impl Default for Config {
 
             // Custody
             custody_requirement: 4,
-            samples_per_slot: 16,
+            number_of_columns: 128,
+            number_of_custody_groups: 128,
+            samples_per_slot: 8,
 
             blacklisted_blocks: vec![],
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
         }
+    }
+}
+
+#[derive(Constructor, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct BlobScheduleEntry {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub epoch: Epoch,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_blobs_per_block: usize,
+}
+
+impl Sortable for BlobScheduleEntry {
+    fn key(&self) -> impl Ord {
+        self.epoch
     }
 }
 
@@ -303,6 +334,12 @@ impl Config {
             deposit_contract_address: H160(hex!("00000000219ab540356cBB839Cbe05303d7705Fa")),
             deposit_network_id: 1,
 
+            // Networking
+            blob_schedule: vec![
+                BlobScheduleEntry::new(269_568, 6),
+                BlobScheduleEntry::new(364_032, 9),
+            ],
+
             // Transition
             terminal_total_difficulty: Difficulty::from_u128(58_750_000_000_000_000_000_000),
 
@@ -330,6 +367,7 @@ impl Config {
             capella_fork_version: H32(hex!("03000001")),
             deneb_fork_version: H32(hex!("04000001")),
             electra_fork_version: H32(hex!("05000001")),
+            fulu_fork_version: H32(hex!("06000001")),
 
             // Time parameters
             eth1_follow_distance: 16,
@@ -350,6 +388,10 @@ impl Config {
 
             // Networking
             min_epochs_for_block_requests: 272,
+            blob_schedule: vec![
+                BlobScheduleEntry::new(0xFFFF_FFFF_FFFF_FFFF, 6),
+                BlobScheduleEntry::new(0xFFFF_FFFF_FFFF_FFFF, 9),
+            ],
 
             ..Self::default()
         }
@@ -734,6 +776,7 @@ impl Config {
             Phase::Capella => self.capella_fork_version,
             Phase::Deneb => self.deneb_fork_version,
             Phase::Electra => self.electra_fork_version,
+            Phase::Fulu => self.fulu_fork_version,
         }
     }
 
@@ -747,6 +790,7 @@ impl Config {
             Phase::Capella => self.capella_fork_epoch,
             Phase::Deneb => self.deneb_fork_epoch,
             Phase::Electra => self.electra_fork_epoch,
+            Phase::Fulu => self.fulu_fork_epoch,
         }
     }
 
@@ -788,13 +832,8 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn is_eip7594_fork(&self, epoch: Epoch) -> bool {
-        epoch >= self.eip7594_fork_epoch
-    }
-
-    #[must_use]
-    pub const fn is_eip7594_fork_epoch_set(&self) -> bool {
-        self.eip7594_fork_epoch != FAR_FUTURE_EPOCH
+    pub const fn is_peerdas_scheduled(&self) -> bool {
+        self.fulu_fork_epoch != FAR_FUTURE_EPOCH
     }
 
     #[must_use]
@@ -803,7 +842,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => {
                 self.max_request_blocks
             }
-            Phase::Deneb | Phase::Electra => self.max_request_blocks_deneb,
+            Phase::Deneb | Phase::Electra | Phase::Fulu => self.max_request_blocks_deneb,
         }
     }
 
@@ -813,7 +852,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 self.blob_sidecar_subnet_count
             }
-            Phase::Electra => self.blob_sidecar_subnet_count_electra,
+            Phase::Electra | Phase::Fulu => self.blob_sidecar_subnet_count_electra,
         }
     }
 
@@ -823,7 +862,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 self.max_request_blob_sidecars
             }
-            Phase::Electra => self.max_request_blob_sidecars_electra,
+            Phase::Electra | Phase::Fulu => self.max_request_blob_sidecars_electra,
         }
     }
 
@@ -848,6 +887,60 @@ impl Config {
         32_usize.checked_add(n)?.checked_add(n / 6)
     }
 
+    #[must_use]
+    pub fn max_blob_sideacar_subnet_count(&self) -> u64 {
+        self.blob_sidecar_subnet_count
+            .get()
+            .max(self.blob_sidecar_subnet_count_electra.get())
+    }
+
+    #[must_use]
+    pub const fn custody_group_count(&self, subscribe_all_data_column_subnets: bool) -> u64 {
+        if subscribe_all_data_column_subnets {
+            self.number_of_custody_groups
+        } else {
+            self.custody_requirement
+        }
+    }
+
+    #[must_use]
+    pub fn sampling_size(&self, custody_group_count: u64) -> u64 {
+        core::cmp::max(
+            custody_group_count.saturating_mul(self.columns_per_group()),
+            self.samples_per_slot,
+        )
+    }
+
+    #[must_use]
+    pub const fn columns_per_group(&self) -> u64 {
+        self.number_of_columns
+            .saturating_div(self.number_of_custody_groups)
+    }
+
+    #[must_use]
+    pub fn number_of_columns(&self) -> usize {
+        usize::try_from(self.number_of_columns).expect("should be able to parse number_of_columns")
+    }
+
+    pub fn get_max_blobs_per_block(&self, epoch: Epoch) -> Result<usize, Error> {
+        if self.blob_schedule.is_empty() {
+            return Err(Error::BlobScheduleUndefined);
+        }
+
+        // There is no need to sort everytime the function called, `blob_schedule` has been sorted by
+        // `epoch` in descending order.
+        self.blob_schedule
+            .iter()
+            .find_map(|entry| (epoch >= entry.epoch).then_some(entry.max_blobs_per_block))
+            .or_else(|| {
+                self.blob_schedule
+                    .iter()
+                    .map(|entry| entry.max_blobs_per_block)
+                    .min()
+            })
+            .ok_or(Error::BlobScheduleUndefined)
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }
@@ -861,6 +954,7 @@ impl Config {
             self.capella_fork_epoch,
             self.deneb_fork_epoch,
             self.electra_fork_epoch,
+            self.fulu_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -875,6 +969,7 @@ impl Config {
             &mut self.capella_fork_epoch,
             &mut self.deneb_fork_epoch,
             &mut self.electra_fork_epoch,
+            &mut self.fulu_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -887,6 +982,8 @@ pub enum Error {
     NameEmpty,
     #[error("configuration name contains illegal characters")]
     NameContainsIllegalCharacters,
+    #[error("blob schedule is not defined")]
+    BlobScheduleUndefined,
 }
 
 #[expect(

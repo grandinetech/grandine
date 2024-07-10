@@ -13,6 +13,7 @@ binary_utils = { workspace = true }
 bls = { workspace = true }
 clock = { workspace = true }
 criterion = { workspace = true }
+dashmap = { workspace = true }
 database = { workspace = true }
 easy-ext = { workspace = true }
 eth2_cache_utils = { workspace = true }

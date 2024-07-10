@@ -22,6 +22,7 @@ use types::{
         containers::BlobSidecar,
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
+    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -46,6 +47,7 @@ pub enum Topic {
     BlsToExecutionChange,
     ChainReorg,
     ContributionAndProof,
+    DataColumnSidecar,
     FinalizedCheckpoint,
     Head,
     PayloadAttributes,
@@ -62,6 +64,7 @@ pub enum Event<P: Preset> {
     BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
+    DataColumnSidecar(DataColumnSidecarEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttributes(PayloadAttributesEvent),
@@ -80,6 +83,7 @@ impl<P: Preset> Event<P> {
             Self::BlsToExecutionChange(_) => Topic::BlsToExecutionChange,
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
+            Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::PayloadAttributes(_) => Topic::PayloadAttributes,
@@ -99,6 +103,7 @@ pub struct EventChannels<P: Preset> {
     pub bls_to_execution_changes: Sender<Event<P>>,
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
+    pub data_column_sidecars: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub payload_attributes: Sender<Event<P>>,
@@ -125,6 +130,7 @@ impl<P: Preset> EventChannels<P> {
             bls_to_execution_changes: broadcast::channel(max_events).0,
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
+            data_column_sidecars: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attributes: broadcast::channel(max_events).0,
@@ -144,6 +150,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::BlsToExecutionChange => &self.bls_to_execution_changes,
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
+            Topic::DataColumnSidecar => &self.data_column_sidecars,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttributes => &self.payload_attributes,
@@ -216,6 +223,18 @@ impl<P: Preset> EventChannels<P> {
             self.send_contribution_and_proof_event_internal(signed_contribution_and_proof)
         {
             warn!("unable to send contribution and proof event: {error}");
+        }
+    }
+
+    pub fn send_data_column_sidecar_event(
+        &self,
+        block_root: H256,
+        data_column_sidecar: &DataColumnSidecar<P>,
+    ) {
+        if let Err(error) =
+            self.send_data_column_sidecar_event_internal(block_root, data_column_sidecar)
+        {
+            warn!("unable to send data column sidecar event: {error}");
         }
     }
 
@@ -397,6 +416,22 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_data_column_sidecar_event_internal(
+        &self,
+        block_root: H256,
+        data_column_sidecar: &DataColumnSidecar<P>,
+    ) -> Result<()> {
+        if self.data_column_sidecars.receiver_count() > 0 {
+            let data_column_sidecar_event =
+                DataColumnSidecarEvent::new(block_root, data_column_sidecar);
+
+            let event = Event::DataColumnSidecar(data_column_sidecar_event);
+            self.data_column_sidecars.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -530,6 +565,25 @@ pub struct BlockEvent {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct DataColumnSidecarEvent {
+    pub block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub index: ColumnIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+}
+
+impl DataColumnSidecarEvent {
+    const fn new<P: Preset>(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
+        Self {
+            block_root,
+            index: data_column_sidecar.index,
+            slot: data_column_sidecar.slot(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct ChainReorgEvent {
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
@@ -651,6 +705,7 @@ pub enum CombinedPayloadAttributesEventData {
     Capella(PayloadAttributesEventDataV2),
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
+    Fulu(PayloadAttributesEventDataV3),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -777,6 +832,9 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             }
             PayloadAttributes::Electra(payload_attributes_v3) => {
                 Self::Electra(payload_attributes_v3.into())
+            }
+            PayloadAttributes::Fulu(payload_attributes_v3) => {
+                Self::Fulu(payload_attributes_v3.into())
             }
         }
     }
