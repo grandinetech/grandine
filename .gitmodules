@@ -3,7 +3,7 @@
 	url = https://github.com/grandinetech/dedicated_executor.git
 [submodule "eth2_libp2p"]
 	path = eth2_libp2p
-	url = https://github.com/grandinetech/eth2_libp2p.git
+	url = https://github.com/guha-rahul/eth2_libp2p.git
 [submodule "grandine-snapshot-tests"]
 	path = grandine-snapshot-tests
 	url = https://github.com/grandinetech/grandine-snapshot-tests.git
