@@ -10,8 +10,8 @@ use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor,
-    Store,
+    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
+    StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -28,7 +28,7 @@ use types::{
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -387,6 +387,7 @@ pub struct DataColumnSidecarTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
     pub block_seen: bool,
     pub origin: DataColumnSidecarOrigin,
     pub submission_time: Instant,
@@ -400,25 +401,45 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             mutator_tx,
             wait_group,
             data_column_sidecar,
+            state,
             block_seen,
             origin,
             submission_time,
             metrics,
         } = self;
 
-        let _timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
-
         let block_root = data_column_sidecar
             .signed_block_header
             .message
             .hash_tree_root();
+
+        let _data_column_sidecar_verification_timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_verification_times.start_timer());
+
+        if let Some(metrics) = metrics.as_ref() {
+            metrics.data_column_sidecars_submitted_for_processing.inc();
+        }
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
+
         let index = data_column_sidecar.index;
         let data_column_identifier = DataColumnIdentifier { block_root, index };
 
-        let result =
-            store_snapshot.validate_data_column_sidecar(data_column_sidecar, block_seen, &origin);
+        let result = store_snapshot.validate_data_column_sidecar(
+            data_column_sidecar,
+            state,
+            block_seen,
+            &origin,
+        );
+
+        if let Ok(DataColumnSidecarAction::Accept(_)) = result {
+            if let Some(metrics) = metrics.as_ref() {
+                metrics.verified_gossip_data_column_sidecar.inc();
+            }
+        }
 
         MutatorMessage::DataColumnSidecar {
             wait_group,
@@ -466,6 +487,112 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
             }
             Err(error) => {
                 warn!("failed to persist blob sidecars to storage: {error:?}");
+            }
+        }
+    }
+}
+
+pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub storage: Arc<Storage<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub block_root: Option<H256>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            storage,
+            mutator_tx,
+            block_root,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_data_column_sidecar_persist_task_times
+                .start_timer()
+        });
+
+        let data_column_sidecars = if let Some(block_root) = block_root {
+            store_snapshot
+                .unpersisted_data_column_sidecars_by_block(block_root)
+                .collect::<Vec<_>>()
+        } else {
+            store_snapshot
+                .unpersisted_data_column_sidecars()
+                .collect::<Vec<_>>()
+        };
+
+        match storage.append_data_column_sidecars(data_column_sidecars) {
+            Ok(persisted_data_column_ids) => {
+                MutatorMessage::FinishedPersistingDataColumnSidecars {
+                    wait_group,
+                    persisted_data_column_ids,
+                }
+                .send(&mutator_tx);
+            }
+            Err(error) => {
+                warn!("failed to persist data column sidecars to storage: {error:?}");
+            }
+        }
+    }
+}
+
+pub struct ReconstructDataColumnSidecarsTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub block_root: H256,
+}
+
+impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            block_root,
+        } = self;
+
+        let available_columns = store_snapshot.available_columns_at_block(block_root);
+
+        if !available_columns.is_empty()
+            && available_columns.len() * 2 >= store_snapshot.chain_config().number_of_columns()
+        {
+            let blob_count = available_columns
+                .first()
+                .expect("first data column sidecar must be available")
+                .column
+                .len();
+
+            let partial_matrix = available_columns
+                .into_iter()
+                .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar))
+                .collect::<Vec<_>>();
+
+            debug!("handling data column sidecars reconstruction at block: {block_root}");
+
+            match eip_7594::recover_matrix(
+                &partial_matrix,
+                blob_count,
+                store_snapshot.store_config().kzg_backend,
+            ) {
+                Ok(full_matrix) => {
+                    MutatorMessage::ReconstructedMissingColumns {
+                        wait_group,
+                        block_root,
+                        full_matrix,
+                    }
+                    .send(&mutator_tx);
+                }
+                Err(error) => {
+                    warn!("failed to reconstruct missing data column sidecars: {error:?}");
+                }
             }
         }
     }

@@ -19,6 +19,7 @@ use types::{
         containers::BlobSidecar,
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
+    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -43,6 +44,7 @@ pub enum Topic {
     BlsToExecutionChange,
     ChainReorg,
     ContributionAndProof,
+    DataColumnSidecar,
     FinalizedCheckpoint,
     Head,
     PayloadAttributes,
@@ -64,6 +66,7 @@ pub struct EventChannels {
     pub bls_to_execution_changes: Sender<Event>,
     pub chain_reorgs: Sender<Event>,
     pub contribution_and_proofs: Sender<Event>,
+    pub data_column_sidecars: Sender<Event>,
     pub finalized_checkpoints: Sender<Event>,
     pub heads: Sender<Event>,
     pub payload_attributes: Sender<Event>,
@@ -88,6 +91,7 @@ impl EventChannels {
             bls_to_execution_changes: broadcast::channel(max_events).0,
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
+            data_column_sidecars: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attributes: broadcast::channel(max_events).0,
@@ -106,6 +110,7 @@ impl EventChannels {
             Topic::BlsToExecutionChange => &self.bls_to_execution_changes,
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
+            Topic::DataColumnSidecar => &self.data_column_sidecars,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttributes => &self.payload_attributes,
@@ -172,6 +177,18 @@ impl EventChannels {
             self.send_contribution_and_proof_event_internal(signed_contribution_and_proof)
         {
             warn!("unable to send contribution and proof event: {error}");
+        }
+    }
+
+    pub fn send_data_column_sidecar_event<P: Preset>(
+        &self,
+        block_root: H256,
+        data_column_sidecar: &DataColumnSidecar<P>,
+    ) {
+        if let Err(error) =
+            self.send_data_column_sidecar_event_internal(block_root, data_column_sidecar)
+        {
+            warn!("unable to send data column sidecar event: {error}");
         }
     }
 
@@ -332,6 +349,21 @@ impl EventChannels {
         Ok(())
     }
 
+    fn send_data_column_sidecar_event_internal<P: Preset>(
+        &self,
+        block_root: H256,
+        data_column_sidecar: &DataColumnSidecar<P>,
+    ) -> Result<()> {
+        if self.data_column_sidecars.receiver_count() > 0 {
+            let data_column_sidecar_event =
+                DataColumnSidecarEvent::new(block_root, data_column_sidecar);
+            let event = Topic::DataColumnSidecar.build(data_column_sidecar_event)?;
+            self.data_column_sidecars.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -452,6 +484,25 @@ impl BlobSidecarEvent {
             slot: blob_sidecar.slot(),
             kzg_commitment,
             versioned_hash: misc::kzg_commitment_to_versioned_hash(kzg_commitment),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DataColumnSidecarEvent {
+    block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    index: ColumnIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    slot: Slot,
+}
+
+impl DataColumnSidecarEvent {
+    const fn new<P: Preset>(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
+        Self {
+            block_root,
+            index: data_column_sidecar.index,
+            slot: data_column_sidecar.slot(),
         }
     }
 }
@@ -586,6 +637,7 @@ enum CombinedPayloadAttributesEventData {
     Capella(PayloadAttributesEventDataV2),
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
+    Fulu(PayloadAttributesEventDataV3),
 }
 
 #[derive(Debug, Serialize)]
@@ -712,6 +764,9 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             }
             PayloadAttributes::Electra(payload_attributes_v3) => {
                 Self::Electra(payload_attributes_v3.into())
+            }
+            PayloadAttributes::Fulu(payload_attributes_v3) => {
+                Self::Fulu(payload_attributes_v3.into())
             }
         }
     }

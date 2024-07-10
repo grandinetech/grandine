@@ -22,12 +22,13 @@ use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
 use types::preset::Preset;
 
-use crate::tasks::DataColumnSidecarTask;
+use crate::tasks::{DataColumnSidecarTask, ReconstructDataColumnSidecarsTask};
 use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
-        PersistBlobSidecarsTask, PreprocessStateTask, Run, StateAtSlotCacheFlushTask,
+        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask, PreprocessStateTask, Run,
+        StateAtSlotCacheFlushTask,
     },
     wait::Wait,
 };
@@ -110,6 +111,7 @@ enum HighPriorityTask<P: Preset, E, W> {
     CheckpointState(CheckpointStateTask<P, W>),
     DataColumnSidecar(DataColumnSidecarTask<P, W>),
     PreprocessState(PreprocessStateTask<P, W>),
+    ReconstructDataColumnSidecars(ReconstructDataColumnSidecarsTask<P, W>),
 }
 
 impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, W> {
@@ -121,6 +123,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, 
             Self::CheckpointState(task) => task.run(),
             Self::DataColumnSidecar(task) => task.run(),
             Self::PreprocessState(task) => task.run(),
+            Self::ReconstructDataColumnSidecars(task) => task.run(),
         }
     }
 }
@@ -133,6 +136,7 @@ enum LowPriorityTask<P: Preset, W> {
     AttesterSlashing(AttesterSlashingTask<P, W>),
     PersistBlobSidecarsTask(PersistBlobSidecarsTask<P, W>),
     StateAtSlotCacheFlush(StateAtSlotCacheFlushTask<P>),
+    PersistDataColumnSidecarsTask(PersistDataColumnSidecarsTask<P, W>),
 }
 
 impl<P: Preset, W> Run for LowPriorityTask<P, W> {
@@ -144,6 +148,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::AttesterSlashing(task) => task.run(),
             Self::PersistBlobSidecarsTask(task) => task.run(),
             Self::StateAtSlotCacheFlush(task) => task.run(),
+            Self::PersistDataColumnSidecarsTask(task) => task.run(),
         }
     }
 }
@@ -188,6 +193,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PreprocessStateTask<P, W> {
     }
 }
 
+impl<P: Preset, E, W> Spawn<P, E, W> for ReconstructDataColumnSidecarsTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.high_priority_tasks.push_back(self.into())
+    }
+}
+
 impl<P: Preset, E, W> Spawn<P, E, W> for AggregateAndProofTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
@@ -219,6 +230,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PersistBlobSidecarsTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for StateAtSlotCacheFlushTask<P> {
+fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for PersistDataColumnSidecarsTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
     }

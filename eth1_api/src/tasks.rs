@@ -46,7 +46,7 @@ async fn exchange_capabilities(eth1_api: &Eth1Api) -> Result<()> {
         match response {
             Ok(response) => {
                 eth1_api.on_ok_response(endpoint);
-                endpoint.set_capabilities(response);
+                endpoint.set_capabilities(response.clone());
 
                 info!("updated capabilities for eth1 endpoint: {}", endpoint.url());
             }

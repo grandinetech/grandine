@@ -17,6 +17,7 @@ use types::{
     config::Config,
     deneb::{containers::BlobSidecar, primitives::BlobIndex},
     electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
+    fulu::containers::DataColumnSidecar,
     phase0::{
         consts::{TargetAggregatorsPerCommittee, ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH},
         containers::{AttestationData, Validator},
@@ -222,6 +223,21 @@ pub fn is_valid_blob_sidecar_inclusion_proof<P: Preset>(blob_sidecar: &BlobSidec
     )
 }
 
+#[must_use]
+pub fn is_valid_data_column_sidecar_inclusion_proof<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+) -> bool {
+    // Fields in BeaconBlockBody before blob KZG commitments
+    let index_at_commitment_depth = 11;
+
+    is_valid_merkle_branch(
+        data_column_sidecar.kzg_commitments.hash_tree_root(),
+        data_column_sidecar.kzg_commitments_inclusion_proof,
+        index_at_commitment_depth,
+        data_column_sidecar.signed_block_header.message.body_root,
+    )
+}
+
 /// <https://github.com/ethereum/consensus-specs/blob/f7da1a38347155589f5e0403ad3290ffb77f4da6/specs/phase0/beacon-chain.md#helpers>
 #[must_use]
 pub fn is_in_inactivity_leak<P: Preset>(state: &impl BeaconState<P>) -> bool {
@@ -373,6 +389,10 @@ mod spec_tests {
         capella::containers::BeaconBlockBody as CapellaBeaconBlockBody,
         deneb::containers::BeaconBlockBody as DenebBeaconBlockBody,
         electra::containers::BeaconBlockBody as ElectraBeaconBlockBody,
+        fulu::{
+            containers::{BeaconBlockBody as FuluBeaconBlockBody, DataColumnSidecar},
+            primitives::ColumnIndex,
+        },
         nonstandard::Phase,
         phase0::containers::SignedBeaconBlockHeader,
         preset::{Mainnet, Minimal},
@@ -417,6 +437,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/deneb/light_client/single_merkle_proof/BeaconBlockBody/*/"]   [deneb_minimal_beacon_block_body]   [DenebBeaconBlockBody<Minimal>];
         ["consensus-spec-tests/tests/mainnet/electra/light_client/single_merkle_proof/BeaconBlockBody/*/"] [electra_mainnet_beacon_block_body] [ElectraBeaconBlockBody<Mainnet>];
         ["consensus-spec-tests/tests/minimal/electra/light_client/single_merkle_proof/BeaconBlockBody/*/"] [electra_minimal_beacon_block_body] [ElectraBeaconBlockBody<Minimal>];
+        ["consensus-spec-tests/tests/mainnet/fulu/light_client/single_merkle_proof/BeaconBlockBody/*/"]    [fulu_mainnet_beacon_block_body]    [FuluBeaconBlockBody<Mainnet>];
+        ["consensus-spec-tests/tests/minimal/fulu/light_client/single_merkle_proof/BeaconBlockBody/*/"]    [fulu_minimal_beacon_block_body]    [FuluBeaconBlockBody<Minimal>];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -515,6 +537,89 @@ mod spec_tests {
         assert_eq!(proof.as_slice(), branch);
     }
 
+    #[duplicate_item(
+        glob                                                                                                               function_name                           preset;
+        ["consensus-spec-tests/tests/mainnet/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitment_*"] [fulu_mainnet_beacon_block_body_proofs] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitment_*"] [fulu_minimal_beacon_block_body_proofs] [Minimal];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let Proof {
+            leaf,
+            leaf_index,
+            branch,
+        } = case.yaml("proof");
+
+        // Unlike the name suggests, `leaf_index` is actually a generalized index.
+        // `is_valid_merkle_branch` expects an index that includes only leaves.
+        let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
+        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+        // vs
+        // let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
+
+        let block_body = case.ssz_default::<FuluBeaconBlockBody<preset>>("object");
+
+        // > Check that `is_valid_merkle_branch` confirms `leaf` at `leaf_index` to verify
+        // > against `has_tree_root(state)` and `proof`.
+        assert!(is_valid_merkle_branch(
+            leaf,
+            branch.iter().copied(),
+            index_at_commitment_depth,
+            block_body.hash_tree_root(),
+        ));
+
+        // > If the implementation supports generating merkle proofs, check that the
+        // > self-generated proof matches the `proof` provided with the test.
+        let proof = misc::electra_kzg_commitment_inclusion_proof(&block_body, commitment_index)
+            .expect("inclusion proof should be constructed successfully");
+
+        assert_eq!(proof.as_slice(), branch);
+    }
+
+    #[duplicate_item(
+        glob                                                                                                                function_name                                  preset;
+        ["consensus-spec-tests/tests/mainnet/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [fulu_kzg_commitments_inclusion_proof_mainnet] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [fulu_kzg_commitments_inclusion_proof_minimal] [Minimal];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let Proof {
+            leaf,
+            leaf_index,
+            branch,
+        } = case.yaml("proof");
+
+        // Unlike the name suggests, `leaf_index` is actually a generalized index.
+        // `is_valid_merkle_branch` expects an index that includes only leaves.
+        let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
+        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+        // vs
+        // let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
+
+        let block_body = case.ssz_default::<FuluBeaconBlockBody<preset>>("object");
+
+        // > Check that `is_valid_merkle_branch` confirms `leaf` at `leaf_index` to verify
+        // > against `has_tree_root(state)` and `proof`.
+        assert!(is_valid_merkle_branch(
+            leaf,
+            branch.iter().copied(),
+            index_at_commitment_depth,
+            block_body.hash_tree_root(),
+        ));
+
+        // Reuse `merkle_proof` test cases to test `is_valid_data_column_sidecar_inclusion_proof`.
+        assert!(is_valid_data_column_sidecar_inclusion_proof(
+            &incomplete_data_column_sidecar(commitment_index, &block_body, branch.iter().copied())
+                .expect("data column sidecar should be constructed successfully")
+        ));
+
+        // > If the implementation supports generating merkle proofs, check that the
+        // > self-generated proof matches the `proof` provided with the test.
+        let proof = misc::kzg_commitments_inclusion_proof(&block_body);
+
+        assert_eq!(proof.as_slice(), branch);
+    }
+
     fn run_light_client_case<C, T: SszRead<C> + SszHash>(context: &C, case: Case) {
         let Proof {
             leaf,
@@ -579,6 +684,23 @@ mod spec_tests {
             signed_block_header,
             kzg_commitment_inclusion_proof: ContiguousVector::try_from_iter(inclusion_proof)?,
             ..BlobSidecar::default()
+        })
+    }
+
+    fn incomplete_data_column_sidecar<P: Preset>(
+        column_index: ColumnIndex,
+        body: &FuluBeaconBlockBody<P>,
+        inclusion_proof: impl IntoIterator<Item = H256>,
+    ) -> Result<DataColumnSidecar<P>> {
+        let mut signed_block_header = SignedBeaconBlockHeader::default();
+        signed_block_header.message.body_root = body.hash_tree_root();
+
+        Ok(DataColumnSidecar {
+            index: column_index,
+            kzg_commitments: body.blob_kzg_commitments.clone(),
+            signed_block_header,
+            kzg_commitments_inclusion_proof: ContiguousVector::try_from_iter(inclusion_proof)?,
+            ..DataColumnSidecar::default()
         })
     }
 }

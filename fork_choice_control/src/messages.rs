@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     time::Instant,
 };
@@ -17,7 +18,10 @@ use serde::Serialize;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::DataColumnIdentifier,
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        primitives::ColumnIndex,
+    },
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -136,6 +140,10 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         persisted_blob_ids: Vec<BlobIdentifier>,
     },
+    FinishedPersistingDataColumnSidecars {
+        wait_group: W,
+        persisted_data_column_ids: Vec<DataColumnIdentifier>,
+    },
     PreprocessedBeaconState {
         state: Arc<BeaconState<P>>,
     },
@@ -162,6 +170,19 @@ pub enum MutatorMessage<P: Preset, W> {
     Stop {
         save_to_storage: bool,
     },
+    StoreSamplingColumns {
+        sampling_columns: HashSet<ColumnIndex>,
+    },
+    ReconstructMissingColumns {
+        wait_group: W,
+        block_root: H256,
+        slot: Slot,
+    },
+    ReconstructedMissingColumns {
+        wait_group: W,
+        block_root: H256,
+        full_matrix: Vec<MatrixEntry<P>>,
+    },
 }
 
 impl<P: Preset, W> MutatorMessage<P, W> {
@@ -184,10 +205,10 @@ pub enum P2pMessage<P: Preset> {
     Accept(GossipId),
     Ignore(GossipId),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
+    PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
-    DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
     Stop,
