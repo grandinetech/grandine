@@ -10,7 +10,6 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
-    deneb::containers::BlobIdentifier,
     nonstandard::{Phase, TimedPowBlock},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -18,7 +17,7 @@ use types::{
 
 use crate::{
     types::{PayloadAttributes, PayloadId, PayloadStatusV1},
-    ExecutionServiceMessage,
+    EngineGetBlobsParams, ExecutionServiceMessage,
 };
 
 pub trait ExecutionEngine<P: Preset> {
@@ -33,7 +32,7 @@ pub trait ExecutionEngine<P: Preset> {
     fn get_blobs(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     );
 
@@ -76,10 +75,10 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
     fn get_blobs(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     ) {
-        (*self).get_blobs(block, blob_identifiers, peer_id)
+        (*self).get_blobs(block, params, peer_id)
     }
 
     fn notify_forkchoice_updated(
@@ -132,10 +131,10 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
     fn get_blobs(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     ) {
-        self.as_ref().get_blobs(block, blob_identifiers, peer_id)
+        self.as_ref().get_blobs(block, params, peer_id)
     }
 
     fn notify_forkchoice_updated(
@@ -193,12 +192,12 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
     fn get_blobs(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     ) {
         self.lock()
             .expect("execution engine mutex is poisoned")
-            .get_blobs(block, blob_identifiers, peer_id)
+            .get_blobs(block, params, peer_id)
     }
 
     fn notify_forkchoice_updated(
@@ -260,7 +259,7 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
     fn get_blobs(
         &self,
         _block: Arc<SignedBeaconBlock<P>>,
-        _blob_identifier: Vec<BlobIdentifier>,
+        _params: EngineGetBlobsParams,
         _peer_id: Option<PeerId>,
     ) {
     }
@@ -311,13 +310,13 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
     fn get_blobs(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     ) {
         if let Some(sender) = self.execution_service_tx.as_ref() {
             ExecutionServiceMessage::GetBlobs {
                 block,
-                blob_identifiers,
+                params,
                 peer_id,
             }
             .send(sender);

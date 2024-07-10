@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
+use ssz::H256;
 use std_ext::ArcExt as _;
 use types::{
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::DataColumnSidecarWithId,
-    phase0::primitives::Slot,
+    phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
 
@@ -16,6 +17,26 @@ pub struct DataColumnCache<P: Preset> {
 }
 
 impl<P: Preset> DataColumnCache<P> {
+    pub fn exibits_equivocation(
+        &self,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+        block_root: H256,
+    ) -> bool {
+        self.data_columns.iter().any(
+            move |(data_column_identifier, (data_column_sidecar, data_column_slot, _))| {
+                let data_column_proposer_index = data_column_sidecar
+                    .signed_block_header
+                    .message
+                    .proposer_index;
+
+                *data_column_slot == slot
+                    && data_column_proposer_index == proposer_index
+                    && data_column_identifier.block_root != block_root
+            },
+        )
+    }
+
     pub fn get(&self, data_column_id: DataColumnIdentifier) -> Option<Arc<DataColumnSidecar<P>>> {
         Some(self.data_columns.get(&data_column_id)?.0.clone_arc())
     }
@@ -66,6 +87,23 @@ impl<P: Preset> DataColumnCache<P> {
         self.data_columns
             .iter()
             .filter(|(_, (_, _, persisted))| !persisted)
+            .map(
+                |(data_column_id, (data_column_sidecar, _, _))| DataColumnSidecarWithId {
+                    data_column_sidecar: data_column_sidecar.clone_arc(),
+                    data_column_id: *data_column_id,
+                },
+            )
+    }
+
+    pub fn unpersisted_data_column_sidecars_by_block(
+        &self,
+        block_root: H256,
+    ) -> impl Iterator<Item = DataColumnSidecarWithId<P>> + '_ {
+        self.data_columns
+            .iter()
+            .filter(move |(identifier, (_, _, persisted))| {
+                !persisted && identifier.block_root == block_root
+            })
             .map(
                 |(data_column_id, (data_column_sidecar, _, _))| DataColumnSidecarWithId {
                     data_column_sidecar: data_column_sidecar.clone_arc(),

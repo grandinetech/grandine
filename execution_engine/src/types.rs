@@ -10,7 +10,7 @@ use serde::{
     ser::{Error as _, SerializeSeq as _},
     Deserialize, Deserializer, Serialize,
 };
-use ssz::{ByteList, ByteVector, ContiguousList, SszReadDefault, SszWrite as _};
+use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite as _};
 use typenum::Unsigned;
 use types::{
     bellatrix::{
@@ -23,12 +23,13 @@ use types::{
     },
     combined::ExecutionPayload,
     deneb::{
-        containers::ExecutionPayload as DenebExecutionPayload,
-        primitives::{Blob, KzgCommitment, KzgProof},
+        containers::{BlobIdentifier, ExecutionPayload as DenebExecutionPayload},
+        primitives::{Blob, KzgCommitment, KzgProof, KzgProofs},
     },
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
+    fulu::containers::DataColumnIdentifier,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, UnixSeconds,
@@ -402,12 +403,23 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
+// #[derive(Deserialize, Serialize)]
+// #[serde(bound = "", rename_all = "camelCase")]
+// pub struct BlobsBundleV1<P: Preset> {
+//     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+//     pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+//     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+// }
+
+// Merge `BlobsBundleV1` with `BlobsBundleV2` by using the same `proofs` max length
+//
 /// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
+/// [`BlobsBundleV2`](https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#blobsbundlev2)
 #[derive(Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
-pub struct BlobsBundleV1<P: Preset> {
+pub struct BlobsBundle<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub proofs: KzgProofs<P>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -501,7 +513,7 @@ pub struct EngineGetPayloadV3Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub block_value: Wei,
-    pub blobs_bundle: BlobsBundleV1<P>,
+    pub blobs_bundle: BlobsBundle<P>,
     pub should_override_builder: bool,
 }
 
@@ -516,7 +528,7 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
 
         let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
 
-        let BlobsBundleV1 {
+        let BlobsBundle {
             commitments,
             proofs,
             blobs,
@@ -539,7 +551,7 @@ pub struct EngineGetPayloadV4Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub block_value: Wei,
-    pub blobs_bundle: BlobsBundleV1<P>,
+    pub blobs_bundle: BlobsBundle<P>,
     pub should_override_builder: bool,
     pub execution_requests: RawExecutionRequests<P>,
 }
@@ -556,7 +568,47 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
 
         let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
 
-        let BlobsBundleV1 {
+        let BlobsBundle {
+            commitments,
+            proofs,
+            blobs,
+        } = blobs_bundle;
+
+        Self::new(
+            execution_payload,
+            Some(commitments),
+            Some(proofs),
+            Some(blobs),
+            Some(block_value),
+            Some(execution_requests.into()),
+        )
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct EngineGetPayloadV5Response<P: Preset> {
+    pub execution_payload: ExecutionPayloadV3<P>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub block_value: Wei,
+    pub blobs_bundle: BlobsBundle<P>,
+    pub should_override_builder: bool,
+    pub execution_requests: RawExecutionRequests<P>,
+}
+
+impl<P: Preset> From<EngineGetPayloadV5Response<P>> for WithBlobsAndMev<ExecutionPayload<P>, P> {
+    fn from(response: EngineGetPayloadV5Response<P>) -> Self {
+        let EngineGetPayloadV5Response {
+            execution_payload,
+            block_value,
+            blobs_bundle,
+            execution_requests,
+            ..
+        } = response;
+
+        let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
+
+        let BlobsBundle {
             commitments,
             proofs,
             blobs,
@@ -580,6 +632,7 @@ pub enum PayloadAttributes<P: Preset> {
     Capella(PayloadAttributesV2<P>),
     Deneb(PayloadAttributesV3<P>),
     Electra(PayloadAttributesV3<P>),
+    Fulu(PayloadAttributesV3<P>),
 }
 
 impl<P: Preset> PayloadAttributes<P> {
@@ -590,6 +643,7 @@ impl<P: Preset> PayloadAttributes<P> {
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
             Self::Electra(_) => Phase::Electra,
+            Self::Fulu(_) => Phase::Fulu,
         }
     }
 }
@@ -694,6 +748,7 @@ pub enum PayloadId {
     Capella(H64),
     Deneb(H64),
     Electra(H64),
+    Fulu(H64),
 }
 
 #[derive(Deserialize)]
@@ -928,6 +983,30 @@ impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
 pub struct BlobAndProofV1<P: Preset> {
     pub blob: Blob<P>,
     pub proof: KzgProof,
+}
+
+#[derive(Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct BlobAndProofV2<P: Preset> {
+    pub blob: Blob<P>,
+    pub proofs: Arc<ContiguousVector<KzgProof, P::CellsPerExtBlob>>,
+}
+
+pub enum EngineGetBlobsParams {
+    Blobs(Vec<BlobIdentifier>),
+    DataColumns(Vec<DataColumnIdentifier>),
+}
+
+impl From<Vec<BlobIdentifier>> for EngineGetBlobsParams {
+    fn from(params: Vec<BlobIdentifier>) -> Self {
+        Self::Blobs(params)
+    }
+}
+
+impl From<Vec<DataColumnIdentifier>> for EngineGetBlobsParams {
+    fn from(params: Vec<DataColumnIdentifier>) -> Self {
+        Self::DataColumns(params)
+    }
 }
 
 #[cfg(test)]

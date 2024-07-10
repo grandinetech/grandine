@@ -941,32 +941,55 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let block = Arc::new(beacon_block);
 
-        if self.chain_config.is_eip7594_fork(epoch) {
-            for data_column_sidecar in eip_7594::get_data_column_sidecars(
-                (*block).clone(),
-                block_blobs.unwrap_or_default().into_iter(),
-            )? {
-                let data_column_sidecar = Arc::new(data_column_sidecar);
+        if let Some(blobs) = block_blobs {
+            if !blobs.is_empty() {
+                if self
+                    .chain_config
+                    .phase_at_slot::<P>(slot_head.slot())
+                    .is_peerdas_activated()
+                {
+                    let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                        blobs.as_ref(),
+                        self.controller.store_config().kzg_backend,
+                    )?;
+                    for data_column_sidecar in eip_7594::construct_data_column_sidecars(
+                        &block,
+                        &cells_and_kzg_proofs,
+                        &self.chain_config,
+                    )? {
+                        let data_column_sidecar = Arc::new(data_column_sidecar);
 
-                self.controller.on_own_data_column_sidecar(
-                    wait_group.clone(),
-                    data_column_sidecar.clone_arc(),
-                );
+                        if self
+                            .controller
+                            .sampling_columns()
+                            .into_iter()
+                            .contains(&data_column_sidecar.index)
+                        {
+                            self.controller.on_own_data_column_sidecar(
+                                wait_group.clone(),
+                                data_column_sidecar.clone_arc(),
+                            );
+                        }
 
-                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
-            }
-        } else {
-            for blob_sidecar in misc::construct_blob_sidecars(
-                &block,
-                block_blobs.unwrap_or_default().into_iter(),
-                block_proofs.unwrap_or_default().into_iter(),
-            )? {
-                let blob_sidecar = Arc::new(blob_sidecar);
+                        if !self.validator_config.withhold_data_columns_publishing {
+                            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                                .send(&self.p2p_tx);
+                        }
+                    }
+                } else {
+                    for blob_sidecar in misc::construct_blob_sidecars(
+                        &block,
+                        blobs.into_iter(),
+                        block_proofs.unwrap_or_default().into_iter(),
+                    )? {
+                        let blob_sidecar = Arc::new(blob_sidecar);
 
-                self.controller
-                    .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+                        self.controller
+                            .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
 
-                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                        ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                    }
+                }
             }
         }
 
