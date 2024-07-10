@@ -830,6 +830,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
+        // Check before broadcasting to avoid slashing. See:
+        // <https://github.com/ethereum/consensus-specs/blob/2f99d0b44460a8e0f2404dc53c7a1d3cd9d9a329/specs/phase0/validator.md#proposer-slashing>
+        let control_flow = self
+            .validate_and_store_block(
+                &beacon_block,
+                &slot_head.beacon_state,
+                public_key.to_bytes(),
+                slot_head.current_epoch(),
+            )
+            .await?;
+
+        if control_flow.is_break() {
+            return Ok(());
+        }
+
         info!(
             "validator {} proposing beacon block with root {:?} in slot {}",
             proposer_index,
@@ -841,32 +856,50 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let block = Arc::new(beacon_block);
 
-        if self.chain_config.is_eip7594_fork(epoch) {
-            for data_column_sidecar in eip_7594::get_data_column_sidecars(
-                (*block).clone(),
-                block_blobs.unwrap_or_default().into_iter(),
-            )? {
-                let data_column_sidecar = Arc::new(data_column_sidecar);
-
-                self.controller.on_own_data_column_sidecar(
-                    wait_group.clone(),
-                    data_column_sidecar.clone_arc(),
+        if let Some(blobs) = block_blobs {
+            if blobs.len() > 0 {
+                info!(
+                    "there are {} blobs in slot: {}",
+                    blobs.len(),
+                    slot_head.slot()
                 );
 
-                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
-            }
-        } else {
-            for blob_sidecar in misc::construct_blob_sidecars(
-                &block,
-                block_blobs.unwrap_or_default().into_iter(),
-                block_proofs.unwrap_or_default().into_iter(),
-            )? {
-                let blob_sidecar = Arc::new(blob_sidecar);
+                if self.chain_config.is_eip7594_fork(epoch) {
+                    let cells_and_kzg_proofs =
+                        eip_7594::convert_blobs_to_cells_and_kzg_proofs::<P>(blobs.into_iter())?;
+                    let data_column_sidecars =
+                        eip_7594::get_data_column_sidecars(&block, cells_and_kzg_proofs)?;
 
-                self.controller
-                    .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+                    if data_column_sidecars.len() > 0 {
+                        let messages = data_column_sidecars
+                            .into_iter()
+                            .map(|dcs| {
+                                let data_column_sidecar = Arc::new(dcs);
 
-                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                                self.controller.on_own_data_column_sidecar(
+                                    wait_group.clone(),
+                                    data_column_sidecar.clone_arc(),
+                                );
+                                data_column_sidecar
+                            })
+                            .collect::<Vec<_>>();
+
+                        ValidatorToP2p::PublishDataColumnSidecars(messages).send(&self.p2p_tx);
+                    }
+                } else {
+                    for blob_sidecar in misc::construct_blob_sidecars(
+                        &block,
+                        blobs.clone().into_iter(),
+                        block_proofs.unwrap_or_default().into_iter(),
+                    )? {
+                        let blob_sidecar = Arc::new(blob_sidecar);
+
+                        self.controller
+                            .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+
+                        ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                    }
+                }
             }
         }
 
@@ -1250,6 +1283,53 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    async fn validate_and_store_block(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        state: &BeaconState<P>,
+        pubkey: PublicKeyBytes,
+        current_epoch: Epoch,
+    ) -> Result<ControlFlow<()>> {
+        let proposal = BlockProposal {
+            slot: block.message().slot(),
+            signing_root: Some(block.message().signing_root(&self.chain_config, state)),
+        };
+
+        debug!("validating beacon block proposal: {block:?}");
+
+        let validation_outcome = {
+            // Tracking slashing protector metrics could be moved to slashing protector methods
+            // but here we additionally collect locking times
+            let _timer = self.metrics.as_ref().map(|metrics| {
+                metrics
+                    .validator_proposal_slashing_protector_times
+                    .start_timer()
+            });
+
+            self.slashing_protector
+                .lock()
+                .await
+                .validate_and_store_proposal(proposal, pubkey, current_epoch)?
+        };
+
+        let control_flow = match validation_outcome {
+            SlashingValidationOutcome::Accept => ControlFlow::Continue(()),
+            SlashingValidationOutcome::Ignore => {
+                warn!("slashing protector ignored duplicate beacon block: {block:?}");
+                ControlFlow::Break(())
+            }
+            SlashingValidationOutcome::Reject(error) => {
+                warn!(
+                    "slashing protector rejected slashable beacon block \
+                     (error: {error}, block: {block:?})",
+                );
+                ControlFlow::Break(())
+            }
+        };
+
+        Ok(control_flow)
+    }
+
     async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) -> Result<()> {
         let Some(last_tick) = self.last_tick else {
             return Ok(());
@@ -1494,6 +1574,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         })
     }
 
+    // TODO: filter out duplicate messages
     async fn own_sync_committee_messages(
         &self,
         slot_head: &SlotHead<P>,
@@ -1527,6 +1608,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .pipe(group_into_btreemap))
     }
 
+    // TODO: filter out duplicate messages
     async fn own_contributions_and_proofs(
         &self,
         slot_head: &SlotHead<P>,
@@ -1601,7 +1683,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn own_sync_committee_members(&self) -> impl Iterator<Item = &SyncCommitteeMember> {
-        self.own_sync_committee_members.get().into_iter().flatten()
+        // TODO: filter out duplicate members before setting into `own_sync_committee_members`.
+        self.own_sync_committee_members
+            .get()
+            .into_iter()
+            .flatten()
+            .unique_by(|m| &m.validator_index)
     }
 
     async fn own_subcommittee_aggregators(

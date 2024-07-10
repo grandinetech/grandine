@@ -16,19 +16,20 @@ use crate::{
 type FieldElementsPerCell = U64;
 type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
+pub type CellIndex = u64;
+pub type RowIndex = u64;
 pub type ColumnIndex = u64;
 pub type Cell = Box<ByteVector<BytesPerCell>>;
 pub type NumberOfColumns = U128;
-
-type DataColumn<P> = ContiguousList<Cell, <P as Preset>::MaxBlobCommitmentsPerBlock>;
 
 pub type KzgCommitmentsInclusionProofDepth = U4;
 
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
+// TODO(feature/das): convert to type const
 pub const CUSTODY_REQUIREMENT: u64 = 4;
-pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
-pub const SAMPLES_PER_SLOT: u64 = 16;
+pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 128;
+pub const SAMPLES_PER_SLOT: u64 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +44,7 @@ pub struct DataColumnIdentifier {
 pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub index: ColumnIndex,
-    pub column: DataColumn<P>,
+    pub column: ContiguousList<Cell, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub signed_block_header: SignedBeaconBlockHeader,
@@ -59,7 +60,7 @@ impl<P: Preset> DataColumnSidecar<P> {
     #[must_use]
     pub fn full() -> Self {
         Self {
-            column: DataColumn::<P>::full(Box::default()),
+            column: ContiguousList::full(Box::default()),
             kzg_commitments: ContiguousList::full(KzgCommitment::repeat_byte(u8::MAX)),
             kzg_proofs: ContiguousList::full(KzgProof::repeat_byte(u8::MAX)),
             ..Default::default()
@@ -95,6 +96,17 @@ impl<P: Preset> From<&DataColumnSidecar<P>> for DataColumnIdentifier {
 
         Self { block_root, index }
     }
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct MatrixEntry {
+    pub cell: Cell,
+    pub kzg_proof: KzgProof,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub column_index: ColumnIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub row_index: RowIndex,
 }
 
 #[cfg(test)]

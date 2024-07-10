@@ -10,6 +10,7 @@
 
 use core::panic::AssertUnwindSafe;
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     thread::{Builder, JoinHandle},
     time::Instant,
@@ -36,7 +37,7 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
+    eip7594::{ColumnIndex, DataColumnSidecar},
     nonstandard::ValidationOutcome,
     phase0::{
         containers::{Attestation, AttesterSlashing, SignedAggregateAndProof},
@@ -185,6 +186,10 @@ where
 
     pub fn chain_config(&self) -> &Arc<ChainConfig> {
         self.storage().config()
+    }
+
+    pub fn on_store_sample_columns(&self, sample_columns: Vec<ColumnIndex>) {
+        self.spawn_store_sample_columns(sample_columns)
     }
 
     // This should be called at the start of every tick.
@@ -435,12 +440,12 @@ where
 
     pub fn on_gossip_data_column_sidecar(
         &self,
-        blob_sidecar: Arc<DataColumnSidecar<P>>,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
         subnet_id: SubnetId,
         gossip_id: GossipId,
     ) {
         self.spawn_data_column_sidecar_task(
-            blob_sidecar,
+            data_column_sidecar,
             DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
         )
     }
@@ -579,6 +584,15 @@ where
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
+    }
+
+    fn spawn_store_sample_columns(&self, sample_columns: Vec<ColumnIndex>) {
+        if !self.owned_store_snapshot().has_sample_columns_stored() {
+            MutatorMessage::StoreSampleColumns {
+                sample_columns: HashSet::from_iter(sample_columns),
+            }
+            .send(&self.owned_mutator_tx());
+        }
     }
 
     pub(crate) fn spawn(&self, task: impl Spawn<P, E, W>) {

@@ -26,10 +26,7 @@ use crate::{
     },
     eip7594::{DataColumnIdentifier, DataColumnSidecar},
     electra::containers::ExecutionRequests,
-    phase0::{
-        containers::Attestation,
-        primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
-    },
+    phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
 

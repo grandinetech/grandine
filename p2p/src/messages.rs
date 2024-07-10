@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
-    rpc::{GoodbyeReason, StatusMessage},
+    rpc::{GoodbyeReason, RPCError, RPCResponseErrorCode, StatusMessage},
     types::{EnrForkId, GossipKind},
     GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
     PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery,
@@ -12,12 +12,11 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use operation_pools::PoolRejectionReason;
 use serde::Serialize;
-use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
     nonstandard::Phase,
     phase0::{
         containers::{ProposerSlashing, SignedVoluntaryExit},
@@ -50,7 +49,8 @@ pub enum P2pToSync<P: Preset> {
     BlocksByRangeRequestFinished(RequestId),
     BlockByRootRequestFinished(H256),
     DataColumnsByRangeRequestFinished(RequestId),
-    RequestFailed(PeerId),
+    RequestFailed(PeerId, RequestId, RPCError),
+    DataColumnsByRootChunkReceived(DataColumnIdentifier, PeerId, RequestId),
 }
 
 impl<P: Preset> P2pToSync<P> {
@@ -66,6 +66,7 @@ impl<P: Preset> P2pToSync<P> {
 pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
+    PublishDataColumnSidecars(Vec<Arc<DataColumnSidecar<P>>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
@@ -116,13 +117,7 @@ impl SyncToMetrics {
 
 pub enum SyncToP2p {
     PruneReceivedBlocks,
-    RequestDataColumnsByRange(
-        RequestId,
-        PeerId,
-        Slot,
-        u64,
-        Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
-    ),
+    RequestDataColumnsByRange(RequestId, PeerId, Slot, u64, Vec<ColumnIndex>),
     RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnIdentifier>),
     RequestBlobsByRange(RequestId, PeerId, Slot, u64),
     RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
@@ -161,7 +156,7 @@ pub enum ValidatorToP2p<P: Preset> {
     Reject(GossipId, PoolRejectionReason),
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
-    PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
+    PublishDataColumnSidecars(Vec<Arc<DataColumnSidecar<P>>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
@@ -207,10 +202,12 @@ pub enum ServiceInboundMessage<P: Preset> {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
     Publish(PubsubMessage<P>),
+    PublishBatch(Vec<PubsubMessage<P>>),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
     SendRequest(PeerId, RequestId, Request),
     SendResponse(PeerId, PeerRequestId, Box<Response<P>>),
+    SendErrorResponse(PeerId, PeerRequestId, RPCResponseErrorCode, &'static str),
     Subscribe(GossipTopic),
     SubscribeKind(GossipKind),
     SubscribeNewForkTopics(Phase, ForkDigest),

@@ -199,6 +199,9 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
 
         let beacon_state = controller.preprocessed_state_at_current_slot()?;
 
+        // TODO(feature/das): there is an issue when try to sync from genesis with data column sidecars,
+        // grandine got alot of `invalid_sync_committee_message`, need to double check with next
+        // devnet
         let is_valid = validate_external_contribution_and_proof(
             controller.chain_config(),
             signed_contribution_and_proof,

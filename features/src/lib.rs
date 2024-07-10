@@ -37,6 +37,7 @@ pub enum Feature {
     ServeCostlyEndpoints,
     ServeLeakyEndpoints,
     SubscribeToAllAttestationSubnets,
+    SubscribeToAllDataColumnSubnets,
     SubscribeToAllSyncCommitteeSubnets,
     TrackMetrics,
     TrustBackSyncBlocks,

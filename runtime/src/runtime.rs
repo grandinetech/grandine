@@ -312,32 +312,6 @@ pub async fn run_after_genesis<P: Preset>(
         );
     }
 
-    let block_sync_service_channels = BlockSyncServiceChannels {
-        fork_choice_to_sync_rx,
-        p2p_to_sync_rx,
-        sync_to_p2p_tx,
-        sync_to_api_tx,
-        sync_to_metrics_tx,
-    };
-
-    let block_sync_database = if in_memory {
-        Database::in_memory()
-    } else {
-        storage_config.sync_database()?
-    };
-
-    let mut block_sync_service = BlockSyncService::new(
-        block_sync_database,
-        anchor_checkpoint_provider.clone(),
-        controller.clone_arc(),
-        metrics.clone(),
-        block_sync_service_channels,
-        back_sync_enabled,
-        loaded_from_remote,
-    )?;
-
-    block_sync_service.try_to_spawn_back_sync_states_archiver()?;
-
     let builder_api = builder_config.map(|builder_config| {
         Arc::new(BuilderApi::new(
             builder_config,
@@ -561,6 +535,46 @@ pub async fn run_after_genesis<P: Preset>(
         registry.as_mut(),
     )
     .await?;
+
+    if chain_config.is_eip7594_enabled() {
+        let sample_columns = network.network_globals().custody_columns();
+        controller.on_store_sample_columns(sample_columns);
+    }
+
+    let block_sync_service_channels = BlockSyncServiceChannels {
+        fork_choice_to_sync_rx,
+        p2p_to_sync_rx,
+        sync_to_p2p_tx,
+        sync_to_api_tx,
+        sync_to_metrics_tx,
+    };
+
+    let block_sync_database = if in_memory {
+        Database::in_memory()
+    } else {
+        Database::persistent(
+            "sync",
+            directories
+                .store_directory
+                .clone()
+                .unwrap_or_default()
+                .join("sync"),
+            db_size,
+        )?
+    };
+
+    let mut block_sync_service = BlockSyncService::new(
+        block_sync_database,
+        anchor_checkpoint_provider.clone(),
+        controller.clone_arc(),
+        network.network_globals().clone_arc(),
+        metrics.clone(),
+        block_sync_service_channels,
+        back_sync_enabled,
+        loaded_from_remote,
+    )?;
+
+    block_sync_service.try_to_spawn_back_sync_states_archiver()?;
 
     let subnet_service = SubnetService::new(
         attestation_agg_pool.clone_arc(),

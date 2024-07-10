@@ -1090,6 +1090,7 @@ impl<P: Preset> LightClientBootstrap<P> {
             Self::Altair(_) => Phase::Altair,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 
@@ -1099,6 +1100,7 @@ impl<P: Preset> LightClientBootstrap<P> {
             Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
             Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
             Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
+            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
         }
     }
 }
@@ -1129,18 +1131,6 @@ impl<P: Preset> SszWrite for LightClientBootstrap<P> {
             Self::Capella(update) => update.write_variable(bytes),
             Self::Deneb(update) => update.write_variable(bytes),
             Self::Electra(update) => update.write_variable(bytes),
-        }
-    }
-}
-
-impl<P: Preset> LightClientBootstrap<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Altair(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Capella(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Deneb(bootstrap) => bootstrap.header.beacon.slot,
-            Self::Electra(bootstrap) => bootstrap.header.beacon.slot,
         }
     }
 }
@@ -1192,23 +1182,12 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
 
 impl<P: Preset> LightClientFinalityUpdate<P> {
     #[must_use]
-    pub fn signature_slot(&self) -> Slot {
-        match self {
-            Self::Altair(update) => update.signature_slot,
-            Self::Capella(update) => update.signature_slot,
-            Self::Deneb(update) => update.signature_slot,
-            Self::Electra(update) => update.signature_slot,
-        }
-    }
-}
-
-impl<P: Preset> LightClientFinalityUpdate<P> {
-    #[must_use]
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Altair(_) => Phase::Altair,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 
@@ -1218,6 +1197,7 @@ impl<P: Preset> LightClientFinalityUpdate<P> {
             Self::Altair(update) => update.signature_slot,
             Self::Capella(update) => update.signature_slot,
             Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
         }
     }
 }
@@ -1551,23 +1531,12 @@ impl<P: Preset> AttesterSlashing<P> {
 
 impl<P: Preset> LightClientOptimisticUpdate<P> {
     #[must_use]
-    pub fn signature_slot(&self) -> Slot {
-        match self {
-            Self::Altair(update) => update.signature_slot,
-            Self::Capella(update) => update.signature_slot,
-            Self::Deneb(update) => update.signature_slot,
-            Self::Electra(update) => update.signature_slot,
-        }
-    }
-}
-
-impl<P: Preset> LightClientOptimisticUpdate<P> {
-    #[must_use]
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Altair(_) => Phase::Altair,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 
@@ -1577,6 +1546,7 @@ impl<P: Preset> LightClientOptimisticUpdate<P> {
             Self::Altair(update) => update.signature_slot,
             Self::Capella(update) => update.signature_slot,
             Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
         }
     }
 }

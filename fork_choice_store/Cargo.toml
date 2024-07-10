@@ -26,7 +26,6 @@ itertools = { workspace = true }
 kzg_utils = { workspace = true }
 log = { workspace = true }
 prometheus_metrics = { workspace = true }
-primitive-types = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }
 static_assertions = { workspace = true }

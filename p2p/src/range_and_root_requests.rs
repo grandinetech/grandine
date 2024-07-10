@@ -48,7 +48,7 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
         self.requests_by_root.cache_clear();
     }
 
-    pub fn expired_range_batches(&mut self) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    pub fn expired_range_batches(&mut self) -> impl Iterator<Item = (RequestKey, SyncBatch)> + '_ {
         let expired_keys = self
             .requests_by_range_keys()
             .into_iter()
@@ -59,9 +59,11 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             })
             .collect_vec();
 
-        expired_keys
-            .into_iter()
-            .filter_map(|id| self.requests_by_range.cache_remove(&id))
+        expired_keys.into_iter().filter_map(|id| {
+            self.requests_by_range
+                .cache_remove(&id)
+                .map(|(batch, _)| (id, batch))
+        })
     }
 
     pub fn ready_to_request_by_range(&mut self) -> bool {
@@ -85,7 +87,10 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
         !requests.contains(&peer_id)
     }
 
-    pub fn remove_peer(&mut self, peer_id: &PeerId) -> impl Iterator<Item = SyncBatch> + '_ {
+    pub fn remove_peer(
+        &mut self,
+        peer_id: &PeerId,
+    ) -> impl Iterator<Item = (RequestKey, SyncBatch)> + '_ {
         let range_keys_to_remove = self
             .requests_by_range_keys()
             .into_iter()
@@ -97,10 +102,18 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             })
             .collect_vec();
 
-        range_keys_to_remove
-            .into_iter()
-            .filter_map(|key| self.requests_by_range.cache_remove(&key))
+        range_keys_to_remove.into_iter().filter_map(|key| {
+            self.requests_by_range
+                .cache_remove(&key)
+                .map(|(batch, _)| (key, batch))
+        })
+    }
+
+    pub fn get_request_by_id(&mut self, request_id: RequestId) -> Option<SyncBatch> {
+        self.requests_by_range
+            .cache_get(&request_id)
             .map(|(batch, _)| batch)
+            .cloned()
     }
 
     pub fn request_direction(&mut self, request_id: RequestId) -> Option<SyncDirection> {

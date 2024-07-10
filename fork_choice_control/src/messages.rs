@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     time::Instant,
 };
@@ -22,7 +23,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
-    eip7594::DataColumnIdentifier,
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
     phase0::{
         containers::Checkpoint,
         primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -129,6 +130,10 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         persisted_blob_ids: Vec<BlobIdentifier>,
     },
+    FinishedPersistingDataColumnSidecars {
+        wait_group: W,
+        persisted_data_column_ids: Vec<DataColumnIdentifier>,
+    },
     PreprocessedBeaconState {
         state: Arc<BeaconState<P>>,
     },
@@ -153,6 +158,14 @@ pub enum MutatorMessage<P: Preset, W> {
     // `Controller::wait_for_tasks` after that.
     Stop {
         save_to_storage: bool,
+    },
+    StoreSampleColumns {
+        sample_columns: HashSet<ColumnIndex>,
+    },
+    ReconstructedMissingColumns {
+        wait_group: W,
+        block: Arc<SignedBeaconBlock<P>>,
+        full_matrix: Vec<MatrixEntry>,
     },
 }
 
@@ -181,6 +194,8 @@ pub enum P2pMessage<P: Preset> {
     DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
+    ReverifyGossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
+    DataColumnsReconstructed(Vec<Arc<DataColumnSidecar<P>>>, Slot),
 }
 
 impl<P: Preset> P2pMessage<P> {

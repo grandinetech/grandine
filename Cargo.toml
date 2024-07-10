@@ -309,13 +309,13 @@ delay_map = '0.4'
 derivative = '2'
 derive_more = { version = '1', features = ["full"] }
 dirs = '5'
-discv5 = { version = '0.4', features = ['libp2p'] }
-drain_filter_polyfill = '0.1'
+discv5 = { version = '0.7.0', features = ['libp2p'] }
+drain_filter_polyfill = '0.1.3'
 duplicate = '1'
 easy-ext = '1'
-either = '1'
+either = '1.9.0'
 enum-iterator = '2'
-enum-map = '2'
+enum-map = '2.7.3'
 enumset = '1'
 env_logger = '0.11'
 ethereum-types = '0.14'
@@ -355,8 +355,8 @@ jwt-simple = { version = '0.12.6', default-features = false, features = ['pure-r
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw-2' }
 lazy_static = '1.4.0'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '2d01f3608697eed05357fb847e25ad33ab59d702' }
-libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
-libp2p-mplex = '0.41.0'
+libp2p = { version = '0.54', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
+libp2p-mplex = '0.42.0'
 log = '0.4.20'
 lru = '0.12.2'
 memoffset = '0.9.0'
@@ -425,7 +425,7 @@ tiny-keccak = '2.0.2'
 tokio = { version = '1.36.0', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
 tokio-io-timeout = '1.2.0'
 tokio-stream = { version = '0.1.14', features = ['sync'] }
-tokio-util = { version = '0.6.10', features = ['codec', 'compat', 'time'] }
+tokio-util = { version = "0.7", features = ["codec", "compat", "time"] }
 tower = { version = '0.4.13', features = ['timeout'] }
 tower-http = { version = '0.4.4', features = ['cors', 'trace'] }
 tracing = '0.1.40'
@@ -433,8 +433,7 @@ triomphe = '0.1.11'
 tynm = '0.1.9'
 typenum = '1.17.0'
 unicode-normalization = '0.1.22'
-# 0.7.2 breaks `eth2_libp2p`. Update this is no longer the case.
-unsigned-varint = { version = '= 0.7.1', features = ['codec'] }
+unsigned-varint = { version = "0.8", features = ["codec"] }
 unwrap_none = '0.1.2'
 url = '2.5.0'
 uuid = { version = '1.7.0', features = ['serde', 'v4'] }
@@ -510,7 +509,7 @@ validator_key_cache = { path = 'validator_key_cache' }
 # different bounds for type parameters in `Clone` and `Copy` impls.
 # Use the `derivative` crate or write impls manually.
 # `derivative` is unmaintained but less buggy than `educe`.
-educe = '<0.0.0'
+educe = '0.4.23'
 
 # `owning_ref` is unsound and unmaintained:
 # - <https://github.com/Kimundi/owning-ref-rs/issues/61>

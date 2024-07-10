@@ -22,7 +22,7 @@ use types::{
             ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TARGET_AGGREGATORS_PER_COMMITTEE,
         },
         containers::{AttestationData, Validator},
-        primitives::{CommitteeIndex, Epoch, Slot, H256},
+        primitives::{CommitteeIndex, Epoch, Gwei, Slot, H256},
     },
     preset::Preset,
     traits::{

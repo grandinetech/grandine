@@ -1,35 +1,34 @@
-use std::collections::HashMap;
-
 use anyhow::{ensure, Result};
-use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof};
+use c_kzg::{
+    Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof, CELLS_PER_EXT_BLOB,
+};
 use hashing::ZERO_HASHES;
 use helper_functions::predicates::is_valid_merkle_branch;
+use itertools::Itertools;
+use kzg as _;
 use num_traits::One as _;
+use prometheus_metrics::Metrics;
 use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
+use std::sync::Arc;
 use thiserror::Error;
 use try_from_iterator::TryFromIterator as _;
-use typenum::Unsigned as _;
+use typenum::Unsigned;
 use types::{
     combined::SignedBeaconBlock,
-    deneb::primitives::{Blob, BlobIndex, KzgProof},
+    deneb::primitives::{Blob, KzgProof},
     eip7594::{
-        BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns,
-        DATA_COLUMN_SIDECAR_SUBNET_COUNT,
+        BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, MatrixEntry,
+        NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
     },
-    phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
+    phase0::primitives::{NodeId, SubnetId},
     preset::Preset,
-    traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
+    traits::{PostDenebBeaconBlockBody, PostElectraBeaconBlockBody, SignedBeaconBlock as _},
 };
 
 use crate::trusted_setup::settings;
 
 mod trusted_setup;
-
-const MAX_BLOBS_PER_BLOCK: u64 = 6;
-
-type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
-type CellID = u64;
 
 #[derive(Debug, Error)]
 pub enum VerifyKzgProofsError {
@@ -50,9 +49,32 @@ pub enum VerifyKzgProofsError {
         column_length: usize,
         proofs_length: usize,
     },
+    #[error("Sidecar with no commitments considered to be invalid.")]
+    SidecarWithoutCommitments,
 }
 
-pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
+#[derive(Debug, Error)]
+pub enum ExtendedSampleError {
+    #[error(
+        "Allowed failtures is out of range: {allowed_failures} in 0 -> {}",
+        NumberOfColumns::U64 / 2
+    )]
+    AllowedFailtureOutOfRange { allowed_failures: u64 },
+}
+
+#[derive(Debug, Error)]
+pub enum GetDataColumnSidecarsError {
+    #[error(
+        "Cells and proofs length {cells_length} does not match commitment length {commitments_length}"
+    )]
+    CellsCommitmentsLengthError {
+        cells_length: usize,
+        commitments_length: usize,
+    },
+}
+
+/// Verify if the data column sidecar is valid.
+pub fn verify_data_column_sidecar<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> bool {
     let DataColumnSidecar {
         index,
         column,
@@ -61,36 +83,66 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         ..
     } = data_column_sidecar;
 
-    ensure!(
-        *index < NumberOfColumns::U64,
-        VerifyKzgProofsError::SidecarIndexOutOfBounds { index: *index }
-    );
+    // The sidecar index must be within the valid range
+    // ensure!(
+    //     *index < NumberOfColumns::U64,
+    //     VerifyKzgProofsError::SidecarIndexOutOfBounds { index: *index }
+    // );
+    if *index >= NumberOfColumns::U64 {
+        return false;
+    }
 
-    ensure!(
-        column.len() == kzg_commitments.len(),
-        VerifyKzgProofsError::SidecarCommitmentsLengthError {
-            column_length: column.len(),
-            commitments_length: kzg_commitments.len(),
-        }
-    );
+    // A sidecar for zero blobs is invalid
+    // ensure!(
+    //     kzg_commitments.len() > 0,
+    //     VerifyKzgProofsError::SidecarWithoutCommitments
+    // );
+    if kzg_commitments.len() == 0 {
+        return false;
+    }
 
-    ensure!(
-        column.len() == kzg_proofs.len(),
-        VerifyKzgProofsError::SidecarProofsLengthError {
-            column_length: column.len(),
-            proofs_length: kzg_proofs.len(),
-        }
-    );
+    // The column length must be equal to the number of commitments/proofs
+    // ensure!(
+    //     column.len() == kzg_commitments.len(),
+    //     VerifyKzgProofsError::SidecarCommitmentsLengthError {
+    //         column_length: column.len(),
+    //         commitments_length: kzg_commitments.len(),
+    //     }
+    // );
+    // ensure!(
+    //     column.len() == kzg_proofs.len(),
+    //     VerifyKzgProofsError::SidecarProofsLengthError {
+    //         column_length: column.len(),
+    //         proofs_length: kzg_proofs.len(),
+    //     }
+    // );
+    if column.len() != kzg_commitments.len() || column.len() != kzg_proofs.len() {
+        return false;
+    }
 
-    let (row_indices, col_indices): (Vec<_>, Vec<_>) = column
-        .iter()
-        .zip(0_u64..)
-        .map(|(_, row_index)| (row_index, index))
-        .unzip();
+    true
+}
 
-    let kzg_settings = settings();
+/// Verify if the KZG proofs are correct.
+pub fn verify_kzg_proofs<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+    metrics: &Option<Arc<Metrics>>,
+) -> Result<bool> {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.data_column_sidecar_verification_times.start_timer();
+    }
 
-    let column = column
+    let DataColumnSidecar {
+        index,
+        column,
+        kzg_commitments,
+        kzg_proofs,
+        ..
+    } = data_column_sidecar;
+
+    let cell_indices: Vec<u64> = vec![*index; column.len()];
+
+    let cells = column
         .clone()
         .into_iter()
         .map(|a| CKzgCell::from_bytes(a.as_bytes()).map_err(Into::into))
@@ -106,12 +158,13 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    CKzgProof::verify_cell_proof_batch(
+    let kzg_settings = settings();
+
+    CKzgProof::verify_cell_kzg_proof_batch(
         commitments.as_slice(),
-        &row_indices,
-        &col_indices,
-        column.as_slice(),
-        &kzg_proofs,
+        cell_indices.as_slice(),
+        cells.as_slice(),
+        kzg_proofs.as_slice(),
         &kzg_settings,
     )
     .map_err(Into::into)
@@ -119,7 +172,14 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
 
 pub fn verify_sidecar_inclusion_proof<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
+    metrics: &Option<Arc<Metrics>>,
 ) -> bool {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics
+            .data_column_sidecar_inclusion_proof_verification
+            .start_timer();
+    }
+
     let DataColumnSidecar {
         kzg_commitments,
         signed_block_header,
@@ -139,7 +199,10 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     );
 }
 
-pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
+pub fn get_custody_subnets(
+    node_id: NodeId,
+    custody_subnet_count: u64,
+) -> impl Iterator<Item = SubnetId> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 
     let mut subnet_ids = vec![];
@@ -172,130 +235,214 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
         current_id = current_id + Uint256::one();
     }
 
+    subnet_ids.into_iter()
+}
+
+pub fn get_custody_columns(
+    node_id: NodeId,
+    custody_subnet_count: u64,
+) -> impl Iterator<Item = ColumnIndex> {
+    get_custody_subnets(node_id, custody_subnet_count)
+        .flat_map(|subnet_id| get_columns_index_for_subnet(subnet_id))
+        .sorted()
+}
+
+fn get_columns_index_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = ColumnIndex> {
     let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
-    let mut result = Vec::new();
-    for i in 0..columns_per_subnet {
-        for &subnet_id in &subnet_ids {
-            result.push(
-                (DATA_COLUMN_SIDECAR_SUBNET_COUNT * i + subnet_id)
-                    .try_into()
-                    .unwrap(),
-            );
-        }
-    }
 
-    result.sort();
-    result
+    (0..columns_per_subnet)
+        .map(move |column_index| (DATA_COLUMN_SIDECAR_SUBNET_COUNT * column_index + subnet_id))
 }
 
-pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
-    let mut extended_matrix: Vec<CKzgCell> = Vec::new();
+pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+) -> Vec<MatrixEntry> {
+    let DataColumnSidecar {
+        index,
+        column,
+        kzg_proofs,
+        ..
+    } = data_column_sidecar;
+
+    let blob_count = column.len() as u64;
+
+    (0..blob_count)
+        .zip(column)
+        .zip(kzg_proofs)
+        .map(|((row_index, cell), kzg_proof)| MatrixEntry {
+            row_index,
+            column_index: *index,
+            cell: cell.clone(),
+            kzg_proof: kzg_proof.clone(),
+        })
+        .collect()
+}
+
+/**
+ * Return the full, flattened sequence of matrix entries.
+ *
+ * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
+ */
+pub fn compute_matrix(
+    blobs: Vec<CKzgBlob>,
+    metrics: &Option<Arc<Metrics>>,
+) -> Result<Vec<MatrixEntry>> {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.data_column_sidecar_computation.start_timer();
+    }
 
     let kzg_settings = settings();
 
-    for blob in blobs {
-        let cells = *CKzgCell::compute_cells(&blob, &kzg_settings)?;
-        extended_matrix.extend(cells);
+    let mut matrix = vec![];
+    for (blob_index, blob) in blobs.iter().enumerate() {
+        let (cells, proofs) = CKzgCell::compute_cells_and_kzg_proofs(blob, &kzg_settings)?;
+        for (cell_index, (cell, proof)) in cells.into_iter().zip(proofs.into_iter()).enumerate() {
+            matrix.push(MatrixEntry {
+                cell: try_convert_ckzg_cell_to_cell(&cell)?,
+                kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
+                row_index: blob_index as u64,
+                column_index: cell_index as u64,
+            });
+        }
     }
 
-    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
-    array.copy_from_slice(&extended_matrix[..]);
-
-    Ok(array)
+    Ok(matrix)
 }
 
-fn recover_matrix(
-    cells_dict: &HashMap<(BlobIndex, CellID), CKzgCell>,
+/**
+ * Recover the full, flattened sequence of matrix entries.
+ *
+ * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
+ */
+pub fn recover_matrix(
+    partial_matrix: Vec<MatrixEntry>,
     blob_count: usize,
-) -> Result<ExtendedMatrix> {
-    let kzg_settings = settings();
-
-    let mut extended_matrix = Vec::new();
-    for blob_index in 0..blob_count {
-        let mut cell_ids = Vec::new();
-        for &(b_index, cell_id) in cells_dict.keys() {
-            if b_index == blob_index as u64 {
-                cell_ids.push(cell_id);
-            }
-        }
-        let cells: Vec<CKzgCell> = cell_ids
-            .iter()
-            .map(|&cell_id| cells_dict[&(blob_index as u64, cell_id)])
-            .collect();
-        let full_polynomial = CKzgCell::recover_polynomial(&cell_ids, &cells, &kzg_settings)?;
-        extended_matrix.push(full_polynomial);
+    metrics: &Option<Arc<Metrics>>,
+) -> Result<Vec<MatrixEntry>> {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.columns_reconstruction_time.start_timer();
     }
-    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
-    array.copy_from_slice(&extended_matrix[..]);
 
-    Ok(array)
+    let mut matrix = vec![];
+    for blob_index in 0..blob_count {
+        let (cell_indexs, cells_bytes): (Vec<_>, Vec<_>) = partial_matrix
+            .iter()
+            .filter_map(|e| {
+                if e.row_index == blob_index as u64 {
+                    Some((e.column_index, e.cell.as_bytes()))
+                } else {
+                    None
+                }
+            })
+            .unzip();
+
+        let cells = cells_bytes
+            .into_iter()
+            .map(|c| CKzgCell::from_bytes(c).map_err(Into::into))
+            .collect::<Result<Vec<CKzgCell>>>()?;
+
+        let kzg_settings = settings();
+        let (recovered_cells, recovered_proofs) =
+            CKzgCell::recover_cells_and_kzg_proofs(&cell_indexs, &cells, &kzg_settings)?;
+
+        for (cell_index, (cell, proof)) in recovered_cells
+            .into_iter()
+            .zip(recovered_proofs.into_iter())
+            .enumerate()
+        {
+            matrix.push(MatrixEntry {
+                cell: try_convert_ckzg_cell_to_cell(&cell)?,
+                kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
+                row_index: blob_index as u64,
+                column_index: cell_index as u64,
+            });
+        }
+    }
+
+    Ok(matrix)
+}
+
+fn try_convert_ckzg_cell_to_cell(cell: &CKzgCell) -> Result<Cell> {
+    Ok(Box::new(ByteVector::from(ContiguousVector::try_from_iter(
+        cell.to_bytes(),
+    )?)))
+}
+
+pub fn convert_blobs_to_cells_and_kzg_proofs<P: Preset>(
+    blobs: impl Iterator<Item = Blob<P>>,
+) -> Result<Vec<([Cell; CELLS_PER_EXT_BLOB], [KzgProof; CELLS_PER_EXT_BLOB])>> {
+    let kzg_settings = settings();
+    let cells_and_kzg_proofs = blobs
+        .map(|blob| {
+            let c_kzg_blob = CKzgBlob::from_bytes(blob.as_bytes())?;
+            CKzgCell::compute_cells_and_kzg_proofs(&c_kzg_blob, &kzg_settings).map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut result: Vec<([Cell; CELLS_PER_EXT_BLOB], [KzgProof; CELLS_PER_EXT_BLOB])> = vec![];
+    for (column_cells, column_proofs) in cells_and_kzg_proofs {
+        let cells = column_cells
+            .iter()
+            .map(|cell| try_convert_ckzg_cell_to_cell(cell))
+            .collect::<Result<Vec<Cell>>>()?;
+
+        let proofs = column_proofs
+            .iter()
+            .map(|proof| KzgProof::try_from(proof.to_bytes().into_inner()).map_err(Into::into))
+            .collect::<Result<Vec<KzgProof>>>()?;
+
+        let column: [Cell; CELLS_PER_EXT_BLOB] = cells
+            .try_into()
+            .expect("cells should not be more than number of columns");
+        let kzg_proofs: [KzgProof; CELLS_PER_EXT_BLOB] = proofs
+            .try_into()
+            .expect("kzg_proofs should not be more than number of columns");
+        result.push((column, kzg_proofs));
+    }
+
+    Ok(result)
 }
 
 pub fn get_data_column_sidecars<P: Preset>(
-    signed_block: SignedBeaconBlock<P>,
-    blobs: impl Iterator<Item = Blob<P>>,
+    signed_block: &SignedBeaconBlock<P>,
+    cells_and_kzg_proofs: Vec<([Cell; CELLS_PER_EXT_BLOB], [KzgProof; CELLS_PER_EXT_BLOB])>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
-    let (beacon_block, signature) = signed_block.split();
+    if let Some(post_deneb_beacon_block_body) = signed_block.message().body().post_deneb() {
+        let signed_block_header = signed_block.to_header();
+        let kzg_commitments = post_deneb_beacon_block_body.blob_kzg_commitments();
 
-    if let Some(post_deneb_beacon_block_body) = beacon_block.body().post_deneb() {
+        if kzg_commitments.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let blob_count = cells_and_kzg_proofs.len();
+        ensure!(
+            kzg_commitments.len() == blob_count,
+            GetDataColumnSidecarsError::CellsCommitmentsLengthError {
+                cells_length: blob_count,
+                commitments_length: kzg_commitments.len(),
+            }
+        );
         let kzg_commitments_inclusion_proof =
             kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
 
-        let kzg_settings = settings();
-
-        let signed_block_header = SignedBeaconBlockHeader {
-            message: beacon_block.to_header(),
-            signature,
-        };
-
-        let c_kzg_blobs = blobs
-            .map(|blob| CKzgBlob::from_bytes(blob.as_bytes()).map_err(Into::into))
-            .collect::<Result<Vec<CKzgBlob>>>()?;
-
-        let cells_and_proofs = c_kzg_blobs
-            .into_iter()
-            .map(|blob| {
-                CKzgCell::compute_cells_and_proofs(&blob, &kzg_settings).map_err(Into::into)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let blob_count = cells_and_proofs.len();
-
         for column_index in 0..NumberOfColumns::U64 {
-            let mut column_cells: Vec<CKzgCell> = Vec::new();
-
-            for row_index in 0..blob_count {
-                column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());
-            }
-
-            let kzg_proof_of_column: Vec<_> = (0..blob_count)
-                .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
+            let column_cells: Vec<Cell> = (0..blob_count)
+                .map(|row_index| cells_and_kzg_proofs[row_index].0[column_index as usize].clone())
                 .collect();
 
-            let cells = column_cells.iter().map(|cell| cell.to_bytes());
+            let column_proofs: Vec<KzgProof> = (0..blob_count)
+                .map(|row_index| cells_and_kzg_proofs[row_index].1[column_index as usize].clone())
+                .collect();
 
-            let mut cont_cells = Vec::new();
-
-            for cell in cells {
-                let bytes = cell.into_iter();
-                let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
-                let v = Box::new(v);
-
-                cont_cells.push(v);
-            }
-
-            let proofs = kzg_proof_of_column
-                .iter()
-                .map(|data| KzgProof::try_from(data).map_err(Into::into))
-                .collect::<Result<Vec<KzgProof>>>()?;
-
-            let kzg_proofs = ContiguousList::try_from_iter(proofs.into_iter())?;
+            let column = ContiguousList::try_from_iter(column_cells.into_iter())?;
+            let kzg_proofs = ContiguousList::try_from_iter(column_proofs.into_iter())?;
 
             sidecars.push(DataColumnSidecar {
                 index: column_index,
-                column: ContiguousList::try_from(cont_cells)?,
-                kzg_commitments: post_deneb_beacon_block_body.blob_kzg_commitments().clone(),
+                column,
+                kzg_commitments: kzg_commitments.clone(),
                 kzg_proofs,
                 signed_block_header,
                 kzg_commitments_inclusion_proof,
@@ -307,7 +454,7 @@ pub fn get_data_column_sidecars<P: Preset>(
 }
 
 fn kzg_commitment_inclusion_proof<P: Preset>(
-    body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
+    body: &(impl PostDenebBeaconBlockBody<P> + PostElectraBeaconBlockBody<P> + ?Sized),
 ) -> BlobCommitmentsInclusionProof {
     let mut proof = BlobCommitmentsInclusionProof::default();
 
@@ -341,6 +488,62 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
     );
 
     proof
+}
+
+/**
+ * Return the sample count if allowing failures.
+ *
+ * This helper demonstrates how to calculate the number of columns to query per slot when
+ * allowing given number of failures, assuming uniform random selection without replacement.
+*/
+pub fn get_extended_sample_count(allowed_failures: u64) -> Result<u64> {
+    // check that `allowed_failures` within the accepted range [0 -> NUMBER_OF_COLUMNS // 2]
+    // missing chunks for more than a half is the worst case
+    let worst_case_missing = NumberOfColumns::U64 / 2 + 1;
+    ensure!(
+        allowed_failures < worst_case_missing,
+        ExtendedSampleError::AllowedFailtureOutOfRange { allowed_failures }
+    );
+
+    // modified from [math_lib](https://docs.rs/math_l/latest/src/math_l/math.rs.html#32-38) with compatible types
+    let math_comb = |n: u64, k: u64| -> f64 {
+        if k > n {
+            0_f64
+        } else {
+            (1..=k).fold(1_f64, |acc, i| acc * (n - i + 1) as f64 / i as f64)
+        }
+    };
+
+    let hypergeom_cdf = |k: u64, m: u64, n: u64, big_n: u64| -> f64 {
+        (0..=k).fold(0_f64, |acc, i| {
+            acc + math_comb(n, i) * math_comb(m - n, big_n - i) / math_comb(m, big_n)
+        })
+    };
+
+    // the probability of successful sampling of an unavailable block
+    let false_positive_threshold = hypergeom_cdf(
+        0,
+        NumberOfColumns::U64,
+        worst_case_missing,
+        SAMPLES_PER_SLOT,
+    );
+
+    // number of unique column IDs
+    let mut sample_count = SAMPLES_PER_SLOT;
+    while sample_count <= NumberOfColumns::U64 {
+        if hypergeom_cdf(
+            allowed_failures,
+            NumberOfColumns::U64,
+            worst_case_missing,
+            sample_count,
+        ) <= false_positive_threshold
+        {
+            break;
+        }
+        sample_count += 1;
+    }
+
+    Ok(sample_count)
 }
 
 #[cfg(test)]
@@ -387,7 +590,10 @@ mod tests {
             result,
         } = case.yaml::<Meta>("meta");
 
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
+        assert_eq!(
+            get_custody_columns(node_id, custody_subnet_count).collect::<Vec<_>>(),
+            result
+        );
     }
 
     #[derive(Deserialize)]
