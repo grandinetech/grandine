@@ -9,13 +9,13 @@ use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
 use thiserror::Error;
 use try_from_iterator::TryFromIterator as _;
-use typenum::Unsigned as _;
+use typenum::Unsigned;
 use types::{
     combined::SignedBeaconBlock,
     deneb::primitives::{Blob, BlobIndex, KzgProof},
     eip7594::{
         BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns,
-        DATA_COLUMN_SIDECAR_SUBNET_COUNT,
+        DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
     },
     phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
     preset::Preset,
@@ -204,7 +204,7 @@ pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
     Ok(array)
 }
 
-fn recover_matrix(
+pub fn recover_matrix(
     cells_dict: &HashMap<(BlobIndex, CellID), CKzgCell>,
     blob_count: usize,
 ) -> Result<ExtendedMatrix> {
@@ -341,6 +341,56 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
     );
 
     proof
+}
+
+/** 
+ * Return the sample count if allowing failures.
+ * 
+ * This helper demonstrates how to calculate the number of columns to query per slot when 
+ * allowing given number of failures, assuming uniform random selection without replacement. 
+*/
+pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
+    // check that `allowed_failures` within the accepted range [0 -> NUMBER_OF_COLUMNS // 2]
+    assert!((0..(NumberOfColumns::U64 / 2)).contains(&allowed_failures));
+
+    // missing chunks for more than a half is the worst case
+    let worst_case_missing = NumberOfColumns::U64 / 2 + 1;
+
+    // the probability of successful sampling of an unavailable block
+    let false_positive_threshold = 
+        hypergeom_cdf(0, NumberOfColumns::U64, worst_case_missing, SAMPLES_PER_SLOT);
+
+    // number of unique column IDs
+    let mut sample_count = SAMPLES_PER_SLOT;
+    while sample_count <= NumberOfColumns::U64 + 1 {
+        // TODO(feature/das): change variable name `x` to a suitable one
+        let x = 
+            hypergeom_cdf(allowed_failures, NumberOfColumns::U64, worst_case_missing, sample_count);
+        if x <= false_positive_threshold {
+            break;
+        }
+        sample_count += 1;
+    }
+    return sample_count;
+}
+
+fn hypergeom_cdf(k: u64, m: u64, n: u64, big_n: u64) -> f64 {
+    let mut sum = 0_f64;
+    for i in 0..(k + 1) {
+        sum += math_comb(n, i) * math_comb(m - n, big_n - i) / math_comb(m, big_n);
+    }
+    sum
+}
+
+fn math_comb(n: u64, k: u64) -> f64 {
+    if !(0..n).contains(&k) {
+        return 0_f64;
+    }
+    let mut r = 1_f64;
+    for i in 0..(std::cmp::min(k, n - k)) {
+        r *= (n - i) as f64 / (i + 1) as f64
+    }
+    r
 }
 
 #[cfg(test)]
