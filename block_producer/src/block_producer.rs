@@ -72,6 +72,7 @@ use types::{
         BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
         ExecutionRequests,
     },
+    fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
@@ -447,6 +448,9 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 unphased::validate_voluntary_exit(&self.producer_context.chain_config, &state, exit)
             }
             BeaconState::Electra(state) => {
+                electra::validate_voluntary_exit(&self.producer_context.chain_config, state, exit)
+            }
+            BeaconState::Fulu(state) => {
                 electra::validate_voluntary_exit(&self.producer_context.chain_config, state, exit)
             }
         };
@@ -884,6 +888,80 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     parent_root,
                     state_root,
                     body: ElectraBeaconBlockBody {
+                        randao_reveal,
+                        eth1_data,
+                        graffiti,
+                        proposer_slashings,
+                        attester_slashings: self.prepare_attester_slashings_electra().await,
+                        attestations,
+                        deposits,
+                        voluntary_exits,
+                        sync_aggregate,
+                        execution_payload: DenebExecutionPayload::default(),
+                        bls_to_execution_changes,
+                        blob_kzg_commitments: ContiguousList::default(),
+                        execution_requests: ExecutionRequests::default(),
+                    },
+                })
+            }
+            Phase::Fulu => {
+                // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
+                let mut results: Vec<(
+                    AttestationData,
+                    HashSet<CommitteeIndex>,
+                    Vec<ElectraAttestation<P>>,
+                )> = Vec::new();
+
+                for (electra_attestation, committee_index) in
+                    attestations.into_iter().filter_map(|attestation| {
+                        let committee_index = attestation.data.index;
+
+                        match operation_pools::convert_to_electra_attestation(attestation) {
+                            Ok(electra_attestation) => Some((electra_attestation, committee_index)),
+                            Err(error) => {
+                                warn!("unable to convert to electra attestation: {error:?}");
+                                None
+                            }
+                        }
+                    })
+                {
+                    if let Some((_, indices, attestations)) =
+                        results.iter_mut().find(|(data, indices, _)| {
+                            *data == electra_attestation.data && !indices.contains(&committee_index)
+                        })
+                    {
+                        indices.insert(committee_index);
+                        attestations.push(electra_attestation);
+                    } else {
+                        results.push((
+                            electra_attestation.data,
+                            HashSet::from([committee_index]),
+                            vec![electra_attestation],
+                        ))
+                    }
+                }
+
+                let attestations = results
+                    .into_iter()
+                    .filter_map(|(_, _, attestations)| {
+                        match Self::compute_on_chain_aggregate(attestations.into_iter()) {
+                            Ok(electra_aggregate) => Some(electra_aggregate),
+                            Err(error) => {
+                                warn!("unable to compute on chain aggregate: {error:?}");
+                                None
+                            }
+                        }
+                    })
+                    .take(P::MaxAttestationsElectra::USIZE);
+
+                let attestations = ContiguousList::try_from_iter(attestations)?;
+
+                BeaconBlock::from(FuluBeaconBlock {
+                    slot,
+                    proposer_index,
+                    parent_root,
+                    state_root,
+                    body: FuluBeaconBlockBody {
                         randao_reveal,
                         eth1_data,
                         graffiti,
@@ -1449,6 +1527,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
                 PayloadAttributes::Electra(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
+            }
+            BeaconState::Fulu(state) => {
+                let (withdrawals, _) = electra::get_expected_withdrawals(state)?;
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
+                PayloadAttributes::Fulu(PayloadAttributesV3 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,

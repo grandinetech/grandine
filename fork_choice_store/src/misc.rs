@@ -23,7 +23,7 @@ use types::{
         Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
+    fulu::containers::DataColumnSidecar,
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
@@ -548,6 +548,7 @@ impl BlobSidecarOrigin {
 pub enum DataColumnSidecarOrigin {
     Api(Option<OneshotSender<Result<ValidationOutcome>>>),
     BackSync,
+    ExecutionLayer,
     Gossip(SubnetId, GossipId),
     Requested(PeerId),
     Own,
@@ -564,7 +565,7 @@ impl DataColumnSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
-            Self::BackSync | Self::Own | Self::Requested(_) => (None, None),
+            Self::BackSync | Self::ExecutionLayer | Self::Own | Self::Requested(_) => (None, None),
         }
     }
 
@@ -572,7 +573,11 @@ impl DataColumnSidecarOrigin {
     pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id),
-            Self::BackSync | Self::Api(_) | Self::Own | Self::Requested(_) => None,
+            Self::Api(_)
+            | Self::BackSync
+            | Self::ExecutionLayer
+            | Self::Own
+            | Self::Requested(_) => None,
         }
     }
 
@@ -581,7 +586,7 @@ impl DataColumnSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => Some(*peer_id),
-            Self::BackSync | Self::Api(_) | Self::Own => None,
+            Self::Api(_) | Self::BackSync | Self::ExecutionLayer | Self::Own => None,
         }
     }
 
@@ -589,13 +594,22 @@ impl DataColumnSidecarOrigin {
     pub const fn subnet_id(&self) -> Option<SubnetId> {
         match self {
             Self::Gossip(subnet_id, _) => Some(*subnet_id),
-            Self::BackSync | Self::Api(_) | Self::Own | Self::Requested(_) => None,
+            Self::Api(_)
+            | Self::BackSync
+            | Self::ExecutionLayer
+            | Self::Own
+            | Self::Requested(_) => None,
         }
     }
 
     #[must_use]
     pub const fn is_from_back_sync(&self) -> bool {
         matches!(self, Self::BackSync)
+    }
+
+    #[must_use]
+    pub const fn is_from_el(&self) -> bool {
+        matches!(self, Self::ExecutionLayer)
     }
 }
 
@@ -674,6 +688,7 @@ impl<P: Preset> BlobSidecarAction<P> {
 pub enum DataColumnSidecarAction<P: Preset> {
     Accept(Arc<DataColumnSidecar<P>>),
     Ignore(Publishable),
+    DelayUntilState(Arc<DataColumnSidecar<P>>, H256),
     DelayUntilParent(Arc<DataColumnSidecar<P>>),
     DelayUntilSlot(Arc<DataColumnSidecar<P>>),
 }

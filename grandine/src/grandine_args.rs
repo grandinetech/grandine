@@ -159,6 +159,10 @@ struct ChainOptions {
     #[clap(long, value_name = "YAML_FILE")]
     verify_electra_preset_file: Option<PathBuf>,
 
+    /// Verify that Fulu variables in preset match YAML_FILE
+    #[clap(long, value_name = "YAML_FILE")]
+    verify_fulu_preset_file: Option<PathBuf>,
+
     /// Verify that configuration matches YAML_FILE
     #[clap(long, value_name = "YAML_FILE")]
     verify_configuration_file: Option<PathBuf>,
@@ -326,6 +330,10 @@ struct BeaconNodeOptions {
     #[clap(long)]
     state_slot: Option<Slot>,
 
+    /// Subscribe to all data column subnets
+    #[clap(long)]
+    subscribe_all_data_column_subnets: bool,
+
     /// Subscribe to all subnets
     #[clap(long)]
     subscribe_all_subnets: bool,
@@ -402,6 +410,11 @@ struct BeaconNodeOptions {
     // A list beacon block roots that beacon node rejects unconditionally
     #[clap(long)]
     blacklisted_blocks: Vec<H256>,
+
+    // Disable `engine_getBlobs` integration, use purely gossip and p2p requests.
+    // Use for testing purpose
+    #[clap(long)]
+    disable_engine_getblobs: bool,
 }
 
 #[expect(
@@ -434,6 +447,10 @@ struct NetworkConfigOptions {
     /// Disable peer scoring
     #[clap(long)]
     disable_peer_scoring: bool,
+
+    /// Disable rate limiting both inbound and outbound
+    #[clap(long)]
+    disable_rate_limiting: bool,
 
     /// Disable NAT traversal via UPnP
     /// [default: enabled]
@@ -524,6 +541,7 @@ struct NetworkConfigOptions {
 }
 
 impl NetworkConfigOptions {
+    #[expect(clippy::too_many_lines)]
     fn into_config(
         self,
         network: Network,
@@ -539,6 +557,7 @@ impl NetworkConfigOptions {
             disable_enr_auto_update,
             disable_quic,
             disable_peer_scoring,
+            disable_rate_limiting,
             disable_upnp,
             discovery_port,
             discovery_port_ipv6,
@@ -576,8 +595,12 @@ impl NetworkConfigOptions {
         network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
         network_config.libp2p_private_key_file = libp2p_private_key_file;
-        network_config.inbound_rate_limiter_config = Some(InboundRateLimiterConfig::default());
-        network_config.outbound_rate_limiter_config = Some(OutboundRateLimiterConfig::default());
+
+        if !disable_rate_limiting {
+            network_config.inbound_rate_limiter_config = Some(InboundRateLimiterConfig::default());
+            network_config.outbound_rate_limiter_config =
+                Some(OutboundRateLimiterConfig::default());
+        }
 
         if let Some(listen_address_ipv6) = listen_address_ipv6 {
             network_config.set_ipv4_ipv6_listening_addresses(
@@ -640,6 +663,9 @@ impl NetworkConfigOptions {
 
         if Feature::SubscribeToAllAttestationSubnets.is_enabled() {
             network_config.subscribe_all_subnets = true;
+        }
+
+        if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
             network_config.subscribe_all_data_column_subnets = true;
         }
 
@@ -704,6 +730,7 @@ struct SlasherOptions {
     slashing_history_limit: u64,
 }
 
+#[expect(clippy::struct_excessive_bools)]
 #[derive(Args)]
 struct ValidatorOptions {
     /// Path to a directory containing EIP-2335 keystore files
@@ -785,6 +812,10 @@ struct ValidatorOptions {
     /// Number of epochs to keep slashing protection data for
     #[clap(long, default_value_t = DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT)]
     slashing_protection_history_limit: u64,
+
+    // Withhold all data column sidecars when assigned to propose a block. Use for testing purpose
+    #[clap(long)]
+    withhold_data_columns_publishing: bool,
 }
 
 #[derive(Args)]
@@ -910,6 +941,7 @@ impl GrandineArgs {
             verify_capella_preset_file,
             verify_deneb_preset_file,
             verify_electra_preset_file,
+            verify_fulu_preset_file,
             verify_configuration_file,
             terminal_total_difficulty_override,
             terminal_block_hash_override,
@@ -938,6 +970,7 @@ impl GrandineArgs {
             max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout,
             state_slot,
+            subscribe_all_data_column_subnets,
             subscribe_all_subnets,
             suggested_fee_recipient,
             jwt_id,
@@ -955,6 +988,7 @@ impl GrandineArgs {
             in_memory,
             kzg_backend,
             blacklisted_blocks,
+            disable_engine_getblobs,
         } = beacon_node_options;
 
         // let SlasherOptions {
@@ -984,6 +1018,7 @@ impl GrandineArgs {
             web3signer_api_urls,
             web3signer_urls,
             slashing_protection_history_limit,
+            withhold_data_columns_publishing,
         } = validator_options;
 
         if in_memory {
@@ -1123,6 +1158,13 @@ impl GrandineArgs {
             Phase::Electra,
         )?;
 
+        verify_preset(
+            &chain_config,
+            &chain_config.preset_base.fulu_preset(),
+            verify_fulu_preset_file,
+            Phase::Fulu,
+        )?;
+
         verify_config(&chain_config, verify_configuration_file)?;
 
         // Overriding after verifying seems more useful, though neither is strictly better.
@@ -1232,7 +1274,14 @@ impl GrandineArgs {
             .into_iter()
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
-            .collect();
+            .chain(
+                subscribe_all_data_column_subnets
+                    .then_some(Feature::SubscribeToAllDataColumnSubnets),
+            )
+            .collect::<Vec<_>>();
+
+        // enabling these features here, because it being used in below network config conversion
+        features.iter().for_each(|f| f.enable());
 
         let auth_options = AuthOptions {
             secrets_path: jwt_secret,
@@ -1340,6 +1389,8 @@ impl GrandineArgs {
             validator_api_config,
             kzg_backend,
             blacklisted_blocks: blacklisted_blocks.into_iter().collect(),
+            withhold_data_columns_publishing,
+            disable_engine_getblobs,
         })
     }
 

@@ -17,7 +17,11 @@ use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
+    fulu::{
+        consts::NumberOfColumns,
+        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        primitives::ColumnIndex,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -41,7 +45,7 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
-    DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
+    DataColumnsNeeded(DataColumnsByRootIdentifier, Slot),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, RequestId, RPCRequestType),
     RequestedBlock(Arc<SignedBeaconBlock<P>>, PeerId, RequestId, RPCRequestType),
     RequestedDataColumnSidecar(Arc<DataColumnSidecar<P>>, PeerId, RequestId, RPCRequestType),
@@ -71,6 +75,7 @@ impl<P: Preset> P2pToSync<P> {
 pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
+    PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
@@ -133,10 +138,9 @@ pub enum SyncToP2p {
         u64,
         Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
     ),
-    RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnIdentifier>),
+    RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnsByRootIdentifier>),
     RequestPeerStatus(RequestId, PeerId),
     SubscribeToCoreTopics,
-    SubscribeToDataColumnTopics,
 }
 
 impl SyncToP2p {

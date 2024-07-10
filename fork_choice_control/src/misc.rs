@@ -17,7 +17,10 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -183,4 +186,12 @@ pub enum ReorgSource {
     BlockAttestation,
     PayloadResponse,
     Tick,
+}
+
+pub enum BlockDataColumnAvailability {
+    Complete,
+    CompleteWithReconstruction,
+    AnyPending,
+    Missing(Vec<ColumnIndex>),
+    Irrelevant,
 }

@@ -18,4 +18,5 @@ pub struct ValidatorConfig {
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Gas,
     pub keystore_storage_password_file: Option<PathBuf>,
+    pub withhold_data_columns_publishing: bool,
 }

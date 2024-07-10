@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
+use dashmap::DashMap;
 use database::Database;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use fork_choice_store::StoreConfig;
@@ -129,6 +130,7 @@ where
             core::iter::empty(),
             true,
             [].into(),
+            Arc::new(DashMap::new()),
         )
         .expect("Controller::new should not fail in tests and benchmarks")
     }

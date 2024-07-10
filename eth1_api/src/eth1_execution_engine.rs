@@ -5,7 +5,8 @@ use derive_more::Constructor;
 use either::Either;
 use eth2_libp2p::PeerId;
 use execution_engine::{
-    ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId, PayloadStatusV1,
+    EngineGetBlobsParams, ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId,
+    PayloadStatusV1,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::{info, warn};
@@ -13,7 +14,6 @@ use tokio::runtime::{Builder, Handle};
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
     config::Config,
-    deneb::containers::BlobIdentifier,
     nonstandard::{Phase, TimedPowBlock, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -43,12 +43,12 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
     fn get_blobs(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     ) {
         ExecutionServiceMessage::GetBlobs {
             block,
-            blob_identifiers,
+            params,
             peer_id,
         }
         .send(&self.execution_service_tx);

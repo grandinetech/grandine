@@ -13,6 +13,7 @@ bls = { workspace = true }
 dashmap = { workspace = true }
 dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
+eip_7594 = { workspace = true }
 either = { workspace = true }
 enum-iterator = { workspace = true }
 eth2_libp2p = { workspace = true }
@@ -39,6 +40,7 @@ static_assertions = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 web3 = { workspace = true }

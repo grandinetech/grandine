@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 clock = { workspace = true }
 crossbeam-skiplist = { workspace = true }
+dashmap = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 eip_7594 = { workspace = true }
@@ -25,7 +26,6 @@ itertools = { workspace = true }
 kzg_utils = { workspace = true }
 log = { workspace = true }
 prometheus_metrics = { workspace = true }
-primitive-types = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }

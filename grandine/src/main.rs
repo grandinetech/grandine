@@ -383,6 +383,8 @@ fn try_main() -> Result<()> {
         validator_api_config,
         kzg_backend,
         blacklisted_blocks,
+        withhold_data_columns_publishing,
+        disable_engine_getblobs,
     } = config;
 
     features.into_iter().for_each(Feature::enable);
@@ -419,6 +421,7 @@ fn try_main() -> Result<()> {
         default_builder_boost_factor,
         default_gas_limit,
         keystore_storage_password_file,
+        withhold_data_columns_publishing,
     });
 
     let store_config = StoreConfig {
@@ -427,6 +430,7 @@ fn try_main() -> Result<()> {
         state_cache_lock_timeout,
         unfinalized_states_in_memory,
         kzg_backend,
+        disable_engine_getblobs,
     };
 
     let eth1_auth = Arc::new(Auth::new(auth_options)?);
