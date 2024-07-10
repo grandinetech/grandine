@@ -7,7 +7,7 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
+    fulu::containers::DataColumnSidecar,
     phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
@@ -81,10 +81,14 @@ pub enum Error<P: Preset> {
     DataColumnSidecarBlockNotADescendantOfFinalized {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
+    #[error("data_column sidecar is invalid: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalid {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
     // TODO(feature/deneb): This is vague.
     //                      The validation that fails with this error actually checks commitments.
-    #[error("data_column sidecar is invalid: {data_column_sidecar:?} error: {error}")]
-    DataColumnSidecarInvalid {
+    #[error("data_column sidecar's kzg proofs is invalid: {data_column_sidecar:?} error: {error}")]
+    DataColumnSidecarInvalidKzgProofs {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         error: AnyhowError,
     },
@@ -94,10 +98,6 @@ pub enum Error<P: Preset> {
     },
     #[error("data_column sidecar contains invalid inclusion proof: {data_column_sidecar:?}")]
     DataColumnSidecarInvalidInclusionProof {
-        data_column_sidecar: Arc<DataColumnSidecar<P>>,
-    },
-    #[error("data_column sidecar index is invalid: {data_column_sidecar:?}")]
-    DataColumnSidecarInvalidIndex {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
     #[error(

@@ -253,6 +253,8 @@ pub async fn run_after_genesis<P: Preset>(
 
     let event_channels = Arc::new(EventChannels::new(max_events));
 
+    let sidecars_construction_started = Arc::new(DashMap::new());
+
     let (controller, mutator_handle) = Controller::new(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
@@ -273,9 +275,11 @@ pub async fn run_after_genesis<P: Preset>(
         unfinalized_blocks,
         !back_sync_enabled || is_anchor_genesis,
         blacklisted_blocks,
+        sidecars_construction_started.clone_arc(),
     )?;
 
     let received_blob_sidecars = Arc::new(DashMap::new());
+    let received_data_column_sidecars = Arc::new(DashMap::new());
 
     let execution_service = ExecutionService::new(
         eth1_api.clone_arc(),
@@ -289,6 +293,8 @@ pub async fn run_after_genesis<P: Preset>(
         eth1_api.clone_arc(),
         controller.clone_arc(),
         received_blob_sidecars.clone_arc(),
+        received_data_column_sidecars.clone_arc(),
+        sidecars_construction_started,
         blob_fetcher_to_p2p_tx,
         execution_service_to_blob_fetcher_rx,
     );
@@ -369,42 +375,10 @@ pub async fn run_after_genesis<P: Preset>(
         );
     }
 
-    let block_sync_service_channels = BlockSyncServiceChannels {
-        fork_choice_to_sync_rx,
-        p2p_to_sync_rx,
-        sync_to_p2p_tx,
-        sync_to_api_tx,
-        sync_to_metrics_tx,
-    };
-
-    let block_sync_database = if in_memory {
-        Database::in_memory()
-    } else {
-        storage_config.sync_database(None, DatabaseMode::ReadWrite)?
-    };
-
     let data_dumper = Arc::new(DataDumper::new(&controller.chain_config().config_name)?);
 
     let validator_statistics =
         report_validator_performance.then(|| Arc::new(ValidatorStatistics::new(metrics.clone())));
-
-    let mut block_sync_service = BlockSyncService::new(
-        chain_config.clone_arc(),
-        block_sync_database,
-        anchor_checkpoint_provider.clone(),
-        controller.clone_arc(),
-        metrics.clone(),
-        validator_statistics.clone(),
-        block_sync_service_channels,
-        back_sync_enabled,
-        loaded_from_remote,
-        storage_config.storage_mode,
-        network_config.target_peers,
-        received_blob_sidecars,
-        data_dumper.clone_arc(),
-    )?;
-
-    block_sync_service.try_to_spawn_back_sync_states_archiver()?;
 
     let builder_api = builder_config.map(|builder_config| {
         Arc::new(BuilderApi::new(
@@ -611,7 +585,7 @@ pub async fn run_after_genesis<P: Preset>(
         slashing_protector,
         sync_committee_agg_pool.clone_arc(),
         metrics.clone(),
-        validator_statistics,
+        validator_statistics.clone(),
         validator_channels,
     );
 
@@ -645,9 +619,48 @@ pub async fn run_after_genesis<P: Preset>(
         bls_to_execution_change_pool.clone_arc(),
         metrics.clone(),
         registry.as_mut(),
-        data_dumper,
+        data_dumper.clone_arc(),
     )
     .await?;
+
+    if chain_config.is_peerdas_scheduled() {
+        let sampling_columns = network.network_globals().sampling_columns.clone();
+        controller.on_store_sampling_columns(sampling_columns);
+    }
+
+    let block_sync_service_channels = BlockSyncServiceChannels {
+        fork_choice_to_sync_rx,
+        p2p_to_sync_rx,
+        sync_to_p2p_tx,
+        sync_to_api_tx,
+        sync_to_metrics_tx,
+    };
+
+    let block_sync_database = if in_memory {
+        Database::in_memory()
+    } else {
+        storage_config.sync_database(None, DatabaseMode::ReadWrite)?
+    };
+
+    let mut block_sync_service = BlockSyncService::new(
+        chain_config.clone_arc(),
+        block_sync_database,
+        anchor_checkpoint_provider.clone(),
+        controller.clone_arc(),
+        metrics.clone(),
+        validator_statistics,
+        block_sync_service_channels,
+        back_sync_enabled,
+        loaded_from_remote,
+        storage_config.storage_mode,
+        network_config.target_peers,
+        received_blob_sidecars,
+        received_data_column_sidecars,
+        data_dumper,
+        network.network_globals().clone_arc(),
+    )?;
+
+    block_sync_service.try_to_spawn_back_sync_states_archiver()?;
 
     let subnet_service = SubnetService::new(
         attestation_agg_pool.clone_arc(),

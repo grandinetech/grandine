@@ -47,7 +47,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                 }
                 ExecutionServiceMessage::GetBlobs {
                     block,
-                    blob_identifiers,
+                    params,
                     peer_id,
                 } => {
                     // Fetch blobs from the EL in a separate task concurrently.
@@ -59,7 +59,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     // the execution payload is validated with the `engine_newPayload` call.
                     Eth1ApiToBlobFetcher::GetBlobs {
                         block,
-                        blob_identifiers,
+                        params,
                         peer_id,
                     }
                     .send(&self.blob_fetcher_tx);

@@ -52,4 +52,6 @@ types = { workspace = true }
 validator_statistics = { workspace = true }
 
 [dev-dependencies]
+slog-async = { workspace = true }
+slog-term = { workspace = true }
 test-case = { workspace = true }

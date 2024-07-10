@@ -7,19 +7,21 @@ use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
-    StateCacheProcessor, Store,
+    DataColumnSidecarAction, DataColumnSidecarOrigin, StateCacheProcessor, Store,
 };
 use helper_functions::misc;
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use serde::Serialize;
-use ssz::ContiguousList;
 use std_ext::ArcExt;
 use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -531,11 +533,19 @@ where
         data_column_ids: impl IntoIterator<Item = DataColumnIdentifier> + Send,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let snapshot = self.snapshot();
+        let storage = self.storage();
 
-        // TODO(feature/eip7594): data columns from storage
         let data_columns = data_column_ids
             .into_iter()
-            .filter_map(|data_column_id| snapshot.cached_data_column_sidecar_by_id(data_column_id))
+            .map(
+                |data_column_id| match snapshot.cached_data_column_sidecar_by_id(data_column_id) {
+                    Some(data_column_sidecar) => Ok(Some(data_column_sidecar)),
+                    None => storage.data_column_sidecar_by_id(data_column_id),
+                },
+            )
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .collect_vec();
 
         Ok(data_columns)
@@ -544,7 +554,8 @@ where
     pub fn data_column_sidecars_by_range(
         &self,
         range: Range<Slot>,
-        columns: &ContiguousList<ColumnIndex, NumberOfColumns>,
+        columns: &[ColumnIndex],
+        max_request_data_column_sidecars: usize,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let canonical_chain_blocks = self.blocks_by_range(range)?;
 
@@ -552,13 +563,14 @@ where
             .iter()
             .filter_map(|BlockWithRoot { block, root }| {
                 block.message().body().post_deneb().map(|_| {
-                    columns.iter().map(|index| DataColumnIdentifier {
-                        index: *index,
+                    columns.iter().copied().map(|index| DataColumnIdentifier {
+                        index,
                         block_root: *root,
                     })
                 })
             })
-            .flatten();
+            .flatten()
+            .take(max_request_data_column_sidecars);
 
         self.data_column_sidecars_by_ids(data_column_ids)
     }
@@ -695,6 +707,24 @@ where
             parent_fn,
             state_fn,
         )
+    }
+
+    pub fn validate_data_column_sidecar_with_state(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+        origin: &DataColumnSidecarOrigin,
+        parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+    ) -> Result<DataColumnSidecarAction<P>> {
+        self.store_snapshot()
+            .validate_data_column_sidecar_with_state(
+                data_column_sidecar,
+                block_seen,
+                origin,
+                parent_fn,
+                state_fn,
+            )
     }
 }
 

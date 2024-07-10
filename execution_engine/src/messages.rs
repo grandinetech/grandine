@@ -7,19 +7,18 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
-    deneb::containers::BlobIdentifier,
     nonstandard::Phase,
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
 
-use crate::{PayloadAttributes, PayloadId, PayloadStatusV1};
+use crate::{EngineGetBlobsParams, PayloadAttributes, PayloadId, PayloadStatusV1};
 
 pub enum ExecutionServiceMessage<P: Preset> {
     ExchangeCapabilities,
     GetBlobs {
         block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
+        params: EngineGetBlobsParams,
         peer_id: Option<PeerId>,
     },
     NotifyForkchoiceUpdated {

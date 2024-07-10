@@ -2,14 +2,17 @@ use core::{
     num::NonZeroU64,
     ops::{Div as _, Range, Shr as _},
 };
+use std::collections::btree_map::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{ensure, Result};
 use arithmetic::{U64Ext as _, UsizeExt as _};
 use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
 use itertools::{izip, Itertools as _};
-use ssz::{BitVector, ContiguousVector, MerkleTree, SszHash};
+use ssz::{BitVector, ByteVector, ContiguousVector, MerkleTree, SszHash};
 use tap::{Pipe as _, TryConv as _};
+use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
@@ -23,7 +26,10 @@ use types::{
             Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
         },
     },
-    eip7594::{ColumnIndex, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
+    fulu::{
+        containers::{DataColumnSidecar, MatrixEntry},
+        primitives::{BlobCommitmentsInclusionProof, ColumnIndex},
+    },
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
@@ -293,8 +299,11 @@ pub fn compute_subnet_for_blob_sidecar<P: Preset>(
 
 // source: https://github.com/ethereum/consensus-specs/pull/3574/files/cebf78a83e6fc8fa237daf4264b9ca0fe61473f4#diff-96cf4db15bede3d60f04584fb25339507c35755959159cdbe19d760ca92de109R106
 #[must_use]
-pub const fn compute_subnet_for_data_column_sidecar(column_index: ColumnIndex) -> SubnetId {
-    column_index % DATA_COLUMN_SIDECAR_SUBNET_COUNT
+pub const fn compute_subnet_for_data_column_sidecar(
+    config: &Config,
+    column_index: ColumnIndex,
+) -> SubnetId {
+    column_index % config.data_column_sidecar_subnet_count
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#broadcast-sync-committee-message>
@@ -573,6 +582,44 @@ pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
     Ok(proof)
 }
 
+pub fn kzg_commitments_inclusion_proof<P: Preset>(
+    body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
+) -> BlobCommitmentsInclusionProof<P> {
+    let depth = P::KzgCommitmentsInclusionProofDepth::USIZE;
+    let mut proof = BlobCommitmentsInclusionProof::<P>::default();
+
+    proof[depth - 4] = body.bls_to_execution_changes().hash_tree_root();
+
+    proof[depth - 3] = hashing::hash_256_256(
+        body.sync_aggregate().hash_tree_root(),
+        body.execution_payload().hash_tree_root(),
+    );
+
+    proof[depth - 2] = hashing::hash_256_256(
+        hashing::hash_256_256(body.execution_requests().hash_tree_root(), ZERO_HASHES[0]),
+        ZERO_HASHES[1],
+    );
+
+    proof[depth - 1] = hashing::hash_256_256(
+        hashing::hash_256_256(
+            hashing::hash_256_256(
+                body.randao_reveal().hash_tree_root(),
+                body.eth1_data().hash_tree_root(),
+            ),
+            hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
+        ),
+        hashing::hash_256_256(
+            hashing::hash_256_256(body.attester_slashings_root(), body.attestations_root()),
+            hashing::hash_256_256(
+                body.deposits().hash_tree_root(),
+                body.voluntary_exits().hash_tree_root(),
+            ),
+        ),
+    );
+
+    proof
+}
+
 #[must_use]
 pub fn blob_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
     let current_epoch = compute_epoch_at_slot::<P>(current_slot);
@@ -644,6 +691,48 @@ pub fn construct_blob_sidecars<P: Preset>(
         .collect()
 }
 
+pub fn construct_blob_sidecars_from_data_column_sidecars<P: Preset>(
+    block: &SignedBeaconBlock<P>,
+    data_column_sidecars: impl IntoIterator<Item = Arc<DataColumnSidecar<P>>>,
+) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+    let Some(body) = block.message().body().post_deneb() else {
+        return Ok(vec![]);
+    };
+
+    // TODO(peerdas-fulu): `iterools::chunk_by` behave incorrectly when has multiple blobs
+    let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
+    for matrix in data_column_sidecars
+        .into_iter()
+        .flat_map(|sidecar| compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
+    {
+        blobs_matrix_map
+            .entry(matrix.row_index)
+            .or_default()
+            .push(matrix);
+    }
+
+    let blobs = blobs_matrix_map
+        .into_values()
+        .map(|blob_matrix| {
+            ContiguousVector::try_from_iter(
+                blob_matrix
+                    .into_iter()
+                    .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
+            )
+            .map(ByteVector::from)
+            .map(Blob::<P>::from)
+            .map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    construct_blob_sidecars(
+        block,
+        blobs,
+        vec![KzgProof::zero(); body.blob_kzg_commitments().len()],
+    )
+    .map(|blob_sidecars| blob_sidecars.into_iter().map(Arc::new).collect())
+}
+
 #[must_use]
 pub fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeIndex {
     match attestation {
@@ -681,6 +770,40 @@ pub fn parse_graffiti(string: &str) -> Result<H256> {
     graffiti[..string.len()].copy_from_slice(string.as_bytes());
 
     Ok(graffiti)
+}
+
+#[must_use]
+pub fn data_column_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
+    let current_epoch = compute_epoch_at_slot::<P>(current_slot);
+    let epoch = config.fulu_fork_epoch.max(
+        current_epoch
+            .checked_sub(config.min_epochs_for_data_column_sidecars_requests)
+            .unwrap_or(GENESIS_EPOCH),
+    );
+
+    compute_start_slot_at_epoch::<P>(epoch)
+}
+
+pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+) -> Vec<MatrixEntry<P>> {
+    let DataColumnSidecar {
+        index,
+        column,
+        kzg_proofs,
+        ..
+    } = data_column_sidecar;
+
+    let blob_count = column.len() as u64;
+
+    izip!(0..blob_count, column, kzg_proofs)
+        .map(|(row_index, cell, kzg_proof)| MatrixEntry {
+            row_index,
+            column_index: *index,
+            cell: cell.clone(),
+            kzg_proof: *kzg_proof,
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 pub mod eip_4844;
+pub mod eip_7594;
 
 mod bls;
 mod error;
