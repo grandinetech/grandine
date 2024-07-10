@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::Error as AnyhowError;
 use bit_field::BitField as _;
 use bls::Signature;
 use derive_more::Constructor;
@@ -23,11 +24,11 @@ use crate::{
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::{Blob, KzgCommitment, KzgProof},
+        primitives::{Blob, KzgCommitment, KzgProofs},
     },
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     electra::containers::ExecutionRequests,
-    phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    phase0::primitives::{Epoch, Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
 
@@ -61,21 +62,28 @@ pub enum Phase {
     Capella,
     Deneb,
     Electra,
+    Fulu,
 }
 
 impl Phase {
-    #[must_use]
-    pub fn max_blobs_per_block(self, config: &Config) -> u64 {
+    pub fn max_blobs_per_block(self, epoch: Epoch, config: &Config) -> Result<u64, AnyhowError> {
         let max_blobs = match self {
             Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella | Self::Deneb => {
                 config.max_blobs_per_block
             }
             Self::Electra => config.max_blobs_per_block_electra,
+            Self::Fulu => config
+                .get_max_blobs_per_block(epoch)
+                .map_err(AnyhowError::new)?,
         };
 
-        max_blobs
-            .try_into()
-            .expect("number of max blobs in block should fit in u64")
+        max_blobs.try_into().map_err(Into::into)
+    }
+
+    // Modify condition if we want to change the peerdas activation behaviour
+    #[must_use]
+    pub fn is_peerdas_activated(self) -> bool {
+        self >= Self::Fulu
     }
 }
 
@@ -216,6 +224,23 @@ impl<P: Preset> From<Arc<BlobSidecar<P>>> for BlobSidecarWithId<P> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct DataColumnSidecarWithId<P: Preset> {
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub data_column_id: DataColumnIdentifier,
+}
+
+impl<P: Preset> From<Arc<DataColumnSidecar<P>>> for DataColumnSidecarWithId<P> {
+    fn from(data_column_sidecar: Arc<DataColumnSidecar<P>>) -> Self {
+        let data_column_id = data_column_sidecar.as_ref().into();
+
+        Self {
+            data_column_sidecar,
+            data_column_id,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub struct BlockRewards {
     pub total: Gwei,
@@ -223,12 +248,6 @@ pub struct BlockRewards {
     pub sync_aggregate: Gwei,
     pub proposer_slashings: Gwei,
     pub attester_slashings: Gwei,
-}
-
-#[derive(Clone, Debug)]
-pub struct DataColumnSidecarWithId<P: Preset> {
-    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
-    pub data_column_id: DataColumnIdentifier,
 }
 
 #[derive(Clone, Copy)]
@@ -298,7 +317,7 @@ pub struct TimedPowBlock {
 pub struct WithBlobsAndMev<T, P: Preset> {
     pub value: T,
     pub commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-    pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>>,
+    pub proofs: Option<KzgProofs<P>>,
     pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
     pub mev: Option<Wei>,
     pub execution_requests: Option<ExecutionRequests<P>>,
@@ -547,6 +566,7 @@ mod tests {
             Phase::Capella,
             Phase::Deneb,
             Phase::Electra,
+            Phase::Fulu,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);

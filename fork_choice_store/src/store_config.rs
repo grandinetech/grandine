@@ -19,6 +19,8 @@ pub struct StoreConfig {
     pub unfinalized_states_in_memory: u64,
     #[derivative(Default(value = "DEFAULT_KZG_BACKEND"))]
     pub kzg_backend: KzgBackend,
+    #[derivative(Default(value = "false"))]
+    pub disable_engine_getblobs: bool,
 }
 
 impl StoreConfig {
