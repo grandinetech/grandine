@@ -419,13 +419,6 @@ where
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
 
-        if tick.kind == TickKind::AttestFourth
-            && self.store.is_forward_synced()
-            && misc::slots_since_epoch_start::<P>(tick.slot) == 0
-        {
-            self.prune_old_blob_sidecars()?;
-        }
-
         if self.store.is_forward_synced() && misc::slots_since_epoch_start::<P>(tick.slot) == 0 {
             if tick.kind == TickKind::AttestFourth {
                 self.prune_old_blob_sidecars()?;
@@ -436,6 +429,18 @@ where
                     &self.store.head().state(&self.store),
                     metrics,
                 );
+            }
+        }
+
+        if tick.kind == TickKind::AggregateFourth {
+            let store = &self.store;
+
+            if let Some(state) = self.state_cache.existing_state_at_slot(
+                store,
+                store.head().block_root,
+                store.slot() + 1,
+            ) {
+                self.prepare_execution_payload_for_next_slot(&state);
             }
         }
 

@@ -1,5 +1,5 @@
 use core::ops::RangeInclusive;
-use std::{path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use itertools::Itertools as _;
 use once_cell::sync::Lazy;
@@ -7,6 +7,7 @@ use spec_test_utils::Case;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
+    deneb::containers::BlobSidecar,
     phase0::primitives::Slot,
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -141,4 +142,35 @@ pub fn beacon_blocks<P: Preset>(
     }
 
     blocks
+}
+
+pub fn blob_sidecars<P: Preset>(
+    config: &Config,
+    case: Case,
+    slots: RangeInclusive<Slot>,
+    width: usize,
+) -> BTreeMap<Slot, Vec<Arc<BlobSidecar<P>>>> {
+    let pattern = format!("blob_sidecar_slot_{:?<width$}_*", "");
+    let low = format!("blob_sidecar_slot_{:0width$}_*", slots.start());
+    let high = format!("blob_sidecar_slot_{:0width$}_*", slots.end() + 1);
+
+    let blobs = case
+        .glob(pattern)
+        .skip_while(|path| path < Path::new(low.as_str()))
+        .take_while(|path| path < Path::new(high.as_str()))
+        .map(|path| case.ssz_uncompressed::<_, Arc<BlobSidecar<P>>>(config, path))
+        .chunk_by(|blob| blob.signed_block_header.message.slot)
+        .into_iter()
+        .map(|(slot, blobs)| (slot, blobs.collect_vec()))
+        .collect::<BTreeMap<_, _>>();
+
+    if let Some((first_slot, _)) = blobs.first_key_value() {
+        assert_eq!(*first_slot, *slots.start());
+    }
+
+    if let Some((last_slot, _)) = blobs.last_key_value() {
+        assert_eq!(*last_slot, *slots.end());
+    }
+
+    blobs
 }
