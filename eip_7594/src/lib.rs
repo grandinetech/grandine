@@ -80,11 +80,10 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         }
     );
 
-    let (row_indices, col_indices): (Vec<_>, Vec<_>) = column
+    let col_indices = column
         .iter()
-        .zip(0_u64..)
-        .map(|(_, row_index)| (row_index, index))
-        .unzip();
+        .map(|_| *index)
+        .collect::<Vec<u64>>();
 
     let kzg_settings = settings();
 
@@ -106,8 +105,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
 
     CKzgProof::verify_cell_kzg_proof_batch(
         commitments.as_slice(),
-        &row_indices,
-        &col_indices,
+        col_indices.as_slice(),
         column.as_slice(),
         &kzg_proofs,
         &kzg_settings,
