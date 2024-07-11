@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use anyhow::{ensure, Result};
 use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof};
 use hashing::ZERO_HASHES;
 use helper_functions::predicates::is_valid_merkle_branch;
+use kzg as _;
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
@@ -12,10 +11,10 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned;
 use types::{
     combined::SignedBeaconBlock,
-    deneb::primitives::{Blob, BlobIndex, KzgProof},
+    deneb::primitives::{Blob, KzgProof},
     eip7594::{
-        BlobCommitmentsInclusionProof, ColumnIndex, DataColumnSidecar, NumberOfColumns,
-        DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
+        BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, MatrixEntry,
+        NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
     },
     phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
     preset::Preset,
@@ -27,9 +26,8 @@ use crate::trusted_setup::settings;
 mod trusted_setup;
 
 const MAX_BLOBS_PER_BLOCK: u64 = 6;
-
-type ExtendedMatrix = [CKzgCell; (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
-type CellID = u64;
+const MAX_CELLS_IN_EXTENDED_MATRIX: usize = (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize;
+const CELLS_PER_EXT_BLOB: usize = 128;
 
 #[derive(Debug, Error)]
 pub enum VerifyKzgProofsError {
@@ -106,7 +104,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         .map(|a| Bytes48::from_bytes(&a.as_bytes()).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
 
-    CKzgProof::verify_cell_proof_batch(
+    CKzgProof::verify_cell_kzg_proof_batch(
         commitments.as_slice(),
         &row_indices,
         &col_indices,
@@ -188,47 +186,82 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
     result
 }
 
-pub fn compute_extended_matrix(blobs: Vec<CKzgBlob>) -> Result<ExtendedMatrix> {
-    let mut extended_matrix: Vec<CKzgCell> = Vec::new();
-
+/**
+ * Return the full ``ExtendedMatrix``.
+ *
+ * This helper demonstrates the relationship between blobs and ``ExtendedMatrix``.
+ */
+pub fn compute_extended_matrix(
+    blobs: Vec<CKzgBlob>,
+) -> Result<[MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX]> {
     let kzg_settings = settings();
 
-    for blob in blobs {
-        let cells = *CKzgCell::compute_cells(&blob, &kzg_settings)?;
-        extended_matrix.extend(cells);
+    let mut extended_matrix: [MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX] =
+        core::array::from_fn(|_| MatrixEntry::default());
+    for (blob_index, blob) in blobs.iter().enumerate() {
+        let (cells, proofs) = CKzgCell::compute_cells_and_kzg_proofs(blob, &kzg_settings)?;
+        for (cell_id, (cell, proof)) in cells.into_iter().zip(proofs.into_iter()).enumerate() {
+            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_id] = MatrixEntry {
+                cell: try_convert_ckzg_cell_to_cell(&cell)?,
+                kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
+                row_index: blob_index as u64,
+                column_index: cell_id as u64,
+            };
+        }
     }
 
-    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
-    array.copy_from_slice(&extended_matrix[..]);
-
-    Ok(array)
+    Ok(extended_matrix)
 }
 
+/**
+ * Return the recovered extended matrix.
+ *
+ * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
+ */
 pub fn recover_matrix(
-    cells_dict: &HashMap<(BlobIndex, CellID), CKzgCell>,
+    partial_matrix: Vec<MatrixEntry>,
     blob_count: usize,
-) -> Result<ExtendedMatrix> {
+) -> Result<[MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX]> {
     let kzg_settings = settings();
 
-    let mut extended_matrix = Vec::new();
+    let mut extended_matrix: [MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX] =
+        core::array::from_fn(|_| MatrixEntry::default());
     for blob_index in 0..blob_count {
-        let mut cell_ids = Vec::new();
-        for &(b_index, cell_id) in cells_dict.keys() {
-            if b_index == blob_index as u64 {
-                cell_ids.push(cell_id);
+        let mut cell_ids = vec![];
+        let mut cells = vec![];
+        let mut proofs = vec![];
+
+        for e in partial_matrix.iter() {
+            if e.row_index == blob_index as u64 {
+                cell_ids.push(e.column_index);
+                cells.push(CKzgCell::from_bytes(e.cell.as_bytes())?);
+                proofs.push(e.kzg_proof);
             }
         }
-        let cells: Vec<CKzgCell> = cell_ids
-            .iter()
-            .map(|&cell_id| cells_dict[&(blob_index as u64, cell_id)])
-            .collect();
-        let full_polynomial = CKzgCell::recover_polynomial(&cell_ids, &cells, &kzg_settings)?;
-        extended_matrix.push(full_polynomial);
-    }
-    let mut array = [CKzgCell::default(); (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize];
-    array.copy_from_slice(&extended_matrix[..]);
 
-    Ok(array)
+        let (recovered_cells, recovered_proofs) =
+            CKzgCell::recover_cells_and_kzg_proofs(&cell_ids, &cells, &kzg_settings)?;
+        for (cell_id, (cell, proof)) in recovered_cells
+            .into_iter()
+            .zip(recovered_proofs.into_iter())
+            .enumerate()
+        {
+            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_id] = MatrixEntry {
+                cell: try_convert_ckzg_cell_to_cell(&cell)?,
+                kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
+                row_index: blob_index as u64,
+                column_index: cell_id as u64,
+            };
+        }
+    }
+
+    Ok(extended_matrix)
+}
+
+fn try_convert_ckzg_cell_to_cell(cell: &CKzgCell) -> Result<Cell> {
+    Ok(Box::new(ByteVector::from(ContiguousVector::try_from_iter(
+        cell.to_bytes(),
+    )?)))
 }
 
 pub fn get_data_column_sidecars<P: Preset>(
@@ -256,20 +289,18 @@ pub fn get_data_column_sidecars<P: Preset>(
         let cells_and_proofs = c_kzg_blobs
             .into_iter()
             .map(|blob| {
-                CKzgCell::compute_cells_and_proofs(&blob, &kzg_settings).map_err(Into::into)
+                CKzgCell::compute_cells_and_kzg_proofs(&blob, &kzg_settings).map_err(Into::into)
             })
             .collect::<Result<Vec<_>>>()?;
 
         let blob_count = cells_and_proofs.len();
 
         for column_index in 0..NumberOfColumns::U64 {
-            let mut column_cells: Vec<CKzgCell> = Vec::new();
+            let column_cells: Vec<CKzgCell> = (0..blob_count)
+                .map(|row_index| cells_and_proofs[row_index].0[column_index as usize].clone())
+                .collect();
 
-            for row_index in 0..blob_count {
-                column_cells.push(cells_and_proofs[row_index].0[column_index as usize].clone());
-            }
-
-            let kzg_proof_of_column: Vec<_> = (0..blob_count)
+            let column_proofs: Vec<CKzgProof> = (0..blob_count)
                 .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
                 .collect();
 
@@ -285,9 +316,9 @@ pub fn get_data_column_sidecars<P: Preset>(
                 cont_cells.push(v);
             }
 
-            let proofs = kzg_proof_of_column
+            let proofs = column_proofs
                 .iter()
-                .map(|data| KzgProof::try_from(data).map_err(Into::into))
+                .map(|data| KzgProof::try_from(data.to_bytes().into_inner()).map_err(Into::into))
                 .collect::<Result<Vec<KzgProof>>>()?;
 
             let kzg_proofs = ContiguousList::try_from_iter(proofs.into_iter())?;
@@ -343,11 +374,11 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
     proof
 }
 
-/** 
+/**
  * Return the sample count if allowing failures.
- * 
- * This helper demonstrates how to calculate the number of columns to query per slot when 
- * allowing given number of failures, assuming uniform random selection without replacement. 
+ *
+ * This helper demonstrates how to calculate the number of columns to query per slot when
+ * allowing given number of failures, assuming uniform random selection without replacement.
 */
 pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
     // check that `allowed_failures` within the accepted range [0 -> NUMBER_OF_COLUMNS // 2]
@@ -357,15 +388,23 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
     let worst_case_missing = NumberOfColumns::U64 / 2 + 1;
 
     // the probability of successful sampling of an unavailable block
-    let false_positive_threshold = 
-        hypergeom_cdf(0, NumberOfColumns::U64, worst_case_missing, SAMPLES_PER_SLOT);
+    let false_positive_threshold = hypergeom_cdf(
+        0,
+        NumberOfColumns::U64,
+        worst_case_missing,
+        SAMPLES_PER_SLOT,
+    );
 
     // number of unique column IDs
     let mut sample_count = SAMPLES_PER_SLOT;
     while sample_count <= NumberOfColumns::U64 + 1 {
         // TODO(feature/das): change variable name `x` to a suitable one
-        let x = 
-            hypergeom_cdf(allowed_failures, NumberOfColumns::U64, worst_case_missing, sample_count);
+        let x = hypergeom_cdf(
+            allowed_failures,
+            NumberOfColumns::U64,
+            worst_case_missing,
+            sample_count,
+        );
         if x <= false_positive_threshold {
             break;
         }
