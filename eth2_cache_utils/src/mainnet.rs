@@ -1,10 +1,11 @@
 use core::ops::RangeInclusive;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use spec_test_utils::Case;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
+    deneb::containers::BlobSidecar,
     phase0::{consts::GENESIS_SLOT, primitives::Slot},
     preset::Mainnet,
 };
@@ -74,4 +75,12 @@ pub fn beacon_blocks(
 #[must_use]
 pub fn beacon_state(slot: Slot, width: usize) -> Arc<BeaconState<Mainnet>> {
     generic::beacon_state(&Config::mainnet(), CASE, slot, width)
+}
+
+#[must_use]
+pub fn blob_sidecars(
+    slots: RangeInclusive<Slot>,
+    width: usize,
+) -> BTreeMap<Slot, Vec<Arc<BlobSidecar<Mainnet>>>> {
+    generic::blob_sidecars(&Config::mainnet(), CASE, slots, width)
 }
