@@ -16,7 +16,7 @@ use crate::{
 type FieldElementsPerCell = U64;
 type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
-pub type CellID = u64;
+pub type CellIndex = u64;
 pub type RowIndex = u64;
 pub type ColumnIndex = u64;
 pub type Cell = Box<ByteVector<BytesPerCell>>;

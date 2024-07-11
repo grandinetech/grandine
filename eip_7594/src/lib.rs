@@ -200,12 +200,12 @@ pub fn compute_extended_matrix(
         core::array::from_fn(|_| MatrixEntry::default());
     for (blob_index, blob) in blobs.iter().enumerate() {
         let (cells, proofs) = CKzgCell::compute_cells_and_kzg_proofs(blob, &kzg_settings)?;
-        for (cell_id, (cell, proof)) in cells.into_iter().zip(proofs.into_iter()).enumerate() {
-            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_id] = MatrixEntry {
+        for (cell_index, (cell, proof)) in cells.into_iter().zip(proofs.into_iter()).enumerate() {
+            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_index] = MatrixEntry {
                 cell: try_convert_ckzg_cell_to_cell(&cell)?,
                 kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
                 row_index: blob_index as u64,
-                column_index: cell_id as u64,
+                column_index: cell_index as u64,
             };
         }
     }
@@ -227,30 +227,30 @@ pub fn recover_matrix(
     let mut extended_matrix: [MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX] =
         core::array::from_fn(|_| MatrixEntry::default());
     for blob_index in 0..blob_count {
-        let mut cell_ids = vec![];
+        let mut cell_indexs = vec![];
         let mut cells = vec![];
         let mut proofs = vec![];
 
         for e in partial_matrix.iter() {
             if e.row_index == blob_index as u64 {
-                cell_ids.push(e.column_index);
+                cell_indexs.push(e.column_index);
                 cells.push(CKzgCell::from_bytes(e.cell.as_bytes())?);
                 proofs.push(e.kzg_proof);
             }
         }
 
         let (recovered_cells, recovered_proofs) =
-            CKzgCell::recover_cells_and_kzg_proofs(&cell_ids, &cells, &kzg_settings)?;
-        for (cell_id, (cell, proof)) in recovered_cells
+            CKzgCell::recover_cells_and_kzg_proofs(&cell_indexs, &cells, &kzg_settings)?;
+        for (cell_index, (cell, proof)) in recovered_cells
             .into_iter()
             .zip(recovered_proofs.into_iter())
             .enumerate()
         {
-            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_id] = MatrixEntry {
+            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_index] = MatrixEntry {
                 cell: try_convert_ckzg_cell_to_cell(&cell)?,
                 kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
                 row_index: blob_index as u64,
-                column_index: cell_id as u64,
+                column_index: cell_index as u64,
             };
         }
     }

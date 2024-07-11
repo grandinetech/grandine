@@ -424,7 +424,7 @@ arithmetic = { path = 'arithmetic' }
 binary_utils = { path = 'binary_utils' }
 bls = { path = 'bls' }
 builder_api = { path = 'builder_api' }
-c-kzg = { git = 'https://github.com/ethereum/c-kzg-4844', branch = 'das' }
+c-kzg = { git = 'https://github.com/ethereum/c-kzg-4844', rev = '5e4be925967a3f235f75cc9a5e3948a086584a66' }
 clock = { path = 'clock' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
