@@ -1,5 +1,5 @@
 use core::ops::RangeInclusive;
-use std::{sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use allocator as _;
 use anyhow::{Error, Result};
@@ -14,6 +14,7 @@ use rand::seq::SliceRandom as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
+    deneb::containers::BlobSidecar,
     phase0::{consts::GENESIS_SLOT, primitives::Slot},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -28,7 +29,7 @@ struct Options {
     #[clap(value_enum)]
     mode: Mode,
     #[clap(long)]
-    unfinalized_states_in_memory: u64,
+    unfinalized_states_in_memory: Option<u64>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -50,6 +51,9 @@ enum Blocks {
     MainnetAltair2048,
     #[clap(name = "mainnet-altair-8192")]
     MainnetAltair8192,
+
+    #[clap(name = "mainnet-deneb-1024")]
+    MainnetDeneb1024,
 
     #[clap(name = "medalla-genesis-128")]
     MedallaGenesis128,
@@ -123,7 +127,8 @@ impl From<Blocks> for Chain {
             | Blocks::MainnetAltair128
             | Blocks::MainnetAltair1024
             | Blocks::MainnetAltair2048
-            | Blocks::MainnetAltair8192 => Self::Mainnet,
+            | Blocks::MainnetAltair8192
+            | Blocks::MainnetDeneb1024 => Self::Mainnet,
             Blocks::MedallaGenesis128
             | Blocks::MedallaGenesis1024
             | Blocks::MedallaRoughtime1024
@@ -181,6 +186,11 @@ impl From<Blocks> for BlockParameters {
             Blocks::MainnetAltair8192 => Self {
                 first_slot: 3_078_848,
                 last_slot: 3_087_040,
+                slot_width: 7,
+            },
+            Blocks::MainnetDeneb1024 => Self {
+                first_slot: 9_481_344,
+                last_slot: 9_482_368,
                 slot_width: 7,
             },
             Blocks::MedallaGenesis128 => Self {
@@ -248,36 +258,42 @@ fn main() -> Result<()> {
             options,
             mainnet::beacon_state,
             mainnet::beacon_blocks,
+            mainnet::blob_sidecars,
         ),
         Chain::Medalla => run(
             ChainConfig::medalla(),
             options,
             medalla::beacon_state,
             medalla::beacon_blocks,
+            |_, _| BTreeMap::new(),
         ),
         Chain::Goerli => run(
             ChainConfig::goerli(),
             options,
             goerli::beacon_state,
             goerli::beacon_blocks,
+            |_, _| BTreeMap::new(),
         ),
         Chain::Withdrawals => run(
             ChainConfig::withdrawal_devnet_4(),
             options,
             withdrawal_devnet_4::beacon_state,
             withdrawal_devnet_4::beacon_blocks,
+            |_, _| BTreeMap::new(),
         ),
         Chain::Holesky => run(
             ChainConfig::holesky(),
             options,
             holesky::beacon_state,
             holesky::beacon_blocks,
+            holesky::blob_sidecars,
         ),
         Chain::HoleskyDevnet => run(
             ChainConfig::holesky_devnet(),
             options,
             holesky_devnet::beacon_state,
             holesky_devnet::beacon_blocks,
+            |_, _| BTreeMap::new(),
         ),
     }?;
 
@@ -294,6 +310,7 @@ fn run<P: Preset>(
     options: Options,
     beacon_state: impl FnOnce(Slot, usize) -> Arc<BeaconState<P>>,
     beacon_blocks: impl FnOnce(RangeInclusive<Slot>, usize) -> Vec<Arc<SignedBeaconBlock<P>>>,
+    blob_sidecars: impl FnOnce(RangeInclusive<Slot>, usize) -> BTreeMap<Slot, Vec<Arc<BlobSidecar<P>>>>,
 ) -> Result<()> {
     print_jemalloc_stats()?;
 
@@ -311,6 +328,7 @@ fn run<P: Preset>(
     } = blocks.into();
 
     let mut blocks = beacon_blocks(first_slot..=last_slot, slot_width).into_iter();
+    let mut blobs = blob_sidecars(first_slot..=last_slot, slot_width);
 
     let last_block_root = blocks
         .as_slice()
@@ -320,6 +338,9 @@ fn run<P: Preset>(
         .hash_tree_root();
 
     let chain_config = Arc::new(chain_config);
+
+    let unfinalized_states_in_memory =
+        unfinalized_states_in_memory.unwrap_or(StoreConfig::default().unfinalized_states_in_memory);
 
     let store_config = StoreConfig {
         unfinalized_states_in_memory,
@@ -357,7 +378,15 @@ fn run<P: Preset>(
     let start = Instant::now();
 
     for block in blocks {
+        let slot = block.message().slot();
+
         controller.on_requested_block(block, None);
+
+        if let Some(block_blobs) = blobs.remove(&slot) {
+            for blob in block_blobs {
+                controller.on_api_blob_sidecar(blob)
+            }
+        }
 
         if mode == Mode::Synchronous {
             controller.wait_for_tasks();
