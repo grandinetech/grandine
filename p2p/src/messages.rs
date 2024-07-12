@@ -29,7 +29,7 @@ use types::{
 
 use crate::{
     misc::{
-        AttestationSubnetActions, BeaconCommitteeSubscription, RequestId,
+        AttestationSubnetActions, BeaconCommitteeSubscription, PeerReportReason, RequestId,
         SyncCommitteeSubnetAction, SyncCommitteeSubscription,
     },
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
@@ -111,6 +111,7 @@ impl SyncToMetrics {
 
 pub enum SyncToP2p {
     PruneReceivedBlocks,
+    ReportPeer(PeerId, PeerAction, ReportSource, PeerReportReason),
     RequestBlobsByRange(RequestId, PeerId, Slot, u64),
     RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
     RequestBlocksByRange(RequestId, PeerId, Slot, u64),
