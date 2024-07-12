@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_with::{As, DisplayFromStr};
+use strum::IntoStaticStr;
 use types::phase0::primitives::{CommitteeIndex, Epoch, Slot, SubnetId, ValidatorIndex};
 
 pub type RequestId = usize;
@@ -50,6 +51,11 @@ pub struct BeaconCommitteeSubscription {
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
     pub is_aggregator: bool,
+}
+
+#[derive(IntoStaticStr)]
+pub enum PeerReportReason {
+    ExpiredSyncBatch,
 }
 
 #[derive(PartialEq, Eq, Debug, Deserialize, Serialize)]

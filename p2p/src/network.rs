@@ -390,6 +390,17 @@ impl<P: Preset> Network<P> {
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {
                     match message {
+                        SyncToP2p::PruneReceivedBlocks => {
+                            self.received_block_roots = HashMap::new();
+                        }
+                        SyncToP2p::ReportPeer(peer_id, peer_action, report_source, reason) => {
+                            self.report_peer(
+                                peer_id,
+                                peer_action,
+                                report_source,
+                                reason
+                            );
+                        }
                         SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count) => {
                             self.request_blobs_by_range(request_id, peer_id, start_slot, count);
                         }
@@ -407,9 +418,6 @@ impl<P: Preset> Network<P> {
                         }
                         SyncToP2p::SubscribeToCoreTopics => {
                             self.subscribe_to_core_topics();
-                        }
-                        SyncToP2p::PruneReceivedBlocks => {
-                            self.received_block_roots = HashMap::new();
                         }
                     }
                 },

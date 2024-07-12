@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use database::Database;
 use eth1_api::RealController;
-use eth2_libp2p::{rpc::StatusMessage, PeerId};
+use eth2_libp2p::{rpc::StatusMessage, PeerAction, PeerId, ReportSource};
 use fork_choice_control::SyncMessage;
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -29,7 +29,7 @@ use types::{
 use crate::{
     back_sync::{BackSync, Data as BackSyncData, Error as BackSyncError, SyncCheckpoint},
     messages::{ArchiverToSync, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p},
-    misc::RequestId,
+    misc::{PeerReportReason, RequestId},
     sync_manager::{SyncBatch, SyncManager, SyncTarget},
 };
 
@@ -354,10 +354,19 @@ impl<P: Preset> BlockSyncService<P> {
             let request_id = self.request_id()?;
             let SyncBatch {
                 target,
+                peer_id,
                 start_slot,
                 count,
                 ..
             } = batch;
+
+            SyncToP2p::ReportPeer(
+                peer_id,
+                PeerAction::MidToleranceError,
+                ReportSource::SyncService,
+                PeerReportReason::ExpiredSyncBatch,
+            )
+            .send(&self.sync_to_p2p_tx);
 
             let peer = self.sync_manager.retry_batch(request_id, &batch);
 

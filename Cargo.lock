@@ -5610,6 +5610,7 @@ dependencies = [
  "slog-stdlog",
  "ssz",
  "std_ext",
+ "strum",
  "test-case",
  "thiserror",
  "tokio",
