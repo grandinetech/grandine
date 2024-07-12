@@ -118,6 +118,9 @@ impl<P: Preset> SszSize for BeaconState<P> {
 
 impl<P: Preset> SszRead<Config> for BeaconState<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `state.slot`:
+        // - The contents of `state.genesis_time`.
+        // - The contents of `state.genesis_validators_root`.
         let slot_start = UnixSeconds::SIZE.get() + H256::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -301,6 +304,9 @@ impl<P: Preset> SszSize for SignedBeaconBlock<P> {
 
 impl<P: Preset> SszRead<Config> for SignedBeaconBlock<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `block.message.slot`:
+        // - The offset of `block.message`.
+        // - The contents of `block.signature`.
         let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -437,6 +443,7 @@ impl<P: Preset> SszSize for BeaconBlock<P> {
 
 impl<P: Preset> SszRead<Config> for BeaconBlock<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // The offset of `block.slot` is the first fixed part in `block`.
         let slot_start = 0;
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
@@ -622,6 +629,9 @@ impl<P: Preset> SszSize for SignedBlindedBeaconBlock<P> {
 
 impl<P: Preset> SszRead<Config> for SignedBlindedBeaconBlock<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `block.message.slot`:
+        // - The offset of `block.message`.
+        // - The contents of `block.signature`.
         let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
         let slot_end = slot_start + Slot::SIZE.get();
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
