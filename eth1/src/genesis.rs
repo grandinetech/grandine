@@ -9,12 +9,8 @@ use log::info;
 use ssz::{SszRead as _, SszWrite as _};
 use thiserror::Error;
 use types::{
-    combined::BeaconState,
-    config::Config,
-    nonstandard::Phase,
-    phase0::{consts::GENESIS_SLOT, primitives::UnixSeconds},
-    preset::Preset,
-    traits::BeaconState as _,
+    combined::BeaconState, config::Config, nonstandard::Phase, phase0::primitives::UnixSeconds,
+    preset::Preset, traits::BeaconState as _,
 };
 
 use crate::Eth1Chain;
@@ -44,7 +40,7 @@ pub async fn wait<P: Preset>(
     }
 
     ensure!(
-        config.phase_at_slot::<P>(GENESIS_SLOT) < Phase::Bellatrix,
+        config.genesis_phase() < Phase::Bellatrix,
         Error::PostBellatrixGenesisNotImplemented,
     );
 

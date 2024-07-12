@@ -606,6 +606,11 @@ impl Config {
         Ok(())
     }
 
+    #[must_use]
+    pub fn genesis_phase(&self) -> Phase {
+        self.phase_at_epoch(GENESIS_EPOCH)
+    }
+
     #[inline]
     #[must_use]
     pub const fn version(&self, phase: Phase) -> Version {
@@ -642,6 +647,14 @@ impl Config {
         self.fork_slot::<P>(phase).into_option().is_some()
     }
 
+    fn phase_at_epoch(&self, epoch: Epoch) -> Phase {
+        self.fork_epochs()
+            .take_while(|(_, fork_epoch)| *fork_epoch <= epoch)
+            .map(|(phase, _)| phase)
+            .last()
+            .unwrap_or(Phase::Phase0)
+    }
+
     #[must_use]
     pub fn phase_at_slot<P: Preset>(&self, slot: Slot) -> Phase {
         self.fork_slots::<P>()
@@ -660,6 +673,19 @@ impl Config {
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
+    }
+
+    fn fork_epochs(&self) -> impl Iterator<Item = (Phase, Epoch)> {
+        // Do not remove the type annotation.
+        // It ensures that this method is up to date when new phases are added.
+        let fields: [_; Phase::CARDINALITY - 1] = [
+            self.altair_fork_epoch,
+            self.bellatrix_fork_epoch,
+            self.capella_fork_epoch,
+            self.deneb_fork_epoch,
+        ];
+
+        enum_iterator::all().skip(1).zip(fields)
     }
 
     fn fork_epochs_mut(&mut self) -> impl Iterator<Item = (Phase, &mut Epoch)> {
