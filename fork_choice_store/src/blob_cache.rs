@@ -2,10 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use std_ext::ArcExt as _;
 use types::{
-    deneb::containers::{BlobIdentifier, BlobSidecar},
-    nonstandard::BlobSidecarWithId,
-    phase0::primitives::Slot,
-    preset::Preset,
+    combined::BlobSidecar, deneb::containers::BlobIdentifier, nonstandard::BlobSidecarWithId,
+    phase0::primitives::Slot, preset::Preset,
 };
 
 const BLOB_RETAIN_DURATION_IN_SLOTS: Slot = 2;
@@ -25,7 +23,7 @@ impl<P: Preset> BlobCache<P> {
     }
 
     pub fn insert(&mut self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        let slot = blob_sidecar.signed_block_header.message.slot;
+        let slot = blob_sidecar.signed_block_header().message.slot;
         let blob_identifier = blob_sidecar.as_ref().into();
 
         self.blobs

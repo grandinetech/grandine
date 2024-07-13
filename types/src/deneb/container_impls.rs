@@ -1,21 +1,18 @@
-use core::fmt::{Debug, Formatter, Result as FmtResult};
-
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 
 use crate::{
+    combined::BlobSidecar,
     deneb::{
         containers::{
             BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
-            ExecutionPayload, ExecutionPayloadHeader,
+            BlobIdentifier, ExecutionPayload, ExecutionPayloadHeader,
         },
         primitives::KzgCommitment,
     },
     phase0::primitives::H256,
     preset::Preset,
 };
-
-use super::containers::{BlobIdentifier, BlobSidecar};
 
 impl<P: Preset> BeaconBlock<P> {
     pub fn with_execution_payload_header_and_kzg_commitments(
@@ -175,31 +172,9 @@ impl<P: Preset> From<&ExecutionPayload<P>> for ExecutionPayloadHeader<P> {
 
 impl<P: Preset> From<&BlobSidecar<P>> for BlobIdentifier {
     fn from(blob_sidecar: &BlobSidecar<P>) -> Self {
-        let BlobSidecar {
-            index,
-            signed_block_header,
-            ..
-        } = *blob_sidecar;
-
-        let block_header = signed_block_header.message;
-        let block_root = block_header.hash_tree_root();
-
-        Self { block_root, index }
-    }
-}
-
-impl<P: Preset> Debug for BlobSidecar<P> {
-    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-        formatter
-            .debug_struct("BlobSidecar")
-            .field("index", &self.index)
-            .field("kzg_commitment", &self.kzg_commitment)
-            .field("kzg_proof", &self.kzg_proof)
-            .field("signed_block_header", &self.signed_block_header)
-            .field(
-                "kzg_commitment_inclusion_proof",
-                &self.kzg_commitment_inclusion_proof,
-            )
-            .finish_non_exhaustive()
+        Self {
+            block_root: blob_sidecar.signed_block_header().message.hash_tree_root(),
+            index: blob_sidecar.index(),
+        }
     }
 }

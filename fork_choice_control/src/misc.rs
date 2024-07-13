@@ -11,8 +11,7 @@ use fork_choice_store::{
 use serde::Serialize;
 use strum::IntoStaticStr;
 use types::{
-    combined::{SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobSidecar,
+    combined::{BlobSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     phase0::primitives::ValidatorIndex,
     preset::Preset,
 };

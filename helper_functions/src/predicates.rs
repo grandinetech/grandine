@@ -13,9 +13,9 @@ use tap::TryConv as _;
 use typenum::Unsigned as _;
 use types::{
     altair::consts::{SyncCommitteeSubnetCount, TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE},
-    combined::BeaconState as CombinedBeaconState,
+    combined::{BeaconState as CombinedBeaconState, BlobSidecar},
     config::Config,
-    deneb::{containers::BlobSidecar, primitives::BlobIndex},
+    deneb::primitives::BlobIndex,
     electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
     phase0::{
         consts::{
@@ -214,13 +214,23 @@ pub fn is_valid_merkle_branch(
 pub fn is_valid_blob_sidecar_inclusion_proof<P: Preset>(blob_sidecar: &BlobSidecar<P>) -> bool {
     // `consensus-specs` calls this `gindex`, but that is another misleading name.
     // This is NOT a generalized index.
-    let index_at_commitment_depth = index_at_commitment_depth::<P>(blob_sidecar.index);
+    let index_at_commitment_depth = match blob_sidecar {
+        BlobSidecar::Deneb(blob_sidecar) => {
+            deneb_index_at_commitment_depth::<P>(blob_sidecar.index)
+        }
+        BlobSidecar::Electra(blob_sidecar) => {
+            electra_index_at_commitment_depth::<P>(blob_sidecar.index)
+        }
+    };
 
     is_valid_merkle_branch(
-        blob_sidecar.kzg_commitment.hash_tree_root(),
-        blob_sidecar.kzg_commitment_inclusion_proof,
+        blob_sidecar.kzg_commitment().hash_tree_root(),
+        blob_sidecar
+            .kzg_commitment_inclusion_proof()
+            .iter()
+            .copied(),
         index_at_commitment_depth,
-        blob_sidecar.signed_block_header.message.body_root,
+        blob_sidecar.signed_block_header().message.body_root,
     )
 }
 
@@ -275,7 +285,7 @@ pub fn has_eth1_withdrawal_credential(validator: &Validator) -> bool {
         .starts_with(ETH1_ADDRESS_WITHDRAWAL_PREFIX)
 }
 
-const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
+const fn deneb_index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
     // When using the minimal preset, `commitment_index` should be in the range `0..16`.
     // 16 is the value of `MAX_BLOB_COMMITMENTS_PER_BLOCK`.
     //
@@ -343,6 +353,15 @@ const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u6
     index_of_commitment_0 + commitment_index
 }
 
+const fn electra_index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
+    // WIP WIP WIP
+    let fields_before_blob_kzg_commitments = 11;
+    let indices_per_field_without_length = P::MaxBlobCommitmentsPerBlock::U64;
+    let indices_per_field_with_length = 2 * indices_per_field_without_length;
+    let index_of_commitment_0 = fields_before_blob_kzg_commitments * indices_per_field_with_length;
+    index_of_commitment_0 + commitment_index
+}
+
 #[must_use]
 pub fn is_compounding_withdrawal_credential(withdrawal_credentials: H256) -> bool {
     withdrawal_credentials
@@ -372,7 +391,9 @@ mod spec_tests {
     use try_from_iterator::TryFromIterator as _;
     use types::{
         capella::containers::BeaconBlockBody as CapellaBeaconBlockBody,
-        deneb::containers::BeaconBlockBody as DenebBeaconBlockBody,
+        deneb::containers::{
+            BeaconBlockBody as DenebBeaconBlockBody, BlobSidecar as DenebBlobSidecar,
+        },
         nonstandard::Phase,
         phase0::containers::SignedBeaconBlockHeader,
         preset::{Mainnet, Minimal},
@@ -438,7 +459,7 @@ mod spec_tests {
         // Unlike the name suggests, `leaf_index` is actually a generalized index.
         // `is_valid_merkle_branch` expects an index that includes only leaves.
         let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
-        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+        let index_at_commitment_depth = deneb_index_at_commitment_depth::<preset>(commitment_index);
 
         let block_body = case.ssz_default::<DenebBeaconBlockBody<preset>>("object");
 
@@ -453,7 +474,7 @@ mod spec_tests {
 
         // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
         assert!(is_valid_blob_sidecar_inclusion_proof(
-            &incomplete_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
+            &incomplete_deneb_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
                 .expect("blob sidecar should be constructed successfully")
         ));
 
@@ -498,7 +519,7 @@ mod spec_tests {
 
     // `merkle_proof` test cases do not contain enough information to construct a valid sidecar,
     // but this should be enough to test `is_valid_blob_sidecar_inclusion_proof`.
-    fn incomplete_blob_sidecar<P: Preset>(
+    fn incomplete_deneb_blob_sidecar<P: Preset>(
         commitment_index: BlobIndex,
         body: &DenebBeaconBlockBody<P>,
         inclusion_proof: impl IntoIterator<Item = H256>,
@@ -506,13 +527,13 @@ mod spec_tests {
         let mut signed_block_header = SignedBeaconBlockHeader::default();
         signed_block_header.message.body_root = body.hash_tree_root();
 
-        Ok(BlobSidecar {
+        Ok(BlobSidecar::from(DenebBlobSidecar {
             index: commitment_index,
             kzg_commitment: body.blob_kzg_commitments[usize::try_from(commitment_index)?],
             signed_block_header,
             kzg_commitment_inclusion_proof: ContiguousVector::try_from_iter(inclusion_proof)?,
-            ..BlobSidecar::default()
-        })
+            ..DenebBlobSidecar::default()
+        }))
     }
 }
 

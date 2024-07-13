@@ -19,9 +19,9 @@ use thiserror::Error;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
     combined::{
-        Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttestingIndices, BeaconState, BlobSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
-    deneb::containers::BlobSidecar,
     nonstandard::{PayloadStatus, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},

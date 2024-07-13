@@ -4,8 +4,7 @@ use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::containers::PowBlock,
-    combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobSidecar,
+    combined::{Attestation, BlobSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };

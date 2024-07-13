@@ -31,10 +31,10 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconState, BlobSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
     config::Config as ChainConfig,
-    deneb::containers::BlobSidecar,
     nonstandard::ValidationOutcome,
     phase0::primitives::{ExecutionBlockHash, Slot, SubnetId},
     preset::Preset,

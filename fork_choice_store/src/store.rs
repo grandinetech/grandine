@@ -33,12 +33,12 @@ use transition_functions::{
 use typenum::Unsigned as _;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, AttestingIndices, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, AttesterSlashing, AttestingIndices, BeaconState, BlobSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
-        containers::{BlobIdentifier, BlobSidecar},
+        containers::BlobIdentifier,
         primitives::{BlobIndex, KzgCommitment},
     },
     nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
@@ -1618,17 +1618,17 @@ impl<P: Preset> Store<P> {
         origin: &BlobSidecarOrigin,
         mut verifier: impl Verifier + Send,
     ) -> Result<BlobSidecarAction<P>> {
-        let block_header = blob_sidecar.signed_block_header.message;
+        let block_header = blob_sidecar.signed_block_header().message;
 
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
         ensure!(
-            blob_sidecar.index < P::MaxBlobsPerBlock::U64,
+            blob_sidecar.index() < P::MaxBlobsPerBlock::U64,
             Error::BlobSidecarInvalidIndex { blob_sidecar },
         );
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index);
+            let expected = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index());
 
             ensure!(
                 actual == expected,
@@ -1656,7 +1656,7 @@ impl<P: Preset> Store<P> {
         if self.accepted_blob_sidecars.contains_key(&(
             block_header.slot,
             block_header.proposer_index,
-            blob_sidecar.index,
+            blob_sidecar.index(),
         )) && !block_seen
         {
             return Ok(BlobSidecarAction::Ignore);
@@ -1674,8 +1674,11 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         verifier.verify_singular(
-            blob_sidecar.signing_root(&self.chain_config, &state),
-            blob_sidecar.signed_block_header.signature,
+            blob_sidecar
+                .signed_block_header()
+                .message
+                .signing_root(&self.chain_config, &state),
+            blob_sidecar.signed_block_header().signature,
             accessors::public_key(&state, block_header.proposer_index)?,
             SignatureKind::BlobSidecar,
         )?;
@@ -1736,9 +1739,9 @@ impl<P: Preset> Store<P> {
         // [REJECT] The sidecar's blob is valid as verified by verify_blob_kzg_proof(blob_sidecar.blob, blob_sidecar.kzg_commitment, blob_sidecar.kzg_proof).
         ensure!(
             kzg_utils::eip_4844::verify_blob_kzg_proof::<P>(
-                &blob_sidecar.blob,
-                blob_sidecar.kzg_commitment,
-                blob_sidecar.kzg_proof,
+                blob_sidecar.blob(),
+                blob_sidecar.kzg_commitment(),
+                blob_sidecar.kzg_proof(),
             )
             .unwrap_or(false),
             Error::BlobSidecarInvalid { blob_sidecar }
@@ -2072,7 +2075,7 @@ impl<P: Preset> Store<P> {
     }
 
     pub fn apply_blob_sidecar(&mut self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        let block_header = blob_sidecar.signed_block_header.message;
+        let block_header = blob_sidecar.signed_block_header().message;
         let block_root = block_header.hash_tree_root();
 
         let commitments = self
@@ -2080,11 +2083,11 @@ impl<P: Preset> Store<P> {
             .entry((
                 block_header.slot,
                 block_header.proposer_index,
-                blob_sidecar.index,
+                blob_sidecar.index(),
             ))
             .or_default();
 
-        commitments.insert(block_root, blob_sidecar.kzg_commitment);
+        commitments.insert(block_root, blob_sidecar.kzg_commitment());
 
         self.blob_cache.insert(blob_sidecar);
     }

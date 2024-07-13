@@ -19,9 +19,9 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, BlobSidecar, SignedBeaconBlock},
     deneb::{
-        containers::{BlobIdentifier, BlobSidecar},
+        containers::BlobIdentifier,
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},

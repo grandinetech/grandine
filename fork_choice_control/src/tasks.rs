@@ -19,8 +19,7 @@ use helper_functions::{
 use log::warn;
 use prometheus_metrics::Metrics;
 use types::{
-    combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobSidecar,
+    combined::{AttesterSlashing, BlobSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     nonstandard::RelativeEpoch,
     phase0::{
         containers::Checkpoint,

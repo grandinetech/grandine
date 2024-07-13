@@ -15,5 +15,5 @@ pub type KzgCommitment = H384;
 pub type KzgProof = H384;
 pub type VersionedHash = H256;
 
-pub type BlobCommitmentInclusionProof<P> =
-    ContiguousVector<H256, <P as Preset>::KzgCommitmentInclusionProofDepth>;
+pub type DenebBlobCommitmentInclusionProof<P> =
+    ContiguousVector<H256, <P as Preset>::DenebKzgCommitmentInclusionProofDepth>;

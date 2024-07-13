@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
+use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz::{BitList, BitVector, ByteList, ByteVector, ContiguousList, ContiguousVector, Ssz};
 use typenum::Log2;
@@ -12,12 +13,15 @@ use crate::{
         consts::ExecutionPayloadIndex,
         containers::{SignedBlsToExecutionChange, Withdrawal},
     },
-    deneb::primitives::KzgCommitment,
-    electra::consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
+    deneb::primitives::{Blob, BlobIndex, KzgCommitment, KzgProof},
+    electra::{
+        consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
+        primitives::ElectraBlobCommitmentInclusionProof,
+    },
     phase0::{
         containers::{
             AttestationData, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
-            SignedVoluntaryExit,
+            SignedBeaconBlockHeader, SignedVoluntaryExit,
         },
         primitives::{
             Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, Uint256,
@@ -113,6 +117,20 @@ pub struct BlindedBeaconBlockBody<P: Preset> {
     pub bls_to_execution_changes:
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+}
+
+#[derive(Clone, PartialEq, Eq, Default, Educe, Deserialize, Serialize, Ssz)]
+#[educe(Debug)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct BlobSidecar<P: Preset> {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub index: BlobIndex,
+    #[educe(Debug(ignore))]
+    pub blob: Blob<P>,
+    pub kzg_commitment: KzgCommitment,
+    pub kzg_proof: KzgProof,
+    pub signed_block_header: SignedBeaconBlockHeader,
+    pub kzg_commitment_inclusion_proof: ElectraBlobCommitmentInclusionProof<P>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

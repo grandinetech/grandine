@@ -11,9 +11,9 @@ use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use std_ext::ArcExt as _;
 use types::{
-    combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, AttesterSlashing, BeaconState, BlobSidecar, SignedBeaconBlock},
     config::Config,
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    deneb::containers::BlobIdentifier,
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -253,7 +253,7 @@ impl<P: Preset> Context<P> {
     }
 
     pub fn on_blob_sidecar(&mut self, blob_sidecar: BlobSidecar<P>) -> Option<P2pMessage<P>> {
-        let subnet_id = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index);
+        let subnet_id = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index());
 
         self.controller().on_gossip_blob_sidecar(
             Arc::new(blob_sidecar),

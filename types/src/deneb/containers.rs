@@ -2,6 +2,7 @@ use core::hash::Hash;
 use std::sync::Arc;
 
 use bls::SignatureBytes;
+use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, Ssz};
 use typenum::Log2;
@@ -16,7 +17,9 @@ use crate::{
         consts::ExecutionPayloadIndex,
         containers::{SignedBlsToExecutionChange, Withdrawal},
     },
-    deneb::primitives::{Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof},
+    deneb::primitives::{
+        Blob, BlobIndex, DenebBlobCommitmentInclusionProof, KzgCommitment, KzgProof,
+    },
     phase0::{
         containers::{
             Attestation, AttesterSlashing, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
@@ -100,16 +103,18 @@ pub struct BlobIdentifier {
     pub index: BlobIndex,
 }
 
-#[derive(Clone, PartialEq, Eq, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, PartialEq, Eq, Default, Educe, Deserialize, Serialize, Ssz)]
+#[educe(Debug)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct BlobSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub index: BlobIndex,
+    #[educe(Debug(ignore))]
     pub blob: Blob<P>,
     pub kzg_commitment: KzgCommitment,
     pub kzg_proof: KzgProof,
     pub signed_block_header: SignedBeaconBlockHeader,
-    pub kzg_commitment_inclusion_proof: BlobCommitmentInclusionProof<P>,
+    pub kzg_commitment_inclusion_proof: DenebBlobCommitmentInclusionProof<P>,
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

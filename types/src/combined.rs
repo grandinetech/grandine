@@ -50,7 +50,7 @@ use crate::{
         beacon_state::BeaconState as DenebBeaconState,
         containers::{
             BeaconBlock as DenebBeaconBlock, BlindedBeaconBlock as DenebBlindedBeaconBlock,
-            ExecutionPayload as DenebExecutionPayload,
+            BlobSidecar as DenebBlobSidecar, ExecutionPayload as DenebExecutionPayload,
             ExecutionPayloadHeader as DenebExecutionPayloadHeader,
             LightClientBootstrap as DenebLightClientBootstrap,
             LightClientFinalityUpdate as DenebLightClientFinalityUpdate,
@@ -58,14 +58,14 @@ use crate::{
             SignedBeaconBlock as DenebSignedBeaconBlock,
             SignedBlindedBeaconBlock as DenebSignedBlindedBeaconBlock,
         },
-        primitives::{KzgCommitment, VersionedHash},
+        primitives::{Blob, BlobIndex, KzgCommitment, KzgProof, VersionedHash},
     },
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
         containers::{
             AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
             AttesterSlashing as ElectraAttesterSlashing, BeaconBlock as ElectraBeaconBlock,
-            BlindedBeaconBlock as ElectraBlindedBeaconBlock,
+            BlindedBeaconBlock as ElectraBlindedBeaconBlock, BlobSidecar as ElectraBlobSidecar,
             ExecutionPayload as ElectraExecutionPayload,
             ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
             LightClientBootstrap as ElectraLightClientBootstrap,
@@ -1459,6 +1459,73 @@ impl<P: Preset> LightClientOptimisticUpdate<P> {
             Self::Capella(update) => update.signature_slot,
             Self::Deneb(update) => update.signature_slot,
             Self::Electra(update) => update.signature_slot,
+        }
+    }
+}
+
+#[derive(Debug, From)]
+pub enum BlobSidecar<P: Preset> {
+    Deneb(DenebBlobSidecar<P>),
+    Electra(ElectraBlobSidecar<P>),
+}
+
+impl<P: Preset> SszHash for BlobSidecar<P> {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> H256 {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.hash_tree_root(),
+            Self::Electra(blob_sidecar) => blob_sidecar.hash_tree_root(),
+        }
+    }
+}
+
+impl<P: Preset> BlobSidecar<P> {
+    #[must_use]
+    pub const fn index(&self) -> BlobIndex {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.index,
+            Self::Electra(blob_sidecar) => blob_sidecar.index,
+        }
+    }
+
+    #[must_use]
+    pub const fn blob(&self) -> &Blob<P> {
+        match self {
+            Self::Deneb(blob_sidecar) => &blob_sidecar.blob,
+            Self::Electra(blob_sidecar) => &blob_sidecar.blob,
+        }
+    }
+
+    #[must_use]
+    pub const fn kzg_commitment(&self) -> KzgCommitment {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.kzg_commitment,
+            Self::Electra(blob_sidecar) => blob_sidecar.kzg_commitment,
+        }
+    }
+
+    #[must_use]
+    pub const fn kzg_proof(&self) -> KzgProof {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.kzg_proof,
+            Self::Electra(blob_sidecar) => blob_sidecar.kzg_proof,
+        }
+    }
+
+    #[must_use]
+    pub const fn signed_block_header(&self) -> SignedBeaconBlockHeader {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.signed_block_header,
+            Self::Electra(blob_sidecar) => blob_sidecar.signed_block_header,
+        }
+    }
+
+    #[must_use]
+    pub fn kzg_commitment_inclusion_proof(&self) -> &[H256] {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.kzg_commitment_inclusion_proof.as_slice(),
+            Self::Electra(blob_sidecar) => blob_sidecar.kzg_commitment_inclusion_proof.as_slice(),
         }
     }
 }

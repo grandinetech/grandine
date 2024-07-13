@@ -22,10 +22,7 @@ use types::{
         BlindedBeaconBlock,
     },
     config::Config,
-    deneb::{
-        consts::DOMAIN_BLOB_SIDECAR,
-        containers::{BeaconBlock as DenebBeaconBlock, BlobSidecar},
-    },
+    deneb::containers::BeaconBlock as DenebBeaconBlock,
     electra::{
         consts::DOMAIN_CONSOLIDATION,
         containers::{
@@ -353,21 +350,6 @@ impl<P: Preset> SignForSingleFork<P> for BlindedBeaconBlock<P> {
 
     fn epoch(&self) -> Epoch {
         misc::compute_epoch_at_slot::<P>(self.slot())
-    }
-}
-
-// TODO(feature/deneb): Link to `consensus-specs`.
-impl<P: Preset> SignForSingleFork<P> for BlobSidecar<P> {
-    const DOMAIN_TYPE: DomainType = DOMAIN_BLOB_SIDECAR;
-    const SIGNATURE_KIND: SignatureKind = SignatureKind::BlobSidecar;
-
-    fn epoch(&self) -> Epoch {
-        misc::compute_epoch_at_slot::<P>(self.signed_block_header.message.slot)
-    }
-
-    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
-        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, None);
-        misc::compute_signing_root(self, domain)
     }
 }
 

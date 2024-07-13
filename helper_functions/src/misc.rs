@@ -14,14 +14,19 @@ use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
     cache::PackedIndices,
-    combined::{Attestation, SignedBeaconBlock},
+    combined::{Attestation, BlobSidecar, SignedBeaconBlock},
     config::Config,
     deneb::{
         consts::{BlobCommitmentTreeDepth, BlobSidecarSubnetCount, VERSIONED_HASH_VERSION_KZG},
-        containers::BlobSidecar,
+        containers::BlobSidecar as DenebBlobSidecar,
         primitives::{
-            Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
+            Blob, BlobIndex, DenebBlobCommitmentInclusionProof, KzgCommitment, KzgProof,
+            VersionedHash,
         },
+    },
+    electra::{
+        containers::BlobSidecar as ElectraBlobSidecar,
+        primitives::ElectraBlobCommitmentInclusionProof,
     },
     phase0::{
         consts::{
@@ -353,8 +358,8 @@ pub fn kzg_commitment_to_versioned_hash(kzg_commitment: KzgCommitment) -> Versio
 pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
     commitment_index: BlobIndex,
-) -> Result<BlobCommitmentInclusionProof<P>> {
-    let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
+) -> Result<DenebBlobCommitmentInclusionProof<P>> {
+    let depth = P::DenebKzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
     let mut merkle_tree = MerkleTree::<BlobCommitmentTreeDepth<P>>::default();
@@ -409,8 +414,8 @@ pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
 pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
     body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
     commitment_index: BlobIndex,
-) -> Result<BlobCommitmentInclusionProof<P>> {
-    let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
+) -> Result<ElectraBlobCommitmentInclusionProof<P>> {
+    let depth = P::ElectraKzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
     let mut merkle_tree = MerkleTree::<BlobCommitmentTreeDepth<P>>::default();
@@ -432,17 +437,17 @@ pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
     // The first 13 or 5 nodes are computed from other elements of `body.blob_kzg_commitments`.
     proof[..depth - 4].copy_from_slice(subproof.as_slice());
 
-    // The last 4 nodes are computed from other fields of `body`.
-    proof[depth - 4] = body.bls_to_execution_changes().hash_tree_root();
+    // The last 6 nodes are computed from other fields of `body`.
+    proof[depth - 6] = body.bls_to_execution_changes().hash_tree_root();
 
-    proof[depth - 3] = hashing::hash_256_256(
+    proof[depth - 5] = hashing::hash_256_256(
         body.sync_aggregate().hash_tree_root(),
         body.execution_payload().hash_tree_root(),
     );
 
-    proof[depth - 2] = ZERO_HASHES[2];
+    proof[depth - 4] = ZERO_HASHES[2];
 
-    proof[depth - 1] = hashing::hash_256_256(
+    proof[depth - 3] = hashing::hash_256_256(
         hashing::hash_256_256(
             hashing::hash_256_256(
                 body.randao_reveal().hash_tree_root(),
@@ -458,6 +463,10 @@ pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
             ),
         ),
     );
+
+    proof[depth - 2] = ZERO_HASHES[4];
+
+    proof[depth - 1] = ZERO_HASHES[5];
 
     Ok(proof)
 }
@@ -488,19 +497,34 @@ pub fn construct_blob_sidecars<P: Preset>(
 
     izip!(0.., blobs, proofs, commitments)
         .map(|(index, blob, kzg_proof, kzg_commitment)| {
-            let kzg_commitment_inclusion_proof = match block.message().body().post_electra() {
-                Some(body) => electra_kzg_commitment_inclusion_proof(body, index)?,
-                None => deneb_kzg_commitment_inclusion_proof(body, index)?,
-            };
+            match block.message().body().post_electra() {
+                Some(body) => {
+                    let kzg_commitment_inclusion_proof =
+                        electra_kzg_commitment_inclusion_proof(body, index)?;
 
-            Ok(BlobSidecar {
-                index,
-                blob,
-                kzg_commitment,
-                kzg_proof,
-                signed_block_header,
-                kzg_commitment_inclusion_proof,
-            })
+                    Ok(BlobSidecar::from(ElectraBlobSidecar {
+                        index,
+                        blob,
+                        kzg_commitment,
+                        kzg_proof,
+                        signed_block_header,
+                        kzg_commitment_inclusion_proof,
+                    }))
+                }
+                None => {
+                    let kzg_commitment_inclusion_proof =
+                        deneb_kzg_commitment_inclusion_proof(body, index)?;
+
+                    Ok(BlobSidecar::from(DenebBlobSidecar {
+                        index,
+                        blob,
+                        kzg_commitment,
+                        kzg_proof,
+                        signed_block_header,
+                        kzg_commitment_inclusion_proof,
+                    }))
+                }
+            }
         })
         .collect()
 }

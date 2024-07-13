@@ -14,8 +14,8 @@ use ssz::{
 use strum::{Display, EnumString};
 use typenum::{
     IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, True, Unsigned, B1, U1, U1048576, U1073741824,
-    U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144, U32, U4,
-    U4096, U512, U6, U64, U65536, U8, U8192, U9,
+    U1099511627776, U11, U128, U134217728, U16, U16777216, U17, U19, U2, U2048, U256, U262144, U32,
+    U4, U4096, U512, U6, U64, U65536, U8, U8192, U9,
 };
 
 use crate::{
@@ -106,12 +106,12 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     //                      the preset even in `consensus-specs`.
     //                      Consider adding bounds to verify they are consistent.
     // Deneb
-    type FieldElementsPerBlob: Unsigned + NonZero;
-    type KzgCommitmentInclusionProofDepth: ContiguousVectorElements<H256>
+    type DenebKzgCommitmentInclusionProofDepth: ContiguousVectorElements<H256>
         + MerkleElements<H256>
         + ArrayLengthCopy<H256>
         + Debug
         + Eq;
+    type FieldElementsPerBlob: Unsigned + NonZero;
     type MaxBlobCommitmentsPerBlock: MerkleElements<KzgCommitment> + Eq + Debug + Send + Sync;
     type MaxBlobsPerBlock: MerkleElements<Blob<Self>>
         + MerkleElements<KzgCommitment>
@@ -122,6 +122,11 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Sync;
 
     // Electra
+    type ElectraKzgCommitmentInclusionProofDepth: ContiguousVectorElements<H256>
+        + MerkleElements<H256>
+        + ArrayLengthCopy<H256>
+        + Debug
+        + Eq;
     type MaxAttestationsElectra: MerkleElements<ElectraAttestation<Self>> + Eq + Debug + Send + Sync;
     type MaxAttesterSlashingsElectra: MerkleElements<ElectraAttesterSlashing<Self>>
         + Eq
@@ -284,12 +289,13 @@ impl Preset for Mainnet {
     type MaxWithdrawalsPerPayload = U16;
 
     // Deneb
+    type DenebKzgCommitmentInclusionProofDepth = U17;
     type FieldElementsPerBlob = U4096;
     type MaxBlobCommitmentsPerBlock = U4096;
     type MaxBlobsPerBlock = U6;
-    type KzgCommitmentInclusionProofDepth = U17;
 
     // Electra
+    type ElectraKzgCommitmentInclusionProofDepth = U19;
     type MaxAttestationsElectra = U8;
     type MaxAttesterSlashingsElectra = U1;
     type MaxConsolidationRequestsPerPayload = U1;
@@ -384,10 +390,11 @@ impl Preset for Minimal {
     type MaxWithdrawalsPerPayload = U4;
 
     // Deneb
+    type DenebKzgCommitmentInclusionProofDepth = U9;
     type MaxBlobCommitmentsPerBlock = U16;
-    type KzgCommitmentInclusionProofDepth = U9;
 
     // Electra
+    type ElectraKzgCommitmentInclusionProofDepth = U11;
     type MaxDepositRequestsPerPayload = U4;
     type MaxWithdrawalRequestsPerPayload = U2;
     type PendingConsolidationsLimit = U64;
@@ -460,12 +467,13 @@ impl Preset for Medalla {
         type MaxWithdrawalsPerPayload;
 
         // Deneb
+        type DenebKzgCommitmentInclusionProofDepth;
         type FieldElementsPerBlob;
         type MaxBlobCommitmentsPerBlock;
         type MaxBlobsPerBlock;
-        type KzgCommitmentInclusionProofDepth;
 
         // Electra
+        type ElectraKzgCommitmentInclusionProofDepth;
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
         type MaxConsolidationRequestsPerPayload;
@@ -840,7 +848,9 @@ pub struct DenebPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_blobs_per_block: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    kzg_committment_inclusion_proof_depth: u64,
+    deneb_kzg_committment_inclusion_proof_depth: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    electra_kzg_committment_inclusion_proof_depth: u64,
 }
 
 impl DenebPreset {
@@ -848,10 +858,13 @@ impl DenebPreset {
     pub fn new<P: Preset>() -> Self {
         Self {
             // > Misc
+            deneb_kzg_committment_inclusion_proof_depth:
+                P::DenebKzgCommitmentInclusionProofDepth::U64,
+            electra_kzg_committment_inclusion_proof_depth:
+                P::ElectraKzgCommitmentInclusionProofDepth::U64,
             field_elements_per_blob: P::FieldElementsPerBlob::non_zero(),
             max_blob_commitments_per_block: P::MaxBlobCommitmentsPerBlock::U64,
             max_blobs_per_block: P::MaxBlobsPerBlock::U64,
-            kzg_committment_inclusion_proof_depth: P::KzgCommitmentInclusionProofDepth::U64,
         }
     }
 }

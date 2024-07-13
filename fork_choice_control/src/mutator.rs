@@ -45,8 +45,8 @@ use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use types::{
-    combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    combined::{BeaconState, BlobSidecar, ExecutionPayloadParams, SignedBeaconBlock},
+    deneb::containers::BlobIdentifier,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -1022,7 +1022,7 @@ where
                 }
             }
             Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar)) => {
-                let parent_root = blob_sidecar.signed_block_header.message.parent_root;
+                let parent_root = blob_sidecar.signed_block_header().message.parent_root;
 
                 let pending_blob_sidecar = PendingBlobSidecar {
                     blob_sidecar,
@@ -1044,7 +1044,7 @@ where
                 }
             }
             Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar)) => {
-                let slot = blob_sidecar.signed_block_header.message.slot;
+                let slot = blob_sidecar.signed_block_header().message.slot;
 
                 let pending_blob_sidecar = PendingBlobSidecar {
                     blob_sidecar,
@@ -1553,7 +1553,7 @@ where
     fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: Arc<BlobSidecar<P>>) {
         let old_head = self.store.head().clone();
         let head_was_optimistic = old_head.is_optimistic();
-        let block_root = blob_sidecar.signed_block_header.message.hash_tree_root();
+        let block_root = blob_sidecar.signed_block_header().message.hash_tree_root();
 
         self.store_mut().apply_blob_sidecar(blob_sidecar);
 
@@ -1820,7 +1820,7 @@ where
             .entry(
                 pending_blob_sidecar
                     .blob_sidecar
-                    .signed_block_header
+                    .signed_block_header()
                     .message
                     .parent_root,
             )
@@ -1834,7 +1834,7 @@ where
             .entry(
                 pending_blob_sidecar
                     .blob_sidecar
-                    .signed_block_header
+                    .signed_block_header()
                     .message
                     .slot,
             )
@@ -2035,7 +2035,8 @@ where
                 blob_sidecars
                     .drain_filter(|pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.blob_sidecar.signed_block_header.message.slot - 1 <= finalized_slot
+                        pending.blob_sidecar.signed_block_header().message.slot - 1
+                            <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );

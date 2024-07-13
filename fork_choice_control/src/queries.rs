@@ -14,8 +14,8 @@ use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
 use types::{
-    combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    combined::{BeaconState, BlobSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    deneb::containers::BlobIdentifier,
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,

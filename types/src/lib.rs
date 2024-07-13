@@ -68,6 +68,7 @@ pub mod electra {
     pub mod beacon_state;
     pub mod consts;
     pub mod containers;
+    pub mod primitives;
 
     mod container_impls;
 
