@@ -26,9 +26,9 @@ pub type KzgCommitmentsInclusionProofDepth = U4;
 
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
-pub const CUSTODY_REQUIREMENT: u64 = 4;
+pub const CUSTODY_REQUIREMENT: u64 = 1;
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 32;
-pub const SAMPLES_PER_SLOT: u64 = 16;
+pub const SAMPLES_PER_SLOT: u64 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
