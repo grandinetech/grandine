@@ -606,8 +606,8 @@ impl From<WithdrawalRequestV1> for WithdrawalRequest {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ConsolidationRequestV1 {
     pub source_address: ExecutionAddress,
-    pub source_public_key: PublicKeyBytes,
-    pub target_public_key: PublicKeyBytes,
+    pub source_pubkey: PublicKeyBytes,
+    pub target_pubkey: PublicKeyBytes,
 }
 
 impl From<ConsolidationRequest> for ConsolidationRequestV1 {
@@ -620,8 +620,8 @@ impl From<ConsolidationRequest> for ConsolidationRequestV1 {
 
         Self {
             source_address,
-            source_public_key: source_pubkey,
-            target_public_key: target_pubkey,
+            source_pubkey,
+            target_pubkey,
         }
     }
 }
@@ -630,14 +630,14 @@ impl From<ConsolidationRequestV1> for ConsolidationRequest {
     fn from(consolidation_request: ConsolidationRequestV1) -> Self {
         let ConsolidationRequestV1 {
             source_address,
-            source_public_key,
-            target_public_key,
+            source_pubkey,
+            target_pubkey,
         } = consolidation_request;
 
         Self {
             source_address,
-            source_pubkey: source_public_key,
-            target_pubkey: target_public_key,
+            source_pubkey,
+            target_pubkey,
         }
     }
 }
