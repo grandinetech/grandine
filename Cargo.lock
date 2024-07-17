@@ -1041,7 +1041,7 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "1.0.2"
-source = "git+https://github.com/ethereum/c-kzg-4844?branch=das#f8e768bcf97f731cdffd647cb4c14cf3d33aedf7"
+source = "git+https://github.com/ethereum/c-kzg-4844?branch=das#0e753e2603db4b81c5b408ba54b737ef35d2d24e"
 dependencies = [
  "arbitrary",
  "blst",
@@ -1049,6 +1049,7 @@ dependencies = [
  "glob",
  "hex",
  "libc",
+ "once_cell",
  "serde",
 ]
 
