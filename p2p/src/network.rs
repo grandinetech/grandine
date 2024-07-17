@@ -1342,16 +1342,24 @@ impl<P: Preset> Network<P> {
                 ));
             }
             Response::BlocksByRange(Some(block)) => {
+                let block_root = block.message().hash_tree_root();
+                let block_slot = block.message().slot();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received BeaconBlocksByRange response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, block.message.slot: {:?})",
-                        block.message().slot(),
+                         (request_id: {request_id}, peer_id: {peer_id}, \
+                         block.message.slot: {block_slot})",
                     ),
                 );
 
-                let block_root = block.message().hash_tree_root();
+                self.log(
+                    Level::Info,
+                    format_args!(
+                        "received beacon block from RPC slot: {block_slot}, root: {block_root:?}",
+                    ),
+                );
 
                 if self.register_new_received_block(block_root, block.message().slot()) {
                     P2pToSync::RequestedBlock((block, peer_id, request_id))
@@ -1381,7 +1389,7 @@ impl<P: Preset> Network<P> {
                 self.log(
                     Level::Info,
                     format_args!(
-                        "received beacon block from RPC (request_id: {request_id}, slot: {block_slot}, root: {block_root:?})",
+                        "received beacon block from RPC slot: {block_slot}, root: {block_root:?}",
                     ),
                 );
 
