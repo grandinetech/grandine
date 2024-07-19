@@ -1,16 +1,16 @@
-use educe::Educe;
+use derivative::Derivative;
 use once_cell::race::OnceBox;
 use serde::{Deserialize, Serialize};
 use ssz::{ReadError, Size, SszHash, SszRead, SszReadDefault as _, SszSize, SszWrite, H256};
 
 use crate::{Error, PublicKey, PublicKeyBytes};
 
-#[derive(Default, Debug, Educe, Deserialize, Serialize)]
-#[educe(PartialEq, Eq)]
+#[derive(Default, Debug, Derivative, Deserialize, Serialize)]
+#[derivative(PartialEq, Eq)]
 #[serde(transparent)]
 pub struct CachedPublicKey {
     bytes: PublicKeyBytes,
-    #[educe(PartialEq(ignore))]
+    #[derivative(PartialEq = "ignore")]
     #[serde(skip)]
     decompressed: OnceBox<PublicKey>,
 }

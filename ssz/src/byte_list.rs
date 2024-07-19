@@ -1,7 +1,7 @@
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 
+use derivative::Derivative;
 use derive_more::From;
-use educe::Educe;
 use ethereum_types::H256;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use typenum::{Unsigned, U1};
@@ -14,8 +14,13 @@ use crate::{
     type_level::MerkleElements,
 };
 
-#[derive(From, Educe, Serialize)]
-#[educe(Clone, PartialEq, Eq, Default)]
+#[derive(From, Derivative, Serialize)]
+#[derivative(
+    Clone(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Default(bound = "")
+)]
 #[serde(transparent)]
 pub struct ByteList<N> {
     #[serde(with = "serde_utils::prefixed_hex_or_bytes_slice")]

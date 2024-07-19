@@ -1,4 +1,4 @@
-use educe::Educe;
+use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, Ssz};
 
@@ -16,8 +16,8 @@ use crate::{
     preset::Preset,
 };
 
-#[derive(Clone, Default, Debug, Educe, Deserialize, Serialize, Ssz)]
-#[educe(PartialEq, Eq)]
+#[derive(Clone, Default, Debug, Derivative, Deserialize, Serialize, Ssz)]
+#[derivative(PartialEq, Eq)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct BeaconState<P: Preset> {
     // > Versioning
@@ -63,7 +63,7 @@ pub struct BeaconState<P: Preset> {
     pub finalized_checkpoint: Checkpoint,
 
     // Cache
-    #[educe(PartialEq(ignore))]
+    #[derivative(PartialEq = "ignore")]
     #[serde(skip)]
     #[ssz(skip)]
     pub cache: Cache,

@@ -2,7 +2,6 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Error, Result};
 use bls::{PublicKeyBytes, SecretKey};
-use educe::Educe;
 use eip_2335::Keystore;
 use log::{info, warn};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
@@ -12,8 +11,7 @@ use tap::{Pipe as _, TryConv as _};
 use validator_key_cache::ValidatorKeyCache;
 use zeroize::Zeroizing;
 
-#[derive(Educe)]
-#[educe(Default)]
+#[derive(Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub struct Validators {
     pub keystore_dir: PathBuf,

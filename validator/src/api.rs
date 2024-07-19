@@ -31,7 +31,6 @@ use axum_extra::{
 use bls::PublicKeyBytes;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;
-use educe::Educe;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, signing::SignForSingleFork};
@@ -60,13 +59,18 @@ use zeroize::Zeroizing;
 const VALIDATOR_API_TOKEN_PATH: &str = "api-token.txt";
 const VALIDATOR_API_DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Debug, Educe)]
-#[educe(Default(expression = "Self::with_address(Ipv4Addr::LOCALHOST, 5055)"))]
+#[derive(Clone, Debug)]
 pub struct ValidatorApiConfig {
     pub address: SocketAddr,
     pub allow_origin: AllowOrigin,
     pub timeout: Duration,
     pub token_file: Option<PathBuf>,
+}
+
+impl Default for ValidatorApiConfig {
+    fn default() -> Self {
+        Self::with_address(Ipv4Addr::LOCALHOST, 5055)
+    }
 }
 
 impl ValidatorApiConfig {

@@ -1,7 +1,7 @@
 use core::{fmt::Debug, hash::Hash, marker::PhantomData};
 
-use derive_more::{AsRef, DebugCustom, Deref, DerefMut};
-use educe::Educe;
+use derivative::Derivative;
+use derive_more::{AsRef, Deref, DerefMut};
 use ethereum_types::H256;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use try_from_iterator::TryFromIterator;
@@ -16,16 +16,15 @@ use crate::{
     type_level::MerkleElements,
 };
 
-#[derive(Deref, DerefMut, AsRef, DebugCustom, Educe, Serialize)]
+#[derive(Deref, DerefMut, AsRef, Derivative, Serialize)]
 #[as_ref(forward)]
-#[debug(bound = "T: Debug")]
-#[debug(fmt = "{elements:?}")]
-#[educe(
+#[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq"),
     Hash(bound = "T: Hash"),
-    Default
+    Default(bound = ""),
+    Debug(bound = "T: Debug", transparent = "true")
 )]
 #[serde(transparent)]
 pub struct ContiguousList<T, N> {
@@ -33,6 +32,7 @@ pub struct ContiguousList<T, N> {
     #[deref_mut]
     elements: Box<[T]>,
     #[as_ref(ignore)]
+    #[derivative(Debug = "ignore")]
     phantom: PhantomData<N>,
 }
 

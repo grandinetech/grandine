@@ -6,8 +6,8 @@ use core::{
 
 use bit_field::BitArray as _;
 use bitvec::{bitbox, boxed::BitBox, vec::BitVec};
+use derivative::Derivative;
 use derive_more::{Deref, DerefMut};
-use educe::Educe;
 use ethereum_types::H256;
 use serde::{de::Error as _, ser::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use static_assertions::assert_eq_size;
@@ -22,8 +22,15 @@ use crate::{
     type_level::MerkleBits,
 };
 
-#[derive(Deref, DerefMut, Educe)]
-#[educe(Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Deref, DerefMut, Derivative)]
+#[derivative(
+    Clone(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    PartialOrd(bound = ""),
+    Ord(bound = ""),
+    Default(bound = "")
+)]
 pub struct BitList<N> {
     // `bitvec` has a rather complicated API, some of which is slow due to being overly general.
     // The only reason we use `BitBox` instead of `Box<[u8]>` is because `Box<[u8]>` would
@@ -38,7 +45,7 @@ pub struct BitList<N> {
     #[deref]
     #[deref_mut]
     bits: BitBox<u8>,
-    #[educe(PartialEq(ignore), PartialOrd(ignore), Ord(ignore))]
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     phantom: PhantomData<N>,
 }
 

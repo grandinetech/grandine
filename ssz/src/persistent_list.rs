@@ -12,7 +12,7 @@ use core::{
 
 use arithmetic::NonZeroExt as _;
 use bit_field::BitField as _;
-use educe::Educe;
+use derivative::Derivative;
 use ethereum_types::H256;
 use itertools::Itertools as _;
 use serde::{
@@ -38,12 +38,12 @@ use crate::{
     zero_default::ZeroDefault,
 };
 
-#[derive(Educe)]
-#[educe(
+#[derive(Derivative)]
+#[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq"),
-    Default
+    Default(bound = "")
 )]
 pub struct PersistentList<T, N, B = MinimumBundleSize<T>> {
     root: Option<Arc<Hc<Node<T, B>>>>,
@@ -482,8 +482,8 @@ impl<T, N, B> PersistentList<T, N, B> {
 
 type Height = u8;
 
-#[derive(Educe)]
-#[educe(
+#[derive(Derivative)]
+#[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq")

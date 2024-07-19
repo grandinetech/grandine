@@ -8,8 +8,8 @@ workspace = true
 
 [dependencies]
 blst = { workspace = true }
+derivative = { workspace = true }
 derive_more = { workspace = true }
-educe = { workspace = true }
 fixed-hash = { workspace = true }
 hex = { workspace = true }
 impl-serde = { workspace = true }

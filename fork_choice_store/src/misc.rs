@@ -5,8 +5,8 @@ use core::{
 use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
+use derivative::Derivative;
 use derive_more::DebugCustom;
-use educe::Educe;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
@@ -33,51 +33,17 @@ use types::{
 
 use crate::{segment::Position, store::Store};
 
-#[derive(Clone)]
+#[derive(Clone, Derivative)]
+#[derivative(Debug(bound = ""))]
 pub struct ChainLink<P: Preset> {
     pub block_root: H256,
+    #[derivative(Debug(format_with = "fmt_block_concisely"))]
     pub block: Arc<SignedBeaconBlock<P>>,
+    #[derivative(Debug(format_with = "fmt_as_wildcard"))]
     pub state: Option<Arc<BeaconState<P>>>,
     pub unrealized_justified_checkpoint: Checkpoint,
     pub unrealized_finalized_checkpoint: Checkpoint,
     pub payload_status: PayloadStatus,
-}
-
-// `#[educe(Debug(method = "…"))]` cannot handle type parameters.
-impl<P: Preset> Debug for ChainLink<P> {
-    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-        struct DebugBlock<'block, P: Preset>(&'block SignedBeaconBlock<P>);
-
-        impl<P: Preset> Debug for DebugBlock<'_, P> {
-            fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-                let Self(block) = self;
-
-                formatter
-                    .debug_struct("SignedBeaconBlock")
-                    .field("phase", &block.phase())
-                    .field("slot", &block.message().slot())
-                    .field("parent_root", &block.message().parent_root())
-                    .field("state_root", &block.message().state_root())
-                    .finish_non_exhaustive()
-            }
-        }
-
-        struct DebugState;
-
-        impl Debug for DebugState {
-            fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-                formatter.write_str("_")
-            }
-        }
-
-        formatter
-            .debug_struct("ChainLink")
-            .field("block_root", &self.block_root)
-            .field("block", &DebugBlock(&self.block))
-            .field("state", &self.state.as_ref().map(|_| DebugState))
-            .field("payload_status", &self.payload_status)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<P: Preset> ChainLink<P> {
@@ -756,10 +722,10 @@ pub type Difference = i64;
 /// [`consensus-specs` pull request #3250]: https://github.com/ethereum/consensus-specs/pull/3250
 pub type Score = (Gwei, H256);
 
-#[derive(Clone, Copy, Educe)]
-#[educe(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Derivative)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub struct DifferenceAtLocation {
-    #[educe(PartialEq(ignore), PartialOrd(ignore), Ord(ignore))]
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     pub difference: Difference,
     pub location: Location,
 }
@@ -791,13 +757,13 @@ pub struct DissolvedDifference {
     pub difference: Difference,
 }
 
-#[derive(Educe)]
-#[educe(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Derivative)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub struct BranchPoint {
     pub parent: Location,
-    #[educe(PartialEq(ignore), PartialOrd(ignore), Ord(ignore))]
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     pub best_descendant: SegmentId,
-    #[educe(PartialEq(ignore), PartialOrd(ignore), Ord(ignore))]
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     pub score: Score,
 }
 
@@ -838,4 +804,21 @@ impl<P: Preset, I> AttestationValidationError<P, I> {
             | Self::Other { attestation, .. } => attestation,
         }
     }
+}
+
+fn fmt_block_concisely(
+    block: &SignedBeaconBlock<impl Preset>,
+    formatter: &mut Formatter,
+) -> FmtResult {
+    formatter
+        .debug_struct("SignedBeaconBlock")
+        .field("phase", &block.phase())
+        .field("slot", &block.message().slot())
+        .field("parent_root", &block.message().parent_root())
+        .field("state_root", &block.message().state_root())
+        .finish_non_exhaustive()
+}
+
+fn fmt_as_wildcard<T>(_: T, formatter: &mut Formatter) -> FmtResult {
+    formatter.write_str("_")
 }

@@ -15,9 +15,9 @@ bls = { workspace = true }
 builder_api = { workspace = true }
 clock = { workspace = true }
 constant_time_eq = { workspace = true }
+derivative = { workspace = true }
 derive_more = { workspace = true }
 directories = { workspace = true }
-educe = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }

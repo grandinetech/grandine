@@ -4,18 +4,22 @@ use core::{
 };
 
 use anyhow::Result;
-use educe::Educe;
 use tokio::net::TcpListener;
 use tower_http::cors::AllowOrigin;
 
-#[derive(Clone, Debug, Educe)]
-#[educe(Default(expression = "Self::with_address(Ipv4Addr::LOCALHOST, 5052)"))]
+#[derive(Clone, Debug)]
 pub struct HttpApiConfig {
     pub address: SocketAddr,
     pub allow_origin: AllowOrigin,
     pub max_events: usize,
     // `HttpApiConfig.timeout` is optional to prevent timeouts in tests.
     pub timeout: Option<Duration>,
+}
+
+impl Default for HttpApiConfig {
+    fn default() -> Self {
+        Self::with_address(Ipv4Addr::LOCALHOST, 5052)
+    }
 }
 
 impl HttpApiConfig {

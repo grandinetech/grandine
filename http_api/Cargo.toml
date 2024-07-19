@@ -15,7 +15,6 @@ block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 byteorder = { workspace = true }
-educe = { workspace = true }
 enum-iterator = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }

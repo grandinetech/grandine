@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use educe::Educe;
+use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, Hc, Ssz};
 
@@ -22,8 +22,8 @@ use crate::{
     preset::Preset,
 };
 
-#[derive(Clone, Debug, Default, Educe, Deserialize, Serialize, Ssz)]
-#[educe(PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Derivative, Deserialize, Serialize, Ssz)]
+#[derivative(PartialEq, Eq)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct BeaconState<P: Preset> {
     // > Versioning
@@ -106,7 +106,7 @@ pub struct BeaconState<P: Preset> {
     pub pending_consolidations: PendingConsolidations<P>,
 
     // Cache
-    #[educe(PartialEq(ignore))]
+    #[derivative(PartialEq = "ignore")]
     #[serde(skip)]
     #[ssz(skip)]
     pub cache: Cache,

@@ -3,8 +3,8 @@ use core::{
     marker::PhantomData,
 };
 
-use derive_more::{AsRef, DebugCustom, Deref, DerefMut};
-use educe::Educe;
+use derivative::Derivative;
+use derive_more::{AsRef, Deref, DerefMut};
 use ethereum_types::H256;
 use generic_array::{ArrayLength, GenericArray};
 use serde::{
@@ -23,23 +23,18 @@ use crate::{
     type_level::{ArrayLengthCopy, ContiguousVectorElements, MerkleElements},
 };
 
-#[derive(Deref, DerefMut, AsRef, DebugCustom, Educe, Serialize)]
+#[derive(Deref, DerefMut, AsRef, Derivative, Serialize)]
 #[as_ref(forward)]
-#[debug(bound = "T: Debug")]
-#[debug(fmt = "{elements:?}")]
-#[educe(
+#[derivative(
     Clone(bound = "T: Clone"),
     Copy(bound = "T: Copy, N: ArrayLengthCopy<T>"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq"),
-    Default(bound = "T: Default")
+    Default(bound = "T: Default"),
+    Debug(bound = "T: Debug", transparent = "true")
 )]
 #[serde(bound(serialize = "T: Serialize"), transparent)]
 pub struct ContiguousVector<T, N: ArrayLength<T>> {
-    // The `trait` attribute works around a bug in `educe`.
-    // When deriving both `Clone` and `Copy`, `educe` always implements `Clone` as `*self`.
-    // That is not correct when the two impls have different bounds.
-    #[educe(Clone(trait = "Clone"))]
     elements: GenericArray<T, N>,
 }
 
