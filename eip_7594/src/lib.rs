@@ -80,12 +80,9 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
         }
     );
 
-    let col_indices = column
-        .iter()
-        .map(|_| *index)
-        .collect::<Vec<u64>>();
-
     let kzg_settings = settings();
+    
+    let col_indices: Vec<u64> = vec![*index; column.len()];
 
     let column = column
         .clone()
@@ -225,17 +222,21 @@ pub fn recover_matrix(
     let mut extended_matrix: [MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX] =
         core::array::from_fn(|_| MatrixEntry::default());
     for blob_index in 0..blob_count {
-        let mut cell_indexs = vec![];
-        let mut cells = vec![];
-        let mut proofs = vec![];
-
-        for e in partial_matrix.iter() {
-            if e.row_index == blob_index as u64 {
-                cell_indexs.push(e.column_index);
-                cells.push(CKzgCell::from_bytes(e.cell.as_bytes())?);
-                proofs.push(e.kzg_proof);
-            }
-        }
+        let (cell_indexs, cells_bytes): (Vec<_>, Vec<_>) = partial_matrix
+            .iter()
+            .filter_map(|e| {
+                if e.row_index == blob_index as u64 {
+                    Some((e.column_index, e.cell.as_bytes()))
+                } else {
+                    None
+                }
+            })
+            .unzip();
+        
+        let cells = cells_bytes
+            .into_iter()
+            .map(|c| CKzgCell::from_bytes(c).map_err(Into::into))
+            .collect::<Result<Vec<CKzgCell>>>()?;
 
         let (recovered_cells, recovered_proofs) =
             CKzgCell::recover_cells_and_kzg_proofs(&cell_indexs, &cells, &kzg_settings)?;
@@ -395,7 +396,7 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
 
     // number of unique column IDs
     let mut sample_count = SAMPLES_PER_SLOT;
-    while sample_count <= NumberOfColumns::U64 + 1 {
+    while sample_count <= NumberOfColumns::U64 {
         // TODO(feature/das): change variable name `x` to a suitable one
         let x = hypergeom_cdf(
             allowed_failures,
