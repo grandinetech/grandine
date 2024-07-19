@@ -1,18 +1,18 @@
 use core::{ops::Mul as _, time::Duration};
 
-use educe::Educe;
+use derivative::Derivative;
 use types::config::Config as ChainConfig;
 
 pub const DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS: u64 = 1500;
 
-#[derive(Clone, Copy, Educe)]
-#[educe(Default)]
+#[derive(Clone, Copy, Derivative)]
+#[derivative(Default)]
 pub struct StoreConfig {
-    #[educe(Default = 32)]
+    #[derivative(Default(value = "32"))]
     pub max_empty_slots: u64,
-    #[educe(Default(expression = "Duration::from_millis(DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)"))]
+    #[derivative(Default(value = "Duration::from_millis(DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)"))]
     pub state_cache_lock_timeout: Duration,
-    #[educe(Default = 128)]
+    #[derivative(Default(value = "128"))]
     pub unfinalized_states_in_memory: u64,
 }
 

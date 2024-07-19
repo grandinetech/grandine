@@ -6,7 +6,7 @@ use core::{
 
 use bit_field::BitArray as _;
 use bitvec::{order::Lsb0, view::BitView as _};
-use educe::Educe;
+use derivative::Derivative;
 use ethereum_types::H256;
 use generic_array::GenericArray;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
@@ -22,8 +22,15 @@ use crate::{
     type_level::{BitVectorBits, MerkleBits},
 };
 
-#[derive(Educe, Serialize)]
-#[educe(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Derivative, Serialize)]
+#[derivative(
+    Clone(bound = ""),
+    Copy(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Hash(bound = ""),
+    Default(bound = "")
+)]
 #[serde(transparent)]
 pub struct BitVector<N: BitVectorBits> {
     // There's maybe a dozen crates that implement bit arrays, but none of them have what we need.

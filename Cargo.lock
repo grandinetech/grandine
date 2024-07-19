@@ -968,8 +968,8 @@ name = "bls"
 version = "0.0.0"
 dependencies = [
  "blst",
+ "derivative",
  "derive_more",
- "educe",
  "fixed-hash",
  "hex",
  "impl-serde",
@@ -1797,6 +1797,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2 1.0.86",
+ "quote 1.0.36",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2002,18 +2013,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "educe"
-version = "0.4.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f0042ff8246a363dbe77d2ceedb073339e85a804b9a47636c6e016a9a32c05f"
-dependencies = [
- "enum-ordinalize",
- "proc-macro2 1.0.86",
- "quote 1.0.36",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "eip_2335"
 version = "0.0.0"
 dependencies = [
@@ -2152,19 +2151,6 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
 dependencies = [
- "proc-macro2 1.0.86",
- "quote 1.0.36",
- "syn 2.0.68",
-]
-
-[[package]]
-name = "enum-ordinalize"
-version = "3.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bf1fa3f06bbff1ea5b1a9c7b14aa992a39657db60a2759457328d7e058f49ee"
-dependencies = [
- "num-bigint",
- "num-traits",
  "proc-macro2 1.0.86",
  "quote 1.0.36",
  "syn 2.0.68",
@@ -2615,10 +2601,10 @@ dependencies = [
  "clock",
  "crossbeam-utils",
  "database",
+ "derivative",
  "derive_more",
  "drain_filter_polyfill",
  "duplicate",
- "educe",
  "eth2_cache_utils",
  "eth2_libp2p",
  "execution_engine",
@@ -2664,8 +2650,8 @@ dependencies = [
  "arithmetic",
  "clock",
  "crossbeam-skiplist",
+ "derivative",
  "derive_more",
- "educe",
  "eth2_libp2p",
  "execution_engine",
  "features",
@@ -3042,10 +3028,10 @@ dependencies = [
  "clap",
  "database",
  "deposit_tree",
+ "derivative",
  "derive_more",
  "directories",
  "dirs",
- "educe",
  "eip_2335",
  "enum-iterator",
  "eth1",
@@ -3541,7 +3527,6 @@ dependencies = [
  "database",
  "dedicated_executor",
  "deposit_tree",
- "educe",
  "enum-iterator",
  "eth1",
  "eth1_api",
@@ -7337,8 +7322,8 @@ dependencies = [
  "bincode",
  "bls",
  "database",
+ "derivative",
  "derive_more",
- "educe",
  "eth1_api",
  "features",
  "futures",
@@ -7359,8 +7344,8 @@ dependencies = [
  "anyhow",
  "bls",
  "chrono",
+ "derivative",
  "duplicate",
- "educe",
  "factory",
  "fs-err",
  "glob",
@@ -7566,10 +7551,10 @@ dependencies = [
  "bit_field",
  "bitvec",
  "byteorder",
+ "derivative",
  "derive_more",
  "duplicate",
  "easy-ext",
- "educe",
  "ethereum-types",
  "generic-array",
  "hashing",
@@ -8303,9 +8288,9 @@ dependencies = [
  "bincode",
  "bit_field",
  "bls",
+ "derivative",
  "derive_more",
  "duplicate",
- "educe",
  "enum-iterator",
  "enum-map",
  "ethereum-types",
@@ -8498,9 +8483,9 @@ dependencies = [
  "builder_api",
  "clock",
  "constant_time_eq",
+ "derivative",
  "derive_more",
  "directories",
- "educe",
  "eth1_api",
  "eth2_libp2p",
  "factory",

@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
-use educe::Educe;
+use derivative::Derivative;
 use fs_err::File;
 use helper_functions::{accessors, misc, signing::SignForSingleFork};
 use itertools::Itertools as _;
@@ -127,8 +127,8 @@ impl ImportReport {
     }
 }
 
-#[derive(Educe)]
-#[educe(Default)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 #[cfg_attr(test, derive(Debug))]
 pub struct ImportRecords<T> {
     succeeded: Vec<T>,

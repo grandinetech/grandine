@@ -6,7 +6,7 @@ use core::{
 
 use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
-use educe::Educe;
+use derivative::Derivative;
 use ethereum_types::H256;
 use itertools::Itertools as _;
 use serde::{
@@ -32,8 +32,8 @@ use crate::{
     type_level::{MerkleElements, MinimumBundleSize, PersistentVectorElements},
 };
 
-#[derive(Educe)]
-#[educe(
+#[derive(Derivative)]
+#[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq")
@@ -61,7 +61,6 @@ where
     }
 }
 
-// `Educe` does not allow specifying bounds and a custom expression at the same time.
 impl<T, N, B> Default for PersistentVector<T, N, B>
 where
     T: Clone + Default,
@@ -379,8 +378,8 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
     }
 }
 
-#[derive(Educe)]
-#[educe(
+#[derive(Derivative)]
+#[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq")

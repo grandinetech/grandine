@@ -14,8 +14,8 @@
 use std::{collections::VecDeque, sync::Arc, thread::Builder};
 
 use anyhow::Result;
+use derivative::Derivative;
 use derive_more::From;
-use educe::Educe;
 use execution_engine::ExecutionEngine;
 use log::debug;
 use parking_lot::{Condvar, Mutex};
@@ -31,8 +31,8 @@ use crate::{
     wait::Wait,
 };
 
-#[derive(Educe)]
-#[educe(Clone)]
+#[derive(Derivative)]
+#[derivative(Clone(bound = ""))]
 pub struct ThreadPool<P: Preset, E, W> {
     shared: Arc<Shared<P, E, W>>,
 }
@@ -76,8 +76,8 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
     }
 }
 
-#[derive(Educe)]
-#[educe(Default)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 struct Shared<P: Preset, E, W> {
     critical: Mutex<Critical<P, E, W>>,
     condvar: Condvar,
@@ -85,8 +85,8 @@ struct Shared<P: Preset, E, W> {
 
 // `done` and fields holding tasks must be inside the `Mutex` to avoid race conditions.
 // This remains true even with thread-safe collections like `crossbeam_queue::SegQueue`.
-#[derive(Educe)]
-#[educe(Default)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct Critical<P: Preset, E, W> {
     done: bool,
     // `VecDeque` is faster than both `LinkedList` and `crossbeam_queue::SegQueue`. The downside of

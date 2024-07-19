@@ -1,8 +1,8 @@
-use educe::Educe;
+use derivative::Derivative;
 
-#[derive(Clone, Copy, Educe)]
-#[educe(Default)]
+#[derive(Clone, Copy, Derivative)]
+#[derivative(Default)]
 pub struct SlasherConfig {
-    #[educe(Default = 54000)]
+    #[derivative(Default(value = "54000"))]
     pub slashing_history_limit: u64,
 }

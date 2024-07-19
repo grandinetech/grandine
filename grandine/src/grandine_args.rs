@@ -18,9 +18,9 @@ use builder_api::{
 };
 use bytesize::ByteSize;
 use clap::{error::ErrorKind, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum};
+use derivative::Derivative;
 use derive_more::Display;
 use directories::Directories;
-use educe::Educe;
 use enum_iterator::Sequence;
 use eth1_api::AuthOptions;
 use eth2_libp2p::PeerIdSerialized;
@@ -632,8 +632,8 @@ impl NetworkConfigOptions {
     }
 }
 
-#[derive(Educe, Args)]
-#[educe(Default)]
+#[derive(Derivative, Args)]
+#[derivative(Default)]
 struct SlasherOptions {
     /// Enable slasher
     /// [default: disabled]
@@ -641,6 +641,7 @@ struct SlasherOptions {
     slashing_enabled: bool,
 
     /// Number of epochs for slasher to search for violations
+    #[derivative(Default(value = "SlasherConfig::default().slashing_history_limit"))]
     #[clap(long, default_value_t = SlasherConfig::default().slashing_history_limit)]
     slashing_history_limit: u64,
 }

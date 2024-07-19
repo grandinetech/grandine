@@ -11,8 +11,8 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 clock = { workspace = true }
 crossbeam-skiplist = { workspace = true }
+derivative = { workspace = true }
 derive_more = { workspace = true }
-educe = { workspace = true }
 eth2_libp2p = { workspace = true }
 execution_engine = { workspace = true }
 features = { workspace = true }

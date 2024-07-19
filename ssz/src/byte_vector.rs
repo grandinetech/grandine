@@ -1,7 +1,7 @@
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 
+use derivative::Derivative;
 use derive_more::From;
-use educe::Educe;
 use ethereum_types::H256;
 use generic_array::ArrayLength;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -15,14 +15,16 @@ use crate::{
     type_level::{ArrayLengthCopy, ContiguousVectorElements, MerkleElements},
 };
 
-#[derive(From, Educe, Serialize)]
-#[educe(Clone, Copy(bound = "N: ArrayLengthCopy<u8>"), PartialEq, Eq, Default)]
+#[derive(From, Derivative, Serialize)]
+#[derivative(
+    Clone(bound = ""),
+    Copy(bound = "N: ArrayLengthCopy<u8>"),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Default(bound = "")
+)]
 #[serde(transparent)]
 pub struct ByteVector<N: ArrayLength<u8>> {
-    // The `trait` attribute works around a bug in `educe`.
-    // When deriving both `Clone` and `Copy`, `educe` always implements `Clone` as `*self`.
-    // That is not correct when the two impls have different bounds.
-    #[educe(Clone(trait = "Clone"))]
     #[serde(with = "serde_utils::prefixed_hex_or_bytes_slice")]
     bytes: ContiguousVector<u8, N>,
 }

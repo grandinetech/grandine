@@ -17,7 +17,7 @@ use core::ops::{Add, Range};
 
 use bit_field::BitField as _;
 use byteorder::LittleEndian;
-use educe::Educe;
+use derivative::Derivative;
 use ethereum_types::H256;
 use generic_array::{ArrayLength, GenericArray};
 use hashing::ZERO_HASHES;
@@ -34,8 +34,13 @@ use crate::{
     type_level::{ContiguousVectorElements, MerkleElements, ProofSize},
 };
 
-#[derive(Educe, Deserialize, Serialize, Ssz)]
-#[educe(Clone, Copy(bound = "D::ArrayType: Copy"), Default, Debug)]
+#[derive(Derivative, Deserialize, Serialize, Ssz)]
+#[derivative(
+    Clone(bound = ""),
+    Copy(bound = "D::ArrayType: Copy"),
+    Default(bound = ""),
+    Debug(bound = "")
+)]
 #[serde(bound = "", deny_unknown_fields)]
 #[ssz(
     bound = "D: ContiguousVectorElements<H256> + MerkleElements<H256>",
@@ -44,10 +49,6 @@ use crate::{
     transparent
 )]
 pub struct MerkleTree<D: ArrayLength<H256>> {
-    // The `trait` attribute works around a bug in `educe`.
-    // When deriving both `Clone` and `Copy`, `educe` always implements `Clone` as `*self`.
-    // That is not correct when the two impls have different bounds.
-    #[educe(Clone(trait = "Clone"))]
     // The elements of `MerkleTree.sibling_hashes` are initialized to 0x00…00.
     // The initial values are meaningless and never used as long as correct indices are passed.
     sibling_hashes: ContiguousVector<H256, D>,

@@ -3,8 +3,8 @@ use core::{
     ops::DerefMut,
 };
 
+use derivative::Derivative;
 use derive_more::{AsRef, Deref};
-use educe::Educe;
 use ethereum_types::H256;
 use once_cell::race::OnceBox;
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,8 @@ use crate::{
 };
 
 /// A "Hash Cell". Or a "Hash Cache", if you prefer.
-#[derive(Default, Deref, AsRef, Educe, Deserialize, Serialize)]
-#[educe(PartialEq(bound), Eq(bound), Debug(bound))]
+#[derive(Default, Deref, AsRef, Derivative, Deserialize, Serialize)]
+#[derivative(PartialEq, Eq, Debug)]
 #[serde(transparent)]
 pub struct Hc<T> {
     #[deref]
@@ -29,7 +29,7 @@ pub struct Hc<T> {
     // However, `OnceCell<Box<H256>>` needs two words of memory, whereas `OnceBox` fits in one.
     // The drawback is that `OnceBox` may cause multiple threads to redundantly compute the same
     // root, whereas `OnceCell` prevents that by locking.
-    #[educe(PartialEq(ignore), Debug(method = "fmt_once_box_as_option"))]
+    #[derivative(PartialEq = "ignore", Debug(format_with = "fmt_once_box_as_option"))]
     #[serde(skip)]
     cached_root: OnceBox<H256>,
 }

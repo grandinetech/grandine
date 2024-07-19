@@ -11,9 +11,9 @@ arithmetic = { workspace = true }
 bit_field = { workspace = true }
 bitvec = { workspace = true }
 byteorder = { workspace = true }
+derivative = { workspace = true }
 derive_more = { workspace = true }
 easy-ext = { workspace = true }
-educe = { workspace = true }
 ethereum-types = { workspace = true }
 generic-array = { workspace = true }
 hashing = { workspace = true }

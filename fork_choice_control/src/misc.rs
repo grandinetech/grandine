@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 use clock::Tick;
-use educe::Educe;
+use derivative::Derivative;
 use eth2_libp2p::GossipId;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
@@ -17,8 +17,8 @@ use types::{
     preset::Preset,
 };
 
-#[derive(Educe)]
-#[educe(Default)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct Delayed<P: Preset> {
     // These could be sets rather than `Vec`s now that we have our own SSZ bit collections, but
     // using sets makes logic for handling delayed objects more complicated and seems to worsen
@@ -46,8 +46,8 @@ impl<P: Preset> Delayed<P> {
     }
 }
 
-#[derive(Educe)]
-#[educe(Default)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct WaitingForCheckpointState<P: Preset> {
     pub ticks: Vec<Tick>,
     pub chain_links: Vec<PendingChainLink<P>>,

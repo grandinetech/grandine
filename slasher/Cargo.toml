@@ -11,8 +11,8 @@ anyhow = { workspace = true }
 bincode = { workspace = true }
 bls = { workspace = true }
 database = { workspace = true }
+derivative = { workspace = true }
 derive_more = { workspace = true }
-educe = { workspace = true }
 eth1_api = { workspace = true }
 features = { workspace = true }
 futures = { workspace = true }

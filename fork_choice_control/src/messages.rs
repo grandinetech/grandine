@@ -37,7 +37,7 @@ use crate::{
 use core::fmt::Debug;
 
 #[cfg(test)]
-use educe::Educe;
+use derivative::Derivative;
 
 pub enum AttestationVerifierMessage<P: Preset, W> {
     AggregateAndProof {
@@ -158,8 +158,8 @@ impl<P: Preset, W> MutatorMessage<P, W> {
 
 #[derive(Serialize)]
 #[serde(bound = "")]
-#[cfg_attr(test, derive(Educe))]
-#[cfg_attr(test, educe(Debug))]
+#[cfg_attr(test, derive(Derivative))]
+#[cfg_attr(test, derivative(Debug(bound = "")))]
 pub enum P2pMessage<P: Preset> {
     Slot(Slot),
     Accept(GossipId),
@@ -168,7 +168,7 @@ pub enum P2pMessage<P: Preset> {
     BlockNeeded(H256, Option<PeerId>),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
-    HeadState(#[cfg_attr(test, educe(Debug(ignore)))] Arc<BeaconState<P>>),
+    HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
 }
 
 impl<P: Preset> P2pMessage<P> {
