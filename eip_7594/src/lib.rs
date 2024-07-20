@@ -386,6 +386,19 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
     // missing chunks for more than a half is the worst case
     let worst_case_missing = NumberOfColumns::U64 / 2 + 1;
 
+    // modified from [math_lib](https://docs.rs/math_l/latest/src/math_l/math.rs.html#32-38) with compatible types
+    let math_comb = |n: u64, k: u64| -> f64 {
+        if k > n {
+            0_f64
+        } else {
+            (1..=k).fold(1_f64, |acc, i| acc * (n - i + 1) as f64 / i as f64)
+        }
+    };
+    
+    let hypergeom_cdf = |k: u64, m: u64, n: u64, big_n: u64| -> f64 {
+        (0..=k).fold(0_f64, |acc, i| acc + math_comb(n, i) * math_comb(m - n, big_n - i) / math_comb(m, big_n))
+    };
+
     // the probability of successful sampling of an unavailable block
     let false_positive_threshold = hypergeom_cdf(
         0,
@@ -410,25 +423,6 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
         sample_count += 1;
     }
     return sample_count;
-}
-
-fn hypergeom_cdf(k: u64, m: u64, n: u64, big_n: u64) -> f64 {
-    let mut sum = 0_f64;
-    for i in 0..(k + 1) {
-        sum += math_comb(n, i) * math_comb(m - n, big_n - i) / math_comb(m, big_n);
-    }
-    sum
-}
-
-fn math_comb(n: u64, k: u64) -> f64 {
-    if !(0..n).contains(&k) {
-        return 0_f64;
-    }
-    let mut r = 1_f64;
-    for i in 0..(std::cmp::min(k, n - k)) {
-        r *= (n - i) as f64 / (i + 1) as f64
-    }
-    r
 }
 
 #[cfg(test)]
