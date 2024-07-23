@@ -29,6 +29,7 @@ nonzero_ext = { workspace = true }
 operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 serde = { workspace = true }
+serde_utils = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }

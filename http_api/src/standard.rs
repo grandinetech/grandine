@@ -17,7 +17,7 @@ use axum::{
     },
     Json,
 };
-use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
+use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
@@ -89,9 +89,7 @@ use crate::{
     events::{EventChannels, Topic},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
-    misc::{
-        APIBlock, BackSyncedStatus, BroadcastValidation, ProposerData, SignedAPIBlock, SyncedStatus,
-    },
+    misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
     response::{EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
@@ -2314,16 +2312,7 @@ pub async fn validator_prepare_beacon_proposer<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     EthJson(proposers): EthJson<Vec<ProposerData>>,
 ) -> Result<(), Error> {
-    for proposer in proposers {
-        let ProposerData {
-            validator_index,
-            fee_recipient,
-        } = proposer;
-
-        block_producer
-            .add_new_prepared_proposer(validator_index, fee_recipient)
-            .await;
-    }
+    block_producer.add_new_prepared_proposers(proposers).await;
 
     Ok(())
 }

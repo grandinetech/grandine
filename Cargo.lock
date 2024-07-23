@@ -938,6 +938,7 @@ dependencies = [
  "operation_pools",
  "prometheus_metrics",
  "serde",
+ "serde_utils",
  "ssz",
  "std_ext",
  "tap",
