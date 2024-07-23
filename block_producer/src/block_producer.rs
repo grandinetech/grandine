@@ -30,14 +30,13 @@ use operation_pools::{
     SyncCommitteeAggPool,
 };
 use prometheus_metrics::Metrics;
-use serde::Serialize;
-use ssz::{BitList, BitVector, ContiguousList, Size, SszHash, SszSize, SszWrite, WriteError};
+use ssz::{BitList, BitVector, ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
 use transition_functions::{capella, electra, unphased};
 use try_from_iterator::TryFromIterator as _;
-use typenum::{Unsigned as _, U1};
+use typenum::Unsigned as _;
 use types::{
     altair::{
         consts::SyncCommitteeSubnetCount,
@@ -85,12 +84,13 @@ use types::{
         },
     },
     preset::Preset,
-    traits::{
-        BeaconBlock as _, BeaconState as _, PostBellatrixBeaconState, PostDenebBeaconBlockBody,
-    },
+    traits::{BeaconState as _, PostBellatrixBeaconState},
 };
 
-use crate::eth1_storage::Eth1Storage as _;
+use crate::{
+    eth1_storage::Eth1Storage as _,
+    misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock},
+};
 
 const DEFAULT_BUILDER_BOOST_FACTOR: NonZeroU64 = nonzero!(100_u64);
 const PAYLOAD_CACHE_SIZE: usize = 20;
@@ -159,16 +159,15 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .push(attester_slashing);
     }
 
-    pub async fn add_new_prepared_proposer(
+    pub async fn add_new_prepared_proposers(
         &self,
-        proposer_index: ValidatorIndex,
-        fee_recipient: ExecutionAddress,
+        proposers: impl IntoIterator<Item = ProposerData> + Send,
     ) {
-        self.producer_context
-            .prepared_proposers
-            .lock()
-            .await
-            .insert(proposer_index, fee_recipient);
+        let mut prepared_proposers = self.producer_context.prepared_proposers.lock().await;
+
+        for proposer in proposers {
+            prepared_proposers.insert(proposer.validator_index, proposer.fee_recipient);
+        }
     }
 
     pub async fn add_new_proposer_slashing(&self, proposer_slashing: ProposerSlashing) {
@@ -1647,105 +1646,4 @@ fn post_merge_state<P: Preset>(state: &BeaconState<P>) -> Option<&dyn PostBellat
     state
         .post_bellatrix()
         .filter(|state| predicates::is_merge_transition_complete(*state))
-}
-
-#[derive(Clone, Copy, Debug)]
-enum PayloadIdEntry {
-    Cached(PayloadId),
-    Live(PayloadId),
-}
-
-impl PayloadIdEntry {
-    #[must_use]
-    pub const fn id(self) -> PayloadId {
-        match self {
-            Self::Cached(payload_id) | Self::Live(payload_id) => payload_id,
-        }
-    }
-}
-
-#[derive(Clone, Serialize)]
-#[serde(bound = "", untagged)]
-pub enum ValidatorBlindedBlock<P: Preset> {
-    BlindedBeaconBlock {
-        #[serde(flatten)]
-        blinded_block: BlindedBeaconBlock<P>,
-        #[serde(skip)]
-        execution_payload: Box<ExecutionPayload<P>>,
-    },
-    BeaconBlock(BeaconBlock<P>),
-}
-
-impl<P: Preset> SszSize for ValidatorBlindedBlock<P> {
-    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
-    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size =
-        Size::for_untagged_union([BlindedBeaconBlock::<P>::SIZE, BeaconBlock::<P>::SIZE]);
-}
-
-impl<P: Preset> SszHash for ValidatorBlindedBlock<P> {
-    type PackingFactor = U1;
-
-    fn hash_tree_root(&self) -> H256 {
-        match self {
-            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.hash_tree_root(),
-            Self::BeaconBlock(block) => block.hash_tree_root(),
-        }
-    }
-}
-
-impl<P: Preset> SszWrite for ValidatorBlindedBlock<P> {
-    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
-        match self {
-            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.write_variable(bytes),
-            Self::BeaconBlock(block) => block.write_variable(bytes),
-        }
-    }
-}
-
-impl<P: Preset> ValidatorBlindedBlock<P> {
-    #[must_use]
-    pub fn into_blinded(self) -> Self {
-        let Self::BeaconBlock(block) = self else {
-            return self;
-        };
-
-        let Some(body) = block.body().post_bellatrix() else {
-            return Self::BeaconBlock(block);
-        };
-
-        let execution_payload = block
-            .clone()
-            .execution_payload()
-            .expect("post-Bellatrix blocks should have execution payload");
-
-        let kzg_commitments = block
-            .body()
-            .post_deneb()
-            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
-            .cloned();
-
-        let payload_header = body.execution_payload().to_header();
-        let blinded_block = block
-            .into_blinded(payload_header, kzg_commitments)
-            .expect("phases should match because payload header was taken from block");
-
-        Self::BlindedBeaconBlock {
-            blinded_block,
-            execution_payload: Box::new(execution_payload),
-        }
-    }
-
-    #[must_use]
-    pub const fn phase(&self) -> Phase {
-        match self {
-            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.phase(),
-            Self::BeaconBlock(block) => block.phase(),
-        }
-    }
-
-    #[must_use]
-    pub const fn is_blinded(&self) -> bool {
-        matches!(self, Self::BlindedBeaconBlock { .. })
-    }
 }

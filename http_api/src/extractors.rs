@@ -16,6 +16,7 @@ use axum::{
     Json, RequestExt as _, RequestPartsExt as _,
 };
 use axum_extra::{extract::Query, headers::ContentType, TypedHeader};
+use block_producer::ProposerData;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
 use http_api_utils::{BlockId, StateId};
@@ -37,7 +38,6 @@ use types::{
 
 use crate::{
     error::Error,
-    misc::ProposerData,
     validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
 };
 

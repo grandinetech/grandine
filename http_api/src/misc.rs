@@ -20,10 +20,7 @@ use types::{
     },
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
     nonstandard::{Phase, WithBlobsAndMev},
-    phase0::{
-        containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
-        primitives::{ExecutionAddress, Slot, ValidatorIndex},
-    },
+    phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::Slot},
     preset::Preset,
 };
 
@@ -301,11 +298,4 @@ pub enum BroadcastValidation {
     Gossip,
     Consensus,
     ConsensusAndEquivocation,
-}
-
-#[derive(Deserialize)]
-pub struct ProposerData {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub validator_index: ValidatorIndex,
-    pub fee_recipient: ExecutionAddress,
 }
