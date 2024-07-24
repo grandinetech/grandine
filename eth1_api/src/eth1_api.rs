@@ -1,4 +1,4 @@
-use core::ops::RangeInclusive;
+use core::{ops::RangeInclusive, time::Duration};
 use std::{collections::BTreeMap, sync::Arc, vec::IntoIter};
 
 use anyhow::{bail, ensure, Result};
@@ -38,6 +38,10 @@ use crate::{
     auth::Auth, deposit_event::DepositEvent, eth1_block::Eth1Block, Eth1ApiToMetrics,
     Eth1ConnectionData,
 };
+
+const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
+const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
+const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[allow(clippy::struct_field_names)]
 pub struct Eth1Api {
@@ -205,12 +209,22 @@ impl Eth1Api {
             (ExecutionPayload::Bellatrix(payload), None) => {
                 let payload_v1 = ExecutionPayloadV1::from(payload);
                 let params = vec![serde_json::to_value(payload_v1)?];
-                self.execute("engine_newPayloadV1", params).await
+                self.execute(
+                    "engine_newPayloadV1",
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                )
+                .await
             }
             (ExecutionPayload::Capella(payload), None) => {
                 let payload_v2 = ExecutionPayloadV2::from(payload);
                 let params = vec![serde_json::to_value(payload_v2)?];
-                self.execute("engine_newPayloadV2", params).await
+                self.execute(
+                    "engine_newPayloadV2",
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                )
+                .await
             }
             (
                 ExecutionPayload::Deneb(payload),
@@ -225,7 +239,12 @@ impl Eth1Api {
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
                 ];
-                self.execute("engine_newPayloadV3", params).await
+                self.execute(
+                    "engine_newPayloadV3",
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                )
+                .await
             }
             _ => bail!(Error::InvalidParameters),
         }
@@ -267,9 +286,30 @@ impl Eth1Api {
             payload_id,
             payload_status,
         } = match phase {
-            Phase::Bellatrix => self.execute("engine_forkchoiceUpdatedV1", params).await?,
-            Phase::Capella => self.execute("engine_forkchoiceUpdatedV2", params).await?,
-            Phase::Deneb => self.execute("engine_forkchoiceUpdatedV3", params).await?,
+            Phase::Bellatrix => {
+                self.execute(
+                    "engine_forkchoiceUpdatedV1",
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                )
+                .await?
+            }
+            Phase::Capella => {
+                self.execute(
+                    "engine_forkchoiceUpdatedV2",
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                )
+                .await?
+            }
+            Phase::Deneb => {
+                self.execute(
+                    "engine_forkchoiceUpdatedV3",
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                )
+                .await?
+            }
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
@@ -314,23 +354,35 @@ impl Eth1Api {
             PayloadId::Bellatrix(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV1Response<P>>("engine_getPayloadV1", params)
-                    .await
-                    .map(Into::into)
+                self.execute::<EngineGetPayloadV1Response<P>>(
+                    "engine_getPayloadV1",
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                )
+                .await
+                .map(Into::into)
             }
             PayloadId::Capella(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV2Response<P>>("engine_getPayloadV2", params)
-                    .await
-                    .map(Into::into)
+                self.execute::<EngineGetPayloadV2Response<P>>(
+                    "engine_getPayloadV2",
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                )
+                .await
+                .map(Into::into)
             }
             PayloadId::Deneb(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV3Response<P>>("engine_getPayloadV3", params)
-                    .await
-                    .map(Into::into)
+                self.execute::<EngineGetPayloadV3Response<P>>(
+                    "engine_getPayloadV3",
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                )
+                .await
+                .map(Into::into)
             }
         }
     }
@@ -339,6 +391,7 @@ impl Eth1Api {
         &self,
         method: &str,
         params: Vec<Value>,
+        timeout: Option<Duration>,
     ) -> Result<T> {
         let _timer = self.metrics.as_ref().map(|metrics| {
             prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
@@ -349,6 +402,7 @@ impl Eth1Api {
                 method,
                 params.clone(),
                 headers,
+                timeout,
             )))
         })
         .await
