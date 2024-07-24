@@ -147,6 +147,13 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
         self.beacon_committee_subscriptions
             .update::<P>(subscriptions);
 
+        let committees_with_aggregators = self
+            .beacon_committee_subscriptions
+            .committees_with_aggregators();
+
+        self.attestation_agg_pool
+            .set_committees_with_aggregators(committees_with_aggregators);
+
         let actions = self
             .attestation_subnets
             .update(current_slot, self.beacon_committee_subscriptions.all())?;

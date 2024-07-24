@@ -1,5 +1,8 @@
 use core::ops::RangeBounds;
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use anyhow::{Context, Error, Result};
 use bls::PublicKeyBytes;
@@ -16,7 +19,7 @@ use types::{
     config::Config,
     phase0::{
         containers::{Attestation, AttestationData},
-        primitives::{Epoch, Slot, ValidatorIndex, H256},
+        primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -26,7 +29,8 @@ use crate::{
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask, InsertAttestationTask,
-            PackProposableAttestationsTask, SetRegisteredValidatorsTask,
+            PackProposableAttestationsTask, SetCommitteesWithAggregatorsTask,
+            SetRegisteredValidatorsTask,
         },
     },
     misc::PoolTask,
@@ -148,6 +152,16 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             pool: self.pool.clone_arc(),
             controller: self.controller.clone_arc(),
             metrics: self.metrics.clone(),
+        });
+    }
+
+    pub fn set_committees_with_aggregators(
+        &self,
+        committees_with_aggregators: BTreeMap<Slot, BTreeSet<CommitteeIndex>>,
+    ) {
+        self.spawn_detached(SetCommitteesWithAggregatorsTask {
+            pool: self.pool.clone_arc(),
+            committees_with_aggregators,
         });
     }
 

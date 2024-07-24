@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use helper_functions::misc;
 use types::{
-    phase0::primitives::{CommitteeIndex, Epoch, ValidatorIndex},
+    phase0::primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex},
     preset::Preset,
 };
 
@@ -18,6 +18,19 @@ pub struct BeaconCommitteeSubscriptions {
 impl BeaconCommitteeSubscriptions {
     pub fn discard_old_subscriptions(&mut self, epoch: Epoch) {
         self.subscriptions = self.subscriptions.split_off(&epoch);
+    }
+
+    pub fn committees_with_aggregators(&self) -> BTreeMap<Slot, BTreeSet<CommitteeIndex>> {
+        let mut committees: BTreeMap<Slot, BTreeSet<CommitteeIndex>> = BTreeMap::new();
+
+        for subscription in self.all().filter(|subscription| subscription.is_aggregator) {
+            committees
+                .entry(subscription.slot)
+                .or_default()
+                .insert(subscription.committee_index);
+        }
+
+        committees
     }
 
     pub fn all(&self) -> impl Iterator<Item = BeaconCommitteeSubscription> + '_ {
