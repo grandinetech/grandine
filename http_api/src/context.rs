@@ -247,7 +247,7 @@ impl<P: Preset> Context<P> {
             AttestationAggPool::new(controller.clone_arc(), dedicated_executor.clone_arc(), None);
 
         let sync_committee_agg_pool = SyncCommitteeAggPool::new(
-            dedicated_executor,
+            dedicated_executor.clone_arc(),
             controller.clone_arc(),
             Some(pool_to_liveness_tx),
             pool_to_p2p_tx.clone(),
@@ -274,6 +274,7 @@ impl<P: Preset> Context<P> {
             keymanager.proposer_configs().clone_arc(),
             None,
             controller.clone_arc(),
+            dedicated_executor,
             eth1_chain,
             execution_engine,
             attestation_agg_pool.clone_arc(),

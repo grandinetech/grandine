@@ -13,6 +13,7 @@ arithmetic = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 cached = { workspace = true }
+dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }
 eth1 = { workspace = true }
 eth1_api = { workspace = true }

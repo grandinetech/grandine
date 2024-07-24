@@ -551,6 +551,27 @@ impl<P: Preset> BeaconBlock<P> {
         Ok(self)
     }
 
+    #[must_use]
+    pub fn with_blob_kzg_commitments(
+        mut self,
+        blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> Self {
+        let Some(commitments) = blob_kzg_commitments else {
+            return self;
+        };
+
+        match &mut self {
+            Self::Deneb(block) => block.body.blob_kzg_commitments = commitments,
+            _ => {
+                // This match arm will silently match any new phases.
+                // Cause a compilation error if a new phase is added.
+                const_assert_eq!(Phase::CARDINALITY, 5);
+            }
+        }
+
+        self
+    }
+
     pub fn into_blinded(
         self,
         execution_payload_header: ExecutionPayloadHeader<P>,
