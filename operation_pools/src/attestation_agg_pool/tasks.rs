@@ -1,5 +1,9 @@
 use core::time::Duration;
-use std::{sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
@@ -11,8 +15,11 @@ use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState, phase0::containers::Attestation, phase0::primitives::ValidatorIndex,
-    preset::Preset, traits::BeaconState as _,
+    combined::BeaconState,
+    phase0::containers::Attestation,
+    phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex},
+    preset::Preset,
+    traits::BeaconState as _,
 };
 
 use crate::{
@@ -188,21 +195,27 @@ impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
             metrics,
         } = self;
 
-        let _timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.att_pool_insert_attestation_task_times.start_timer());
-
         let Attestation {
             ref aggregation_bits,
             data,
             signature,
         } = *attestation;
 
+        let is_singular = aggregation_bits.count_ones() == 1;
+
+        if is_singular && !pool.aggregate_in_committee(data.index, data.slot).await {
+            return Ok(());
+        }
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.att_pool_insert_attestation_task_times.start_timer());
+
         let singular_attestations = pool.singular_attestations(data).await;
         let aggregates = pool.aggregates(data).await;
         let mut aggregates = aggregates.lock().await;
 
-        if aggregation_bits.count_ones() > 1 || aggregates.is_empty() {
+        if !is_singular || aggregates.is_empty() {
             let mut aggregate = Aggregate {
                 aggregation_bits: aggregation_bits.clone(),
                 signature: signature.try_into()?,
@@ -221,11 +234,32 @@ impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
 
         pool.add_data_root_to_data_entry(data).await;
 
-        if aggregation_bits.count_ones() == 1 {
+        if is_singular {
             singular_attestations.write().await.insert(attestation);
         }
 
         drop(wait_group);
+
+        Ok(())
+    }
+}
+
+pub struct SetCommitteesWithAggregatorsTask<P: Preset> {
+    pub pool: Arc<Pool<P>>,
+    pub committees_with_aggregators: BTreeMap<Slot, BTreeSet<CommitteeIndex>>,
+}
+
+impl<P: Preset> PoolTask for SetCommitteesWithAggregatorsTask<P> {
+    type Output = ();
+
+    async fn run(self) -> Result<Self::Output> {
+        let Self {
+            pool,
+            committees_with_aggregators,
+        } = self;
+
+        pool.set_committees_with_aggregators(committees_with_aggregators)
+            .await;
 
         Ok(())
     }

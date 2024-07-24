@@ -1,10 +1,11 @@
 use core::ops::RangeBounds;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
 use anyhow::Result;
+use features::Feature;
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
@@ -15,7 +16,7 @@ use types::{
     phase0::{
         consts::GENESIS_EPOCH,
         containers::{Attestation, AttestationData},
-        primitives::{Epoch, Slot, ValidatorIndex, H256},
+        primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::BeaconState,
@@ -34,6 +35,7 @@ pub struct Pool<P: Preset> {
     // though that may change if the packers are redesigned again.
     singular_attestations: RwLock<BTreeMap<Epoch, AttestationMap<P>>>,
     best_proposable_attestations: Mutex<AttestationsWithSlot<P>>,
+    committees_with_aggregators: RwLock<BTreeMap<Slot, BTreeSet<CommitteeIndex>>>,
     proposer_indices: RwLock<BTreeMap<Slot, ValidatorIndex>>,
     registered_validator_indices: RwLock<HashSet<ValidatorIndex>>,
 }
@@ -125,6 +127,31 @@ impl<P: Preset> Pool<P> {
             .into_iter()
             .flatten()
             .collect_vec()
+    }
+
+    pub async fn aggregate_in_committee(
+        &self,
+        committee_index: CommitteeIndex,
+        attestation_slot: Slot,
+    ) -> bool {
+        let proposing_from_slot = attestation_slot + 1;
+        let proposing_to_slot = attestation_slot + 2;
+
+        if Feature::AggregateAllAttestations.is_enabled()
+            || self
+                .has_registered_validators_proposing_in_slots(
+                    proposing_from_slot..=proposing_to_slot,
+                )
+                .await
+        {
+            return true;
+        }
+
+        self.committees_with_aggregators
+            .read()
+            .await
+            .get(&attestation_slot)
+            .is_some_and(|indices| indices.contains(&committee_index))
     }
 
     pub async fn best_aggregate_attestation(
@@ -253,6 +280,13 @@ impl<P: Preset> Pool<P> {
         prepared_for_slot: Slot,
     ) {
         *self.best_proposable_attestations.lock().await = (attestations, prepared_for_slot);
+    }
+
+    pub async fn set_committees_with_aggregators(
+        &self,
+        committees_with_aggregators: BTreeMap<Slot, BTreeSet<CommitteeIndex>>,
+    ) {
+        *self.committees_with_aggregators.write().await = committees_with_aggregators;
     }
 
     pub async fn set_registered_validator_indices(

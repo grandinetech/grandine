@@ -24,6 +24,7 @@ static FEATURES: [AtomicBool; Feature::VARIANT_COUNT] = [FALSE; Feature::VARIANT
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Display, FromStr, VariantCount)]
 pub enum Feature {
+    AggregateAllAttestations,
     AlwaysPrepackAttestations,
     AlwaysPrepareExecutionPayload,
     CacheTargetStates,
