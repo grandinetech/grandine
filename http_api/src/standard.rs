@@ -1930,8 +1930,14 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     let execution_payload_header_handle =
         block_build_context.get_execution_payload_header(public_key.to_bytes());
 
+    let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
     let blinded_block = block_build_context
-        .build_blinded_beacon_block(randao_reveal, execution_payload_header_handle)
+        .build_blinded_beacon_block(
+            randao_reveal,
+            execution_payload_header_handle,
+            local_execution_payload_handle,
+        )
         .await?
         .ok_or(Error::UnableToProduceBlindedBlock)?
         .0
@@ -1977,8 +1983,10 @@ pub async fn validator_block<P: Preset, W: Wait>(
         },
     );
 
+    let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
     let (beacon_block, _) = block_build_context
-        .build_beacon_block(randao_reveal)
+        .build_beacon_block(randao_reveal, local_execution_payload_handle)
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -2032,8 +2040,14 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let execution_payload_header_handle =
         block_build_context.get_execution_payload_header(public_key.to_bytes());
 
+    let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
     let (validator_block, block_rewards) = block_build_context
-        .build_blinded_beacon_block(randao_reveal, execution_payload_header_handle)
+        .build_blinded_beacon_block(
+            randao_reveal,
+            execution_payload_header_handle,
+            local_execution_payload_handle,
+        )
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 

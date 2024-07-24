@@ -1,4 +1,4 @@
-use core::{fmt::Display, num::NonZeroU64, ops::Div as _};
+use core::{fmt::Display, future::Future, num::NonZeroU64, ops::Div as _};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -8,6 +8,7 @@ use anyhow::{Context as _, Error as AnyhowError, Result};
 use bls::{AggregateSignature, PublicKeyBytes, SignatureBytes};
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
+use dedicated_executor::{DedicatedExecutor, Job};
 use eth1::Eth1Chain;
 use eth1_api::{ApiController, Eth1ExecutionEngine};
 use execution_engine::{
@@ -96,6 +97,10 @@ const DEFAULT_BUILDER_BOOST_FACTOR: NonZeroU64 = nonzero!(100_u64);
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
+pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
+pub type LocalExecutionPayloadJoinHandle<P> =
+    JoinHandle<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>>;
+
 pub struct BlockProducer<P: Preset, W: Wait> {
     producer_context: Arc<ProducerContext<P, W>>,
 }
@@ -106,6 +111,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         proposer_configs: Arc<ProposerConfigs>,
         builder_api: Option<Arc<BuilderApi>>,
         controller: ApiController<P, W>,
+        dedicated_executor: Arc<DedicatedExecutor>,
         eth1_chain: Eth1Chain,
         execution_engine: Arc<Eth1ExecutionEngine<P>>,
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
@@ -118,6 +124,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             proposer_configs,
             builder_api,
             controller,
+            dedicated_executor,
             eth1_chain,
             execution_engine,
             attestation_agg_pool,
@@ -550,6 +557,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     proposer_configs: Arc<ProposerConfigs>,
     builder_api: Option<Arc<BuilderApi>>,
     controller: ApiController<P, W>,
+    dedicated_executor: Arc<DedicatedExecutor>,
     eth1_chain: Eth1Chain,
     execution_engine: Arc<Eth1ExecutionEngine<P>>,
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
@@ -581,98 +589,10 @@ pub struct BlockBuildContext<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
-    pub async fn build_blinded_beacon_block(
-        &self,
-        randao_reveal: SignatureBytes,
-        execution_payload_header_handle: Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>>,
-    ) -> Result<
-        Option<(
-            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
-            Option<BlockRewards>,
-        )>,
-    > {
-        let Some((beacon_block, block_rewards)) = self.build_beacon_block(randao_reveal).await?
-        else {
-            return Ok(None);
-        };
-
-        if beacon_block.value.phase() >= Phase::Bellatrix {
-            if let Some(header_handle) = execution_payload_header_handle {
-                match header_handle.await? {
-                    Ok(Some(response)) => {
-                        let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
-                        let builder_mev = response.mev();
-
-                        if let Some((blinded_block, blinded_block_rewards)) = self
-                            .blinded_block_from_beacon_block(
-                                beacon_block.value.clone(),
-                                response.execution_payload_header(),
-                                blob_kzg_commitments,
-                            )
-                        {
-                            if let Some(local_mev) = beacon_block.mev {
-                                let builder_boost_factor = Uint256::from_u64(
-                                    self.options
-                                        .builder_boost_factor
-                                        .unwrap_or(DEFAULT_BUILDER_BOOST_FACTOR.get()),
-                                );
-
-                                let boosted_builder_mev = builder_mev
-                                    .div(DEFAULT_BUILDER_BOOST_FACTOR)
-                                    .saturating_mul(builder_boost_factor);
-
-                                if local_mev >= boosted_builder_mev {
-                                    info!(
-                                        "using more profitable local payload: \
-                                         local MEV: {local_mev}, builder MEV: {builder_mev}, \
-                                         boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
-                                    );
-
-                                    return Ok(Some((
-                                        beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
-                                        block_rewards,
-                                    )));
-                                }
-                            }
-
-                            let block = ValidatorBlindedBlock::BlindedBeaconBlock {
-                                blinded_block,
-                                execution_payload: Box::new(
-                                    beacon_block.value.execution_payload().expect(
-                                        "post-Bellatrix blocks should have execution payload",
-                                    ),
-                                ),
-                            };
-
-                            return Ok(Some((
-                                WithBlobsAndMev::new(
-                                    block,
-                                    None,
-                                    beacon_block.proofs,
-                                    beacon_block.blobs,
-                                    Some(builder_mev),
-                                ),
-                                blinded_block_rewards,
-                            )));
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        warn!("failed to get execution payload header: {error}");
-                    }
-                };
-            }
-        }
-
-        Ok(Some((
-            beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
-            block_rewards,
-        )))
-    }
-
     pub async fn build_beacon_block(
         &self,
         randao_reveal: SignatureBytes,
+        local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         let _block_timer = self
             .producer_context
@@ -680,86 +600,114 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .as_ref()
             .map(|metrics| metrics.build_beacon_block_times.start_timer());
 
-        let WithBlobsAndMev {
-            value: mut execution_payload,
-            commitments,
-            proofs,
-            blobs,
-            mev,
-        } = self
-            .local_execution_payload_option()
-            .await
-            .map(|value| value.map(Some))
-            .unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+        let block_without_state_root = self
+            .build_beacon_block_without_state_root(randao_reveal)
+            .await?;
 
-        let slot = self.beacon_state.slot();
+        let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
+            build_context
+                .produce_beacon_block(block_without_state_root, local_execution_payload_handle)
+                .await
+        });
 
-        // Starting with Capella, all blocks must be post-Merge.
-        // Construct a superficially valid execution payload for snapshot testing.
-        // It will almost always be invalid in a real network, but so would a default payload.
-        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
-        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
-        if self.beacon_state.phase() >= Phase::Capella && execution_payload.is_none() {
-            execution_payload = Some(factory::execution_payload(
-                &self.producer_context.chain_config,
-                &self.beacon_state,
-                slot,
-                ExecutionBlockHash::from_low_u64_be(slot),
-            )?);
-        }
+        wait_for_result(produce_beacon_block_join_handle).await
+    }
 
-        let without_state_root = self
-            .build_beacon_block_without_state_root(randao_reveal, commitments)
-            .await?
-            .with_execution_payload(execution_payload)?;
+    pub async fn build_blinded_beacon_block(
+        &self,
+        randao_reveal: SignatureBytes,
+        execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
+        local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
+            Option<BlockRewards>,
+        )>,
+    > {
+        let block_without_state_root = self
+            .build_beacon_block_without_state_root(randao_reveal)
+            .await?;
 
-        let block_processor = self.producer_context.controller.block_processor();
-        let pre_state = self.beacon_state.clone_arc();
+        let block = block_without_state_root.clone();
 
-        let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
-            block_processor.process_trusted_block_with_report(pre_state, &without_state_root)
-        } else {
-            block_processor.process_untrusted_block_with_report(
-                pre_state,
-                &without_state_root,
-                self.options.skip_randao_verification,
-            )
-        };
+        let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
+            build_context
+                .produce_beacon_block(block, local_execution_payload_handle)
+                .await
+        });
 
-        let (post_state, block_rewards) = match result {
-            Ok((state, block_rewards)) => (state, block_rewards),
-            Err(error) => {
-                warn!(
-                    "constructed invalid beacon block \
-                     (error: {error:?}, without_state_root: {without_state_root:?})",
-                );
-                return Ok(None);
+        let produce_blinded_block_join_handle = self.spawn_job(|build_context| async move {
+            build_context
+                .produce_blinded_block(block_without_state_root, execution_payload_header_handle)
+                .await
+        });
+
+        let beacon_block_opt = wait_for_result(produce_beacon_block_join_handle).await?;
+        let blinded_block_opt = wait_for_result(produce_blinded_block_join_handle).await?;
+
+        match (beacon_block_opt, blinded_block_opt) {
+            (
+                Some((beacon_block, beacon_block_rewards)),
+                Some((blinded_block, blinded_block_rewards, builder_mev)),
+            ) => {
+                if let Some(local_mev) = beacon_block.mev {
+                    let builder_boost_factor = Uint256::from_u64(
+                        self.options
+                            .builder_boost_factor
+                            .unwrap_or(DEFAULT_BUILDER_BOOST_FACTOR.get()),
+                    );
+
+                    let boosted_builder_mev = builder_mev
+                        .div(DEFAULT_BUILDER_BOOST_FACTOR)
+                        .saturating_mul(builder_boost_factor);
+
+                    if local_mev >= boosted_builder_mev {
+                        info!(
+                            "using more profitable local payload: \
+                             local MEV: {local_mev}, builder MEV: {builder_mev}, \
+                             boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
+                        );
+
+                        return Ok(Some((
+                            beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
+                            beacon_block_rewards,
+                        )));
+                    }
+                }
+
+                let block = ValidatorBlindedBlock::BlindedBeaconBlock {
+                    blinded_block,
+                    execution_payload: Box::new(
+                        beacon_block
+                            .value
+                            .execution_payload()
+                            .expect("post-Bellatrix blocks should have execution payload"),
+                    ),
+                };
+
+                Ok(Some((
+                    WithBlobsAndMev::new(
+                        block,
+                        None,
+                        beacon_block.proofs,
+                        beacon_block.blobs,
+                        Some(builder_mev),
+                    ),
+                    blinded_block_rewards,
+                )))
             }
-        };
-
-        // Computing and setting the state root could be skipped when `skip_randao_verification`
-        // is `true`. The resulting block is invalid either way. The client would have to mix in
-        // the real RANDAO reveal and recompute the state root to make it valid.
-        let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
-
-        Ok(Some((
-            WithBlobsAndMev::new(
-                beacon_block,
-                // Commitments are moved to block.
-                None,
-                proofs,
-                blobs,
-                mev,
-            ),
-            block_rewards,
-        )))
+            (Some((beacon_block, beacon_block_rewards)), None) => Ok(Some((
+                beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
+                beacon_block_rewards,
+            ))),
+            _ => Ok(None),
+        }
     }
 
     #[allow(clippy::too_many_lines)]
     async fn build_beacon_block_without_state_root(
         &self,
         randao_reveal: SignatureBytes,
-        blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
     ) -> Result<BeaconBlock<P>> {
         let eth1_data = self.prepare_eth1_data()?;
         let deposits = self.prepare_deposits(eth1_data)?;
@@ -785,7 +733,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // we fill all fields when constructing a block.
         let state_root = H256::zero();
 
-        let without_state_root = match self.beacon_state.phase() {
+        match self.beacon_state.phase() {
             Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
                 slot,
                 proposer_index,
@@ -873,7 +821,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     sync_aggregate,
                     execution_payload: DenebExecutionPayload::default(),
                     bls_to_execution_changes,
-                    blob_kzg_commitments: blob_kzg_commitments.unwrap_or_default(),
+                    blob_kzg_commitments: ContiguousList::default(),
                 },
             }),
             Phase::Electra => {
@@ -917,13 +865,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         sync_aggregate,
                         execution_payload: ElectraExecutionPayload::default(),
                         bls_to_execution_changes,
-                        blob_kzg_commitments: blob_kzg_commitments.unwrap_or_default(),
+                        blob_kzg_commitments: ContiguousList::default(),
                     },
                 })
             }
-        };
-
-        Ok(without_state_root)
+        }
+        .pipe(Ok)
     }
 
     pub fn compute_on_chain_aggregate(
@@ -1012,6 +959,128 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let with_state_root = without_state_root.with_state_root(post_state.hash_tree_root());
 
         Some((with_state_root, block_rewards))
+    }
+
+    fn process_beacon_block(
+        &self,
+        without_state_root: BeaconBlock<P>,
+    ) -> Option<(BeaconBlock<P>, Option<BlockRewards>)> {
+        let block_processor = self.producer_context.controller.block_processor();
+        let pre_state = self.beacon_state.clone_arc();
+
+        let result = if Feature::TrustOwnBlockSignatures.is_enabled() {
+            block_processor.process_trusted_block_with_report(pre_state, &without_state_root)
+        } else {
+            block_processor.process_untrusted_block_with_report(
+                pre_state,
+                &without_state_root,
+                self.options.skip_randao_verification,
+            )
+        };
+
+        let (post_state, block_rewards) = match result {
+            Ok((state, block_rewards)) => (state, block_rewards),
+            Err(error) => {
+                warn!(
+                    "constructed invalid beacon block \
+                     (error: {error:?}, without_state_root: {without_state_root:?})",
+                );
+                return None;
+            }
+        };
+
+        // Computing and setting the state root could be skipped when `skip_randao_verification`
+        // is `true`. The resulting block is invalid either way. The client would have to mix in
+        // the real RANDAO reveal and recompute the state root to make it valid.
+        let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
+
+        Some((beacon_block, block_rewards))
+    }
+
+    pub async fn produce_beacon_block(
+        &self,
+        block_without_state_root: BeaconBlock<P>,
+        local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
+        let with_blobs_and_mev = if let Some(handle) = local_execution_payload_handle {
+            handle.await?.map(|value| value.map(Some))
+        } else {
+            None
+        };
+
+        let WithBlobsAndMev {
+            value: mut execution_payload,
+            commitments,
+            proofs,
+            blobs,
+            mev,
+        } = with_blobs_and_mev.unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+
+        let slot = self.beacon_state.slot();
+
+        // Starting with Capella, all blocks must be post-Merge.
+        // Construct a superficially valid execution payload for snapshot testing.
+        // It will almost always be invalid in a real network, but so would a default payload.
+        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
+        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
+        if self.beacon_state.phase() >= Phase::Capella && execution_payload.is_none() {
+            execution_payload = Some(factory::execution_payload(
+                &self.producer_context.chain_config,
+                &self.beacon_state,
+                slot,
+                ExecutionBlockHash::from_low_u64_be(slot),
+            )?);
+        }
+
+        let without_state_root_with_payload = block_without_state_root
+            .with_execution_payload(execution_payload)?
+            .with_blob_kzg_commitments(commitments);
+
+        self.process_beacon_block(without_state_root_with_payload)
+            .map(|(beacon_block, block_rewards)| {
+                (
+                    WithBlobsAndMev::new(
+                        beacon_block,
+                        // Commitments are moved to block.
+                        None,
+                        proofs,
+                        blobs,
+                        mev,
+                    ),
+                    block_rewards,
+                )
+            })
+            .pipe(Ok)
+    }
+
+    pub async fn produce_blinded_block(
+        &self,
+        block_without_state_root: BeaconBlock<P>,
+        execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
+    ) -> Result<Option<(BlindedBeaconBlock<P>, Option<BlockRewards>, Uint256)>> {
+        let Some(header_handle) = execution_payload_header_handle else {
+            return Ok(None);
+        };
+
+        match header_handle.await? {
+            Ok(Some(response)) => {
+                let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
+                let builder_mev = response.mev();
+
+                self.blinded_block_from_beacon_block(
+                    block_without_state_root,
+                    response.execution_payload_header(),
+                    blob_kzg_commitments,
+                )
+                .map(|(blinded_block, block_rewards)| (blinded_block, block_rewards, builder_mev))
+                .pipe(Ok)
+            }
+            Ok(None) => Ok(None),
+            Err(error) => {
+                warn!("failed to get execution payload header: {error}");
+                Ok(None)
+            }
+        }
     }
 
     fn prepare_eth1_data(&self) -> Result<Eth1Data> {
@@ -1477,7 +1546,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     pub fn get_execution_payload_header(
         &self,
         public_key: PublicKeyBytes,
-    ) -> Option<JoinHandle<Result<Option<SignedBuilderBid<P>>>>> {
+    ) -> Option<ExecutionPayloadHeaderJoinHandle<P>> {
         if let Some(state) = self.beacon_state.post_bellatrix() {
             if let Some(builder_api) = self.producer_context.builder_api.clone() {
                 let slot = self.beacon_state.slot();
@@ -1512,6 +1581,17 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         None
+    }
+
+    pub fn get_local_execution_payload(&self) -> Option<LocalExecutionPayloadJoinHandle<P>> {
+        self.beacon_state.post_bellatrix()?;
+
+        let builder_context = self.clone();
+
+        let handle =
+            tokio::spawn(async move { builder_context.local_execution_payload_option().await });
+
+        Some(handle)
     }
 
     async fn local_execution_payload_result(
@@ -1636,6 +1716,17 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     .fee_recipient(proposer_pubkey.to_bytes())
             })
     }
+
+    fn spawn_job<T, F>(&self, task: T) -> Job<F::Output>
+    where
+        T: FnOnce(Self) -> F,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.producer_context
+            .dedicated_executor
+            .spawn(task(self.clone()))
+    }
 }
 
 fn log_with_feature(message: impl Display) {
@@ -1646,4 +1737,10 @@ fn post_merge_state<P: Preset>(state: &BeaconState<P>) -> Option<&dyn PostBellat
     state
         .post_bellatrix()
         .filter(|state| predicates::is_merge_transition_complete(*state))
+}
+
+async fn wait_for_result<T: Send>(job: Job<Result<T>>) -> Result<T> {
+    job.await
+        .map_err(AnyhowError::msg)
+        .context("block producer task failed")?
 }

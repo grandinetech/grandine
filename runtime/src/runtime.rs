@@ -484,6 +484,7 @@ pub async fn run_after_genesis<P: Preset>(
         keymanager.proposer_configs().clone_arc(),
         builder_api.clone(),
         controller.clone_arc(),
+        dedicated_executor_normal_priority.clone_arc(),
         eth1_chain,
         execution_engine,
         attestation_agg_pool.clone_arc(),

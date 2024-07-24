@@ -650,6 +650,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let execution_payload_header_handle =
             block_build_context.get_execution_payload_header(public_key.to_bytes());
 
+        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
         let epoch = slot_head.current_epoch();
 
         let result = signer_snapshot
@@ -675,7 +677,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let beacon_block_option = block_build_context
-            .build_blinded_beacon_block(randao_reveal, execution_payload_header_handle)
+            .build_blinded_beacon_block(
+                randao_reveal,
+                execution_payload_header_handle,
+                local_execution_payload_handle,
+            )
             .await?;
 
         let Some((

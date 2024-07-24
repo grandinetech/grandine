@@ -921,6 +921,7 @@ dependencies = [
  "bls",
  "builder_api",
  "cached",
+ "dedicated_executor",
  "deposit_tree",
  "eth1",
  "eth1_api",
