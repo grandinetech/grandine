@@ -33,6 +33,7 @@ members = [
     'keymanager',
     'kzg_utils',
     'liveness_tracker',
+    'logging',
     'metrics',
     'operation_pools',
     'p2p',
@@ -457,6 +458,7 @@ interop = { path = 'interop' }
 keymanager = { path = 'keymanager' }
 kzg_utils = { path = 'kzg_utils' }
 liveness_tracker = { path = 'liveness_tracker' }
+logging = { path = 'logging' }
 metrics = { path = 'metrics' }
 operation_pools = { path = 'operation_pools' }
 p2p = { path = 'p2p' }

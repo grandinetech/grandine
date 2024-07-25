@@ -778,6 +778,7 @@ dependencies = [
  "chrono",
  "env_logger 0.11.3",
  "log",
+ "logging",
  "panics",
  "rayon",
 ]
@@ -3053,6 +3054,7 @@ dependencies = [
  "itertools 0.13.0",
  "keymanager",
  "log",
+ "logging",
  "metrics",
  "p2p",
  "panics",
@@ -5018,6 +5020,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "logging"
+version = "0.0.0"
+dependencies = [
+ "derive_more",
+]
+
+[[package]]
 name = "lru"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5586,6 +5595,7 @@ dependencies = [
  "igd-next",
  "itertools 0.13.0",
  "log",
+ "logging",
  "operation_pools",
  "prometheus-client",
  "prometheus_metrics",

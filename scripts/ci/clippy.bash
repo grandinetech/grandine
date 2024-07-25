@@ -46,6 +46,7 @@ options=(
     --package keymanager
     --package kzg_utils
     --package liveness_tracker
+    --package logging
     --package metrics
     --package operation_pools
     --package p2p

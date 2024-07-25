@@ -20,6 +20,7 @@ use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
 use http_api::HttpApiConfig;
 use log::{error, info, warn};
+use logging::PEER_LOG_METRICS;
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use reqwest::{Client, ClientBuilder, Url};
@@ -371,6 +372,8 @@ fn try_main() -> Result<()> {
     } = config;
 
     features.into_iter().for_each(Feature::enable);
+
+    PEER_LOG_METRICS.set_target_peer_count(network_config.target_peers);
 
     let MetricsConfig {
         metrics,
