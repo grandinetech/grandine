@@ -15,6 +15,7 @@ pub fn initialize_logger(
 
     builder
         .filter_level(LevelFilter::Off)
+        .filter_module("attestation_verifier", LevelFilter::Info)
         .filter_module("block_producer", LevelFilter::Info)
         .filter_module("builder_api", LevelFilter::Info)
         .filter_module("dedicated_executor", LevelFilter::Info)
