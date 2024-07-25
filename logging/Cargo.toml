@@ -1,0 +1,10 @@
+[package]
+name = 'logging'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+derive_more = { workspace = true }

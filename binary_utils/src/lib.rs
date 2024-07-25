@@ -4,6 +4,7 @@ use anyhow::Result;
 use chrono::{Local, SecondsFormat};
 use env_logger::{Builder, Env, Target, WriteStyle};
 use log::LevelFilter;
+use logging::PEER_LOG_METRICS;
 use rayon::ThreadPoolBuilder;
 
 pub fn initialize_logger(
@@ -49,7 +50,7 @@ pub fn initialize_logger(
         .format(|formatter, record| {
             writeln!(
                 formatter,
-                "[{}] [{}] [{}] {}",
+                "[{}] [{}] [{}] [{PEER_LOG_METRICS}] {}",
                 // This allocates a `String` only to write it to `formatter`, but that has a
                 // negligible effect on performance. `DateTime::format_with_items` with the same
                 // format is slower. Manual formatting with `core::fmt` is faster, however.

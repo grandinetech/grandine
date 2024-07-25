@@ -11,5 +11,6 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
+logging = { workspace = true }
 panics = { workspace = true }
 rayon = { workspace = true }
