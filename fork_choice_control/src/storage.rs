@@ -17,12 +17,9 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use transition_functions::combined;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{BeaconState, BlobSidecar, SignedBeaconBlock},
     config::Config,
-    deneb::{
-        containers::{BlobIdentifier, BlobSidecar},
-        primitives::BlobIndex,
-    },
+    deneb::{containers::BlobIdentifier, primitives::BlobIndex},
     nonstandard::{BlobSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
@@ -335,7 +332,7 @@ impl<P: Preset> Storage<P> {
 
             let BlobIdentifier { block_root, index } = blob_id;
 
-            let slot = blob_sidecar.signed_block_header.message.slot;
+            let slot = blob_sidecar.signed_block_header().message.slot;
 
             batch.push(serialize(
                 BlobSidecarByBlobId(block_root, index),

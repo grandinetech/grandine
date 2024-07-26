@@ -1469,6 +1469,67 @@ pub enum BlobSidecar<P: Preset> {
     Electra(ElectraBlobSidecar<P>),
 }
 
+impl<P: Preset> SszSize for BlobSidecar<P> {
+    const SIZE: Size = todo!();
+}
+
+impl<P: Preset> SszRead<Config> for BlobSidecar<P> {
+    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 4 fixed parts before `blob_sidecar.signed_block_header.message.slot`:
+        // - The content of `blob_sidecar.index`.
+        // - The content of `blob_sidecar.blob`.
+        // - The content of `blob_sidecar.kzg_commitment`.
+        // - The content of `blob_sidecar.kzg_proof`.
+        let slot_start = BlobIndex::SIZE.get()
+            + Blob::<P>::SIZE.get()
+            + KzgCommitment::SIZE.get()
+            + KzgProof::SIZE.get();
+
+        let slot_end = slot_start + Slot::SIZE.get();
+        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
+        let slot = Slot::from_ssz_default(slot_bytes)?;
+        let phase = config.phase_at_slot::<P>(slot);
+
+        let blob_sidecar = match phase {
+            Phase::Phase0 => {
+                return Err(ReadError::Custom {
+                    message: "blob sidecar has slot in Phase 0",
+                });
+            }
+            Phase::Altair => {
+                return Err(ReadError::Custom {
+                    message: "blob sidecar has slot in Altair",
+                });
+            }
+            Phase::Bellatrix => {
+                return Err(ReadError::Custom {
+                    message: "blob sidecar has slot in Bellatrix",
+                });
+            }
+            Phase::Capella => {
+                return Err(ReadError::Custom {
+                    message: "blob sidecar has slot in Capella",
+                });
+            }
+            Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+        };
+
+        assert_eq!(slot, blob_sidecar.signed_block_header().message.slot);
+
+        Ok(blob_sidecar)
+    }
+}
+
+impl<P: Preset> SszWrite for BlobSidecar<P> {
+    fn write_fixed(&self, bytes: &mut [u8]) {
+        match self {
+            Self::Deneb(blob_sidecar) => blob_sidecar.write_fixed(bytes),
+            Self::Electra(blob_sidecar) => blob_sidecar.write_fixed(bytes),
+        }
+    }
+}
+
 impl<P: Preset> SszHash for BlobSidecar<P> {
     type PackingFactor = U1;
 
@@ -1526,6 +1587,14 @@ impl<P: Preset> BlobSidecar<P> {
         match self {
             Self::Deneb(blob_sidecar) => blob_sidecar.kzg_commitment_inclusion_proof.as_slice(),
             Self::Electra(blob_sidecar) => blob_sidecar.kzg_commitment_inclusion_proof.as_slice(),
+        }
+    }
+
+    #[cfg(test)]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 }
@@ -1591,6 +1660,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/SignedBeaconBlock/*/*"]     [deneb_minimal_signed_beacon_block]     [SignedBeaconBlock] [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/Attestation/*/*"]           [deneb_mainnet_attestation]             [Attestation]       [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/Attestation/*/*"]           [deneb_minimal_attestation]             [Attestation]       [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/BlobSidecar/*/*"]           [deneb_mainnet_blob_sidecar]            [BlobSidecar]       [Mainnet] [Deneb];
+        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/BlobSidecar/*/*"]           [deneb_minimal_blob_sidecar]            [BlobSidecar]       [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/BeaconState/*/*"]         [electra_mainnet_beacon_state]          [BeaconState]       [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/BeaconState/*/*"]         [electra_minimal_beacon_state]          [BeaconState]       [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedBeaconBlock/*/*"]   [electra_mainnet_signed_beacon_block]   [SignedBeaconBlock] [Mainnet] [Electra];
