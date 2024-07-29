@@ -129,6 +129,8 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub min_epochs_for_blob_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub min_epochs_for_data_column_sidecars_requests: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: u64,
 
     // Transition
@@ -213,6 +215,7 @@ impl Default for Config {
             max_request_blocks_deneb: 128,
             max_request_blob_sidecars: 768,
             min_epochs_for_blob_sidecars_requests: 4096,
+            min_epochs_for_data_column_sidecars_requests: 4096,
             blob_sidecar_subnet_count: 6,
 
             // Transition

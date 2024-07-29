@@ -459,6 +459,18 @@ pub fn construct_blob_sidecars<P: Preset>(
     Ok(vec![])
 }
 
+#[must_use]
+pub fn data_column_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
+    let current_epoch = compute_epoch_at_slot::<P>(current_slot);
+    let epoch = config.eip7594_fork_epoch.max(
+        current_epoch
+            .checked_sub(config.min_epochs_for_data_column_sidecars_requests)
+            .unwrap_or(GENESIS_EPOCH),
+    );
+
+    compute_start_slot_at_epoch::<P>(epoch)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

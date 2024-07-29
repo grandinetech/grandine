@@ -363,6 +363,10 @@ impl<P: Preset> BlockSyncService<P> {
                             self.sync_manager.data_columns_by_range_request_finished(request_id);
                             self.request_blobs_and_blocks_if_ready()?;
                         }
+                        P2pToSync::DataColumnsByRootChunkReceived(identifier, peer_id, request_id) => {
+                            self.sync_manager.received_data_column_sidecar_chunk(identifier, peer_id, request_id);
+                            self.request_blobs_and_blocks_if_ready()?;
+                        }
                     }
                 }
             }
@@ -561,7 +565,18 @@ impl<P: Preset> BlockSyncService<P> {
         slot: Slot,
         peer_id: Option<PeerId>,
     ) -> Result<()> {
-        // TODO(feature/eip_7594): data_column_serve_slot check
+        let data_column_serve_range_slot = misc::data_column_serve_range_slot::<P>(
+            self.controller.chain_config(),
+            self.controller.slot(),
+        );
+
+        if slot < data_column_serve_range_slot {
+            features::log!(
+                DebugP2p,
+                "Ignoring needed data column sidecar request: slot: {slot} < data_column_serve_range_slot: {data_column_serve_range_slot}"
+            );
+            return Ok(());
+        }
 
         let request_id = self.request_id()?;
 

@@ -466,11 +466,19 @@ where
         data_column_ids: impl IntoIterator<Item = DataColumnIdentifier> + Send,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let snapshot = self.snapshot();
+        let storage = self.storage();
 
-        // TODO(feature/eip7594): data columns from storage
         let data_columns = data_column_ids
             .into_iter()
-            .filter_map(|data_column_id| snapshot.cached_data_column_sidecar_by_id(data_column_id))
+            .map(
+                |data_column_id| match snapshot.cached_data_column_sidecar_by_id(data_column_id) {
+                    Some(data_column_sidecar) => Ok(Some(data_column_sidecar)),
+                    None => storage.data_column_sidecar_by_id(data_column_id),
+                },
+            )
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .collect_vec();
 
         Ok(data_columns)

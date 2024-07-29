@@ -69,6 +69,7 @@ pub enum P2pToSync<P: Preset> {
     BlockByRootRequestFinished(H256),
     DataColumnsByRangeRequestFinished(RequestId),
     RequestFailed(PeerId),
+    DataColumnsByRootChunkReceived(DataColumnIdentifier, PeerId, RequestId),
 }
 
 impl<P: Preset> P2pToSync<P> {

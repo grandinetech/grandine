@@ -45,7 +45,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment},
     },
     eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
-    nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
+    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
@@ -2017,8 +2017,7 @@ impl<P: Preset> Store<P> {
         self.update_head_segment_id();
 
         self.blob_cache.on_slot(new_tick.slot);
-        // TODO(feature/eip-7594): uncomment this after implementing persistence
-        // self.data_column_cache.on_slot(new_tick.slot);
+        self.data_column_cache.on_slot(new_tick.slot);
 
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
@@ -3226,10 +3225,23 @@ impl<P: Preset> Store<P> {
         self.blob_cache.unpersisted_blob_sidecars()
     }
 
+    pub fn has_unpersisted_data_column_sidecars(&self) -> bool {
+        self.data_column_cache.has_unpersisted_data_column_sidecars()
+    }
+
+    pub fn mark_persisted_data_columns(&mut self, persisted_data_column_ids: Vec<DataColumnIdentifier>) {
+        self.data_column_cache.mark_persisted_data_columns(persisted_data_column_ids);
+    }
+
+    pub fn unpersisted_data_column_sidecars(&self) -> impl Iterator<Item = DataColumnSidecarWithId<P>> + '_ {
+        self.data_column_cache.unpersisted_data_column_sidecars()
+    }
+
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         let type_name = tynm::type_name::<Self>();
 
         metrics.set_collection_length(&type_name, "blob_store", self.blob_cache.size());
+        metrics.set_collection_length(&type_name, "data_column_store", self.data_column_cache.size());
         metrics.set_collection_length(&type_name, "finalized", self.finalized().len());
         metrics.set_collection_length(&type_name, "unfinalized", self.unfinalized().len());
 

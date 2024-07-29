@@ -1279,7 +1279,7 @@ impl<P: Preset> Network<P> {
             self.controller.chain_config().eip7594_fork_epoch,
         ));
 
-        // > Clients MAY limit the number of blocks and sidecars in the response.
+        // > Clients MAY limit the number of data column sidecars in the response.
         let difference = count.min(MaxRequestDataColumnSidecars::U64);
 
         let current_slot = self.controller.head_slot();
@@ -1325,13 +1325,13 @@ impl<P: Preset> Network<P> {
                     Level::Debug,
                     connected_peers,
                     target_peers,
-                    "terminating BlobSidecarsByRange response stream",
+                    "terminating DataColumnsByRange response stream",
                 );
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
                     peer_request_id,
-                    Box::new(Response::BlobsByRange(None)),
+                    Box::new(Response::DataColumnsByRange(None)),
                 )
                 .send(&network_to_service_tx);
 
@@ -1648,9 +1648,6 @@ impl<P: Preset> Network<P> {
                     ),
                 );
             }
-            // TODO(feature/eip-7594): This appears to be unfinished.
-            // > Before consuming the next response chunk, the response reader SHOULD verify the
-            // > data column sidecar is well-formatted, has valid inclusion proof, and is correct w.r.t. the expected KZG commitments
             Response::DataColumnsByRange(Some(data_column_sidecar)) => {
                 self.log(
                     Level::Debug,
@@ -1661,15 +1658,26 @@ impl<P: Preset> Network<P> {
                     ),
                 );
 
-                let data_column_identifier = data_column_sidecar.as_ref().into();
-                let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+                if eip_7594::verify_kzg_proofs(&data_column_sidecar).unwrap_or_else(|_| false) {
+                    let data_column_identifier = data_column_sidecar.as_ref().into();
+                    let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
 
-                if self.register_new_received_data_column_sidecar(
-                    data_column_identifier,
-                    data_column_sidecar_slot,
-                ) {
-                    P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
-                        .send(&self.channels.p2p_to_sync_tx);
+                    if self.register_new_received_data_column_sidecar(
+                        data_column_identifier,
+                        data_column_sidecar_slot,
+                    ) {
+                        P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
+                            .send(&self.channels.p2p_to_sync_tx);
+                    }
+                } else {
+                    self.log(
+                        Level::Debug,
+                        format_args!(
+                            "received invalid data column sidecar \
+                             (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
+                            data_column_sidecar.signed_block_header.message.slot,
+                        ),
+                    );
                 }
             }
             Response::DataColumnsByRange(None) => {
@@ -1690,32 +1698,43 @@ impl<P: Preset> Network<P> {
                     ),
                 );
 
-                let data_column_identifier: DataColumnIdentifier =
-                    data_column_sidecar.as_ref().into();
-                let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+                if eip_7594::verify_kzg_proofs(&data_column_sidecar).unwrap_or_else(|_| false) {
+                    let data_column_identifier: DataColumnIdentifier =
+                        data_column_sidecar.as_ref().into();
+                    let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
 
-                self.log_with_feature(format_args!(
-                    "received data column sidecar from RPC (identifier: {data_column_identifier:?}, slot: {data_column_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
-                ));
+                    self.log_with_feature(format_args!(
+                        "received data column sidecar from RPC (identifier: {data_column_identifier:?}, slot: {data_column_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
+                    ));
 
-                // if self.register_new_received_data_column_sidecar(
-                //     data_column_identifier,
-                //     data_column_sidecar_slot,
-                // ) {
-                //     let block_seen = self
-                //         .received_block_roots
-                //         .contains_key(&data_column_identifier.block_root);
+                    if self.register_new_received_data_column_sidecar(
+                        data_column_identifier,
+                        data_column_sidecar_slot,
+                    ) {
+                        // let block_seen = self
+                        //     .received_block_roots
+                        //     .contains_key(&data_column_identifier.block_root);
 
-                //     P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, block_seen, peer_id)
-                //         .send(&self.channels.p2p_to_sync_tx);
-                // }
+                        P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
+                            .send(&self.channels.p2p_to_sync_tx);
+                    }
 
-                // P2pToSync::DataColumnsByRootChunkReceived(
-                //     data_column_identifier,
-                //     peer_id,
-                //     request_id,
-                // )
-                // .send(&self.channels.p2p_to_sync_tx);
+                    P2pToSync::DataColumnsByRootChunkReceived(
+                        data_column_identifier,
+                        peer_id,
+                        request_id,
+                    )
+                    .send(&self.channels.p2p_to_sync_tx);
+                } else {
+                    self.log(
+                        Level::Debug,
+                        format_args!(
+                            "received invalid data column sidecar \
+                             (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
+                            data_column_sidecar.signed_block_header.message.slot,
+                        ),
+                    );
+                }
             }
             Response::DataColumnsByRoot(None) => {
                 self.log_with_feature(format_args!(

@@ -23,7 +23,8 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    nonstandard::{BlobSidecarWithId, FinalizedCheckpoint},
+    eip7594::{DataColumnIdentifier, DataColumnSidecar, ColumnIndex},
+    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Epoch, Slot, H256},
@@ -391,6 +392,47 @@ impl<P: Preset> Storage<P> {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn append_data_column_sidecars(
+        &self,
+        data_column_sidecars: impl IntoIterator<Item = DataColumnSidecarWithId<P>>,
+    ) -> Result<Vec<DataColumnIdentifier>> {
+        let mut batch = vec![];
+        let mut persisted_data_column_ids = vec![];
+
+        for data_column_sidecar_with_id in data_column_sidecars {
+            let DataColumnSidecarWithId {
+                data_column_sidecar,
+                data_column_id,
+            } = data_column_sidecar_with_id;
+
+            let DataColumnIdentifier { block_root, index } = data_column_id;
+
+            let slot = data_column_sidecar.signed_block_header.message.slot;
+
+            batch.push(serialize(
+                DataColumnSidecarByColumnIndex(block_root, index),
+                data_column_sidecar,
+            )?);
+
+            batch.push(serialize(SlotColumnIndex(slot, block_root, index), data_column_id)?);
+
+            persisted_data_column_ids.push(data_column_id);
+        }
+
+        self.database.put_batch(batch)?;
+
+        Ok(persisted_data_column_ids)
+    }
+
+    pub(crate) fn data_column_sidecar_by_id(
+        &self,
+        data_column_id: DataColumnIdentifier,
+    ) -> Result<Option<Arc<DataColumnSidecar<P>>>> {
+        let DataColumnIdentifier { block_root, index } = data_column_id;
+
+        self.get(DataColumnSidecarByColumnIndex(block_root, index))
     }
 
     pub(crate) fn checkpoint_state_slot(&self) -> Result<Option<Slot>> {
@@ -854,6 +896,26 @@ pub struct SlotBlobId(pub Slot, pub H256, pub BlobIndex);
 
 impl SlotBlobId {
     const PREFIX: &'static str = "i";
+
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
+}
+
+#[derive(Display)]
+#[display(fmt = "{}{_0:x}{_1}", Self::PREFIX)]
+pub struct DataColumnSidecarByColumnIndex(pub H256, pub ColumnIndex);
+
+impl DataColumnSidecarByColumnIndex {
+    const PREFIX: &'static str = "d";
+}
+
+#[derive(Display)]
+#[display(fmt = "{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
+pub struct SlotColumnIndex(pub Slot, pub H256, pub ColumnIndex);
+
+impl SlotColumnIndex {
+    const PREFIX: &'static str = "c";
 
     fn has_prefix(bytes: &[u8]) -> bool {
         bytes.starts_with(Self::PREFIX.as_bytes())

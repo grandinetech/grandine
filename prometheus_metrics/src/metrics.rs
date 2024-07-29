@@ -117,6 +117,7 @@ pub struct Metrics {
     pub fc_blob_sidecar_task_times: Histogram,
     pub fc_data_column_sidecar_task_times: Histogram,
     pub fc_blob_sidecar_persist_task_times: Histogram,
+    pub fc_data_column_sidecar_persist_task_times: Histogram,
     pub fc_block_attestation_task_times: Histogram,
     pub fc_attester_slashing_task_times: Histogram,
     pub fc_preprocess_state_task_times: Histogram,
@@ -513,6 +514,11 @@ impl Metrics {
                 "Forkchoice DataColumnSidecar times",
             ))?,
 
+            fc_data_column_sidecar_persist_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_DATA_COLUMN_SIDECAR_PERSIST_TASK_TIMES",
+                "Forkchoice DataColumnSidecar persist task times",
+            ))?,
+
             fc_block_attestation_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_BLOCK_ATTESTATION_TASK_TIMES",
                 "Forkchoice BlockAttesttionTask times",
@@ -811,6 +817,8 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_persist_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_data_column_sidecar_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_data_column_sidecar_persist_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_block_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_attester_slashing_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_preprocess_state_task_times.clone()))?;

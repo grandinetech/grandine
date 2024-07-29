@@ -410,14 +410,13 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
     // number of unique column IDs
     let mut sample_count = SAMPLES_PER_SLOT;
     while sample_count <= NumberOfColumns::U64 {
-        // TODO(feature/das): change variable name `x` to a suitable one
-        let x = hypergeom_cdf(
+        let prb = hypergeom_cdf(
             allowed_failures,
             NumberOfColumns::U64,
             worst_case_missing,
             sample_count,
         );
-        if x <= false_positive_threshold {
+        if prb <= false_positive_threshold {
             break;
         }
         sample_count += 1;

@@ -17,6 +17,7 @@ derive_more = { workspace = true }
 enum-iterator = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
+eip_7594 = { workspace = true }
 execution_engine = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }

@@ -71,6 +71,7 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask,
         CheckpointStateTask, DataColumnSidecarTask, PersistBlobSidecarsTask, PreprocessStateTask,
+        PersistDataColumnSidecarsTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -242,6 +243,12 @@ where
                     persisted_blob_ids,
                 } => {
                     self.handle_finish_persisting_blob_sidecars(wait_group, persisted_blob_ids);
+                }
+                MutatorMessage::FinishedPersistingDataColumnSidecars {
+                    wait_group,
+                    persisted_data_column_ids,
+                } => {
+                    self.handle_finish_persisting_data_column_sidecars(wait_group, persisted_data_column_ids);
                 }
                 MutatorMessage::PreprocessedBeaconState { block_root, state } => {
                     self.handle_preprocessed_beacon_state(block_root, &state);
@@ -1269,6 +1276,26 @@ where
         }
     }
 
+    fn handle_finish_persisting_data_column_sidecars(
+        &mut self,
+        wait_group: W,
+        persisted_data_column_ids: Vec<DataColumnIdentifier>,
+    ) {
+        self.store_mut().mark_persisted_data_columns(persisted_data_column_ids);
+
+        self.update_store_snapshot();
+
+        if self.store.has_unpersisted_data_column_sidecars() {
+            self.spawn(PersistDataColumnSidecarsTask {
+                store_snapshot: self.owned_store(),
+                storage: self.storage.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group,
+                metrics: self.metrics.clone(),
+            });
+        }
+    }
+
     fn handle_preprocessed_beacon_state(&mut self, block_root: H256, state: &Arc<BeaconState<P>>) {
         self.store_mut()
             .insert_preprocessed_state(block_root, state.clone_arc());
@@ -1728,15 +1755,13 @@ where
             self.retry_block(wait_group.clone(), pending_block.clone());
         }
 
-        // TODO(feature/eip-7594):
-
-        // self.spawn(PersistBlobSidecarsTask {
-        //     store_snapshot: self.owned_store(),
-        //     storage: self.storage.clone_arc(),
-        //     mutator_tx: self.owned_mutator_tx(),
-        //     wait_group: wait_group.clone(),
-        //     metrics: self.metrics.clone(),
-        // });
+        self.spawn(PersistDataColumnSidecarsTask {
+            store_snapshot: self.owned_store(),
+            storage: self.storage.clone_arc(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: wait_group.clone(),
+            metrics: self.metrics.clone(),
+        });
 
         self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }

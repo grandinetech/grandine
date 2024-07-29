@@ -106,6 +106,10 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         persisted_blob_ids: Vec<BlobIdentifier>,
     },
+    FinishedPersistingDataColumnSidecars {
+        wait_group: W,
+        persisted_data_column_ids: Vec<DataColumnIdentifier>,
+    },
     PreprocessedBeaconState {
         block_root: H256,
         state: Arc<BeaconState<P>>,

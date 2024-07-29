@@ -1,10 +1,10 @@
 use core::{fmt::Display, hash::Hash, ops::Range, time::Duration};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
-use eth2_libp2p::{rpc::StatusMessage, PeerId};
+use eth2_libp2p::{rpc::StatusMessage, discovery::peer_id_to_node_id, PeerId};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use log::{log, Level};
@@ -15,8 +15,8 @@ use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
-    eip7594::{ColumnIndex, DataColumnIdentifier, NumberOfColumns},
-    phase0::primitives::{Epoch, Slot, H256},
+    eip7594::{ColumnIndex, DataColumnIdentifier, NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
+    phase0::primitives::{Epoch, Slot, H256, NodeId},
     preset::Preset,
 };
 
@@ -303,6 +303,7 @@ impl SyncManager {
 
         let mut max_slot = local_head_slot;
         let blob_serve_range_slot = misc::blob_serve_range_slot::<P>(config, current_slot);
+        let data_column_serve_range_slot = misc::data_column_serve_range_slot::<P>(config, current_slot);
 
         let mut sync_batches = vec![];
         for (peer_id, index) in Self::peer_sync_batch_assignments(&peers_to_sync)
@@ -310,24 +311,25 @@ impl SyncManager {
             .take(batches_in_front)
         {
             let start_slot = sync_start_slot + slots_per_request * index;
-            let count = remote_head_slot.saturating_sub(start_slot) + 1;
-            let count = count.min(slots_per_request);
+            let count = core::cmp::min(remote_head_slot.saturating_sub(start_slot) + 1, slots_per_request);
 
             max_slot = start_slot + count - 1;
 
             if config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(start_slot)) {
                 // TODO(feature/eip7594): figure out slot range and data columns
-                //
-                // if data_column_serve_range_slot < max_slot {
-                //     sync_batches.push(SyncBatch {
-                //         target: SyncTarget::BlobSidecar,
-                //         direction: SyncDirection::Forward,
-                //         peer_id,
-                //         start_slot,
-                //         count,
-                //         data_columns: None,
-                //     });
-                // }
+                // fixed `custody_count` with `DATA_COLUMN_SIDECAR_SUBNET_COUNT` for now
+                let node_id = peer_id_to_node_id(&peer_id).map_err(|e| anyhow!(e))?;
+                let peer_custody_columns = eip_7594::get_custody_columns(NodeId::from_be_bytes(node_id.raw()), DATA_COLUMN_SIDECAR_SUBNET_COUNT);
+                if data_column_serve_range_slot < max_slot {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::DataColumnSidecar,
+                        direction: SyncDirection::Forward,
+                        peer_id,
+                        start_slot,
+                        count,
+                        data_columns: Some(Arc::new(ContiguousList::try_from(peer_custody_columns).expect("fail to parse peer_custody_columns"))),
+                    });
+                }
             } else {
                 if blob_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
@@ -377,7 +379,7 @@ impl SyncManager {
 
     pub fn add_data_columns_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
         self.log_with_feature(format_args!(
-            "add blob request by range (request_id: {}, peer_id: {}, range: {:?})",
+            "add data column request by range (request_id: {}, peer_id: {}, range: {:?})",
             request_id,
             batch.peer_id,
             (batch.start_slot..(batch.start_slot + batch.count)),
@@ -500,6 +502,21 @@ impl SyncManager {
         self.log_with_feature(format_args!(
             "request data columns by range finished (request_id: {request_id:?})",
         ));
+    }
+
+    pub fn received_data_column_sidecar_chunk(
+        &mut self,
+        data_column_identifier: DataColumnIdentifier,
+        peer_id: PeerId,
+        request_id: RequestId,
+    ) {
+        self.log_with_feature(format_args!(
+            "received data column sidecar by root (data_column_identifier: {data_column_identifier:?}, \
+            request_id: {request_id}, peer_id: {peer_id})",
+        ));
+
+        self.data_column_requests
+            .chunk_by_root_received(&data_column_identifier, &peer_id)
     }
 
     /// Log a message with peer count information.

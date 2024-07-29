@@ -5376,6 +5376,7 @@ dependencies = [
  "database",
  "dedicated_executor",
  "derive_more",
+ "eip_7594",
  "enum-iterator",
  "eth1_api",
  "eth2_libp2p",

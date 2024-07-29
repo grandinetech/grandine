@@ -413,6 +413,45 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
     }
 }
 
+pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P>>,
+    pub storage: Arc<Storage<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            storage,
+            mutator_tx,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_data_column_sidecar_persist_task_times.start_timer());
+
+        let data_column_sidecars = store_snapshot.unpersisted_data_column_sidecars();
+
+        match storage.append_data_column_sidecars(data_column_sidecars) {
+            Ok(persisted_data_column_ids) => {
+                MutatorMessage::FinishedPersistingDataColumnSidecars {
+                    wait_group,
+                    persisted_data_column_ids,
+                }
+                .send(&mutator_tx);
+            }
+            Err(error) => {
+                warn!("failed to persist data column sidecars to storage: {error:?}");
+            }
+        }
+    }
+}
+
 pub struct CheckpointStateTask<P: Preset, W> {
     pub state_cache: Arc<StateCache<P, W>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
