@@ -27,6 +27,7 @@ http_api_utils = { workspace = true }
 itertools = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }
+mediatype = { workspace = true }
 metrics = { workspace = true }
 mime = { workspace = true }
 operation_pools = { workspace = true }
