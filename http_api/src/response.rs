@@ -4,9 +4,11 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use mediatype::{MediaType, MediaTypeList};
 use mime::APPLICATION_OCTET_STREAM;
 use serde::Serialize;
 use ssz::SszWrite;
+use tap::Pipe as _;
 use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::H256};
 
 use crate::error::Error;
@@ -229,12 +231,68 @@ impl<T> EthResponse<T, (), JsonOrSsz> {
     // `axum` recommends using `axum::TypedHeader` instead of extracting all headers,
     // but the `headers` crate does not provide a type for the `Accept` header.
     // See <https://github.com/hyperium/headers/issues/53>.
-    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Self {
-        let format = match request_headers.get(ACCEPT) {
-            Some(accept) if accept == APPLICATION_OCTET_STREAM.as_ref() => JsonOrSsz::Ssz,
-            _ => JsonOrSsz::Json,
-        };
+    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self> {
+        if let Some(accept_header) = request_headers.get(ACCEPT) {
+            if let Some(accept) = accept_content_type(accept_header.to_str()?)? {
+                if accept == APPLICATION_OCTET_STREAM.as_ref() {
+                    return Ok(Self::new(data, JsonOrSsz::Ssz));
+                }
+            }
+        }
 
-        Self::new(data, format)
+        Ok(Self::new(data, JsonOrSsz::Json))
+    }
+}
+
+fn accept_content_type(accept_header: &str) -> Result<Option<String>> {
+    let mut scored_types = vec![];
+
+    for media_type in MediaTypeList::new(accept_header) {
+        let MediaType {
+            ty, subty, params, ..
+        } = media_type?;
+
+        let essence = format!("{ty}/{subty}");
+        let q = params
+            .iter()
+            .find(|(name, _)| name == "q")
+            .map(|(_, value)| value.as_str());
+
+        scored_types.push((q, essence));
+    }
+
+    scored_types.sort_by_key(|scored_type| scored_type.0);
+
+    scored_types
+        .last()
+        .map(|(_, essence)| essence)
+        .cloned()
+        .pipe(Ok)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_accept_content_type() -> Result<()> {
+        assert_eq!(
+            accept_content_type("application/octet-stream;q=1,application/json;q=0.9")?,
+            Some("application/octet-stream".to_owned()),
+        );
+
+        assert_eq!(
+            accept_content_type("application/octet-stream;q=0.9,application/json;q=1")?,
+            Some("application/json".to_owned()),
+        );
+
+        assert_eq!(
+            accept_content_type("application/octet-stream")?,
+            Some("application/octet-stream".to_owned()),
+        );
+
+        assert_eq!(accept_content_type("")?, None);
+
+        Ok(())
     }
 }

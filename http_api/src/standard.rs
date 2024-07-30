@@ -896,7 +896,7 @@ pub async fn block<P: Preset, W: Wait>(
 
     let version = block.phase();
 
-    Ok(EthResponse::json_or_ssz(block, &headers)
+    Ok(EthResponse::json_or_ssz(block, &headers)?
         .execution_optimistic(optimistic)
         .finalized(finalized)
         .version(version))
@@ -972,7 +972,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
     let blob_sidecars =
         ContiguousList::try_from_iter(blob_sidecars.into_iter()).map_err(AnyhowError::new)?;
 
-    Ok(EthResponse::json_or_ssz(blob_sidecars, &headers))
+    Ok(EthResponse::json_or_ssz(blob_sidecars, &headers)?)
 }
 
 /// `POST /eth/v1/beacon/blocks`
@@ -1554,7 +1554,7 @@ pub async fn beacon_state<P: Preset, W: Wait>(
 
     let version = state.phase();
 
-    Ok(EthResponse::json_or_ssz(state, &headers)
+    Ok(EthResponse::json_or_ssz(state, &headers)?
         .execution_optimistic(optimistic)
         .finalized(finalized)
         .version(version))
@@ -1992,7 +1992,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
 
     let version = beacon_block.value.phase();
 
-    Ok(EthResponse::json_or_ssz(beacon_block.into(), &headers).version(version))
+    Ok(EthResponse::json_or_ssz(beacon_block.into(), &headers)?.version(version))
 }
 
 /// `GET /eth/v3/validator/blocks/{slot}`
@@ -2077,7 +2077,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             None
         });
 
-    Ok(EthResponse::json_or_ssz(validator_block.into(), &headers)
+    Ok(EthResponse::json_or_ssz(validator_block.into(), &headers)?
         .version(version)
         .consensus_block_value(consensus_block_value)
         .execution_payload_blinded(blinded)

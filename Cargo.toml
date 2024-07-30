@@ -343,6 +343,7 @@ libp2p = { version = '0.53', default-features = false, features = ['metrics', 'd
 libp2p-mplex = '0.41.0'
 log = '0.4.22'
 lru = '0.12.3'
+mediatype = '0.19.18'
 memoffset = '0.9.1'
 mime = '0.3.17'
 nonzero_ext = '0.3.0'
