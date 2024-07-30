@@ -1470,7 +1470,12 @@ pub enum BlobSidecar<P: Preset> {
 }
 
 impl<P: Preset> SszSize for BlobSidecar<P> {
-    const SIZE: Size = todo!();
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
+        DenebBlobSidecar::<P>::SIZE,
+        ElectraBlobSidecar::<P>::SIZE,
+    ]);
 }
 
 impl<P: Preset> SszRead<Config> for BlobSidecar<P> {
@@ -1522,11 +1527,24 @@ impl<P: Preset> SszRead<Config> for BlobSidecar<P> {
 }
 
 impl<P: Preset> SszWrite for BlobSidecar<P> {
-    fn write_fixed(&self, bytes: &mut [u8]) {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        let length_before = bytes.len();
+
+        let length_after = match self {
+            Self::Deneb(_) => DenebBlobSidecar::<P>::SIZE.get(),
+            Self::Electra(_) => ElectraBlobSidecar::<P>::SIZE.get(),
+        };
+
+        bytes.resize(length_after, 0);
+
+        let new_bytes = &mut bytes[length_before..];
+
         match self {
-            Self::Deneb(blob_sidecar) => blob_sidecar.write_fixed(bytes),
-            Self::Electra(blob_sidecar) => blob_sidecar.write_fixed(bytes),
+            Self::Deneb(blob_sidecar) => blob_sidecar.write_fixed(new_bytes),
+            Self::Electra(blob_sidecar) => blob_sidecar.write_fixed(new_bytes),
         }
+
+        Ok(())
     }
 }
 
