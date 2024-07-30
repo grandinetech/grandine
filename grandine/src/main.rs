@@ -210,6 +210,8 @@ impl Context {
             )?
         };
 
+        Feature::DebugEth1.enable();
+
         let eth1_chain = Eth1Chain::new(
             chain_config.clone_arc(),
             eth1_config.clone_arc(),
@@ -419,6 +421,7 @@ fn try_main() -> Result<()> {
     let client = ClientBuilder::new()
         .timeout(request_timeout)
         .user_agent(APPLICATION_VERSION_WITH_PLATFORM)
+        .connection_verbose(true)
         .build()?;
 
     let mut cache = use_validator_key_cache.then(|| {
