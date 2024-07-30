@@ -14,6 +14,7 @@ ssz = { workspace = true }
 thiserror = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
+hashing = { workspace = true }
 
 [dev-dependencies]
 factory = { workspace = true }

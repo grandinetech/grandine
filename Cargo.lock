@@ -1753,6 +1753,7 @@ dependencies = [
  "anyhow",
  "factory",
  "features",
+ "hashing",
  "interop",
  "itertools 0.13.0",
  "spec_test_utils",
