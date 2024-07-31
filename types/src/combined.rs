@@ -1463,7 +1463,8 @@ impl<P: Preset> LightClientOptimisticUpdate<P> {
     }
 }
 
-#[derive(Debug, From)]
+#[derive(PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(bound = "", untagged)]
 pub enum BlobSidecar<P: Preset> {
     Deneb(DenebBlobSidecar<P>),
     Electra(ElectraBlobSidecar<P>),

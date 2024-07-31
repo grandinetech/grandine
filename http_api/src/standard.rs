@@ -58,14 +58,11 @@ use types::{
     },
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
-        Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconBlock, BeaconState, BlobSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
-    deneb::{
-        containers::{BlobIdentifier, BlobSidecar},
-        primitives::BlobIndex,
-    },
+    deneb::{containers::BlobIdentifier, primitives::BlobIndex},
     nonstandard::{
         BlockRewards, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev, WithStatus,
         WEI_IN_GWEI,

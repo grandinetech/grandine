@@ -41,8 +41,10 @@ use thiserror::Error;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    combined::{
+        Attestation, AttesterSlashing, BlobSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+    },
+    deneb::containers::BlobIdentifier,
     nonstandard::{Phase, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -535,7 +537,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn publish_blob_sidecar(&self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        let subnet_id = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index);
+        let subnet_id = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index());
         let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
         self.log(
@@ -1269,12 +1271,12 @@ impl<P: Preset> Network<P> {
                     format_args!(
                         "received BlobsByRange response chunk \
                          (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                        blob_sidecar.signed_block_header.message.slot,
+                        blob_sidecar.signed_block_header().message.slot,
                     ),
                 );
 
                 let blob_identifier = blob_sidecar.as_ref().into();
-                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+                let blob_sidecar_slot = blob_sidecar.signed_block_header().message.slot;
 
                 if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
                     let block_seen = self
@@ -1299,12 +1301,12 @@ impl<P: Preset> Network<P> {
                     format_args!(
                         "received BlobsByRoot response chunk \
                          (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                        blob_sidecar.signed_block_header.message.slot,
+                        blob_sidecar.signed_block_header().message.slot,
                     ),
                 );
 
                 let blob_identifier = blob_sidecar.as_ref().into();
-                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+                let blob_sidecar_slot = blob_sidecar.signed_block_header().message.slot;
 
                 self.log_with_feature(format_args!(
                     "received blob from RPC (blob_id: {blob_identifier:?}, slot: {blob_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
