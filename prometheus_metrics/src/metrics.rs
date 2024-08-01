@@ -501,7 +501,7 @@ impl Metrics {
             fc_attestation_task_times: HistogramVec::new(
                 histogram_opts!(
                     "FC_ATTESTATION_TASK_TIMES",
-                    "Forkchoice AttesttionTask times",
+                    "Forkchoice AttestationTask times",
                 ),
                 &["origin"],
             )?,

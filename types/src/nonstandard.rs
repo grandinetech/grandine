@@ -33,6 +33,8 @@ pub use smallvec::smallvec;
 
 pub const WEI_IN_GWEI: Uint256 = Uint256::from_u64(1_000_000_000);
 
+pub type Publishable = bool;
+
 #[derive(
     Clone,
     Copy,
@@ -414,7 +416,7 @@ impl<T: Clone> WithStatus<&T> {
 #[derive(PartialEq, Eq, Debug)]
 pub enum ValidationOutcome {
     Accept,
-    Ignore,
+    Ignore(Publishable),
 }
 
 #[derive(Clone)]

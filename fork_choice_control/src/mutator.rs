@@ -467,14 +467,17 @@ where
 
                 self.accept_block(&wait_group, pending_chain_link)?;
             }
-            Ok(BlockAction::Ignore) => {
+            Ok(BlockAction::Ignore(publishable)) => {
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
                 }
 
-                reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore));
+                reply_block_validation_result_to_http_api(
+                    sender,
+                    Ok(ValidationOutcome::Ignore(publishable)),
+                );
             }
             Ok(BlockAction::DelayUntilBlobs(block)) => {
                 let slot = block.message().slot();
@@ -497,6 +500,11 @@ where
                     if let Some(gossip_id) = pending_block.origin.gossip_id() {
                         P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
                     }
+
+                    let pending_block = reply_delayed_block_validation_result(
+                        pending_block,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
 
                     let blob_ids = missing_blob_indices
                         .into_iter()
@@ -522,6 +530,11 @@ where
                 if self.store.contains_block(parent_root) {
                     self.retry_block(wait_group, pending_block);
                 } else {
+                    let pending_block = reply_delayed_block_validation_result(
+                        pending_block,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
                     debug!("block delayed until parent: {pending_block:?}");
 
                     let peer_id = pending_block.origin.peer_id();
@@ -543,6 +556,11 @@ where
                 if slot <= self.store.slot() {
                     self.retry_block(wait_group, pending_block);
                 } else {
+                    let pending_block = reply_delayed_block_validation_result(
+                        pending_block,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
                     debug!("block delayed until slot: {pending_block:?}");
 
                     self.delay_block_until_slot(pending_block);
@@ -674,7 +692,7 @@ where
                     P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore));
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
             }
             Ok(AggregateAndProofAction::DelayUntilBlock(aggregate_and_proof, block_root)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -836,7 +854,7 @@ where
                     P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore));
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
             }
             Ok(AttestationAction::DelayUntilBlock(attestation, block_root)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1015,16 +1033,24 @@ where
     ) {
         match result {
             Ok(BlobSidecarAction::Accept(blob_sidecar)) => {
-                if let Some(gossip_id) = origin.gossip_id() {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
                     P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
                 }
 
+                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+
                 self.accept_blob_sidecar(&wait_group, blob_sidecar);
             }
-            Ok(BlobSidecarAction::Ignore) => {
-                if let Some(gossip_id) = origin.gossip_id() {
+            Ok(BlobSidecarAction::Ignore(publishable)) => {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
                     P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
                 }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
             Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar)) => {
                 let parent_root = blob_sidecar.signed_block_header.message.parent_root;
@@ -1045,6 +1071,11 @@ where
 
                     P2pMessage::BlockNeeded(parent_root, peer_id).send(&self.p2p_tx);
 
+                    let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
+                        pending_blob_sidecar,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
                     self.delay_blob_sidecar_until_parent(pending_blob_sidecar);
                 }
             }
@@ -1063,16 +1094,25 @@ where
                 } else {
                     debug!("blob sidecar delayed until slot: {slot}");
 
+                    let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
+                        pending_blob_sidecar,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
                     self.delay_blob_sidecar_until_slot(pending_blob_sidecar);
                 }
             }
             Err(error) => {
                 warn!("blob sidecar rejected (error: {error}, origin: {origin:?})");
 
-                if let Some(gossip_id) = origin.gossip_id() {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
                     P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidBlobSidecar)
                         .send(&self.p2p_tx);
                 }
+
+                reply_to_http_api(sender, Err(error));
             }
         }
     }
@@ -1326,7 +1366,7 @@ where
                 P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
             }
 
-            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore));
+            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(true)));
 
             return Ok(());
         }
@@ -1347,7 +1387,7 @@ where
                 P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
             }
 
-            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore));
+            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
 
             return Ok(());
         }
@@ -1439,7 +1479,7 @@ where
                 P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
             }
 
-            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore));
+            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
         } else {
             let (gossip_id, sender) = origin.split();
 
@@ -2398,6 +2438,63 @@ fn reply_block_validation_result_to_http_api(
     if let Some(mut sender) = sender {
         if let Err(reply) = sender.try_send(reply) {
             debug!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+        }
+    }
+}
+
+fn reply_delayed_block_validation_result<P: Preset>(
+    pending_block: PendingBlock<P>,
+    reply: Result<ValidationOutcome>,
+) -> PendingBlock<P> {
+    let PendingBlock {
+        block,
+        origin,
+        submission_time,
+    } = pending_block;
+
+    if let BlockOrigin::Api(Some(sender)) = origin {
+        reply_block_validation_result_to_http_api(Some(sender), reply);
+
+        PendingBlock {
+            block,
+            origin: BlockOrigin::Api(None),
+            submission_time,
+        }
+    } else {
+        PendingBlock {
+            block,
+            origin,
+            submission_time,
+        }
+    }
+}
+
+fn reply_delayed_blob_sidecar_validation_result<P: Preset>(
+    pending_blob_sidecar: PendingBlobSidecar<P>,
+    reply: Result<ValidationOutcome>,
+) -> PendingBlobSidecar<P> {
+    let PendingBlobSidecar {
+        blob_sidecar,
+        block_seen,
+        origin,
+        submission_time,
+    } = pending_blob_sidecar;
+
+    if let BlobSidecarOrigin::Api(Some(sender)) = origin {
+        reply_to_http_api(Some(sender), reply);
+
+        PendingBlobSidecar {
+            blob_sidecar,
+            block_seen,
+            origin: BlobSidecarOrigin::Api(None),
+            submission_time,
+        }
+    } else {
+        PendingBlobSidecar {
+            blob_sidecar,
+            block_seen,
+            origin,
+            submission_time,
         }
     }
 }

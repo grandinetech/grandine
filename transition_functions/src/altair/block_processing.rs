@@ -3,7 +3,7 @@ use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
-        attestation_epoch, get_attestation_participation_flags, get_base_reward,
+        self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
         get_base_reward_per_increment, get_beacon_proposer_index, get_block_root_at_slot,
         index_of_public_key, initialize_shuffled_indices, total_active_balance,
     },
@@ -11,9 +11,9 @@ use helper_functions::{
     error::SignatureKind,
     mutators::{balance, decrease_balance, increase_balance},
     phase0::get_attesting_indices,
-    signing::{SignForAllForks, SignForSingleForkAtSlot as _},
+    signing::{SignForAllForks as _, SignForSingleFork as _, SignForSingleForkAtSlot as _},
     slot_report::{Delta, NullSlotReport, SlotReport, SyncAggregateRewards},
-    verifier::{Triple, Verifier},
+    verifier::{SingleVerifier, Triple, Verifier},
 };
 use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
@@ -25,7 +25,9 @@ use types::{
         consts::{
             PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, SYNC_REWARD_WEIGHT, WEIGHT_DENOMINATOR,
         },
-        containers::{BeaconBlock as AltairBeaconBlock, BeaconBlockBody, SyncAggregate},
+        containers::{
+            BeaconBlock as AltairBeaconBlock, BeaconBlockBody, SignedBeaconBlock, SyncAggregate,
+        },
     },
     config::Config,
     nonstandard::{smallvec, AttestationEpoch, SlashingKind},
@@ -70,6 +72,25 @@ pub fn process_block<P: Preset>(
     verifier.reserve(count_required_signatures(block));
     custom_process_block(config, state, block, &mut verifier, slot_report)?;
     verifier.finish()
+}
+
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    debug_assert_eq!(state.slot, block.message.slot);
+
+    unphased::process_block_header_for_gossip(state, &block.message)?;
+
+    SingleVerifier.verify_singular(
+        block.message.signing_root(config, state),
+        block.signature,
+        accessors::public_key(state, block.message.proposer_index)?,
+        SignatureKind::Block,
+    )?;
+
+    Ok(())
 }
 
 pub fn custom_process_block<P: Preset>(

@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
+use ssz::H256;
 use std_ext::ArcExt as _;
 use types::{
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::BlobSidecarWithId,
-    phase0::primitives::Slot,
+    phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
 
@@ -16,6 +17,23 @@ pub struct BlobCache<P: Preset> {
 }
 
 impl<P: Preset> BlobCache<P> {
+    pub fn exibits_equivocation(
+        &self,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+        block_root: H256,
+    ) -> bool {
+        self.blobs
+            .iter()
+            .any(move |(blob_identifier, (blob_sidecar, blob_slot, _))| {
+                let blob_proposer_index = blob_sidecar.signed_block_header.message.proposer_index;
+
+                *blob_slot == slot
+                    && blob_proposer_index == proposer_index
+                    && blob_identifier.block_root != block_root
+            })
+    }
+
     pub fn get(&self, blob_id: BlobIdentifier) -> Option<Arc<BlobSidecar<P>>> {
         Some(self.blobs.get(&blob_id)?.0.clone_arc())
     }

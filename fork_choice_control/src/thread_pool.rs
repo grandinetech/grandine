@@ -25,8 +25,8 @@ use types::preset::Preset;
 use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
-        BlockAttestationsTask, BlockTask, CheckpointStateTask, PersistBlobSidecarsTask,
-        PreprocessStateTask, Run,
+        BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
+        PersistBlobSidecarsTask, PreprocessStateTask, Run,
     },
     wait::Wait,
 };
@@ -116,6 +116,7 @@ pub struct Critical<P: Preset, E, W> {
 #[derive(From)]
 enum HighPriorityTask<P: Preset, E, W> {
     Block(BlockTask<P, E, W>),
+    BlockForGossip(BlockVerifyForGossipTask<P, W>),
     BlobSidecar(BlobSidecarTask<P, W>),
     // `CheckpointStateTask` is a high priority task to prevent attestation tasks from delaying
     // processing of blocks that are waiting for checkpoint states. However, this may result in a
@@ -128,6 +129,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, 
     fn run(self) {
         match self {
             Self::Block(task) => task.run(),
+            Self::BlockForGossip(task) => task.run(),
             Self::BlobSidecar(task) => task.run(),
             Self::CheckpointState(task) => task.run(),
             Self::PreprocessState(task) => task.run(),
@@ -161,6 +163,12 @@ pub trait Spawn<P: Preset, E, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for BlockTask<P, E, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.high_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for BlockVerifyForGossipTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.high_priority_tasks.push_back(self.into())
     }

@@ -432,6 +432,38 @@ impl<P: Preset> Store<P> {
     }
 
     #[must_use]
+    pub fn exibits_equivocation_on_blobs(
+        &self,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+        block_root: H256,
+    ) -> bool {
+        self.blob_cache
+            .exibits_equivocation(slot, proposer_index, block_root)
+    }
+
+    #[must_use]
+    pub fn exibits_equivocation_on_blocks(
+        &self,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+        block_root: H256,
+    ) -> bool {
+        self.unfinalized_locations.values().any(|location| {
+            let Location {
+                segment_id,
+                position,
+            } = location;
+
+            let chain_link = &self.unfinalized[segment_id][*position].chain_link;
+
+            chain_link.block.message().slot() == slot
+                && chain_link.block.message().proposer_index() == proposer_index
+                && chain_link.block_root != block_root
+        })
+    }
+
+    #[must_use]
     pub fn state_by_state_root(&self, state_root: H256) -> Option<WithStatus<Arc<BeaconState<P>>>> {
         self.canonical_chain()
             .find(|chain_link| chain_link.block.message().state_root() == state_root)
@@ -945,7 +977,7 @@ impl<P: Preset> Store<P> {
                     match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
                     {
                         PartialBlockAction::Accept => {}
-                        PartialBlockAction::Ignore => return Ok((state, Some(BlockAction::Ignore))),
+                        PartialBlockAction::Ignore => return Ok((state, Some(BlockAction::Ignore(false)))),
                     }
                 }
             }
@@ -966,48 +998,93 @@ impl<P: Preset> Store<P> {
         })
     }
 
-    pub fn validate_block_with_custom_state_transition<ST>(
+    fn validate_gossip_rules(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
-        state_transition: ST,
-    ) -> Result<BlockAction<P>>
-    where
-        ST: FnOnce(H256, &ChainLink<P>) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
-    {
-        let block_root = block.message().hash_tree_root();
-
+        block_root: H256,
+    ) -> Option<BlockAction<P>> {
         // Skip blocks that are already known.
         //
         // This is a slight deviation from `consensus-specs`, but it appears to be compatible with
         // both the fork choice rule and the Networking specification.
         if self.contains_block(block_root) {
-            return Ok(BlockAction::Ignore);
+            return Some(BlockAction::Ignore(true));
         }
 
         // > Blocks cannot be in the future.
         // > If they are, their consideration must be delayed until the are in the past.
         if self.slot() < block.message().slot() {
-            return Ok(BlockAction::DelayUntilSlot(block.clone_arc()));
+            return Some(BlockAction::DelayUntilSlot(block.clone_arc()));
         }
 
         // > Check that block is later than the finalized epoch slot
         //
         // This is redundant but may be faster than loading the parent block.
         if block.message().slot() <= self.finalized_slot() {
-            return Ok(BlockAction::Ignore);
+            return Some(BlockAction::Ignore(false));
         }
 
         // > Parent block must be known
         let Some(parent) = self.chain_link(block.message().parent_root()) else {
-            return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
+            return Some(BlockAction::DelayUntilParent(block.clone_arc()));
         };
 
         // > Check block is a descendant of the finalized block at the checkpoint finalized slot
         //
         // Checking the slot is sufficient because orphans are pruned as soon as possible.
         if parent.slot() < self.finalized_slot() {
-            return Ok(BlockAction::Ignore);
+            return Some(BlockAction::Ignore(false));
         }
+
+        None
+    }
+
+    pub fn validate_block_for_gossip(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        state_transition_for_gossip: impl FnOnce(&ChainLink<P>) -> Result<Option<BlockAction<P>>>,
+    ) -> Result<Option<BlockAction<P>>> {
+        let block_root = block.message().hash_tree_root();
+        let block_action = self.validate_gossip_rules(block, block_root);
+
+        if let Some(action) = block_action {
+            return Ok(Some(action));
+        }
+
+        // > Parent block must be known
+        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+            return Ok(Some(BlockAction::DelayUntilParent(block.clone_arc())));
+        };
+
+        // > Check the block is valid and compute the post-state
+        let block_action = state_transition_for_gossip(parent)?;
+
+        if let Some(action) = block_action {
+            return Ok(Some(action));
+        }
+
+        Ok(None)
+    }
+
+    pub fn validate_block_with_custom_state_transition(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        state_transition: impl FnOnce(
+            H256,
+            &ChainLink<P>,
+        ) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
+    ) -> Result<BlockAction<P>> {
+        let block_root = block.message().hash_tree_root();
+        let block_action = self.validate_gossip_rules(block, block_root);
+
+        if let Some(action) = block_action {
+            return Ok(action);
+        }
+
+        // > Parent block must be known
+        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+            return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
+        };
 
         // > Check the block is valid and compute the post-state
         let (state, block_action) = state_transition(block_root, parent)?;
@@ -1650,7 +1727,7 @@ impl<P: Preset> Store<P> {
 
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
         if block_header.slot <= self.finalized_slot() {
-            return Ok(BlobSidecarAction::Ignore);
+            return Ok(BlobSidecarAction::Ignore(false));
         }
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, blob_sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
@@ -1661,7 +1738,7 @@ impl<P: Preset> Store<P> {
             blob_sidecar.index,
         )) && !block_seen
         {
-            return Ok(BlobSidecarAction::Ignore);
+            return Ok(BlobSidecarAction::Ignore(true));
         }
 
         let mut state = self

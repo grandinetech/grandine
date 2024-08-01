@@ -10,18 +10,19 @@ use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, StateCacheProcessor, Store,
+    BlobSidecarOrigin, BlockAction, BlockOrigin, StateCacheProcessor, Store,
 };
+use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
     accessors, misc,
-    verifier::{MultiVerifier, NullVerifier, VerifierOption},
+    verifier::{MultiVerifier, NullVerifier},
 };
-use log::warn;
+use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use types::{
     combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    nonstandard::RelativeEpoch,
+    nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{Slot, H256},
@@ -92,13 +93,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                     MultiVerifier::default(),
                 )
             }
-            BlockOrigin::SemiVerified => block_processor.validate_block(
-                &store_snapshot,
-                &block,
-                origin.state_root_policy(),
-                execution_engine,
-                MultiVerifier::new([VerifierOption::SkipBlockBaseSignatures]),
-            ),
             BlockOrigin::Own => {
                 if Feature::TrustOwnBlockSignatures.is_enabled() {
                     block_processor.validate_block(
@@ -137,6 +131,40 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             rejected_block_root,
         }
         .send(&mutator_tx);
+    }
+}
+
+pub struct BlockVerifyForGossipTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P>>,
+    pub block_processor: Arc<BlockProcessor<P>>,
+    pub wait_group: W,
+    pub block: Arc<SignedBeaconBlock<P>>,
+    pub sender: MultiSender<Result<ValidationOutcome>>,
+}
+
+impl<P: Preset, W> Run for BlockVerifyForGossipTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            block_processor,
+            wait_group,
+            block,
+            mut sender,
+        } = self;
+
+        let validation_outcome = block_processor
+            .validate_block_for_gossip(&store_snapshot, &block)
+            .map(|block_action| match block_action {
+                Some(BlockAction::Accept(_, _)) | None => ValidationOutcome::Accept,
+                Some(BlockAction::Ignore(publishable)) => ValidationOutcome::Ignore(publishable),
+                Some(_) => ValidationOutcome::Ignore(false),
+            });
+
+        if let Err(reply) = sender.try_send(validation_outcome) {
+            debug!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+        }
+
+        drop(wait_group);
     }
 }
 

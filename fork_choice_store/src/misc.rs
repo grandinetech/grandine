@@ -22,7 +22,7 @@ use types::{
         Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    nonstandard::{PayloadStatus, ValidationOutcome},
+    nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
@@ -166,10 +166,9 @@ impl<P: Preset> UnfinalizedBlock<P> {
 pub enum BlockOrigin {
     Gossip(GossipId),
     Requested(Option<PeerId>),
-    SemiVerified,
     Own,
     Persisted,
-    Api(Sender<Result<ValidationOutcome>>),
+    Api(Option<Sender<Result<ValidationOutcome>>>),
 }
 
 impl BlockOrigin {
@@ -177,8 +176,8 @@ impl BlockOrigin {
     pub fn split(self) -> (Option<GossipId>, Option<Sender<Result<ValidationOutcome>>>) {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
-            Self::Api(sender) => (None, Some(sender)),
-            Self::Requested(_) | Self::SemiVerified | Self::Own | Self::Persisted => (None, None),
+            Self::Api(sender) => (None, sender),
+            Self::Requested(_) | Self::Own | Self::Persisted => (None, None),
         }
     }
 
@@ -186,11 +185,7 @@ impl BlockOrigin {
     pub fn gossip_id(&self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.clone()),
-            Self::Requested(_)
-            | Self::SemiVerified
-            | Self::Own
-            | Self::Persisted
-            | Self::Api(_) => None,
+            Self::Requested(_) | Self::Own | Self::Persisted | Self::Api(_) => None,
         }
     }
 
@@ -199,16 +194,14 @@ impl BlockOrigin {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => *peer_id,
-            Self::SemiVerified | Self::Own | Self::Persisted | Self::Api(_) => None,
+            Self::Own | Self::Persisted | Self::Api(_) => None,
         }
     }
 
     #[must_use]
     pub fn state_root_policy(&self) -> StateRootPolicy {
         match self {
-            Self::Gossip(_) | Self::Requested(_) | Self::SemiVerified | Self::Api(_) => {
-                StateRootPolicy::Verify
-            }
+            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => StateRootPolicy::Verify,
             Self::Own => {
                 if Feature::TrustOwnStateRoots.is_enabled() {
                     StateRootPolicy::Trust
@@ -226,7 +219,6 @@ impl BlockOrigin {
         match self {
             Self::Gossip(_) => "Gossip",
             Self::Requested(_) => "Requested",
-            Self::SemiVerified => "SemiVerified",
             Self::Own => "Own",
             Self::Persisted => "Persisted",
             Self::Api(_) => "Api",
@@ -496,7 +488,7 @@ impl AttesterSlashingOrigin {
 
 #[derive(Debug)]
 pub enum BlobSidecarOrigin {
-    Api,
+    Api(Option<OneshotSender<Result<ValidationOutcome>>>),
     Gossip(SubnetId, GossipId),
     Requested(PeerId),
     Own,
@@ -504,10 +496,24 @@ pub enum BlobSidecarOrigin {
 
 impl BlobSidecarOrigin {
     #[must_use]
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        match self {
+            Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, sender),
+            Self::Own | Self::Requested(_) => (None, None),
+        }
+    }
+
+    #[must_use]
     pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id),
-            Self::Api | Self::Own | Self::Requested(_) => None,
+            Self::Api(_) | Self::Own | Self::Requested(_) => None,
         }
     }
 
@@ -516,7 +522,7 @@ impl BlobSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => Some(*peer_id),
-            Self::Api | Self::Own => None,
+            Self::Api(_) | Self::Own => None,
         }
     }
 
@@ -524,14 +530,14 @@ impl BlobSidecarOrigin {
     pub const fn subnet_id(&self) -> Option<SubnetId> {
         match self {
             Self::Gossip(subnet_id, _) => Some(*subnet_id),
-            Self::Api | Self::Own | Self::Requested(_) => None,
+            Self::Api(_) | Self::Own | Self::Requested(_) => None,
         }
     }
 }
 
 pub enum BlockAction<P: Preset> {
     Accept(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>),
-    Ignore,
+    Ignore(Publishable),
     DelayUntilBlobs(Arc<SignedBeaconBlock<P>>),
     DelayUntilParent(Arc<SignedBeaconBlock<P>>),
     DelayUntilSlot(Arc<SignedBeaconBlock<P>>),
@@ -586,7 +592,7 @@ impl<P: Preset, I> AttestationAction<P, I> {
 
 pub enum BlobSidecarAction<P: Preset> {
     Accept(Arc<BlobSidecar<P>>),
-    Ignore,
+    Ignore(Publishable),
     DelayUntilParent(Arc<BlobSidecar<P>>),
     DelayUntilSlot(Arc<BlobSidecar<P>>),
 }

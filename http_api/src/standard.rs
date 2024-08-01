@@ -7,7 +7,7 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::{ensure, Error as AnyhowError, Result};
+use anyhow::{anyhow, ensure, Error as AnyhowError, Result};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -26,7 +26,7 @@ use eth2_libp2p::PeerId;
 use fork_choice_control::{ForkChoiceContext, ForkTip, Wait};
 use futures::{
     channel::mpsc::UnboundedSender,
-    stream::{FuturesOrdered, Stream, StreamExt as _},
+    stream::{FuturesOrdered, FuturesUnordered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
@@ -1036,11 +1036,54 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     .await
 }
 
+/// `POST /eth/v2/beacon/blinded_blocks`
+pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(controller): State<ApiController<P, W>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthQuery(query): EthQuery<PublishBlockQuery>,
+    EthJsonOrSsz(signed_blinded_block): EthJsonOrSsz<Box<SignedBlindedBeaconBlock<P>>>,
+) -> Result<StatusCode, Error> {
+    let execution_payload = block_producer
+        .publish_signed_blinded_block(&signed_blinded_block)
+        .await;
+
+    let WithBlobsAndMev {
+        value: execution_payload,
+        proofs,
+        blobs,
+        ..
+    } = execution_payload.ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+    let (message, signature) = signed_blinded_block.split();
+
+    let signed_beacon_block = message
+        .with_execution_payload(execution_payload)
+        .map_err(AnyhowError::new)?
+        .with_signature(signature)
+        .pipe(Arc::new);
+
+    let blob_sidecars = misc::construct_blob_sidecars(
+        &signed_beacon_block,
+        blobs.unwrap_or_default().into_iter(),
+        proofs.unwrap_or_default().into_iter(),
+    )?;
+
+    publish_signed_block_v2(
+        signed_beacon_block,
+        blob_sidecars,
+        query.broadcast_validation.unwrap_or_default(),
+        controller,
+        api_to_p2p_tx,
+    )
+    .await
+}
+
 /// `POST /eth/v2/beacon/blocks`
 pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthQuery(_query): EthQuery<PublishBlockQuery>,
+    EthQuery(query): EthQuery<PublishBlockQuery>,
     EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
@@ -1051,6 +1094,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     publish_signed_block_v2(
         Arc::new(signed_beacon_block),
         blob_sidecars,
+        query.broadcast_validation.unwrap_or_default(),
         controller,
         api_to_p2p_tx,
     )
@@ -1424,7 +1468,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
                 ApiToP2p::PublishSyncCommitteeMessage(Box::new((subnet_id, message)))
                     .send(&api_to_p2p_tx);
             }
-            Ok(ValidationOutcome::Ignore) => {}
+            Ok(ValidationOutcome::Ignore(_)) => {}
             Err(error) => {
                 debug!(
                     "external sync committee message rejected \
@@ -2485,13 +2529,20 @@ async fn publish_signed_block<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    for blob_sidecar in blob_sidecars {
-        let blob_sidecar = Arc::new(blob_sidecar);
-        controller.on_api_blob_sidecar(blob_sidecar.clone_arc());
-        ApiToP2p::PublishBlobSidecar(blob_sidecar).send(&api_to_p2p_tx);
-    }
+    let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
 
-    ApiToP2p::PublishBeaconBlock(block.clone_arc()).send(&api_to_p2p_tx);
+    submit_blob_sidecars(controller.clone_arc(), &blob_sidecars).await?;
+
+    if let Some(status_code) = publish_beacon_block_with_gossip_checks(
+        controller.clone_arc(),
+        block.clone_arc(),
+        &blob_sidecars,
+        &api_to_p2p_tx,
+    )
+    .await?
+    {
+        return Ok(status_code);
+    }
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
 
@@ -2499,7 +2550,7 @@ async fn publish_signed_block<P: Preset, W: Wait>(
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => StatusCode::OK,
-        Ok(Some(ValidationOutcome::Ignore)) => {
+        Ok(Some(ValidationOutcome::Ignore(_))) => {
             // We log only the root with `info!` because this is not an exceptional case.
             // Vouch submits blocks it constructs to all beacon nodes it is connected to.
             // The blocks often reach our application through gossip faster than through the API.
@@ -2520,17 +2571,76 @@ async fn publish_signed_block<P: Preset, W: Wait>(
     Ok(status_code)
 }
 
+async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    block: Arc<SignedBeaconBlock<P>>,
+    blob_sidecars: &[Arc<BlobSidecar<P>>],
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+) -> Result<Option<StatusCode>, Error> {
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_block_for_gossip(block.clone_arc(), sender);
+
+    match receiver.next().await.transpose() {
+        Ok(Some(ValidationOutcome::Accept)) => {
+            publish_block_to_network(block, blob_sidecars, api_to_p2p_tx);
+        }
+        Ok(Some(ValidationOutcome::Ignore(true))) => {
+            publish_block_to_network(block, blob_sidecars, api_to_p2p_tx);
+            return Ok(Some(StatusCode::ACCEPTED));
+        }
+        Ok(Some(ValidationOutcome::Ignore(false))) => {
+            return Err(Error::UnableToPublishBlock);
+        }
+        Ok(None) => {
+            warn!(
+                "received no block validation response for gossip validation via HTTP API \
+                (block: {block:?})"
+            );
+
+            return Err(Error::UnableToPublishBlock);
+        }
+        Err(error) => return Err(Error::InvalidBlock(error)),
+    }
+
+    Ok(None)
+}
+
+fn publish_block_to_network<P: Preset>(
+    block: Arc<SignedBeaconBlock<P>>,
+    blob_sidecars: &[Arc<BlobSidecar<P>>],
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+) {
+    for blob_sidecar in blob_sidecars {
+        ApiToP2p::PublishBlobSidecar(blob_sidecar.clone_arc()).send(api_to_p2p_tx);
+    }
+
+    ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn publish_signed_block_v2<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,
+    broadcast_validation: BroadcastValidation,
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
 
-    for blob_sidecar in &blob_sidecars {
-        controller.on_api_blob_sidecar(blob_sidecar.clone_arc());
+    submit_blob_sidecars(controller.clone_arc(), &blob_sidecars).await?;
+
+    if broadcast_validation == BroadcastValidation::Gossip {
+        if let Some(status_code) = publish_beacon_block_with_gossip_checks(
+            controller.clone_arc(),
+            block.clone_arc(),
+            &blob_sidecars,
+            &api_to_p2p_tx,
+        )
+        .await?
+        {
+            return Ok(status_code);
+        }
     }
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
@@ -2539,15 +2649,23 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(accept_or_ignore_status)) => {
-            for blob_sidecar in blob_sidecars {
-                ApiToP2p::PublishBlobSidecar(blob_sidecar).send(&api_to_p2p_tx);
-            }
-
-            ApiToP2p::PublishBeaconBlock(block.clone_arc()).send(&api_to_p2p_tx);
-
             match accept_or_ignore_status {
-                ValidationOutcome::Accept => StatusCode::OK,
-                ValidationOutcome::Ignore => {
+                ValidationOutcome::Accept => match broadcast_validation {
+                    BroadcastValidation::Gossip => StatusCode::OK,
+                    BroadcastValidation::Consensus => {
+                        publish_block_to_network(block, &blob_sidecars, &api_to_p2p_tx);
+                        StatusCode::OK
+                    }
+                    BroadcastValidation::ConsensusAndEquivocation => {
+                        if controller.exibits_equivocation(&block) {
+                            return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
+                        }
+
+                        publish_block_to_network(block, &blob_sidecars, &api_to_p2p_tx);
+                        StatusCode::OK
+                    }
+                },
+                ValidationOutcome::Ignore(publishable) => {
                     // We log only the root with `info!` because this is not an exceptional case.
                     // Vouch submits blocks it constructs to all beacon nodes it is connected to.
                     // The blocks often reach our application through gossip faster than through the API.
@@ -2557,17 +2675,34 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
                         "block received through HTTP API was ignored (block root: {block_root:?})"
                     );
 
-                    StatusCode::ACCEPTED
+                    if broadcast_validation == BroadcastValidation::Gossip {
+                        StatusCode::ACCEPTED
+                    } else if publishable {
+                        publish_block_to_network(block, &blob_sidecars, &api_to_p2p_tx);
+                        StatusCode::ACCEPTED
+                    } else {
+                        return Err(Error::UnableToPublishBlock);
+                    }
                 }
             }
         }
         Ok(None) => {
             warn!("received no block validation response for HTTP API (block: {block:?})");
-            return Err(Error::UnableToValidateSignedBlock);
+
+            if broadcast_validation == BroadcastValidation::Gossip {
+                StatusCode::ACCEPTED
+            } else {
+                return Err(Error::UnableToPublishBlock);
+            }
         }
         Err(error) => {
             warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
-            return Err(Error::InvalidBlock(error));
+
+            if broadcast_validation == BroadcastValidation::Gossip {
+                StatusCode::ACCEPTED
+            } else {
+                return Err(Error::InvalidBlock(error));
+            }
         }
     };
 
@@ -2615,6 +2750,45 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
     };
 
     run.await.map_err(|error| IndexedError { index, error })
+}
+
+async fn submit_blob_sidecar<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    blob_sidecar: Arc<BlobSidecar<P>>,
+) -> Result<ValidationOutcome> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    controller.on_api_blob_sidecar(blob_sidecar.clone_arc(), Some(sender));
+
+    receiver.await?
+}
+
+async fn submit_blob_sidecars<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    blob_sidecars: &[Arc<BlobSidecar<P>>],
+) -> Result<(), Error> {
+    let blob_sidecar_results: Result<Vec<_>> = blob_sidecars
+        .iter()
+        .map(|blob_sidecar| submit_blob_sidecar(controller.clone_arc(), blob_sidecar.clone_arc()))
+        .collect::<FuturesUnordered<_>>()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect();
+
+    match blob_sidecar_results {
+        Ok(results) => {
+            if results
+                .iter()
+                .any(|outcome| *outcome == ValidationOutcome::Ignore(false))
+            {
+                return Err(Error::UnableToPublishBlock);
+            }
+        }
+        Err(error) => return Err(Error::InvalidBlock(error)),
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

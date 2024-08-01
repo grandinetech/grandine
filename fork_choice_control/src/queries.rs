@@ -324,6 +324,21 @@ where
         Ok(None)
     }
 
+    pub fn exibits_equivocation(&self, block: &Arc<SignedBeaconBlock<P>>) -> bool {
+        let block_slot = block.message().slot();
+        let store = self.store_snapshot();
+
+        if store.is_slot_finalized(block_slot) {
+            return false;
+        }
+
+        let block_proposer_index = block.message().proposer_index();
+        let block_root = block.message().hash_tree_root();
+
+        store.exibits_equivocation_on_blobs(block_slot, block_proposer_index, block_root)
+            || store.exibits_equivocation_on_blocks(block_slot, block_proposer_index, block_root)
+    }
+
     pub fn check_block_root(&self, block_root: H256) -> Result<Option<WithStatus<H256>>> {
         let store = self.store_snapshot();
 

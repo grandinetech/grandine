@@ -291,7 +291,7 @@ impl<P: Preset> SszRead<Config> for SignedAPIBlock<P> {
     }
 }
 
-#[derive(Default, Deserialize)]
+#[derive(PartialEq, Eq, Default, Deserialize)]
 #[serde(bound = "", rename_all = "snake_case")]
 pub enum BroadcastValidation {
     #[default]

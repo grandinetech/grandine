@@ -2,15 +2,15 @@ use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use helper_functions::{
     accessors::{
-        attestation_epoch, get_beacon_proposer_index, index_of_public_key,
+        self, attestation_epoch, get_beacon_proposer_index, index_of_public_key,
         initialize_shuffled_indices,
     },
     error::SignatureKind,
     mutators::{balance, increase_balance},
     phase0::slash_validator,
-    signing::SignForAllForks,
+    signing::{SignForAllForks as _, SignForSingleFork as _},
     slot_report::{NullSlotReport, SlotReport},
-    verifier::{Triple, Verifier},
+    verifier::{SingleVerifier, Triple, Verifier},
 };
 use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
@@ -23,7 +23,8 @@ use types::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
             Attestation, AttesterSlashing, BeaconBlock as Phase0BeaconBlock, BeaconBlockBody,
-            DepositData, DepositMessage, PendingAttestation, ProposerSlashing, Validator,
+            DepositData, DepositMessage, PendingAttestation, ProposerSlashing, SignedBeaconBlock,
+            Validator,
         },
         primitives::{DepositIndex, ValidatorIndex},
     },
@@ -58,6 +59,25 @@ pub fn process_block<P: Preset>(
     verifier.reserve(count_required_signatures(block));
     custom_process_block(config, state, block, &mut verifier, slot_report)?;
     verifier.finish()
+}
+
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    debug_assert_eq!(state.slot, block.message.slot);
+
+    unphased::process_block_header_for_gossip(state, &block.message)?;
+
+    SingleVerifier.verify_singular(
+        block.message.signing_root(config, state),
+        block.signature,
+        accessors::public_key(state, block.message.proposer_index)?,
+        SignatureKind::Block,
+    )?;
+
+    Ok(())
 }
 
 pub fn custom_process_block<P: Preset>(

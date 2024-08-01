@@ -49,8 +49,8 @@ pub mod unphased {
     pub use state_transition::StateRootPolicy;
 
     pub(crate) use block_processing::{
-        process_block_header, process_eth1_data, process_randao, process_voluntary_exit,
-        validate_attestation_with_verifier, validate_deposits,
+        process_block_header, process_block_header_for_gossip, process_eth1_data, process_randao,
+        process_voluntary_exit, validate_attestation_with_verifier, validate_deposits,
         validate_deposits_without_verifying_merkle_branch,
         validate_proposer_slashing_with_verifier, CombinedDeposit,
     };
@@ -85,7 +85,7 @@ pub mod phase0 {
     pub use epoch_processing::EpochReport;
 
     pub(crate) use block_processing::{
-        count_required_signatures, process_block, process_deposit_data,
+        count_required_signatures, process_block, process_block_for_gossip, process_deposit_data,
     };
     pub(crate) use epoch_intermediates::{statistics, StatisticsForTransition};
     pub(crate) use epoch_processing::{
@@ -109,7 +109,8 @@ pub mod altair {
 
     pub(crate) use block_processing::{
         apply_attestation, apply_deposits, count_required_signatures, process_block,
-        process_deposit_data, process_sync_aggregate, verify_sync_aggregate_signature,
+        process_block_for_gossip, process_deposit_data, process_sync_aggregate,
+        verify_sync_aggregate_signature,
     };
     pub(crate) use epoch_intermediates::{
         statistics, AltairEpochDeltas as EpochDeltas, EpochDeltasForTransition,
@@ -132,7 +133,8 @@ pub mod altair {
 pub(crate) mod bellatrix {
     pub use blinded_block_processing::custom_process_blinded_block;
     pub use block_processing::{
-        process_attester_slashing, process_block, process_proposer_slashing,
+        process_attester_slashing, process_block, process_block_for_gossip,
+        process_proposer_slashing,
     };
     pub use epoch_processing::{epoch_report, process_epoch, process_slashings};
     pub use slot_processing::process_slots;
@@ -153,7 +155,8 @@ pub mod capella {
         custom_process_blinded_block, process_withdrawals_root,
     };
     pub(crate) use block_processing::{
-        process_block, process_bls_to_execution_change, process_operations, process_withdrawals,
+        process_block, process_block_for_gossip, process_bls_to_execution_change,
+        process_operations, process_withdrawals,
     };
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
@@ -170,7 +173,7 @@ pub mod capella {
 // TODO(feature/deneb): Try to reuse existing functions more in `transition_functions::deneb`.
 pub mod deneb {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
-    pub(crate) use block_processing::process_block;
+    pub(crate) use block_processing::{process_block, process_block_for_gossip};
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
@@ -186,7 +189,9 @@ pub mod deneb {
 pub mod electra {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
     pub use block_processing::get_expected_withdrawals;
-    pub(crate) use block_processing::{process_block, process_deposit_data};
+    pub(crate) use block_processing::{
+        process_block, process_block_for_gossip, process_deposit_data,
+    };
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
