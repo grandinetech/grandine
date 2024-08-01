@@ -49,8 +49,8 @@ pub enum CombinedDeposit {
     },
 }
 
-pub fn process_block_header<P: Preset>(
-    state: &mut impl BeaconState<P>,
+pub fn process_block_header_for_gossip<P: Preset>(
+    state: &impl BeaconState<P>,
     block: &impl BeaconBlock<P>,
 ) -> Result<()> {
     // > Verify that the slots match
@@ -91,6 +91,15 @@ pub fn process_block_header<P: Preset>(
         computed == in_block,
         Error::<P>::ParentRootMismatch { computed, in_block },
     );
+
+    Ok(())
+}
+
+pub fn process_block_header<P: Preset>(
+    state: &mut impl BeaconState<P>,
+    block: &impl BeaconBlock<P>,
+) -> Result<()> {
+    process_block_header_for_gossip(state, block)?;
 
     // > Cache current block as the new latest block
     *state.latest_block_header_mut() = BeaconBlockHeader {

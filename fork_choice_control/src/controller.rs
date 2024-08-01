@@ -53,6 +53,7 @@ use crate::{
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
+        BlockVerifyForGossipTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -205,10 +206,6 @@ where
         self.spawn_block_task(block, BlockOrigin::Requested(peer_id))
     }
 
-    pub fn on_semi_verified_block(&self, block: Arc<SignedBeaconBlock<P>>) {
-        self.spawn_block_task(block, BlockOrigin::SemiVerified)
-    }
-
     pub fn on_own_block(&self, wait_group: W, block: Arc<SignedBeaconBlock<P>>) {
         self.spawn_block_task_with_wait_group(wait_group, block, BlockOrigin::Own)
     }
@@ -222,8 +219,12 @@ where
         )
     }
 
-    pub fn on_api_blob_sidecar(&self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::Api)
+    pub fn on_api_blob_sidecar(
+        &self,
+        blob_sidecar: Arc<BlobSidecar<P>>,
+        sender: Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::Api(sender))
     }
 
     pub fn on_api_block(
@@ -231,7 +232,21 @@ where
         block: Arc<SignedBeaconBlock<P>>,
         sender: MultiSender<Result<ValidationOutcome>>,
     ) {
-        self.spawn_block_task(block, BlockOrigin::Api(sender))
+        self.spawn_block_task(block, BlockOrigin::Api(Some(sender)))
+    }
+
+    pub fn on_api_block_for_gossip(
+        &self,
+        block: Arc<SignedBeaconBlock<P>>,
+        sender: MultiSender<Result<ValidationOutcome>>,
+    ) {
+        self.spawn(BlockVerifyForGossipTask {
+            store_snapshot: self.owned_store_snapshot(),
+            block_processor: self.block_processor.clone_arc(),
+            wait_group: self.owned_wait_group(),
+            block,
+            sender,
+        })
     }
 
     pub fn on_notified_fork_choice_update(&self, payload_status: PayloadStatusV1) {

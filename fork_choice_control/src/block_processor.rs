@@ -24,7 +24,7 @@ use types::{
     nonstandard::{BlockRewards, Phase, SlashingKind},
     phase0::primitives::H256,
     preset::Preset,
-    traits::{BeaconBlock as _, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 
 #[derive(Constructor)]
@@ -156,6 +156,31 @@ impl<P: Preset> BlockProcessor<P> {
             .map(|(state, _)| state)
     }
 
+    pub fn validate_block_for_gossip(
+        &self,
+        store: &Store<P>,
+        block: &Arc<SignedBeaconBlock<P>>,
+    ) -> Result<Option<BlockAction<P>>> {
+        store.validate_block_for_gossip(block, |parent| {
+            let block_slot = block.message().slot();
+
+            // > Make a copy of the state to avoid mutability issues
+            let mut state = self
+                .state_cache
+                .before_or_at_slot(store, parent.block_root, block_slot)
+                .unwrap_or_else(|| parent.state(store));
+
+            // > Process slots (including those with no blocks) since block
+            if state.slot() < block_slot {
+                combined::process_slots(&self.chain_config, state.make_mut(), block_slot)?;
+            }
+
+            combined::process_block_for_gossip(&self.chain_config, &state, block)?;
+
+            Ok(None)
+        })
+    }
+
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
         store: &Store<P>,
@@ -190,7 +215,7 @@ impl<P: Preset> BlockProcessor<P> {
                     {
                         PartialBlockAction::Accept => {}
                         PartialBlockAction::Ignore => {
-                            return Ok((state, Some(BlockAction::Ignore)))
+                            return Ok((state, Some(BlockAction::Ignore(false))))
                         }
                     }
                 }

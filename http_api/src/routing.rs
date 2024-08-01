@@ -35,9 +35,9 @@ use crate::{
         node_health, node_identity, node_peer, node_peer_count, node_peers, node_syncing_status,
         node_version, pool_attestations, pool_attester_slashings, pool_bls_to_execution_changes,
         pool_proposer_slashings, pool_voluntary_exits, post_state_validators,
-        publish_blinded_block, publish_block, publish_block_v2, state_committees,
-        state_finality_checkpoints, state_fork, state_randao, state_root, state_sync_committees,
-        state_validator, state_validator_balances, submit_pool_attestations,
+        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
+        state_committees, state_finality_checkpoints, state_fork, state_randao, state_root,
+        state_sync_committees, state_validator, state_validator_balances, submit_pool_attestations,
         submit_pool_attester_slashing, submit_pool_bls_to_execution_change,
         submit_pool_proposer_slashing, submit_pool_sync_committees, submit_pool_voluntary_exit,
         sync_committee_rewards, validator_aggregate_attestation, validator_attestation_data,
@@ -425,6 +425,13 @@ fn eth_v2_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .route(
             "/eth/v2/beacon/blocks",
             post(publish_block_v2).route_layer(axum::middleware::map_request_with_state(
+                state.clone(),
+                middleware::is_synced,
+            )),
+        )
+        .route(
+            "/eth/v2/beacon/blinded_blocks",
+            post(publish_blinded_block_v2).route_layer(axum::middleware::map_request_with_state(
                 state,
                 middleware::is_synced,
             )),

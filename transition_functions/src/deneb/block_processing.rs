@@ -2,14 +2,15 @@ use anyhow::{ensure, Result};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
-        attestation_epoch, get_current_epoch, get_indexed_attestation, get_randao_mix,
+        self, attestation_epoch, get_current_epoch, get_indexed_attestation, get_randao_mix,
         initialize_shuffled_indices,
     },
     error::SignatureKind,
     misc::{compute_epoch_at_slot, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
     predicates::validate_constructed_indexed_attestation,
+    signing::SignForSingleFork as _,
     slot_report::SlotReport,
-    verifier::{Triple, Verifier},
+    verifier::{SingleVerifier, Triple, Verifier},
 };
 use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
@@ -20,7 +21,7 @@ use types::{
     config::Config,
     deneb::{
         beacon_state::BeaconState as DenebBeaconState,
-        containers::{BeaconBlock, BeaconBlockBody, ExecutionPayloadHeader},
+        containers::{BeaconBlock, BeaconBlockBody, ExecutionPayloadHeader, SignedBeaconBlock},
     },
     nonstandard::AttestationEpoch,
     phase0::{
@@ -70,6 +71,27 @@ pub fn process_block<P: Preset>(
     )?;
 
     verifier.finish()
+}
+
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &DenebBeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    debug_assert_eq!(state.slot, block.message.slot);
+
+    unphased::process_block_header_for_gossip(state, &block.message)?;
+
+    process_execution_payload_for_gossip(config, state, &block.message.body)?;
+
+    SingleVerifier.verify_singular(
+        block.message.signing_root(config, state),
+        block.signature,
+        accessors::public_key(state, block.message.proposer_index)?,
+        SignatureKind::Block,
+    )?;
+
+    Ok(())
 }
 
 // TODO(feature/deneb): Reuse function from `transition_functions::capella::block_processing`.
@@ -145,23 +167,7 @@ fn process_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
-    // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
-    let in_block = payload.timestamp;
-
-    ensure!(
-        computed == in_block,
-        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
-    );
-
-    // > [New in Deneb:EIP4844] Verify commitments are under limit
-    let maximum = P::MaxBlobsPerBlock::USIZE;
-    let in_block = body.blob_kzg_commitments.len();
-
-    ensure!(
-        in_block <= maximum,
-        Error::<P>::TooManyBlockKzgCommitments { in_block },
-    );
+    process_execution_payload_for_gossip(config, state, body)?;
 
     // TODO(feature/deneb): Verify `is_valid_block_hash`.
     // TODO(feature/deneb): Verify `versioned_hashes`.
@@ -185,6 +191,34 @@ fn process_execution_payload<P: Preset>(
 
     // > Cache execution payload header
     state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
+
+    Ok(())
+}
+
+fn process_execution_payload_for_gossip<P: Preset>(
+    config: &Config,
+    state: &DenebBeaconState<P>,
+    body: &BeaconBlockBody<P>,
+) -> Result<()> {
+    let payload = &body.execution_payload;
+
+    // > Verify timestamp
+    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let in_block = payload.timestamp;
+
+    ensure!(
+        computed == in_block,
+        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
+    );
+
+    // > [New in Deneb:EIP4844] Verify commitments are under limit
+    let maximum = P::MaxBlobsPerBlock::USIZE;
+    let in_block = body.blob_kzg_commitments.len();
+
+    ensure!(
+        in_block <= maximum,
+        Error::<P>::TooManyBlockKzgCommitments { in_block },
+    );
 
     Ok(())
 }

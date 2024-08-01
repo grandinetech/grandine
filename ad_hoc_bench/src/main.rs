@@ -384,7 +384,7 @@ fn run<P: Preset>(
 
         if let Some(block_blobs) = blobs.remove(&slot) {
             for blob in block_blobs {
-                controller.on_api_blob_sidecar(blob)
+                controller.on_api_blob_sidecar(blob, None)
             }
         }
 

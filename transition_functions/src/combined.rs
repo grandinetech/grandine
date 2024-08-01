@@ -524,6 +524,40 @@ fn process_block<P: Preset>(
     }
 }
 
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    match (state, block) {
+        (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => {
+            phase0::process_block_for_gossip(config, state, block)
+        }
+        (BeaconState::Altair(state), SignedBeaconBlock::Altair(block)) => {
+            altair::process_block_for_gossip(config, state, block)
+        }
+        (BeaconState::Bellatrix(state), SignedBeaconBlock::Bellatrix(block)) => {
+            bellatrix::process_block_for_gossip(config, state, block)
+        }
+        (BeaconState::Capella(state), SignedBeaconBlock::Capella(block)) => {
+            capella::process_block_for_gossip(config, state, block)
+        }
+        (BeaconState::Deneb(state), SignedBeaconBlock::Deneb(block)) => {
+            deneb::process_block_for_gossip(config, state, block)
+        }
+        (state, _) => {
+            // This match arm will silently match any new phases.
+            // Cause a compilation error if a new phase is added.
+            const_assert_eq!(Phase::CARDINALITY, 5);
+
+            bail!(PhaseError {
+                state_phase: state.phase(),
+                block_phase: block.phase(),
+            });
+        }
+    }
+}
+
 pub fn process_untrusted_blinded_block<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,

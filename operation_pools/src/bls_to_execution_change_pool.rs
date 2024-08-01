@@ -179,7 +179,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
 
                     PoolAdditionOutcome::Accept
                 }
-                ValidationOutcome::Ignore => {
+                ValidationOutcome::Ignore(_) => {
                     if let Origin::Gossip(gossip_id) = origin {
                         PoolToP2pMessage::Ignore(gossip_id).send(&self.pool_to_p2p_tx);
                     }
@@ -219,13 +219,13 @@ impl<P: Preset, W: Wait> Service<P, W> {
                 state.slot(),
             );
 
-            return Ok(ValidationOutcome::Ignore);
+            return Ok(ValidationOutcome::Ignore(false));
         };
 
         let validator_index = signed_bls_to_execution_change.message.validator_index;
 
         if self.bls_to_execution_changes.contains_key(&validator_index) {
-            return Ok(ValidationOutcome::Ignore);
+            return Ok(ValidationOutcome::Ignore(false));
         }
 
         capella::validate_bls_to_execution_change(

@@ -1,13 +1,14 @@
 use anyhow::{ensure, Result};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
-    accessors::{get_current_epoch, get_randao_mix, initialize_shuffled_indices},
+    accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
     bellatrix::slash_validator,
     error::SignatureKind,
     misc::compute_timestamp_at_slot,
     predicates::{is_execution_enabled, is_merge_transition_complete},
+    signing::SignForSingleFork as _,
     slot_report::SlotReport,
-    verifier::{Triple, Verifier},
+    verifier::{SingleVerifier, Triple, Verifier},
 };
 use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
@@ -18,6 +19,7 @@ use types::{
         beacon_state::BeaconState,
         containers::{
             BeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody, ExecutionPayloadHeader,
+            SignedBeaconBlock,
         },
     },
     config::Config,
@@ -69,6 +71,29 @@ pub fn process_block<P: Preset>(
     )?;
 
     verifier.finish()
+}
+
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    debug_assert_eq!(state.slot, block.message.slot);
+
+    unphased::process_block_header_for_gossip(state, &block.message)?;
+
+    if is_execution_enabled(state, &block.message.body) {
+        process_execution_payload_for_gossip(config, state, &block.message.body)?;
+    }
+
+    SingleVerifier.verify_singular(
+        block.message.signing_root(config, state),
+        block.signature,
+        accessors::public_key(state, block.message.proposer_index)?,
+        SignatureKind::Block,
+    )?;
+
+    Ok(())
 }
 
 pub fn custom_process_block<P: Preset>(
@@ -141,6 +166,24 @@ fn process_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
+    process_execution_payload_for_gossip(config, state, body)?;
+
+    // > Verify the execution payload is valid
+    execution_engine.notify_new_payload(block_root, payload.clone().into(), None, None)?;
+
+    // > Cache execution payload header
+    state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
+
+    Ok(())
+}
+
+fn process_execution_payload_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    body: &BellatrixBeaconBlockBody<P>,
+) -> Result<()> {
+    let payload = &body.execution_payload;
+
     // > Verify timestamp
     let computed = compute_timestamp_at_slot(config, state, state.slot);
     let in_block = payload.timestamp;
@@ -149,12 +192,6 @@ fn process_execution_payload<P: Preset>(
         computed == in_block,
         Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
     );
-
-    // > Verify the execution payload is valid
-    execution_engine.notify_new_payload(block_root, payload.clone().into(), None, None)?;
-
-    // > Cache execution payload header
-    state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
 
     Ok(())
 }

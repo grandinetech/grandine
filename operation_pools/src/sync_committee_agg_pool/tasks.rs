@@ -150,7 +150,7 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalContributionTask<P, W> {
         if let Origin::Gossip(gossip_id) = origin {
             let message = match &result {
                 Ok(ValidationOutcome::Accept) => PoolToP2pMessage::Accept(gossip_id),
-                Ok(ValidationOutcome::Ignore) => PoolToP2pMessage::Ignore(gossip_id),
+                Ok(ValidationOutcome::Ignore(_)) => PoolToP2pMessage::Ignore(gossip_id),
                 Err(error) => {
                     debug!(
                         "gossip contribution and proof rejected \
@@ -186,7 +186,7 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
                 "sync committee contribution is a known subset: {signed_contribution_and_proof:?}"
             );
 
-            return Ok(ValidationOutcome::Ignore);
+            return Ok(ValidationOutcome::Ignore(false));
         }
 
         let already_exists = pool
@@ -194,7 +194,7 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
             .await;
 
         if already_exists {
-            return Ok(ValidationOutcome::Ignore);
+            return Ok(ValidationOutcome::Ignore(false));
         }
 
         let beacon_state = controller.preprocessed_state_at_current_slot()?;
@@ -214,7 +214,7 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
             .await?;
             Ok(ValidationOutcome::Accept)
         } else {
-            Ok(ValidationOutcome::Ignore)
+            Ok(ValidationOutcome::Ignore(false))
         }
     }
 }
@@ -261,7 +261,7 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalMessageTask<P, W> {
 
                     PoolToP2pMessage::Accept(gossip_id)
                 }
-                Ok(ValidationOutcome::Ignore) => PoolToP2pMessage::Ignore(gossip_id),
+                Ok(ValidationOutcome::Ignore(_)) => PoolToP2pMessage::Ignore(gossip_id),
                 Err(error) => {
                     debug!(
                         "gossip sync committee message rejected \
@@ -298,7 +298,7 @@ impl<P: Preset, W: Wait> HandleExternalMessageTask<P, W> {
             .await;
 
         if already_exists {
-            return Ok(ValidationOutcome::Ignore);
+            return Ok(ValidationOutcome::Ignore(false));
         }
 
         let beacon_state = controller.preprocessed_state_at_current_slot()?;
@@ -317,7 +317,7 @@ impl<P: Preset, W: Wait> HandleExternalMessageTask<P, W> {
                 .await?;
             Ok(ValidationOutcome::Accept)
         } else {
-            Ok(ValidationOutcome::Ignore)
+            Ok(ValidationOutcome::Ignore(false))
         }
     }
 }

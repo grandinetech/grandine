@@ -118,14 +118,14 @@ pub enum Error {
     TargetStateNotFound,
     #[error(transparent)]
     TaskJoinFailed(#[from] JoinError),
+    #[error("unable to publish block")]
+    UnableToPublishBlock,
     #[error("unable to produce attestation")]
     UnableToProduceAttestation(#[source] AnyhowError),
     #[error("unable to produce beacon block")]
     UnableToProduceBeaconBlock,
     #[error("unable to produce blinded block")]
     UnableToProduceBlindedBlock,
-    #[error("unable to validate signed beacon block")]
-    UnableToValidateSignedBlock,
     #[error("validator not found")]
     ValidatorNotFound,
     // TODO(Grandine Team): Some API clients do not set `validator_index`.
@@ -205,7 +205,8 @@ impl Error {
             | Self::InvalidValidatorSignatures(_)
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
-            | Self::StatePreCapella => StatusCode::BAD_REQUEST,
+            | Self::StatePreCapella
+            | Self::UnableToPublishBlock => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
             Self::Internal(_)
             | Self::Canceled(_)
@@ -215,8 +216,7 @@ impl Error {
             | Self::TaskJoinFailed(_)
             | Self::UnableToProduceAttestation { .. }
             | Self::UnableToProduceBeaconBlock
-            | Self::UnableToProduceBlindedBlock
-            | Self::UnableToValidateSignedBlock => StatusCode::INTERNAL_SERVER_ERROR,
+            | Self::UnableToProduceBlindedBlock => StatusCode::INTERNAL_SERVER_ERROR,
             Self::EndpointNotImplemented => StatusCode::NOT_IMPLEMENTED,
             Self::HeadFarBehind { .. } | Self::HeadIsOptimistic | Self::NodeIsSyncing => {
                 StatusCode::SERVICE_UNAVAILABLE

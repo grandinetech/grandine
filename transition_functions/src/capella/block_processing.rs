@@ -3,12 +3,12 @@ use core::ops::{Add as _, Index as _, Rem as _};
 use anyhow::{ensure, Result};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
-    accessors::{get_current_epoch, get_randao_mix, initialize_shuffled_indices},
+    accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
     error::SignatureKind,
     misc::{self, compute_timestamp_at_slot},
     mutators::{balance, decrease_balance},
     predicates::{is_fully_withdrawable_validator, is_partially_withdrawable_validator},
-    signing::SignForAllForksWithGenesis as _,
+    signing::{SignForAllForksWithGenesis as _, SignForSingleFork as _},
     slot_report::SlotReport,
     verifier::{SingleVerifier, Triple, Verifier},
 };
@@ -22,8 +22,8 @@ use types::{
     capella::{
         beacon_state::BeaconState,
         containers::{
-            BeaconBlock, BeaconBlockBody, ExecutionPayloadHeader, SignedBlsToExecutionChange,
-            Withdrawal,
+            BeaconBlock, BeaconBlockBody, ExecutionPayloadHeader, SignedBeaconBlock,
+            SignedBlsToExecutionChange, Withdrawal,
         },
     },
     config::Config,
@@ -71,6 +71,27 @@ pub fn process_block<P: Preset>(
     )?;
 
     verifier.finish()
+}
+
+pub fn process_block_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    debug_assert_eq!(state.slot, block.message.slot);
+
+    unphased::process_block_header_for_gossip(state, &block.message)?;
+
+    process_execution_payload_for_gossip(config, state, &block.message.body)?;
+
+    SingleVerifier.verify_singular(
+        block.message.signing_root(config, state),
+        block.signature,
+        accessors::public_key(state, block.message.proposer_index)?,
+        SignatureKind::Block,
+    )?;
+
+    Ok(())
 }
 
 pub fn custom_process_block<P: Preset>(
@@ -150,6 +171,24 @@ fn process_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
+    process_execution_payload_for_gossip(config, state, body)?;
+
+    // > Verify the execution payload is valid
+    execution_engine.notify_new_payload(block_root, payload.clone().into(), None, None)?;
+
+    // > Cache execution payload header
+    state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
+
+    Ok(())
+}
+
+fn process_execution_payload_for_gossip<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    body: &BeaconBlockBody<P>,
+) -> Result<()> {
+    let payload = &body.execution_payload;
+
     // > Verify timestamp
     let computed = compute_timestamp_at_slot(config, state, state.slot);
     let in_block = payload.timestamp;
@@ -158,12 +197,6 @@ fn process_execution_payload<P: Preset>(
         computed == in_block,
         Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
     );
-
-    // > Verify the execution payload is valid
-    execution_engine.notify_new_payload(block_root, payload.clone().into(), None, None)?;
-
-    // > Cache execution payload header
-    state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
 
     Ok(())
 }
