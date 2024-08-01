@@ -245,7 +245,7 @@ impl From<Blocks> for BlockParameters {
 }
 
 fn main() -> Result<()> {
-    binary_utils::initialize_logger(module_path!(), false, true)?;
+    binary_utils::initialize_logger(module_path!(), false)?;
     binary_utils::initialize_rayon()?;
 
     print_jemalloc_stats()?;
