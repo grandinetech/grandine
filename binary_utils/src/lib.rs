@@ -7,11 +7,7 @@ use log::LevelFilter;
 use logging::PEER_LOG_METRICS;
 use rayon::ThreadPoolBuilder;
 
-pub fn initialize_logger(
-    module_path: &str,
-    always_write_style: bool,
-    parse_env: bool,
-) -> Result<()> {
+pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<()> {
     let mut builder = Builder::new();
 
     builder
@@ -67,15 +63,11 @@ pub fn initialize_logger(
         builder.write_style(WriteStyle::Always);
     }
 
-    if parse_env {
-        let env = Env::new()
-            .filter("GRANDINE_LOG")
-            .write_style("GRANDINE_LOG_STYLE");
+    let env = Env::new()
+        .filter("GRANDINE_LOG")
+        .write_style("GRANDINE_LOG_STYLE");
 
-        builder.parse_env(env);
-    }
-
-    builder.try_init().map_err(Into::into)
+    builder.parse_env(env).try_init().map_err(Into::into)
 }
 
 pub fn initialize_rayon() -> Result<()> {
