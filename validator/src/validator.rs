@@ -1,6 +1,5 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::ops::ControlFlow;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     error::Error as StdError,
@@ -44,7 +43,7 @@ use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
-use slashing_protection::{BlockProposal, SlashingProtector, SlashingValidationOutcome};
+use slashing_protection::SlashingProtector;
 use ssz::{BitList, BitVector};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
@@ -56,7 +55,6 @@ use types::{
     },
     combined::{
         AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     electra::containers::{
@@ -655,7 +653,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let epoch = slot_head.current_epoch();
 
         let result = signer_snapshot
-            .sign(
+            .sign_without_slashing_protection(
                 SigningMessage::RandaoReveal { epoch },
                 RandaoEpoch::from(epoch).signing_root(&self.chain_config, &slot_head.beacon_state),
                 Some(slot_head.beacon_state.as_ref().into()),
@@ -710,6 +708,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         &blinded_block,
                         (&blinded_block).into(),
                         public_key,
+                        self.slashing_protector.clone_arc(),
                     )
                     .await
                 else {
@@ -755,7 +754,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
             ValidatorBlindedBlock::BeaconBlock(block) => {
                 match slot_head
-                    .sign_beacon_block(&self.signer, &block, (&block).into(), public_key)
+                    .sign_beacon_block(
+                        &self.signer,
+                        &block,
+                        (&block).into(),
+                        public_key,
+                        self.slashing_protector.clone_arc(),
+                    )
                     .await
                 {
                     Some(signature) => block.with_signature(signature),
@@ -763,21 +768,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
             }
         };
-
-        // Check before broadcasting to avoid slashing. See:
-        // <https://github.com/ethereum/consensus-specs/blob/2f99d0b44460a8e0f2404dc53c7a1d3cd9d9a329/specs/phase0/validator.md#proposer-slashing>
-        let control_flow = self
-            .validate_and_store_block(
-                &beacon_block,
-                &slot_head.beacon_state,
-                public_key.to_bytes(),
-                slot_head.current_epoch(),
-            )
-            .await?;
-
-        if control_flow.is_break() {
-            return Ok(());
-        }
 
         info!(
             "validator {} proposing beacon block with root {:?} in slot {}",
@@ -788,7 +778,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         debug!("beacon block: {beacon_block:?}");
 
-        let block = Arc::new(beacon_block.clone());
+        let block = Arc::new(beacon_block);
 
         for blob_sidecar in misc::construct_blob_sidecars(
             &block,
@@ -882,35 +872,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             slot_head.slot(),
         );
 
-        // Check before broadcasting to avoid slashing. See:
-        // <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attester-slashing>
-        let accepted_attestations = {
-            // Tracking slashing protector metrics could be moved to slashing protector methods
-            // but here we additionally collect locking times
-            let _slashing_protector_timer = self.metrics.as_ref().map(|metrics| {
-                metrics
-                    .validator_attest_slashing_protector_times
-                    .start_timer()
-            });
-
-            let mut protector = self.slashing_protector.lock().await;
-
-            protector.validate_and_store_own_attestations(
-                &self.chain_config,
-                &slot_head.beacon_state,
-                own_singular_attestations.iter().map(|own_attestation| {
-                    let OwnAttestation {
-                        validator_index, ..
-                    } = own_attestation;
-
-                    let public_key = slot_head.public_key(*validator_index).to_bytes();
-
-                    (own_attestation, public_key)
-                }),
-            )?
-        };
-
-        for own_attestation in &accepted_attestations {
+        for own_attestation in own_singular_attestations {
             let OwnAttestation {
                 validator_index,
                 attestation,
@@ -953,8 +915,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(|member| ((member.committee_index, member.validator_index), member))
             .collect::<HashMap<_, _>>();
 
-        self.own_aggregators = accepted_attestations
-            .into_iter()
+        self.own_aggregators = own_singular_attestations
+            .iter()
             .filter_map(|own_attestation| {
                 let committee_index = misc::committee_index(&own_attestation.attestation);
 
@@ -1057,7 +1019,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let sign_result = self
             .signer
             .load()
-            .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
+            .sign_triples_without_slashing_protection(
+                triples,
+                Some(slot_head.beacon_state.as_ref().into()),
+            )
             .await;
 
         let signatures = match sign_result {
@@ -1208,53 +1173,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    async fn validate_and_store_block(
-        &self,
-        block: &SignedBeaconBlock<P>,
-        state: &BeaconState<P>,
-        pubkey: PublicKeyBytes,
-        current_epoch: Epoch,
-    ) -> Result<ControlFlow<()>> {
-        let proposal = BlockProposal {
-            slot: block.message().slot(),
-            signing_root: Some(block.message().signing_root(&self.chain_config, state)),
-        };
-
-        debug!("validating beacon block proposal: {block:?}");
-
-        let validation_outcome = {
-            // Tracking slashing protector metrics could be moved to slashing protector methods
-            // but here we additionally collect locking times
-            let _timer = self.metrics.as_ref().map(|metrics| {
-                metrics
-                    .validator_proposal_slashing_protector_times
-                    .start_timer()
-            });
-
-            self.slashing_protector
-                .lock()
-                .await
-                .validate_and_store_proposal(proposal, pubkey, current_epoch)?
-        };
-
-        let control_flow = match validation_outcome {
-            SlashingValidationOutcome::Accept => ControlFlow::Continue(()),
-            SlashingValidationOutcome::Ignore => {
-                warn!("slashing protector ignored duplicate beacon block: {block:?}");
-                ControlFlow::Break(())
-            }
-            SlashingValidationOutcome::Reject(error) => {
-                warn!(
-                    "slashing protector rejected slashable beacon block \
-                     (error: {error}, block: {block:?})",
-                );
-                ControlFlow::Break(())
-            }
-        };
-
-        Ok(control_flow)
-    }
-
     async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) -> Result<()> {
         let Some(last_tick) = self.last_tick else {
             return Ok(());
@@ -1355,10 +1273,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .unzip()
         });
 
-        let result = self
-            .signer
-            .load()
-            .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
+        let snapshot = self.signer.load();
+
+        let result = snapshot
+            .sign_triples(
+                triples,
+                slot_head.beacon_state.as_ref(),
+                self.slashing_protector.clone_arc(),
+            )
             .await;
 
         let signatures = match result {
@@ -1379,36 +1301,46 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 let own_attestations = signatures
                     .zip(other_data)
                     .filter_map(|(signature, (data, member))| {
-                        let attestation = if phase < Phase::Electra {
-                            let mut aggregation_bits = BitList::with_length(member.committee_size);
-                            aggregation_bits.set(member.position_in_committee, true);
+                        signature
+                            .map(|signature| {
+                                let attestation = if phase < Phase::Electra {
+                                    let mut aggregation_bits =
+                                        BitList::with_length(member.committee_size);
 
-                            Attestation::from(Phase0Attestation {
-                                aggregation_bits,
-                                data,
-                                signature: signature.into(),
+                                    aggregation_bits.set(member.position_in_committee, true);
+
+                                    Some(Attestation::from(Phase0Attestation {
+                                        aggregation_bits,
+                                        data,
+                                        signature: signature.into(),
+                                    }))
+                                } else {
+                                    let mut aggregation_bits =
+                                        BitList::with_length(member.committee_size);
+
+                                    aggregation_bits.set(member.position_in_committee, true);
+
+                                    // TODO(feature/electra: don't hide error?)
+                                    let mut committee_bits = BitVector::default();
+
+                                    committee_bits
+                                        .set(member.committee_index.try_into().ok()?, true);
+
+                                    Some(Attestation::from(ElectraAttestation {
+                                        aggregation_bits,
+                                        data,
+                                        committee_bits,
+                                        signature: signature.into(),
+                                    }))
+                                };
+
+                                attestation.map(|attestation| OwnAttestation {
+                                    validator_index: member.validator_index,
+                                    attestation,
+                                    signature,
+                                })
                             })
-                        } else {
-                            let mut aggregation_bits = BitList::with_length(member.committee_size);
-                            aggregation_bits.set(member.position_in_committee, true);
-
-                            // TODO(feature/electra: don't hide error?)
-                            let mut committee_bits = BitVector::default();
-                            committee_bits.set(member.committee_index.try_into().ok()?, true);
-
-                            Attestation::from(ElectraAttestation {
-                                aggregation_bits,
-                                data,
-                                committee_bits,
-                                signature: signature.into(),
-                            })
-                        };
-
-                        Some(OwnAttestation {
-                            validator_index: member.validator_index,
-                            attestation,
-                            signature,
-                        })
+                            .flatten()
                     })
                     .collect();
 
@@ -1550,7 +1482,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let result = self
             .signer
             .load()
-            .sign_triples(triples, Some(slot_head.beacon_state.as_ref().into()))
+            .sign_triples_without_slashing_protection(
+                triples,
+                Some(slot_head.beacon_state.as_ref().into()),
+            )
             .await;
 
         let signatures = match result {
@@ -1990,7 +1925,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 })
                 .collect_vec();
 
-            let signatures = signer_snapshot.sign_triples(triples, None).await?;
+            let signatures = signer_snapshot
+                .sign_triples_without_slashing_protection(triples, None)
+                .await?;
 
             let signed_registrations = registrations
                 .into_iter()

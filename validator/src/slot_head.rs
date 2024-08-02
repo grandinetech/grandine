@@ -3,12 +3,15 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bls::{CachedPublicKey, PublicKeyBytes, SignatureBytes};
+use futures::lock::Mutex;
 use helper_functions::{
     accessors, misc, predicates,
     signing::{SignForSingleFork, SignForSingleForkAtSlot as _},
 };
+use itertools::Itertools as _;
 use log::warn;
 use signer::{Signer, SigningMessage, SigningTriple};
+use slashing_protection::SlashingProtector;
 use types::{
     altair::{
         containers::{SyncAggregatorSelectionData, SyncCommitteeMessage},
@@ -111,7 +114,10 @@ impl<P: Preset> SlotHead<P> {
 
         let messages = signer
             .load()
-            .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
+            .sign_triples_without_slashing_protection(
+                triples,
+                Some(self.beacon_state.as_ref().into()),
+            )
             .await?
             .zip(validator_indices)
             .map(move |(signature, validator_index)| SyncCommitteeMessage {
@@ -146,7 +152,10 @@ impl<P: Preset> SlotHead<P> {
 
         signer
             .load()
-            .sign_triples(triples, Some(self.beacon_state.as_ref().into()))
+            .sign_triples_without_slashing_protection(
+                triples,
+                Some(self.beacon_state.as_ref().into()),
+            )
             .await?
             .map(|signature| {
                 let selection_proof = signature.into();
@@ -162,23 +171,44 @@ impl<P: Preset> SlotHead<P> {
         block: &(impl SignForSingleFork<P> + Debug + Send + Sync),
         message: SigningMessage<'_, P>,
         cached_public_key: &CachedPublicKey,
+        slashing_protector: Arc<Mutex<SlashingProtector>>,
     ) -> Option<SignatureBytes> {
         let public_key = cached_public_key.to_bytes();
 
         match signer
             .load()
-            .sign(
-                message,
-                block.signing_root(&self.config, &self.beacon_state),
-                Some(self.beacon_state.as_ref().into()),
-                public_key,
+            .sign_triples(
+                core::iter::once(SigningTriple {
+                    message,
+                    signing_root: block.signing_root(&self.config, &self.beacon_state),
+                    public_key,
+                }),
+                self.beacon_state.as_ref(),
+                slashing_protector,
             )
             .await
         {
-            Ok(signature) => Some(signature.into()),
+            Ok(signatures) => {
+                match signatures.into_iter().exactly_one() {
+                    Ok(signature_option) => match signature_option {
+                        Some(signature) => Some(signature.into()),
+                        None => {
+                            warn!(
+                                "failed to sign beacon block due to slashing protection \
+                                (block: {block:?}, public_key: {public_key:?})",
+                            );
+                            None
+                        }
+                    },
+                    Err(_) => {
+                        warn!("Slashing protection returned iterator with different number of elements",);
+                        None
+                    }
+                }
+            }
             Err(error) => {
                 warn!(
-                    "failed to sign beacon block \
+                    "error while signing beacon block \
                      (error: {error:?}, block: {block:?}, public_key: {public_key:?})",
                 );
                 None

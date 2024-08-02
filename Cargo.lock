@@ -7305,6 +7305,7 @@ dependencies = [
  "serde-aux",
  "serde_json",
  "serde_utils",
+ "slashing_protection",
  "std_ext",
  "thiserror",
  "tokio",

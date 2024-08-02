@@ -7,17 +7,19 @@ use anyhow::Result;
 use arc_swap::{ArcSwap, Guard};
 use bls::{PublicKeyBytes, SecretKey, Signature};
 use futures::{
+    lock::Mutex,
     stream::{FuturesUnordered, TryStreamExt as _},
     try_join, TryFutureExt as _,
 };
-use itertools::Itertools as _;
+use itertools::{izip, Itertools as _};
 use log::{info, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use reqwest::{Client, Url};
+use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use types::{phase0::primitives::H256, preset::Preset};
+use types::{combined::BeaconState, phase0::primitives::H256, preset::Preset};
 
 use crate::{
     types::{ForkInfo, SigningMessage, SigningTriple},
@@ -206,7 +208,7 @@ impl Snapshot {
         }
     }
 
-    pub async fn sign<'block, P: Preset>(
+    pub async fn sign_without_slashing_protection<'block, P: Preset>(
         &self,
         message: SigningMessage<'block, P>,
         signing_root: H256,
@@ -226,6 +228,128 @@ impl Snapshot {
     }
 
     pub async fn sign_triples<P: Preset>(
+        &self,
+        triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
+        beacon_state: &BeaconState<P>,
+        slashing_protector: Arc<Mutex<SlashingProtector>>,
+    ) -> Result<impl Iterator<Item = Option<Signature>>> {
+        let mut message_indices = vec![];
+        let mut block_proposal_indices = vec![];
+        let mut attestation_indices = vec![];
+        let mut block_messages = vec![];
+        let mut attestation_triples = vec![];
+        let mut attestations = vec![];
+        let mut block_proposals = vec![];
+        let mut signable_messages = vec![];
+
+        let fork_info = ForkInfo::from(beacon_state);
+        let mut signing_triples_count = 0;
+
+        for (index, triple) in triples.into_iter().enumerate() {
+            let SigningTriple {
+                message,
+                signing_root,
+                public_key,
+            } = triple;
+
+            match message {
+                SigningMessage::Attestation(attestation_data) => {
+                    attestation_triples.push((message, signing_root, public_key));
+                    attestation_indices.push(index);
+
+                    attestations.push((
+                        Attestation {
+                            source_epoch: attestation_data.source.epoch,
+                            target_epoch: attestation_data.target.epoch,
+                            signing_root: Some(signing_root),
+                        },
+                        public_key,
+                    ));
+                }
+                SigningMessage::BeaconBlock(ref signing_block) => {
+                    let proposal = BlockProposal {
+                        slot: signing_block.slot(),
+                        signing_root: Some(signing_root),
+                    };
+
+                    block_messages.push((message, signing_root, public_key));
+                    block_proposal_indices.push(index);
+                    block_proposals.push((proposal, public_key, fork_info.fork.epoch));
+                }
+                SigningMessage::AggregationSlot { .. }
+                | SigningMessage::AggregateAndProof(_)
+                | SigningMessage::RandaoReveal { .. }
+                | SigningMessage::SyncCommitteeMessage { .. }
+                | SigningMessage::SyncAggregatorSelectionData(_)
+                | SigningMessage::ContributionAndProof(_)
+                | SigningMessage::ValidatorRegistration(_)
+                | SigningMessage::VoluntaryExit(_) => {
+                    signable_messages.push(SigningTriple {
+                        message,
+                        signing_root,
+                        public_key,
+                    });
+                    message_indices.push(index);
+                }
+            }
+
+            signing_triples_count += 1;
+        }
+
+        let mut protector = slashing_protector.lock().await;
+
+        let slashing_outcome =
+            protector.validate_and_store_own_attestations(beacon_state, attestations)?;
+
+        for (outcome, data, index) in izip!(
+            slashing_outcome.iter(),
+            attestation_triples,
+            attestation_indices
+        ) {
+            let (message, signing_root, public_key) = data;
+
+            if outcome.is_some() {
+                signable_messages.push(SigningTriple {
+                    message,
+                    signing_root,
+                    public_key,
+                });
+                message_indices.push(index);
+            }
+        }
+
+        for ((proposal, pubkey, current_epoch), (message, signing_root, public_key), index) in izip!(
+            block_proposals.into_iter(),
+            block_messages,
+            block_proposal_indices
+        ) {
+            let control_flow =
+                protector.validate_and_store_own_block_proposal(proposal, pubkey, current_epoch)?;
+
+            if control_flow.is_continue() {
+                signable_messages.push(SigningTriple {
+                    message,
+                    signing_root,
+                    public_key,
+                });
+
+                message_indices.push(index);
+            }
+        }
+
+        let signed_messages = self
+            .sign_triples_without_slashing_protection(signable_messages, Some(fork_info))
+            .await?;
+
+        let mut answer = vec![None; signing_triples_count];
+        for (signed_message, index) in signed_messages.zip(message_indices) {
+            answer[index] = Some(signed_message);
+        }
+
+        Ok(answer.into_iter())
+    }
+
+    pub async fn sign_triples_without_slashing_protection<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
         fork_info: Option<ForkInfo<P>>,
@@ -265,9 +389,14 @@ impl Snapshot {
             sign_remotely
                 .into_iter()
                 .map(|(index, message, signing_root, public_key)| async move {
-                    self.sign(message, signing_root, fork_info, public_key)
-                        .await
-                        .map(|signature| (index, signature))
+                    self.sign_without_slashing_protection(
+                        message,
+                        signing_root,
+                        fork_info,
+                        public_key,
+                    )
+                    .await
+                    .map(|signature| (index, signature))
                 })
                 .collect::<FuturesUnordered<_>>()
                 .try_collect::<Vec<_>>()

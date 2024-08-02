@@ -186,6 +186,19 @@ pub enum SigningBlock<'block, P: Preset> {
     Electra { block_header: BeaconBlockHeader },
 }
 
+impl<'block, P: Preset> SigningBlock<'block, P> {
+    pub const fn slot(&self) -> Slot {
+        match self {
+            SigningBlock::Phase0 { block } => block.slot,
+            SigningBlock::Altair { block } => block.slot,
+            SigningBlock::Bellatrix { block_header }
+            | SigningBlock::Capella { block_header }
+            | SigningBlock::Deneb { block_header }
+            | SigningBlock::Electra { block_header } => block_header.slot,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Result;

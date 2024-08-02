@@ -1,10 +1,11 @@
+use core::ops::ControlFlow;
 use std::{collections::HashMap, path::Path};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use derivative::Derivative;
 use fs_err::File;
-use helper_functions::{accessors, misc, signing::SignForSingleFork};
+use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use log::{debug, info, warn};
 use rusqlite::{Connection, OptionalExtension, Rows, Transaction, TransactionBehavior};
@@ -12,8 +13,6 @@ use ssz::{SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
 use types::{
     combined::BeaconState,
-    config::Config,
-    nonstandard::OwnAttestation,
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -57,7 +56,7 @@ pub enum SlashingValidationError {
         min_slot: Slot,
     },
     #[error("invalid attestation (attestation: {attestation:?})")]
-    InvalidAttestation { attestation: AttestationProposal },
+    InvalidAttestation { attestation: Attestation },
     #[error(
         "past epoch proposal (current_epoch: {current_epoch:?}, stored_epoch: {stored_epoch:?})"
     )]
@@ -90,16 +89,16 @@ impl SlashingValidationOutcome {
     }
 }
 
-#[derive(Debug)]
-#[cfg_attr(test, derive(Clone, PartialEq, Eq))]
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct BlockProposal {
     pub slot: Slot,
     pub signing_root: Option<H256>,
 }
 
-#[derive(Debug)]
-#[cfg_attr(test, derive(Clone, PartialEq, Eq))]
-pub struct AttestationProposal {
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct Attestation {
     pub source_epoch: Epoch,
     pub target_epoch: Epoch,
     pub signing_root: Option<H256>,
@@ -110,7 +109,7 @@ pub struct AttestationProposal {
 pub struct ImportReport {
     validators: ImportRecords<PublicKeyBytes>,
     blocks: ImportRecords<BlockProposal>,
-    attestations: ImportRecords<AttestationProposal>,
+    attestations: ImportRecords<Attestation>,
 }
 
 impl ImportReport {
@@ -265,7 +264,7 @@ impl SlashingProtector {
                 }
 
                 for signed_attestation in interchange_record.signed_attestations {
-                    let attestation = AttestationProposal {
+                    let attestation = Attestation {
                         source_epoch: signed_attestation.source_epoch,
                         target_epoch: signed_attestation.target_epoch,
                         signing_root: signed_attestation.signing_root,
@@ -439,7 +438,7 @@ impl SlashingProtector {
     fn store_attestation(
         transaction: &Transaction,
         validator_id: ValidatorId,
-        attestation: &AttestationProposal,
+        attestation: &Attestation,
     ) -> Result<()> {
         transaction.execute(
             "INSERT INTO attestation_proposals (
@@ -506,7 +505,7 @@ impl SlashingProtector {
             .map_err(Into::into)
     }
 
-    pub fn validate_and_store_proposal(
+    fn validate_and_store_proposal(
         &mut self,
         proposal: BlockProposal,
         pubkey: PublicKeyBytes,
@@ -557,15 +556,43 @@ impl SlashingProtector {
         Ok(SlashingValidationOutcome::Accept)
     }
 
-    fn validate_and_store_attestation_proposals(
+    pub fn validate_and_store_own_block_proposal(
         &mut self,
-        attestations: impl IntoIterator<Item = (AttestationProposal, PublicKeyBytes)>,
+        proposal: BlockProposal,
+        pubkey: PublicKeyBytes,
+        current_epoch: Epoch,
+    ) -> Result<ControlFlow<()>> {
+        let validation_outcome =
+            self.validate_and_store_proposal(proposal, pubkey, current_epoch)?;
+
+        let control_flow = match validation_outcome {
+            SlashingValidationOutcome::Accept => ControlFlow::Continue(()),
+            SlashingValidationOutcome::Ignore => {
+                warn!("slashing protector ignored duplicate beacon block: {proposal:?}");
+                ControlFlow::Break(())
+            }
+            SlashingValidationOutcome::Reject(error) => {
+                warn!(
+                    "slashing protector rejected slashable beacon block \
+                     (error: {error}, block: {proposal:?})",
+                );
+
+                ControlFlow::Break(())
+            }
+        };
+
+        Ok(control_flow)
+    }
+
+    fn validate_and_store_attestations(
+        &mut self,
+        attestations: impl IntoIterator<Item = (Attestation, PublicKeyBytes)>,
     ) -> Result<Vec<Result<SlashingValidationOutcome>>> {
         let transaction = self.transaction()?;
         let result = attestations
             .into_iter()
-            .map(|(proposal, pubkey)| {
-                Self::validate_attestation_proposal(proposal, pubkey, &transaction)
+            .map(|(attestation, pubkey)| {
+                Self::validate_attestation(attestation, pubkey, &transaction)
             })
             .collect_vec();
 
@@ -574,74 +601,52 @@ impl SlashingProtector {
         Ok(result)
     }
 
-    pub fn validate_and_store_own_attestations<'a, P: Preset>(
+    pub fn validate_and_store_own_attestations<P: Preset>(
         &mut self,
-        config: &Config,
         state: &BeaconState<P>,
-        attestations: impl IntoIterator<Item = (&'a OwnAttestation<P>, PublicKeyBytes)> + Clone,
-    ) -> Result<Vec<&'a OwnAttestation<P>>> {
+        attestations: impl IntoIterator<Item = (Attestation, PublicKeyBytes)> + Clone,
+    ) -> Result<Vec<Option<Attestation>>> {
         let current_epoch = accessors::get_current_epoch(state);
 
         if self.validate_current_epoch(current_epoch)?.is_some() {
             return Ok(vec![]);
         }
 
-        let proposals = attestations
-            .clone()
-            .into_iter()
-            .map(|(own_attestation, pubkey)| {
-                let OwnAttestation { attestation, .. } = own_attestation;
-                let data = attestation.data();
-                let proposal = AttestationProposal {
-                    source_epoch: data.source.epoch,
-                    target_epoch: data.target.epoch,
-                    signing_root: Some(data.signing_root(config, state)),
-                };
-
-                (proposal, pubkey)
-            });
-
-        let outcomes = self.validate_and_store_attestation_proposals(proposals)?;
+        let outcomes = self.validate_and_store_attestations(attestations.clone())?;
 
         Ok(attestations
             .into_iter()
             .zip(outcomes)
-            .filter_map(|((own_attestation, _), outcome_result)| {
-                let OwnAttestation { attestation, .. } = own_attestation;
+            .map(|((attestation, _), outcome_result)| match outcome_result {
+                Ok(outcome) => match outcome {
+                    SlashingValidationOutcome::Accept => Some(attestation),
+                    SlashingValidationOutcome::Ignore => {
+                        warn!("slashing protector ignored duplicate attestation: {attestation:?}",);
 
-                match outcome_result {
-                    Ok(outcome) => match outcome {
-                        SlashingValidationOutcome::Accept => Some(own_attestation),
-                        SlashingValidationOutcome::Ignore => {
-                            warn!(
-                                "slashing protector ignored duplicate attestation: {attestation:?}",
-                            );
-
-                            None
-                        }
-                        SlashingValidationOutcome::Reject(error) => {
-                            warn!(
-                                "slashing protector rejected slashable attestation \
-                                 (error: {error}, attestation: {attestation:?})",
-                            );
-
-                            None
-                        }
-                    },
-                    Err(error) => {
-                        warn!(
-                            "slashing protector returned an error while checking proposable \
-                             attestation (error: {error}, attestation: {attestation:?})",
-                        );
                         None
                     }
+                    SlashingValidationOutcome::Reject(error) => {
+                        warn!(
+                            "slashing protector rejected slashable attestation \
+                                 (error: {error}, attestation: {attestation:?})",
+                        );
+
+                        None
+                    }
+                },
+                Err(error) => {
+                    warn!(
+                        "slashing protector returned an error while checking proposable \
+                             attestation (error: {error}, attestation: {attestation:?})",
+                    );
+                    None
                 }
             })
             .collect_vec())
     }
 
-    fn validate_attestation_proposal(
-        attestation: AttestationProposal,
+    fn validate_attestation(
+        attestation: Attestation,
         pubkey: PublicKeyBytes,
         transaction: &Transaction,
     ) -> Result<SlashingValidationOutcome> {
@@ -989,17 +994,13 @@ fn move_slashing_protection_db_to_validator_dir(
 
 #[cfg(test)]
 mod tests {
-    use bls::Signature;
     use duplicate::duplicate_item;
     use hex_literal::hex;
     use serde::{de::IgnoredAny, Deserialize};
     use tempfile::{Builder, TempDir};
     use test_case::test_case;
     use test_generator::test_resources;
-    use types::{
-        combined::Attestation, phase0::containers::Attestation as Phase0Attestation,
-        preset::Minimal, traits::BeaconState as _,
-    };
+    use types::{config::Config, preset::Minimal, traits::BeaconState as _};
 
     use super::*;
 
@@ -1066,16 +1067,11 @@ mod tests {
         should_succeed_complete: bool,
     }
 
-    fn build_own_attestation<P: Preset>(source: Epoch, target: Epoch) -> OwnAttestation<P> {
-        let mut attestation = Phase0Attestation::default();
-
-        attestation.data.source.epoch = source;
-        attestation.data.target.epoch = target;
-
-        OwnAttestation {
-            attestation: Attestation::from(attestation),
-            signature: Signature::default(),
-            validator_index: 1,
+    const fn build_own_attestation(source: Epoch, target: Epoch) -> Attestation {
+        Attestation {
+            source_epoch: source,
+            target_epoch: target,
+            signing_root: None,
         }
     }
 
@@ -1110,6 +1106,10 @@ mod tests {
             None,
             None,
         ))
+    }
+
+    fn count_some<T>(options: &[Option<T>]) -> usize {
+        options.iter().flatten().count()
     }
 
     // SQLite silently ignores invalid values in most pragma statements.
@@ -1163,13 +1163,13 @@ mod tests {
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
 
-        let attestation = AttestationProposal {
+        let attestation = Attestation {
             source_epoch: 2290,
             target_epoch: 3007,
             signing_root: Some(ATTESTATION_SIGNING_ROOT),
         };
 
-        let outcome = SlashingProtector::validate_attestation_proposal(
+        let outcome = SlashingProtector::validate_attestation(
             attestation,
             PUBKEY,
             &slashing_protector.transaction()?,
@@ -1209,13 +1209,10 @@ mod tests {
 
         let attestation = build_own_attestation(2, 32);
 
-        let accepted_attestations = slashing_protector.validate_and_store_own_attestations(
-            &config,
-            &state,
-            core::iter::once((&attestation, PUBKEY)),
-        )?;
+        let accepted_attestations = slashing_protector
+            .validate_and_store_own_attestations(&state, core::iter::once((attestation, PUBKEY)))?;
 
-        assert_eq!(accepted_attestations.len(), 0);
+        assert_eq!(count_some(&accepted_attestations), 0);
         assert_eq!(
             slashing_protector.validate_current_epoch(32)?,
             Some(SlashingValidationOutcome::Reject(
@@ -1228,14 +1225,11 @@ mod tests {
 
         *state.slot_mut() = misc::compute_start_slot_at_epoch::<Minimal>(1024);
 
-        let accepted_attestations = slashing_protector.validate_and_store_own_attestations(
-            &config,
-            &state,
-            core::iter::once((&attestation, PUBKEY)),
-        )?;
+        let accepted_attestations = slashing_protector
+            .validate_and_store_own_attestations(&state, core::iter::once((attestation, PUBKEY)))?;
 
         assert_eq!(slashing_protector.validate_current_epoch(1024)?, None);
-        assert_eq!(accepted_attestations.len(), 1);
+        assert_eq!(count_some(&accepted_attestations), 1);
 
         let proposal = BlockProposal {
             slot: 32,
@@ -1243,7 +1237,7 @@ mod tests {
         };
 
         assert_eq!(
-            slashing_protector.validate_and_store_proposal(proposal.clone(), PUBKEY, 32)?,
+            slashing_protector.validate_and_store_proposal(proposal, PUBKEY, 32)?,
             SlashingValidationOutcome::Reject(SlashingValidationError::PastEpochPropoal {
                 current_epoch: 32,
                 stored_epoch: 1024,
@@ -1260,9 +1254,7 @@ mod tests {
 
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
-    fn test_slashing_protection_attestation_proposal_pruning(
-        constructor: Constructor,
-    ) -> Result<()> {
+    fn test_slashing_protection_attestation_pruning(constructor: Constructor) -> Result<()> {
         let config = Config::minimal();
 
         let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
@@ -1276,16 +1268,15 @@ mod tests {
         let attestation_3 = build_own_attestation(64, 66);
 
         let accepted_attestations = slashing_protector.validate_and_store_own_attestations(
-            &config,
             &state,
             [
-                (&attestation_1, PUBKEY),
-                (&attestation_2, PUBKEY),
-                (&attestation_3, PublicKeyBytes::default()),
+                (attestation_1, PUBKEY),
+                (attestation_2, PUBKEY),
+                (attestation_3, PublicKeyBytes::default()),
             ],
         )?;
 
-        assert_eq!(accepted_attestations.len(), 2);
+        assert_eq!(count_some(&accepted_attestations), 2);
         assert_eq!(slashing_protector.count_attestations_with_target(32)?, 1);
         assert_eq!(slashing_protector.count_attestations_with_target(64)?, 1);
         assert_eq!(slashing_protector.count_attestations_with_target(66)?, 0);
@@ -1402,15 +1393,15 @@ mod tests {
                     }
                 }
 
-                let outcomes = slashing_protector.validate_and_store_attestation_proposals(
+                let outcomes = slashing_protector.validate_and_store_attestations(
                     step.attestations.iter().map(|test_attestation| {
-                        let proposal = AttestationProposal {
+                        let attestation = Attestation {
                             source_epoch: test_attestation.source_epoch,
                             target_epoch: test_attestation.target_epoch,
                             signing_root: Some(test_attestation.signing_root),
                         };
 
-                        (proposal, test_attestation.pubkey)
+                        (attestation, test_attestation.pubkey)
                     }),
                 )?;
 
@@ -1420,7 +1411,7 @@ mod tests {
                         outcome?.is_slashing_violation(),
                     );
 
-                    // Test that valid attestation proposals are persisted in DB
+                    // Test that valid attestations are persisted in DB
                     if test_attestation.should_succeed_complete {
                         let count: usize = slashing_protector.transaction()?.query_row(
                             "SELECT count(*) FROM attestation_proposals \
