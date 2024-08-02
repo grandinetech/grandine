@@ -6,7 +6,7 @@ use derive_more::Display;
 use eth1_api::RealController;
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
-use log::{info, warn};
+use log::{debug, info, warn};
 use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
 use types::{
@@ -31,7 +31,7 @@ impl<P: Preset> BackSync<P> {
     pub fn load(database: &Database) -> Result<Option<Self>> {
         let data = Data::find(database)?;
 
-        features::log!(DebugP2p, "loaded back sync: {data:?}");
+        debug!("loaded back sync: {data:?}");
 
         Ok(data.map(Self::new))
     }
@@ -74,7 +74,7 @@ impl<P: Preset> BackSync<P> {
         if slot >= self.low_slot() && slot <= self.high_slot() && !self.is_finished() {
             self.batch.push(block);
         } else {
-            features::log!(DebugP2p, "ignoring network block during back sync: {slot}");
+            debug!("ignoring network block during back sync: {slot}");
         }
     }
 
@@ -89,19 +89,13 @@ impl<P: Preset> BackSync<P> {
         sync_tx: UnboundedSender<ArchiverToSync>,
     ) -> Result<()> {
         if !self.is_finished() {
-            features::log!(
-                DebugP2p,
-                "not spawning state archiver: back sync not yet finished",
-            );
+            debug!("not spawning state archiver: back sync not yet finished");
 
             return Ok(());
         }
 
         if self.archiving {
-            features::log!(
-                DebugP2p,
-                "not spawning state archiver: state archiver already started",
-            );
+            debug!("not spawning state archiver: state archiver already started");
 
             return Ok(());
         }
@@ -112,10 +106,7 @@ impl<P: Preset> BackSync<P> {
         Builder::new()
             .name("state-archiver".to_owned())
             .spawn(move || {
-                features::log!(
-                    DebugP2p,
-                    "archiving back sync states from {start_slot} to {end_slot}",
-                );
+                debug!("archiving back sync states from {start_slot} to {end_slot}");
 
                 match controller.archive_back_sync_states(
                     start_slot,
@@ -143,7 +134,7 @@ impl<P: Preset> BackSync<P> {
 
         match self.batch.verify_from_checkpoint(last_block_checkpoint) {
             Ok((checkpoint, blocks)) => {
-                features::log!(DebugP2p, "back sync batch verified: {checkpoint:?}");
+                debug!("back sync batch verified: {checkpoint:?}");
 
                 if checkpoint.slot == self.low_slot() {
                     let expected = self.data.low;
@@ -162,9 +153,9 @@ impl<P: Preset> BackSync<P> {
                 self.data.current = checkpoint;
                 self.save(database)?;
 
-                features::log!(DebugP2p, "back sync batch saved {checkpoint:?}");
+                debug!("back sync batch saved {checkpoint:?}");
             }
-            Err(error) => features::log!(DebugP2p, "back sync batch verification failed: {error}"),
+            Err(error) => debug!("back sync batch verification failed: {error}"),
         }
 
         Ok(())
@@ -188,7 +179,7 @@ impl<P: Preset> Batch<P> {
         SyncCheckpoint,
         impl Iterator<Item = Arc<SignedBeaconBlock<P>>>,
     )> {
-        features::log!(DebugP2p, "verify back sync batch from: {checkpoint:?}");
+        debug!("verify back sync batch from: {checkpoint:?}");
 
         let mut next_parent_root = checkpoint.parent_root;
 
@@ -213,7 +204,7 @@ impl<P: Preset> Batch<P> {
             checkpoint = earliest_block.as_ref().into();
         }
 
-        features::log!(DebugP2p, "next batch checkpoint: {checkpoint:?}");
+        debug!("next batch checkpoint: {checkpoint:?}");
 
         let blocks = core::mem::take(&mut self.blocks).into_values();
 

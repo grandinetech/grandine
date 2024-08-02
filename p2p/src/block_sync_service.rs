@@ -13,7 +13,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::{error, info};
+use log::{debug, error, info};
 use prometheus_metrics::Metrics;
 use ssz::{SszReadDefault, SszWrite as _};
 use std_ext::ArcExt as _;
@@ -191,17 +191,13 @@ impl<P: Preset> BlockSyncService<P> {
                     None => Either::Right(futures::future::pending()),
                 }, if self.archiver_to_sync_rx.is_some() => match message {
                     ArchiverToSync::BackSyncStatesArchived => {
-                        features::log!(DebugP2p, "received back sync states archived message");
+                        debug!("received back sync states archived message");
 
                         if let Some(back_sync) = self.back_sync.as_mut() {
                             if let Some(database) = self.database.as_ref() {
                                 back_sync.finish(database)?;
 
-                                features::log!(
-                                    DebugP2p,
-                                    "finishing back sync: {:?}",
-                                    back_sync.data(),
-                                );
+                                debug!("finishing back sync: {:?}", back_sync.data());
 
                                 if let Some(sync) = BackSync::load(database)? {
                                     self.back_sync = Some(sync);
@@ -221,10 +217,9 @@ impl<P: Preset> BlockSyncService<P> {
                     SyncMessage::Finalized(block) => {
                         if let Some(database) = &self.database {
                             let checkpoint = block.as_ref().into();
-                            features::log!(
-                                DebugP2p,
-                                "saving latest finalized back sync checkpoint: {checkpoint:?}",
-                            );
+
+                            debug!("saving latest finalized back sync checkpoint: {checkpoint:?}");
+
                             save_latest_finalized_back_sync_checkpoint(database, checkpoint)?;
                         }
                     }
@@ -501,8 +496,7 @@ impl<P: Preset> BlockSyncService<P> {
         );
 
         if slot < blob_serve_slot {
-            features::log!(
-                DebugP2p,
+            debug!(
                 "Ignoring needed blob sidecar request: slot: {slot} < blob_serve_slot: {blob_serve_slot}"
             );
             return Ok(());
@@ -561,7 +555,7 @@ impl<P: Preset> BlockSyncService<P> {
 
     fn request_peer_status_update(&mut self, status: StatusMessage) -> Result<()> {
         for peer_id in self.sync_manager.outdated_peers(status) {
-            features::log!(DebugP2p, "Update outdated peer: {peer_id}");
+            debug!("Update outdated peer: {peer_id}");
             self.request_peer_status(peer_id)?;
         }
 
@@ -575,7 +569,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_back_synced(&mut self, is_back_synced: bool) {
-        features::log!(DebugP2p, "set back synced: {is_back_synced}");
+        debug!("set back synced: {is_back_synced}");
 
         let was_back_synced = self.is_back_synced;
         self.is_back_synced = is_back_synced;
@@ -591,7 +585,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_forward_synced(&mut self, is_forward_synced: bool) -> Result<()> {
-        features::log!(DebugP2p, "set forward synced: {is_forward_synced}");
+        debug!("set forward synced: {is_forward_synced}");
 
         let was_forward_synced = self.is_forward_synced;
         self.is_forward_synced = is_forward_synced;

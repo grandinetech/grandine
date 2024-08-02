@@ -98,15 +98,20 @@ impl SyncManager {
     }
 
     pub fn add_peer(&mut self, peer_id: PeerId, status: StatusMessage) {
-        self.log_with_feature(format_args!(
-            "add peer (peer_id: {peer_id}, status: {status:?})",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("add peer (peer_id: {peer_id}, status: {status:?})"),
+        );
 
         self.peers.insert(peer_id, status);
     }
 
     pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch> {
-        self.log_with_feature(format_args!("remove peer (peer_id: {peer_id})"));
+        self.log(
+            Level::Debug,
+            format_args!("remove peer (peer_id: {peer_id})"),
+        );
+
         self.peers.remove(peer_id);
 
         self.block_requests
@@ -118,9 +123,10 @@ impl SyncManager {
     pub fn retry_batch(&mut self, request_id: RequestId, batch: &SyncBatch) -> Option<PeerId> {
         let peer = self.random_peer();
 
-        self.log_with_feature(format_args!(
-            "retrying batch {batch:?}, new peer: {peer:?}, request_id: {request_id}",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("retrying batch {batch:?}, new peer: {peer:?}, request_id: {request_id}"),
+        );
 
         match peer {
             Some(peer_id) => {
@@ -189,7 +195,10 @@ impl SyncManager {
                 count,
             };
 
-            self.log_with_feature(format_args!("back sync batch built: {batch:?})"));
+            self.log(
+                Level::Debug,
+                format_args!("back sync batch built: {batch:?})"),
+            );
 
             sync_batches.push(batch);
 
@@ -198,10 +207,10 @@ impl SyncManager {
             }
         }
 
-        self.log_with_feature(format_args!(
-            "new back sync batches count: {}",
-            sync_batches.len(),
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("new back sync batches count: {}", sync_batches.len(),),
+        );
 
         sync_batches
     }
@@ -222,10 +231,13 @@ impl SyncManager {
         };
 
         if remote_head_slot <= local_head_slot {
-            self.log_with_feature(format_args!(
-                "remote peers have no new slots \
-                 (local_head_slot: {local_head_slot}, remote_head_slot: {remote_head_slot})",
-            ));
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "remote peers have no new slots (local_head_slot: {local_head_slot}, \
+                    remote_head_slot: {remote_head_slot})",
+                ),
+            );
 
             return Ok(vec![]);
         }
@@ -236,7 +248,7 @@ impl SyncManager {
 
         let sync_start_slot = {
             if local_head_slot <= self.last_sync_head {
-                self.log_with_feature("local head not progressing");
+                self.log(Level::Debug, "local head not progressing");
                 self.sequential_redownloads += 1;
                 redownloads_increased = true;
 
@@ -256,16 +268,19 @@ impl SyncManager {
             }
         };
 
-        self.log_with_feature(format_args!(
-            "sequential redownloads: {}",
-            self.sequential_redownloads
-        ));
-        self.log_with_feature(format_args!("local finalized slot: {local_finalized_slot}"));
-        self.log_with_feature(format_args!("local head slot: {local_head_slot}"));
-        self.log_with_feature(format_args!("last sync head: {}", self.last_sync_head));
-        self.log_with_feature(format_args!("remote head slot: {remote_head_slot}"));
-        self.log_with_feature(format_args!("last sync range: {:?}", self.last_sync_range));
-        self.log_with_feature(format_args!("sync start slot: {sync_start_slot}"));
+        self.log(
+            Level::Debug,
+            format_args!(
+                "sequential redownloads: {}, \
+                local finalized slot: {local_finalized_slot}, \
+                local head slot: {local_head_slot}, \
+                last sync head: {}, \
+                remote head slot: {remote_head_slot}, \
+                last sync range: {:?}, \
+                sync start slot: {sync_start_slot},",
+                self.sequential_redownloads, self.last_sync_head, self.last_sync_range,
+            ),
+        );
 
         self.last_sync_head = local_head_slot;
 
@@ -278,10 +293,13 @@ impl SyncManager {
                 self.sequential_redownloads = self.sequential_redownloads.saturating_sub(1);
             }
 
-            self.log_with_feature(format_args!(
-                "remote peers have no new slots \
-                 (sync_start_slot: {sync_start_slot}, remote_head_slot: {remote_head_slot})",
-            ));
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "remote peers have no new slots (sync_start_slot: {sync_start_slot}, \
+                    remote_head_slot: {remote_head_slot})",
+                ),
+            );
 
             return Ok(vec![]);
         }
@@ -322,10 +340,10 @@ impl SyncManager {
             });
         }
 
-        self.log_with_feature(format_args!(
-            "new sync batches count: {}",
-            sync_batches.len(),
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("new sync batches count: {}", sync_batches.len()),
+        );
 
         self.last_sync_range = sync_start_slot..max_slot;
 
@@ -346,12 +364,15 @@ impl SyncManager {
     }
 
     pub fn add_blob_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
-        self.log_with_feature(format_args!(
-            "add blob request by range (request_id: {}, peer_id: {}, range: {:?})",
-            request_id,
-            batch.peer_id,
-            (batch.start_slot..(batch.start_slot + batch.count)),
-        ));
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add blob request by range (request_id: {}, peer_id: {}, range: {:?})",
+                request_id,
+                batch.peer_id,
+                (batch.start_slot..(batch.start_slot + batch.count)),
+            ),
+        );
 
         self.blob_requests.add_request_by_range(request_id, batch)
     }
@@ -361,7 +382,7 @@ impl SyncManager {
         blob_identifiers: Vec<BlobIdentifier>,
         peer_id: PeerId,
     ) -> Vec<BlobIdentifier> {
-        self.log_with_feature(format_args!(
+        self.log(Level::Debug, format_args!(
             "add blobs request by root (blob_identifiers: {blob_identifiers:?}, peer_id: {peer_id})",
         ));
 
@@ -372,20 +393,26 @@ impl SyncManager {
     }
 
     pub fn add_block_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
-        self.log_with_feature(format_args!(
-            "add block request by range (request_id: {}, peer_id: {}, range: {:?})",
-            request_id,
-            batch.peer_id,
-            (batch.start_slot..(batch.start_slot + batch.count)),
-        ));
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add block request by range (request_id: {}, peer_id: {}, range: {:?})",
+                request_id,
+                batch.peer_id,
+                (batch.start_slot..(batch.start_slot + batch.count)),
+            ),
+        );
 
         self.block_requests.add_request_by_range(request_id, batch)
     }
 
     pub fn add_block_request_by_root(&mut self, block_root: H256, peer_id: PeerId) -> bool {
-        self.log_with_feature(format_args!(
-            "add block request by root (block_root: {block_root:?}, peer_id: {peer_id})",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add block request by root (block_root: {block_root:?}, peer_id: {peer_id})",
+            ),
+        );
 
         self.block_requests.add_request_by_root(block_root, peer_id)
     }
@@ -401,9 +428,10 @@ impl SyncManager {
     }
 
     pub fn blobs_by_range_request_finished(&mut self, request_id: RequestId) {
-        self.log_with_feature(format_args!(
-            "request blob sidecars by range finished (request_id: {request_id})",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("request blob sidecars by range finished (request_id: {request_id})",),
+        );
 
         self.blob_requests.request_by_range_finished(request_id)
     }
@@ -414,26 +442,32 @@ impl SyncManager {
         peer_id: PeerId,
         request_id: RequestId,
     ) {
-        self.log_with_feature(format_args!(
-            "received blob sidecar by root (blob_identifier: {blob_identifier:?}, request_id: {request_id}, peer_id: {peer_id})",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!(
+                "received blob sidecar by root (blob_identifier: {blob_identifier:?}, \
+            request_id: {request_id}, peer_id: {peer_id})",
+            ),
+        );
 
         self.blob_requests
             .chunk_by_root_received(&blob_identifier, &peer_id)
     }
 
     pub fn blocks_by_range_request_finished(&mut self, request_id: RequestId) {
-        self.log_with_feature(format_args!(
-            "request blocks by range finished (request_id: {request_id})",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("request blocks by range finished (request_id: {request_id})"),
+        );
 
         self.block_requests.request_by_range_finished(request_id)
     }
 
     pub fn block_by_root_request_finished(&mut self, block_root: H256) {
-        self.log_with_feature(format_args!(
-            "request block by root finished (block_root: {block_root:?})",
-        ));
+        self.log(
+            Level::Debug,
+            format_args!("request block by root finished (block_root: {block_root:?})"),
+        );
     }
 
     /// Log a message with peer count information.
@@ -447,21 +481,14 @@ impl SyncManager {
         );
     }
 
-    fn log_with_feature(&self, message: impl Display) {
-        features::log!(
-            DebugP2p,
-            "[Sync Peers: {}/{}] {}",
-            self.most_peers(),
-            self.total_peers(),
-            message
-        );
-    }
-
     fn find_peers_to_sync(&mut self) -> Option<Vec<PeerId>> {
         self.find_chain_to_sync().map(|chain_id| {
             let peers_to_sync = self.chain_peers_shuffled(&chain_id);
 
-            self.log_with_feature(format_args!("peers to sync count: {}", peers_to_sync.len()));
+            self.log(
+                Level::Debug,
+                format_args!("peers to sync count: {}", peers_to_sync.len()),
+            );
 
             peers_to_sync
         })
@@ -470,10 +497,13 @@ impl SyncManager {
     fn find_chain_to_sync(&mut self) -> Option<ChainId> {
         match self.chain_with_max_peer_count() {
             Some(chain_id) => {
-                self.log_with_feature(format_args!(
-                    "selected chain to sync (finalized root {:?}, finalized epoch {})",
-                    chain_id.finalized_root, chain_id.finalized_epoch,
-                ));
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "selected chain to sync (finalized root {:?}, finalized epoch {})",
+                        chain_id.finalized_root, chain_id.finalized_epoch,
+                    ),
+                );
 
                 Some(chain_id)
             }
@@ -483,7 +513,7 @@ impl SyncManager {
                     .map(|instant| instant.elapsed() > NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN)
                     .unwrap_or(true)
                 {
-                    self.log_with_feature("waiting for more peers to join to start sync");
+                    self.log(Level::Debug, "waiting for more peers to join to start sync");
                     self.not_enough_peers_message_shown_at = Some(Instant::now());
                 }
 
