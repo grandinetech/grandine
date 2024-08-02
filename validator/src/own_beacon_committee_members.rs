@@ -177,7 +177,7 @@ impl OwnBeaconCommitteeMembers {
         }
 
         let selection_proofs = signer_snapshot
-            .sign_triples(triples, Some(state.into()))
+            .sign_triples_without_slashing_protection(triples, Some(state.into()))
             .await?;
 
         members

@@ -651,7 +651,7 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
     };
 
     let signature = signer_snapshot
-        .sign(
+        .sign_without_slashing_protection(
             SigningMessage::VoluntaryExit(voluntary_exit),
             voluntary_exit.signing_root(controller.chain_config(), &state),
             Some(state.as_ref().into()),
