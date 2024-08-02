@@ -31,7 +31,6 @@ pub enum Feature {
     DebugAttestationPacker,
     DebugBlockProducer,
     DebugEth1,
-    DebugP2p,
     IgnoreAttestationsForUnknownBlocks,
     IgnoreFutureAttestations,
     InhibitApplicationRestart,
