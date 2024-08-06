@@ -52,10 +52,14 @@ impl<P: Preset> StateCache<P> {
             return Ok(None);
         };
 
+        info!("StateCache::before_or_at_slot state map lock (block_root: {block_root:?})");
+
         let state_with_rewards = self
             .try_lock_map(&state_map_lock, block_root)?
             .get_prev(&slot)
             .map(|(_, state_with_rewards)| state_with_rewards.clone());
+
+        info!("StateCache::before_or_at_slot state map unlock (block_root: {block_root:?})");
 
         Ok(state_with_rewards)
     }
@@ -78,9 +82,15 @@ impl<P: Preset> StateCache<P> {
             }
         };
 
+        info!("StateCache::get_or_insert_with state map lock (block_root: {block_root:?})");
+
         let mut state_map_guard = match self.try_lock_map(&state_map_lock, block_root) {
             Ok(guard) => guard,
             Err(error) => {
+                info!(
+                    "StateCache::get_or_insert_with state map unlock (block_root: {block_root:?})"
+                );
+
                 if error.is::<CacheLockError>() {
                     return f();
                 }
@@ -110,6 +120,8 @@ impl<P: Preset> StateCache<P> {
 
         state_map_guard.insert(post_state.slot(), (post_state.clone_arc(), rewards));
 
+        info!("StateCache::get_or_insert_with state map unlock (block_root: {block_root:?})");
+
         Ok((post_state, rewards))
     }
 
@@ -131,9 +143,13 @@ impl<P: Preset> StateCache<P> {
             }
         };
 
+        info!("StateCache::get_or_try_insert_with state map lock (block_root: {block_root:?})");
+
         let mut state_map_guard = match self.try_lock_map(&state_map_lock, block_root) {
             Ok(guard) => guard,
             Err(error) => {
+                info!("StateCache::get_or_try_insert_with state map unlock (block_root: {block_root:?})");
+
                 if error.is::<CacheLockError>() {
                     return f(None);
                 }
@@ -149,6 +165,7 @@ impl<P: Preset> StateCache<P> {
         if let Some((state, rewards)) = pre_state {
             if state.slot() >= slot {
                 if rewards.is_some() || ignore_missing_rewards {
+                    info!("StateCache::get_or_try_insert_with state map unlock (block_root: {block_root:?})");
                     return Ok(Some((state.clone_arc(), *rewards)));
                 }
 
@@ -159,7 +176,7 @@ impl<P: Preset> StateCache<P> {
             }
         }
 
-        match f(pre_state)? {
+        let res = match f(pre_state)? {
             Some((post_state, rewards)) => {
                 state_map_guard.insert(post_state.slot(), (post_state.clone_arc(), rewards));
 
@@ -167,49 +184,85 @@ impl<P: Preset> StateCache<P> {
             }
             None => {
                 if state_map_guard.is_empty() {
+                    info!("StateCache::get_or_try_insert_with cache lock (block_root: {block_root:?})");
                     self.try_lock_cache()?.remove(&block_root);
+                    info!("StateCache::get_or_try_insert_with cache unlock (block_root: {block_root:?})");
                 }
 
                 Ok(None)
             }
-        }
+        };
+
+        info!("StateCache::get_or_try_insert_with state map unlock (block_root: {block_root:?})");
+
+        res
     }
 
     pub fn insert(&self, block_root: H256, state_with_rewards: StateWithRewards<P>) -> Result<()> {
         let state_map_lock = self.get_or_init_by_root(block_root)?;
 
+        info!("StateCache::insert state map lock (block_root: {block_root:?})");
+
         self.try_lock_map(&state_map_lock, block_root)?
             .insert(state_with_rewards.0.slot(), state_with_rewards);
+
+        info!("StateCache::insert state map unlock (block_root: {block_root:?})");
 
         Ok(())
     }
 
     pub fn len(&self) -> Result<usize> {
-        self.all_state_map_locks()?
+        info!("StateCache::len cache lock");
+
+        let lengths = self
+            .all_state_map_locks()?
             .into_iter()
             .map(|(block_root, state_map_lock)| {
-                self.try_lock_map(&state_map_lock, block_root)?
+                info!("StateCache::len state map lock (block_root: {block_root:?})");
+
+                let length = self
+                    .try_lock_map(&state_map_lock, block_root)?
                     .len()
-                    .pipe(Ok)
+                    .pipe(Ok);
+
+                info!("StateCache::len state map unlock (block_root: {block_root:?})");
+
+                length
             })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .sum::<usize>()
-            .pipe(Ok)
+            .collect::<Result<Vec<_>>>()?;
+
+        info!("StateCache::len cache unlock");
+
+        lengths.into_iter().sum::<usize>().pipe(Ok)
     }
 
     pub fn prune(&self, last_pruned_slot: Slot) -> Result<()> {
         for (block_root, state_map_lock) in self.all_state_map_locks()? {
+            info!("StateCache::prune state map lock (block_root: {block_root:?})");
+
             let mut state_map = self.try_lock_map(&state_map_lock, block_root)?;
             let (_, retained) = state_map.split(&last_pruned_slot);
             *state_map = retained;
+
+            info!("StateCache::prune state map unlock (block_root: {block_root:?})");
         }
 
+        info!("StateCache::prune cache lock");
+
         self.try_lock_cache()?.retain(|block_root, state_map_lock| {
-            self.try_lock_map(state_map_lock, *block_root)
+            info!("StateCache::prune retain state map lock (block_root: {block_root:?})");
+
+            let retain = self
+                .try_lock_map(state_map_lock, *block_root)
                 .ok()
-                .is_some_and(|state_map| !state_map.is_empty())
+                .is_some_and(|state_map| !state_map.is_empty());
+
+            info!("StateCache::prune retain state map unlock (block_root: {block_root:?})");
+
+            retain
         });
+
+        info!("StateCache::prune cache unlock");
 
         Ok(())
     }
@@ -223,11 +276,18 @@ impl<P: Preset> StateCache<P> {
     }
 
     fn get_or_init_by_root(&self, block_root: H256) -> Result<StateMapLock<P>> {
-        self.try_lock_cache()?
+        info!("StateCache::get_or_init_by_root cache lock");
+
+        let state_map_lock = self
+            .try_lock_cache()?
             .entry(block_root)
             .or_insert_with(StateMapLock::default)
             .clone_arc()
-            .pipe(Ok)
+            .pipe(Ok);
+
+        info!("StateCache::get_or_init_by_root cache unlock");
+
+        state_map_lock
     }
 
     fn get_by_root(&self, block_root: H256) -> Result<Option<StateMapLock<P>>> {

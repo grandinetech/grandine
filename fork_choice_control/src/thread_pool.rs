@@ -17,7 +17,7 @@ use anyhow::Result;
 use derivative::Derivative;
 use derive_more::From;
 use execution_engine::ExecutionEngine;
-use log::debug;
+use log::{debug, info};
 use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
 use types::preset::Preset;
@@ -39,7 +39,12 @@ pub struct ThreadPool<P: Preset, E, W> {
 
 impl<P: Preset, E, W> Drop for ThreadPool<P, E, W> {
     fn drop(&mut self) {
+        info!("ThreadPool::drop critical lock");
+
         self.shared.critical.lock().done = true;
+
+        info!("ThreadPool::drop critical unlock");
+
         self.shared.condvar.notify_all();
     }
 }
@@ -64,12 +69,22 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
     }
 
     pub fn spawn(&self, task: impl Spawn<P, E, W>) {
+        info!("ThreadPool::spawn critical lock");
+
         task.spawn(&mut self.shared.critical.lock());
+
+        info!("ThreadPool::spawn critical unlock");
+
         self.shared.condvar.notify_one();
     }
 
     pub fn task_counts(&self) -> (usize, usize) {
+        info!("ThreadPool::task_counts critical lock");
+
         let critical = self.shared.critical.lock();
+
+        info!("ThreadPool::task_counts critical unlock");
+
         let high = critical.high_priority_tasks.len();
         let low = critical.low_priority_tasks.len();
         (high, low)
@@ -203,10 +218,13 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
     debug!("thread {} starting", thread_name());
 
     'outer: loop {
+        info!("ThreadPool::run_worker critical lock");
+
         let mut critical = shared.critical.lock();
 
         loop {
             if critical.done {
+                info!("ThreadPool::run_worker critical unlock");
                 break 'outer;
             }
 
@@ -214,6 +232,7 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
                 drop(critical);
                 debug!("thread {} received high priority task", thread_name());
                 task.run_and_handle_panics();
+                info!("ThreadPool::run_worker critical unlock");
                 continue 'outer;
             }
 
@@ -221,6 +240,7 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
                 drop(critical);
                 debug!("thread {} received low priority task", thread_name());
                 task.run_and_handle_panics();
+                info!("ThreadPool::run_worker critical unlock");
                 continue 'outer;
             }
 
