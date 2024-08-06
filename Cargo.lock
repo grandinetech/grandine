@@ -3004,6 +3004,7 @@ dependencies = [
  "futures-ticker",
  "futures-timer",
  "getrandom",
+ "hashlink 0.9.1",
  "hex_fmt",
  "libp2p",
  "prometheus-client",
