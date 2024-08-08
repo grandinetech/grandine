@@ -11,6 +11,7 @@ use futures::{
     stream::{FuturesUnordered, TryStreamExt as _},
     try_join, TryFutureExt as _,
 };
+use helper_functions::misc;
 use itertools::{izip, Itertools as _};
 use log::{info, warn};
 use prometheus_metrics::Metrics;
@@ -227,6 +228,7 @@ impl Snapshot {
         Ok(signature)
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn sign_triples<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
@@ -267,14 +269,19 @@ impl Snapshot {
                     ));
                 }
                 SigningMessage::BeaconBlock(ref signing_block) => {
+                    let slot = signing_block.slot();
                     let proposal = BlockProposal {
-                        slot: signing_block.slot(),
+                        slot,
                         signing_root: Some(signing_root),
                     };
 
                     block_messages.push((message, signing_root, public_key));
                     block_proposal_indices.push(index);
-                    block_proposals.push((proposal, public_key, fork_info.fork.epoch));
+                    block_proposals.push((
+                        proposal,
+                        public_key,
+                        misc::compute_epoch_at_slot::<P>(slot),
+                    ));
                 }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
