@@ -22,7 +22,6 @@ use types::{
     bellatrix::primitives::Gas,
     capella::consts::DOMAIN_BLS_TO_EXECUTION_CHANGE,
     config::Config,
-    deneb::consts::DOMAIN_BLOB_SIDECAR,
     phase0::{
         consts::{
             AttestationSubnetCount, DepositContractTreeDepth, JustificationBitsLength,
@@ -146,9 +145,6 @@ pub struct FullConfig {
 
     // TODO(feature/deneb): Add constants from the Polynomial Commitments specification if needed.
 
-    // Deneb domain types
-    domain_blob_sidecar: DomainType,
-
     // Builder constants
     #[serde(with = "serde_utils::string_or_native")]
     builder_proposal_delay_tolerance: u64,
@@ -231,9 +227,6 @@ impl FullConfig {
 
             // Capella domain types
             domain_bls_to_execution_change: DOMAIN_BLS_TO_EXECUTION_CHANGE,
-
-            // Deneb domain types
-            domain_blob_sidecar: DOMAIN_BLOB_SIDECAR,
 
             // Builder constants
             builder_proposal_delay_tolerance: BUILDER_PROPOSAL_DELAY_TOLERANCE,
