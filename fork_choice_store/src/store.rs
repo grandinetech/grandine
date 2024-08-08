@@ -1556,7 +1556,6 @@ impl<P: Preset> Store<P> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
-        mut verifier: impl Verifier + Send,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
 
@@ -1613,7 +1612,7 @@ impl<P: Preset> Store<P> {
             });
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
-        verifier.verify_singular(
+        SingleVerifier.verify_singular(
             blob_sidecar
                 .signed_block_header
                 .message

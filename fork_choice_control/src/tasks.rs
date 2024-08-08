@@ -318,12 +318,7 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_blob_sidecar_task_times.start_timer());
 
-        let result = store_snapshot.validate_blob_sidecar(
-            blob_sidecar,
-            block_seen,
-            &origin,
-            MultiVerifier::default(),
-        );
+        let result = store_snapshot.validate_blob_sidecar(blob_sidecar, block_seen, &origin);
 
         MutatorMessage::BlobSidecar {
             wait_group,
