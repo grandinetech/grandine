@@ -1614,10 +1614,13 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         verifier.verify_singular(
-            blob_sidecar.signing_root(&self.chain_config, &state),
+            blob_sidecar
+                .signed_block_header
+                .message
+                .signing_root(&self.chain_config, &state),
             blob_sidecar.signed_block_header.signature,
             accessors::public_key(&state, block_header.proposer_index)?,
-            SignatureKind::BlobSidecar,
+            SignatureKind::BlockInBlobSidecar,
         )?;
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
