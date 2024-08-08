@@ -869,13 +869,23 @@ pub struct ElectraPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_deposit_requests_per_payload: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    max_effective_balance_electra: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_pending_partials_per_withdrawals_sweep: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     max_withdrawal_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    min_activation_balance: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    min_slashing_penalty_quotient_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pending_balance_deposits_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pending_consolidations_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pending_partial_withdrawals_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    whistleblower_reward_quotient_electra: NonZeroU64,
 }
 
 impl ElectraPreset {
@@ -886,10 +896,16 @@ impl ElectraPreset {
             max_attester_slashings_electra: P::MaxAttesterSlashingsElectra::U64,
             max_consolidation_requests_per_payload: P::MaxConsolidationRequestsPerPayload::U64,
             max_deposit_requests_per_payload: P::MaxDepositRequestsPerPayload::U64,
+            max_effective_balance_electra: P::MAX_EFFECTIVE_BALANCE_ELECTRA,
+            max_pending_partials_per_withdrawals_sweep:
+                P::MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,
             max_withdrawal_requests_per_payload: P::MaxWithdrawalRequestsPerPayload::U64,
+            min_activation_balance: P::MIN_ACTIVATION_BALANCE,
+            min_slashing_penalty_quotient_electra: P::MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,
             pending_balance_deposits_limit: P::PendingBalanceDepositsLimit::U64,
             pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
             pending_partial_withdrawals_limit: P::PendingPartialWithdrawalsLimit::U64,
+            whistleblower_reward_quotient_electra: P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,
         }
     }
 }
