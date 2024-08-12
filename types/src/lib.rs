@@ -64,6 +64,8 @@ pub mod deneb {
     mod spec_tests;
 }
 
+pub mod eip7594;
+
 pub mod electra {
     pub mod beacon_state;
     pub mod consts;
