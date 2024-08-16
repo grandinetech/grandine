@@ -708,6 +708,11 @@ impl Config {
         epoch >= self.eip7594_fork_epoch
     }
 
+    #[must_use]
+    pub const fn is_eip7594_fork_epoch_set(&self) -> bool {
+        self.eip7594_fork_epoch != FAR_FUTURE_EPOCH
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }

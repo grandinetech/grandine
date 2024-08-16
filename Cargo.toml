@@ -14,6 +14,7 @@ members = [
     'deposit_tree',
     'directories',
     'eip_2335',
+    'eip_7594',
     'eth1',
     'eth1_api',
     'eth2_cache_utils',
@@ -439,6 +440,7 @@ database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
 directories = { path = 'directories' }
 eip_2335 = { path = 'eip_2335' }
+eip_7594 = { path = 'eip_7594' }
 eth1 = { path = 'eth1' }
 eth1_api = { path = 'eth1_api' }
 eth2_cache_utils = { path = 'eth2_cache_utils' }

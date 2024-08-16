@@ -2044,6 +2044,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "eip_7594"
+version = "0.0.0"
+dependencies = [
+ "duplicate",
+ "num-traits",
+ "serde",
+ "sha2 0.10.8",
+ "spec_test_utils",
+ "ssz",
+ "test-generator",
+ "typenum",
+ "types",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2330,6 +2345,7 @@ dependencies = [
  "delay_map",
  "dirs",
  "discv5",
+ "eip_7594",
  "either",
  "enum-iterator",
  "exit-future",
@@ -2340,7 +2356,6 @@ dependencies = [
  "grandine_version",
  "helper_functions",
  "hex",
- "lazy_static",
  "libp2p",
  "libp2p-mplex",
  "lru",
