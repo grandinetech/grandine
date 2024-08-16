@@ -132,12 +132,22 @@ pub struct Config {
     pub min_epochs_for_data_column_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: u64,
-
+    #[serde(with = "serde_utils::string_or_native")]
+    pub data_column_sidecar_subnet_count: u64,
+    
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
     #[serde(with = "serde_utils::string_or_native")]
     pub terminal_block_hash_activation_epoch: Epoch,
     pub terminal_total_difficulty: Difficulty,
+
+    // Custody
+    #[serde(with = "serde_utils::string_or_native")]
+    pub custody_requirement: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub samples_per_slot: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub number_of_columns: usize,
 
     // Later phases and other unknown variables
     //
@@ -217,6 +227,7 @@ impl Default for Config {
             min_epochs_for_blob_sidecars_requests: 4096,
             min_epochs_for_data_column_sidecars_requests: 4096,
             blob_sidecar_subnet_count: 6,
+            data_column_sidecar_subnet_count: 32,
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -224,6 +235,11 @@ impl Default for Config {
             terminal_total_difficulty: Difficulty::from_be_bytes(hex!(
                 "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00"
             )),
+
+            // Custody
+            samples_per_slot: 16,
+            custody_requirement: 1,
+            number_of_columns: 128,
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
@@ -684,6 +700,12 @@ impl Config {
         ];
 
         enum_iterator::all().skip(1).zip(fields)
+    }
+
+    pub fn data_columns_per_subnet(&self) -> usize {
+        self.number_of_columns
+            .checked_div(self.data_column_sidecar_subnet_count as usize)
+            .expect("subnet count must be greater than 0")
     }
 }
 
