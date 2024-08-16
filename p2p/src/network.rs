@@ -2509,7 +2509,9 @@ fn run_network_service<P: Preset>(
                             );
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
-                            service.send_request(peer_id, request_id, request);
+                            if let Err((request_id, error)) = service.send_request(peer_id, request_id, request) {
+                                warn!("error while sending request: {request_id} with error: {error}"); 
+                            }
                         }
                         ServiceInboundMessage::SendResponse(peer_id, peer_request_id, response) => {
                             service.send_response(peer_id, peer_request_id, *response);
