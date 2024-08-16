@@ -296,12 +296,6 @@ tests_for_type! {
     "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedBLSToExecutionChange/*/*",
 }
 
-// tests_for_type! {
-//     SignedConsolidation,
-//     "consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedConsolidation/*/*",
-//     "consensus-spec-tests/tests/minimal/electra/ssz_static/SignedConsolidation/*/*",
-// }
-
 tests_for_type! {
     SignedContributionAndProof<_>,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedContributionAndProof/*/*",

@@ -26,12 +26,8 @@ use types::{
         consts::DOMAIN_BLOB_SIDECAR,
         containers::{BeaconBlock as DenebBeaconBlock, BlobSidecar},
     },
-    electra::{
-        consts::DOMAIN_CONSOLIDATION,
-        containers::{
-            AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
-            ConsolidationRequest,
-        },
+    electra::containers::{
+        AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
     },
     phase0::{
         consts::{
@@ -369,13 +365,6 @@ impl<P: Preset> SignForSingleFork<P> for BlobSidecar<P> {
         let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, None);
         misc::compute_signing_root(self, domain)
     }
-}
-
-// TODO: change specs
-// <https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.1/specs/electra/beacon-chain.md#new-process_consolidation>
-impl<P: Preset> SignForAllForksWithGenesis<P> for ConsolidationRequest {
-    const DOMAIN_TYPE: DomainType = DOMAIN_CONSOLIDATION;
-    const SIGNATURE_KIND: SignatureKind = SignatureKind::Consolidation;
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
