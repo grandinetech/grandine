@@ -16,7 +16,7 @@ use types::{
         BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, MatrixEntry,
         NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
     },
-    phase0::{containers::SignedBeaconBlockHeader, primitives::NodeId},
+    phase0::{containers::SignedBeaconBlockHeader, primitives::{NodeId, SubnetId}},
     preset::Preset,
     traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
 };
@@ -132,7 +132,7 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     );
 }
 
-pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
+pub fn get_custody_subnets(node_id: NodeId, custody_subnet_count: u64) -> Vec<SubnetId> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 
     let mut subnet_ids = vec![];
@@ -165,20 +165,26 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
         current_id = current_id + Uint256::one();
     }
 
-    let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
-    let mut result = Vec::new();
-    for i in 0..columns_per_subnet {
-        for &subnet_id in &subnet_ids {
-            result.push(
-                (DATA_COLUMN_SIDECAR_SUBNET_COUNT * i + subnet_id)
-                    .try_into()
-                    .unwrap(),
-            );
-        }
-    }
+    subnet_ids.into()
+}
+
+pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
+    let mut result = get_custody_subnets(node_id, custody_subnet_count)
+        .into_iter()
+        .flat_map(|subnet_id| get_data_columns_for_subnet(subnet_id))
+        .collect::<Vec<_>>();
 
     result.sort();
     result
+}
+
+fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = ColumnIndex> {
+    let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+    
+    (0..columns_per_subnet)
+        .map(move |column_index| 
+            (DATA_COLUMN_SIDECAR_SUBNET_COUNT * column_index + subnet_id)
+        )
 }
 
 /**
