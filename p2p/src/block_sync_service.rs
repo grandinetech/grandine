@@ -266,12 +266,16 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                         P2pToSync::RemovePeer(peer_id) => {
                             let batches_to_retry = self.sync_manager.remove_peer(&peer_id);
-                            self.retry_sync_batches(batches_to_retry)?;
+                            if self.retry_sync_batches(batches_to_retry).is_err() {
+                                features::log!(DebugP2p, "Batch could not retried while removing peer: {peer_id}");
+                            }
                         }
                         P2pToSync::RequestFailed(peer_id) => {
                             if !self.is_forward_synced {
                                 let batches_to_retry = self.sync_manager.remove_peer(&peer_id);
-                                self.retry_sync_batches(batches_to_retry)?;
+                                if self.retry_sync_batches(batches_to_retry).is_err() {
+                                    features::log!(DebugP2p, "Batch could not retired when request failed");
+                                }
                             }
                         }
                         P2pToSync::StatusPeer(peer_id) => {

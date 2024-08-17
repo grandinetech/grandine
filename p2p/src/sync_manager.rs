@@ -114,10 +114,11 @@ impl SyncManager {
     pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch> {
         self.log_with_feature(format_args!("remove peer (peer_id: {peer_id})"));
         self.peers.remove(peer_id);
-
+        
         self.block_requests
             .remove_peer(peer_id)
             .chain(self.blob_requests.remove_peer(peer_id))
+            .chain(self.data_column_requests.remove_peer(peer_id))
             .collect_vec()
     }
 
@@ -128,6 +129,7 @@ impl SyncManager {
             "retrying batch {batch:?}, new peer: {peer:?}, request_id: {request_id}",
         ));
 
+        // NOTE: send and register the batch request
         match peer {
             Some(peer_id) => {
                 let batch = SyncBatch {
@@ -502,6 +504,8 @@ impl SyncManager {
         self.log_with_feature(format_args!(
             "request data columns by range finished (request_id: {request_id:?})",
         ));
+
+        self.data_column_requests.request_by_range_finished(request_id)
     }
 
     pub fn received_data_column_sidecar_chunk(
