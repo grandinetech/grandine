@@ -24,7 +24,7 @@ use types::{
         primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::SignedBeaconBlock as _,
 };
 
 use crate::{
@@ -298,8 +298,7 @@ impl ChainReorgEvent {
                 // Default to the old finalized slot like Lighthouse does.
                 // A proper solution may require significant changes to `Mutator`.
                 old_head
-                    .state(store)
-                    .finalized_checkpoint()
+                    .finalized_checkpoint
                     .epoch
                     .pipe(misc::compute_start_slot_at_epoch::<P>)
             })
