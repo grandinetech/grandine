@@ -199,9 +199,6 @@ where
     pub fn fork_choice_context(&self) -> ForkChoiceContext {
         let store = self.store_snapshot();
 
-        let justified_checkpoint = store.justified_checkpoint();
-        let finalized_checkpoint = store.finalized_checkpoint();
-
         let fork_choice_nodes = store
             .unfinalized()
             .values()
@@ -213,8 +210,8 @@ where
                     slot: chain_link.slot(),
                     block_root: chain_link.block_root,
                     parent_root: chain_link.block.message().parent_root(),
-                    justified_epoch: justified_checkpoint.epoch,
-                    finalized_epoch: finalized_checkpoint.epoch,
+                    justified_epoch: chain_link.justified_checkpoint.epoch,
+                    finalized_epoch: chain_link.finalized_checkpoint.epoch,
                     validity: chain_link.payload_status,
                     weight: unfinalized_block.attesting_balance,
                     execution_block_hash: chain_link.execution_block_hash().unwrap_or_default(),
@@ -223,8 +220,8 @@ where
             .collect();
 
         ForkChoiceContext {
-            justified_checkpoint,
-            finalized_checkpoint,
+            justified_checkpoint: store.justified_checkpoint(),
+            finalized_checkpoint: store.finalized_checkpoint(),
             fork_choice_nodes,
         }
     }

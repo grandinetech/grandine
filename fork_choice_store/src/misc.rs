@@ -41,6 +41,8 @@ pub struct ChainLink<P: Preset> {
     pub block: Arc<SignedBeaconBlock<P>>,
     #[derivative(Debug(format_with = "fmt_as_wildcard"))]
     pub state: Option<Arc<BeaconState<P>>>,
+    pub justified_checkpoint: Checkpoint,
+    pub finalized_checkpoint: Checkpoint,
     pub unrealized_justified_checkpoint: Checkpoint,
     pub unrealized_finalized_checkpoint: Checkpoint,
     pub payload_status: PayloadStatus,

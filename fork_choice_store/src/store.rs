@@ -240,6 +240,8 @@ impl<P: Preset> Store<P> {
             block_root,
             block: anchor_block,
             state: Some(anchor_state.clone_arc()),
+            justified_checkpoint: checkpoint,
+            finalized_checkpoint: checkpoint,
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
             payload_status: Self::initial_payload_status(&anchor_state),
@@ -1031,6 +1033,7 @@ impl<P: Preset> Store<P> {
             .collect();
 
         let justified_checkpoint = state.current_justified_checkpoint();
+        let finalized_checkpoint = state.finalized_checkpoint();
 
         // TODO(Grandine Team): Optimize computation of unrealized checkpoints.
         //                      Unrealized checkpoints must be computed for every block,
@@ -1058,6 +1061,8 @@ impl<P: Preset> Store<P> {
             block_root,
             block: block.clone_arc(),
             state: Some(state),
+            justified_checkpoint,
+            finalized_checkpoint,
             unrealized_justified_checkpoint,
             unrealized_finalized_checkpoint,
             payload_status,
