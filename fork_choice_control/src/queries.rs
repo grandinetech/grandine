@@ -205,14 +205,13 @@ where
             .flatten()
             .map(|unfinalized_block| {
                 let chain_link = &unfinalized_block.chain_link;
-                let state = chain_link.state(&store);
 
                 ForkChoiceNode {
                     slot: chain_link.slot(),
                     block_root: chain_link.block_root,
                     parent_root: chain_link.block.message().parent_root(),
-                    justified_epoch: state.current_justified_checkpoint().epoch,
-                    finalized_epoch: state.finalized_checkpoint().epoch,
+                    justified_epoch: chain_link.current_justified_checkpoint.epoch,
+                    finalized_epoch: chain_link.finalized_checkpoint.epoch,
                     validity: chain_link.payload_status,
                     weight: unfinalized_block.attesting_balance,
                     execution_block_hash: chain_link.execution_block_hash().unwrap_or_default(),

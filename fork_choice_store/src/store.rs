@@ -240,6 +240,8 @@ impl<P: Preset> Store<P> {
             block_root,
             block: anchor_block,
             state: Some(anchor_state.clone_arc()),
+            current_justified_checkpoint: checkpoint,
+            finalized_checkpoint: checkpoint,
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
             payload_status: Self::initial_payload_status(&anchor_state),
@@ -751,10 +753,7 @@ impl<P: Preset> Store<P> {
             unfinalized_block.chain_link.unrealized_justified_checkpoint
         } else {
             // > The block is not from a prior epoch, therefore the voting source is not pulled up
-            unfinalized_block
-                .chain_link
-                .state(self)
-                .current_justified_checkpoint()
+            unfinalized_block.chain_link.current_justified_checkpoint
         }
     }
 
@@ -1032,6 +1031,7 @@ impl<P: Preset> Store<P> {
             .collect();
 
         let justified_checkpoint = state.current_justified_checkpoint();
+        let finalized_checkpoint = state.finalized_checkpoint();
 
         // TODO(Grandine Team): Optimize computation of unrealized checkpoints.
         //                      Unrealized checkpoints must be computed for every block,
@@ -1059,6 +1059,8 @@ impl<P: Preset> Store<P> {
             block_root,
             block: block.clone_arc(),
             state: Some(state),
+            current_justified_checkpoint: justified_checkpoint,
+            finalized_checkpoint,
             unrealized_justified_checkpoint,
             unrealized_finalized_checkpoint,
             payload_status,
@@ -1833,8 +1835,8 @@ impl<P: Preset> Store<P> {
 
         // > Update checkpoints in store if necessary
         self.update_checkpoints(
-            chain_link.state(self).current_justified_checkpoint(),
-            chain_link.state(self).finalized_checkpoint(),
+            chain_link.current_justified_checkpoint,
+            chain_link.finalized_checkpoint,
         );
 
         self.update_unrealized_checkpoints(
