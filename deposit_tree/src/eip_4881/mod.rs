@@ -1,2 +1,3 @@
 pub mod snapshot;
-pub mod tree;
+pub mod deposit_tree;
+pub mod merkle_tree;

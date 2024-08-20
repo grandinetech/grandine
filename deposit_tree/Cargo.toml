@@ -15,6 +15,7 @@ thiserror = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 hashing = { workspace = true }
+lazy_static = { workspace = true }
 
 [dev-dependencies]
 factory = { workspace = true }
@@ -22,3 +23,5 @@ interop = { workspace = true }
 spec_test_utils = { workspace = true }
 std_ext = { workspace = true }
 test-generator = { workspace = true }
+quickcheck = { workspace = true }
+quickcheck_macros = { workspace = true }

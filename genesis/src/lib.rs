@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
-use deposit_tree::DepositTree;
+use deposit_tree::{DepositDataTree, EMPTY_SLICE, MAX_TREE_DEPTH};
 use helper_functions::accessors;
 use ssz::{PersistentVector, SszHash as _};
 use std_ext::ArcExt as _;
@@ -35,7 +35,7 @@ use types::{
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
-        consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        consts::{DepositContractTreeDepth, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
             BeaconBlockHeader, DepositData, Fork,
@@ -49,7 +49,7 @@ use types::{
 pub struct Incremental<'config, P: Preset> {
     config: &'config Config,
     beacon_state: BeaconState<P>,
-    deposit_tree: DepositTree,
+    deposit_tree: DepositDataTree,
 }
 
 impl<'config, P: Preset> Incremental<'config, P> {
@@ -121,7 +121,11 @@ impl<'config, P: Preset> Incremental<'config, P> {
         Self {
             config,
             beacon_state,
-            deposit_tree: DepositTree::default(),
+            deposit_tree: DepositDataTree::create(
+                EMPTY_SLICE,
+                0 as DepositIndex,
+                MAX_TREE_DEPTH
+            ),
         }
     }
 
@@ -144,7 +148,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
             .deposit_tree
             .push_and_compute_root(deposit_index, data)?;
 
-        eth1_data.deposit_count = self.deposit_tree.deposit_count;
+        eth1_data.deposit_count = self.deposit_tree.length;
 
         // See <https://github.com/ethereum/consensus-specs/blame/2fa396f67df35df236b6aa6fe714a59ee1032dc8/specs/phase0/beacon-chain.md#L1193-L1206>.
         if let Some(validator_index) =
@@ -174,7 +178,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
         self,
         eth1_block_hash: ExecutionBlockHash,
         execution_payload_header: Option<ExecutionPayloadHeader<P>>,
-    ) -> Result<(BeaconState<P>, DepositTree)> {
+    ) -> Result<(BeaconState<P>, DepositDataTree)> {
         let Self {
             mut beacon_state,
             deposit_tree,
