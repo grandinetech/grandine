@@ -1,10 +1,11 @@
 use std::ops::Add;
 use core::ops::Range;
 
+use serde::{Deserialize, Serialize};
 use anyhow::{ensure, Result};
 use thiserror::Error;
 use typenum::Unsigned as _;
-use ssz::{mix_in_length, SszHash, H256};
+use ssz::{mix_in_length, Ssz, SszHash, SszSize, H256};
 use types::phase0::{
     consts::DepositContractTreeDepth,
     containers::DepositData,
@@ -25,12 +26,12 @@ pub struct DepositDataTree {
     pub tree: EIP4881MerkleTree,
     pub length: DepositIndex,
     pub finalized_execution_block: Option<FinalizedExecutionBlock>,
-    pub depth: usize
+    pub depth: u32
 }
 
 impl DepositDataTree {
     #[must_use]
-    pub fn create(leaves: &[H256], length: DepositIndex, depth: usize) -> Self {
+    pub fn create(leaves: &[H256], length: DepositIndex, depth: u32) -> Self {
         Self {
             tree: EIP4881MerkleTree::create(leaves, depth),
             length,
@@ -49,7 +50,7 @@ impl DepositDataTree {
     ///
     /// The Merkle proof is in "bottom-up" order, starting with a leaf node
     /// and moving up the tree. Its length will be exactly equal to `depth + 1`.
-    pub fn generate_proof(&self, index: usize) -> Result<(H256, Vec<H256>), EIP4881MerkleTreeError> {
+    pub fn generate_proof(&self, index: DepositIndex) -> Result<(H256, Vec<H256>), EIP4881MerkleTreeError> {
         let (root, mut proof) = self.tree.generate_proof(index, self.depth)?;
         proof.push(self.root());
         Ok((root, proof))
@@ -68,16 +69,12 @@ impl DepositDataTree {
         finalized_execution_block: FinalizedExecutionBlock
     ) -> Result<(), EIP4881MerkleTreeError> {
         self.tree
-            .finalize_deposits(finalized_execution_block.deposit_count as usize, self.depth)?;
+            .finalize_deposits(finalized_execution_block.deposit_count, self.depth)?;
         self.finalized_execution_block = Some(finalized_execution_block);
         Ok(())
     }
 
-    pub fn push_and_compute_root(
-        &mut self,
-        index: DepositIndex,
-        data: DepositData
-    ) -> Result<H256> {
+    pub fn push(&mut self, index: DepositIndex, data: DepositData) -> Result<H256> {
         features::log!(
             DebugEth1,
             "DepositDataTree::push_and_compute_root \
@@ -87,8 +84,17 @@ impl DepositDataTree {
 
         self.validate_index(index)?;
         let chunk = data.hash_tree_root();
-        self.push_leaf(chunk);
-        return Ok(self.root());
+        let _ = self.push_leaf(chunk);
+        Ok(self.root())
+    }
+
+    pub fn push_and_compute_root(
+        &mut self,
+        index: DepositIndex,
+        data: DepositData
+    ) -> Result<H256> {
+        self.push(index, data)?;
+        Ok(self.root())
     }
 
     /// Get snapshot of finalized deposit tree (if tree is finalized)
@@ -109,12 +115,12 @@ impl DepositDataTree {
     /// Create a new Merkle tree from a snapshot
     pub fn from_snapshot(
         snapshot: &DepositTreeSnapshot,
-        depth: usize,
+        depth: u32,
     ) -> Result<Self, EIP4881MerkleTreeError> {
         Ok(Self {
             tree: EIP4881MerkleTree::from_finalized_snapshot(
                 &snapshot.finalized.into_iter().map(|hash| *hash).collect(),
-                snapshot.execution_block.deposit_count as usize,
+                snapshot.execution_block.deposit_count,
                 depth,
             )?,
             length: snapshot.execution_block.deposit_count,

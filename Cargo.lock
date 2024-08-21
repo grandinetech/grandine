@@ -1759,6 +1759,7 @@ dependencies = [
  "lazy_static",
  "quickcheck",
  "quickcheck_macros",
+ "serde",
  "spec_test_utils",
  "ssz",
  "std_ext",

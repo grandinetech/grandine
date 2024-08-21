@@ -1,18 +1,18 @@
 use hashing::{hash_256_256, ZERO_HASHES};
 use typenum::Unsigned;
-use types::phase0::consts::DepositContractTreeDepth;
-use ssz::H256;
+use types::phase0::{consts::DepositContractTreeDepth, primitives::DepositIndex};
+use ssz::{Size, SszHash, SszSize, SszWrite, WriteError, H256};
 use lazy_static::lazy_static;
 
 use crate::FinalizedDeposit;
 
 lazy_static! {
     static ref ZERO_NODES: Vec<EIP4881MerkleTree> = {
-        (0..=MAX_TREE_DEPTH).map(EIP4881MerkleTree::Zero).collect()
+        (0..=MAX_TREE_DEPTH).map(|n| EIP4881MerkleTree::Zero(n as u32)).collect()
     };
 }
 
-pub const MAX_TREE_DEPTH: usize = DepositContractTreeDepth::USIZE;
+pub const MAX_TREE_DEPTH: u32 = DepositContractTreeDepth::USIZE as u32;
 pub const EMPTY_SLICE: &[H256] = &[];
 
 /// Right-sparse Merkle tree.
@@ -21,10 +21,23 @@ pub const EMPTY_SLICE: &[H256] = &[];
 /// indices are populated by non-zero leaves (perfect for the deposit contract tree).
 #[derive(Debug, PartialEq, Clone)]
 pub enum EIP4881MerkleTree {
-    Zero(usize),
+    Zero(u32),
     Leaf(H256),
     Node(H256, Box<Self>, Box<Self>),
     Finalized(H256)
+}
+
+impl SszSize for EIP4881MerkleTree {
+    const SIZE: Size = Size::for_untagged_union([
+        u32::SIZE,
+        H256::SIZE,
+        H256::SIZE,
+        H256::SIZE
+    ]);
+}
+
+impl SszWrite for EIP4881MerkleTree {
+    
 }
 
 impl Default for EIP4881MerkleTree {
@@ -60,14 +73,14 @@ pub enum EIP4881MerkleTreeError {
 #[derive(Debug, PartialEq, Clone)]
 pub enum InvalidSnapshot {
     // Branch hashes are empty but deposits are not
-    EmptyBranchWithNonZeroDeposits(usize),
+    EmptyBranchWithNonZeroDeposits(DepositIndex),
     // End of tree reached but deposits != 1
     EndOfTree,
 }
 
 impl EIP4881MerkleTree {
     #[must_use]
-    pub fn create(leaves: &[H256], depth: usize) -> Self {
+    pub fn create(leaves: &[H256], depth: u32) -> Self {
         use EIP4881MerkleTree::{Leaf, Node, Zero};
         if leaves.is_empty() {
             return Zero(depth);
@@ -79,11 +92,11 @@ impl EIP4881MerkleTree {
                 Leaf(leaves[0])
             },
             _ => {
-                let subtree_capacity = 2usize.pow(depth as u32 - 1);
-                let (left_leaves, right_leaves) = if leaves.len() <= subtree_capacity {
+                let subtree_capacity = 2u32.pow(depth - 1);
+                let (left_leaves, right_leaves) = if leaves.len() as u32 <= subtree_capacity {
                     (leaves, EMPTY_SLICE)
                 } else {
-                    leaves.split_at(subtree_capacity)
+                    leaves.split_at(subtree_capacity as usize)
                 };
 
                 let left_subtree = Self::create(left_leaves, depth - 1);
@@ -95,7 +108,7 @@ impl EIP4881MerkleTree {
         }
     }
 
-    pub fn push_leaf(&mut self, elem: H256, depth: usize) -> Result<(), EIP4881MerkleTreeError> {
+    pub fn push_leaf(&mut self, elem: H256, depth: u32) -> Result<(), EIP4881MerkleTreeError> {
         use EIP4881MerkleTree::{Finalized, Leaf, Node, Zero};
 
         if depth == 0 {
@@ -149,7 +162,7 @@ impl EIP4881MerkleTree {
     pub const fn hash(&self) -> H256 {
         use EIP4881MerkleTree::{Finalized, Leaf, Node, Zero};
         match *self {
-            Zero(depth) => ZERO_HASHES[depth],
+            Zero(depth) => ZERO_HASHES[depth as usize],
             Leaf(hash) | Node(hash, _, _) | Finalized(hash) => hash,
         }
     }
@@ -161,7 +174,7 @@ impl EIP4881MerkleTree {
         match *self {
             Finalized(_) | Leaf(_) | Zero(0) => None,
             Node(_, ref l, ref r) => Some((l, r)),
-            Zero(depth) => Some((&ZERO_NODES[depth - 1], &ZERO_NODES[depth - 1])),
+            Zero(depth) => Some((&ZERO_NODES[depth as usize - 1], &ZERO_NODES[depth as usize - 1])),
         }
     }
 
@@ -174,8 +187,8 @@ impl EIP4881MerkleTree {
     /// Finalize deposits up to deposit with count = deposits_to_finalize
     pub fn finalize_deposits(
         &mut self,
-        deposits_to_finalize: usize,
-        level: usize,
+        deposits_to_finalize: DepositIndex,
+        level: u32,
     ) -> Result<(), EIP4881MerkleTreeError> {
         use EIP4881MerkleTree::{Finalized, Leaf, Node, Zero};
         match self {
@@ -230,8 +243,8 @@ impl EIP4881MerkleTree {
 
     pub fn from_finalized_snapshot(
         finalized_branch: &Vec<H256>,
-        deposit_count: usize,
-        level: usize,
+        deposit_count: DepositIndex,
+        level: u32,
     ) -> Result<Self, EIP4881MerkleTreeError> {
         if finalized_branch.is_empty() {
             return if deposit_count == 0 {
@@ -282,8 +295,8 @@ impl EIP4881MerkleTree {
     /// and moving up the tree. Its length will be exactly equal to `depth`.
     pub fn generate_proof(
         &self,
-        index: usize,
-        depth: usize,
+        index: DepositIndex,
+        depth: u32,
     ) -> Result<(H256, Vec<H256>), EIP4881MerkleTreeError> {
         let mut proof = vec![];
         let mut current_node = self;
@@ -307,7 +320,7 @@ impl EIP4881MerkleTree {
             current_depth -= 1;
         }
 
-        debug_assert_eq!(proof.len(), depth);
+        debug_assert_eq!(proof.len() as u32, depth);
         debug_assert!(current_node.is_leaf());
 
         // Put proof in bottom-up order.
@@ -325,7 +338,7 @@ impl EIP4881MerkleTree {
             Self::Leaf(hash) => (None, format!("Leaf({})", hash)),
             Self::Zero(depth) => (
                 None,
-                format!("Z[{}]({})", depth, ZERO_HASHES[*depth]),
+                format!("Z[{}]({})", depth, ZERO_HASHES[*depth as usize]),
             ),
             Self::Finalized(hash) => (None, format!("Finl({})", hash)),
         };

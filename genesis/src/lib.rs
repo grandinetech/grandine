@@ -35,7 +35,7 @@ use types::{
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
-        consts::{DepositContractTreeDepth, GENESIS_EPOCH, GENESIS_SLOT},
+        consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::{
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
             BeaconBlockHeader, DepositData, Fork,
