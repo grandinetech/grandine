@@ -70,8 +70,8 @@ impl ValidatorIdsAndStatuses for ValidatorIdsAndStatusesBody {
     }
 }
 
-#[derive(Clone, Copy, FromStr, DeserializeFromStr)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug, Display))]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, FromStr, DeserializeFromStr)]
+#[cfg_attr(test, derive(Debug, Display))]
 pub enum ValidatorId {
     #[display("{0}")]
     ValidatorIndex(ValidatorIndex),
