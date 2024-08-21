@@ -1,5 +1,4 @@
 use core::{
-    cmp::Ordering,
     ops::{AddAssign as _, Bound, SubAssign as _},
 };
 use std::{
@@ -26,7 +25,6 @@ use helper_functions::{
 use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use log::{error, warn};
-use primitive_types::H384;
 use prometheus_metrics::Metrics;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;

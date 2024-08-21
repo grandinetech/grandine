@@ -3,10 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
-    rpc::{GoodbyeReason, StatusMessage},
-    types::{EnrForkId, GossipKind},
-    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
-    PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery,
+    rpc::{GoodbyeReason, StatusMessage}, service::api_types::AppRequestId, types::{EnrForkId, GossipKind}, GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
@@ -225,7 +222,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     Publish(PubsubMessage<P>),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
-    SendRequest(PeerId, RequestId, Request),
+    SendRequest(PeerId, AppRequestId, Request),
     SendResponse(PeerId, PeerRequestId, Box<Response<P>>),
     Subscribe(GossipTopic),
     SubscribeKind(GossipKind),
@@ -245,7 +242,7 @@ impl<P: Preset> ServiceInboundMessage<P> {
 }
 
 pub enum ServiceOutboundMessage<P: Preset> {
-    NetworkEvent(NetworkEvent<RequestId, P>),
+    NetworkEvent(NetworkEvent<P>),
 }
 
 impl<P: Preset> ServiceOutboundMessage<P> {

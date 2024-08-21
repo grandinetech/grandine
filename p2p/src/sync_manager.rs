@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 use anyhow::{anyhow, Result};
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
-use eth2_libp2p::{rpc::StatusMessage, discovery::peer_id_to_node_id, PeerId};
+use eth2_libp2p::{discovery::peer_id_to_node_id, rpc::StatusMessage, PeerId};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use log::{log, Level};
@@ -21,7 +21,7 @@ use types::{
 };
 
 use crate::{
-    back_sync::Data, block_sync_service::SyncDirection, misc::RequestId,
+    block_sync_service::SyncDirection, misc::RequestId,
     range_and_root_requests::RangeAndRootRequests,
 };
 
@@ -502,7 +502,7 @@ impl SyncManager {
 
     pub fn data_columns_by_range_request_finished(&mut self, request_id: RequestId) {
         self.log_with_feature(format_args!(
-            "request data columns by range finished (request_id: {request_id:?})",
+            "request data columns by range finished (request_id: {request_id})",
         ));
 
         self.data_column_requests.request_by_range_finished(request_id)
