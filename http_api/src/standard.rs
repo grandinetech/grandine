@@ -2404,29 +2404,44 @@ fn state_validators<P: Preset, W: Wait>(
         finalized,
     } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
 
+    let ids = ids_and_statuses
+        .ids()
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+
+    let statuses = ids_and_statuses.statuses();
+
     let validators = izip!(
         0..,
         state.validators(),
         state.balances().into_iter().copied(),
     )
     .filter(|(index, validator, _)| {
-        let validator_status = ValidatorStatus::new(validator, &state);
+        if !ids.is_empty() {
+            let validator_index = ValidatorId::ValidatorIndex(*index);
+            let validator_pubkey = ValidatorId::PublicKey(*validator.pubkey.as_bytes());
 
-        let ids = ids_and_statuses.ids();
-        let statuses = ids_and_statuses.statuses();
+            let allowed_by_id = ids.contains(&validator_index) || ids.contains(&validator_pubkey);
 
-        let allowed_by_id = ids.is_empty()
-            || ids.iter().any(|validator_id| match validator_id {
-                ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
-            });
+            if !allowed_by_id {
+                return false;
+            }
+        }
 
-        let allowed_by_status = statuses.is_empty()
-            || statuses
+        if !statuses.is_empty() {
+            let validator_status = ValidatorStatus::new(validator, &state);
+
+            let allowed_by_status = statuses
                 .iter()
                 .any(|status| status.matches(validator_status));
 
-        allowed_by_id && allowed_by_status
+            if !allowed_by_status {
+                return false;
+            }
+        }
+
+        true
     })
     .map(|(index, validator, balance)| StateValidatorResponse {
         index,
