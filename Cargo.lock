@@ -1903,7 +1903,7 @@ dependencies = [
  "enr",
  "fnv",
  "futures",
- "hashlink",
+ "hashlink 0.8.4",
  "hex",
  "hkdf",
  "lazy_static",
@@ -3075,6 +3075,7 @@ dependencies = [
  "futures-ticker",
  "futures-timer",
  "getrandom",
+ "hashlink 0.9.1",
  "hex_fmt",
  "libp2p",
  "prometheus-client",
@@ -3241,6 +3242,15 @@ name = "hashlink"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
+dependencies = [
+ "hashbrown 0.14.3",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
 dependencies = [
  "hashbrown 0.14.3",
 ]
@@ -6538,7 +6548,7 @@ dependencies = [
  "bitflags 2.4.2",
  "fallible-iterator",
  "fallible-streaming-iterator",
- "hashlink",
+ "hashlink 0.8.4",
  "libsqlite3-sys",
  "smallvec",
 ]
