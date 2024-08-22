@@ -1523,12 +1523,30 @@ impl<P: Preset> Network<P> {
                     "peer {peer_id} terminated BlobsByRange response stream for request_id: {request_id:?}",
                 ));
 
-                if let AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs { id }) = request_id {
-                    P2pToSync::BlobsByRangeRequestFinished(id as usize)
+                if let AppRequestId::Sync(sync_id) = request_id {
+                    P2pToSync::BlobsByRangeRequestFinished(sync_id)
                         .send(&self.channels.p2p_to_sync_tx);
                 }
             }
             Response::BlobsByRoot(Some(blob_sidecar)) => {
+                let request_id = match request_id {
+                    AppRequestId::Router => {
+                        error!("all BlobsByRoot requests belong to sync, peer_id: {peer_id}");
+                        return;
+                    },
+                    AppRequestId::Sync(sync_id) => match sync_id {
+                        SyncRequestId::SingleBlock { .. } => {
+                            error!("block response to BlobsByRoot request, peer_id: {peer_id}");
+                            return;
+                        },
+                        SyncRequestId::RangeBlockAndBlobs { .. } => {
+                            error!("batch syncing do not request BlobsByRoot requests, peer_id: {peer_id}");
+                            return; 
+                        },
+                        id @ SyncRequestId::SingleBlob { .. } => id,
+                    }
+                };
+
                 self.log(
                     Level::Debug,
                     format_args!(
@@ -1554,10 +1572,8 @@ impl<P: Preset> Network<P> {
                         .send(&self.channels.p2p_to_sync_tx);
                 }
 
-                if let AppRequestId::Sync(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id, .. }}) = request_id {
-                     P2pToSync::BlobsByRootChunkReceived(blob_identifier, peer_id, req_id as usize)
-                        .send(&self.channels.p2p_to_sync_tx);
-                }
+                P2pToSync::BlobsByRootChunkReceived(blob_identifier, peer_id, request_id)
+                    .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRoot(None) => {
                 self.log_with_feature(format_args!(
@@ -1565,6 +1581,20 @@ impl<P: Preset> Network<P> {
                 ));
             }
             Response::BlocksByRange(Some(block)) => {
+                let request_id = match request_id {
+                    AppRequestId::Router => {
+                        error!("all BlocksByRange requests belong to sync, peer_id: {peer_id}");
+                        return;
+                    },
+                    AppRequestId::Sync(sync_id) => match sync_id {
+                        SyncRequestId::SingleBlob { .. } | SyncRequestId::SingleBlock { .. } => {
+                            error!("block lookup do not request BlocksByRange requests, peer_id: {peer_id}");
+                            return;
+                        },
+                        SyncRequestId::RangeBlockAndBlobs { id } => id,
+                    }
+                };
+
                 self.log(
                     Level::Debug,
                     format_args!(
@@ -1577,10 +1607,8 @@ impl<P: Preset> Network<P> {
                 let block_root = block.message().hash_tree_root();
 
                 if self.register_new_received_block(block_root, block.message().slot()) {
-                    if let AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs { id }) = request_id {
-                        P2pToSync::RequestedBlock((block, peer_id, id as usize))
-                            .send(&self.channels.p2p_to_sync_tx);
-                    }
+                    P2pToSync::RequestedBlock((block, peer_id, request_id as usize))
+                        .send(&self.channels.p2p_to_sync_tx);
                 }
             }
             Response::BlocksByRange(None) => {
@@ -1588,8 +1616,8 @@ impl<P: Preset> Network<P> {
                     "peer {peer_id} terminated BeaconBlocksByRange response stream for request_id: {request_id:?}",
                 ));
 
-                if let AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs { id }) = request_id {
-                    P2pToSync::BlocksByRangeRequestFinished(id as usize)
+                if let AppRequestId::Sync(sync_id) = request_id {
+                    P2pToSync::BlocksByRangeRequestFinished(sync_id)
                         .send(&self.channels.p2p_to_sync_tx);
                 }
 
@@ -1597,6 +1625,24 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRoot(Some(block)) => {
+                let request_id = match request_id {
+                    AppRequestId::Router => {
+                        error!("all BlocksByRoot requests belong to sync, peer_id: {peer_id}");
+                        return;
+                    },
+                    AppRequestId::Sync(sync_id) => match sync_id {
+                        SyncRequestId::SingleBlob { .. } => {
+                            error!("blob response to BlocksByRoot request, peer_id: {peer_id}");
+                            return;
+                        },
+                        SyncRequestId::RangeBlockAndBlobs { .. } => {
+                            error!("batch syncing do not request BlocksByRoot requests, peer_id: {peer_id}");
+                            return; 
+                        },
+                        id @ SyncRequestId::SingleBlock { .. } => id,
+                    }
+                };
+
                 self.log(
                     Level::Debug,
                     format_args!(
@@ -1694,8 +1740,8 @@ impl<P: Preset> Network<P> {
                     "peer {peer_id} terminated DataColumnsByRange response stream for request_id: {request_id:?}",
                 ));
 
-                if let AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs { id }) = request_id {
-                    P2pToSync::DataColumnsByRangeRequestFinished(id as usize)
+                if let AppRequestId::Sync(sync_id) = request_id {
+                    P2pToSync::DataColumnsByRangeRequestFinished(sync_id)
                         .send(&self.channels.p2p_to_sync_tx);
                 }
             }
@@ -1730,11 +1776,11 @@ impl<P: Preset> Network<P> {
                             .send(&self.channels.p2p_to_sync_tx);
                     }
 
-                    if let AppRequestId::Sync(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id, .. } }) = request_id {
+                    if let AppRequestId::Sync(sync_id) = request_id {
                         P2pToSync::DataColumnsByRootChunkReceived(
                             data_column_identifier,
                             peer_id,
-                            req_id as usize,
+                            sync_id,
                         )
                         .send(&self.channels.p2p_to_sync_tx);
                     }
@@ -2037,7 +2083,7 @@ impl<P: Preset> Network<P> {
 
         self.log(
             Level::Debug,
-            format_args!("sending Status request (request_id: {request_id}, peer_id: {peer_id}, status: {status:?})"),
+            format_args!("sending Status request (request_id: {request_id:?}, peer_id: {peer_id}, status: {status:?})"),
         );
 
         self.request(peer_id, AppRequestId::Router, Request::Status(status));
@@ -2137,7 +2183,7 @@ impl<P: Preset> Network<P> {
 
     fn request_blobs_by_range(
         &mut self,
-        request_id: RequestId,
+        request_id: SyncRequestId,
         peer_id: PeerId,
         start_slot: Slot,
         count: u64,
@@ -2148,16 +2194,16 @@ impl<P: Preset> Network<P> {
         self.log(
             Level::Debug,
             format_args!(
-                "sending BlobSidecarsByRange request (request_id: {request_id} peer_id: {peer_id}, request: {request:?})",
+                "sending BlobSidecarsByRange request (request_id: {request_id:?} peer_id: {peer_id}, request: {request:?})",
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs{ id: request_id as Id }), Request::BlobsByRange(request));
+        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlobsByRange(request));
     }
 
     fn request_blobs_by_root(
         &self,
-        request_id: RequestId,
+        request_id: SyncRequestId,
         peer_id: PeerId,
         // TODO(feature/deneb): move duplicated constants out of eth2_libp2p
         blob_identifiers: Vec<BlobIdentifier>,
@@ -2187,16 +2233,16 @@ impl<P: Preset> Network<P> {
         self.log(
             Level::Debug,
             format_args!(
-                "sending BlobSidecarsByRoot request (request_id: {request_id}, peer_id: {peer_id}, request: {request:?})",
+                "sending BlobSidecarsByRoot request (request_id: {request_id:?}, peer_id: {peer_id}, request: {request:?})",
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: 0u32 } }), Request::BlobsByRoot(request));
+        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlobsByRoot(request));
     }
 
     fn request_blocks_by_range(
         &mut self,
-        request_id: RequestId,
+        request_id: SyncRequestId,
         peer_id: PeerId,
         start_slot: Slot,
         count: u64,
@@ -2206,14 +2252,14 @@ impl<P: Preset> Network<P> {
         self.log(
             Level::Debug,
             format_args!(
-                "sending BeaconBlocksByRange request (reqeuest_id: {request_id}, peer_id: {peer_id}, request: {request:?})",
+                "sending BeaconBlocksByRange request (reqeuest_id: {request_id:?}, peer_id: {peer_id}, request: {request:?})",
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs { id: request_id as Id }), Request::BlocksByRange(request));
+        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlocksByRange(request));
     }
 
-    fn request_block_by_root(&self, request_id: RequestId, peer_id: PeerId, block_root: H256) {
+    fn request_block_by_root(&self, request_id: SyncRequestId, peer_id: PeerId, block_root: H256) {
         if self.received_block_roots.contains_key(&block_root) {
             return;
         }
@@ -2227,16 +2273,16 @@ impl<P: Preset> Network<P> {
         self.log(
             Level::Debug,
             format_args!(
-                "sending BeaconBlocksByRoot request (request_id: {request_id}, peer_id: {peer_id}, request: {request:?})",
+                "sending BeaconBlocksByRoot request (request_id: {request_id:?}, peer_id: {peer_id}, request: {request:?})",
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(SyncRequestId::SingleBlock { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: 0u32 } }), Request::BlocksByRoot(request));
+        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlocksByRoot(request));
     }
 
     fn request_data_columns_by_range(
         &mut self,
-        request_id: RequestId,
+        request_id: SyncRequestId,
         peer_id: PeerId,
         start_slot: Slot,
         count: u64,
@@ -2252,16 +2298,16 @@ impl<P: Preset> Network<P> {
         self.log(
             Level::Debug,
             format_args!(
-                "sending DataColumnsByRange request (request_id: {request_id} peer_id: {peer_id}, request: {request:?})",
+                "sending DataColumnsByRange request (request_id: {request_id:?} peer_id: {peer_id}, request: {request:?})",
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs { id: request_id as Id }), Request::DataColumnsByRange(request));
+        self.request(peer_id, AppRequestId::Sync(request_id), Request::DataColumnsByRange(request));
     }
 
     fn request_data_columns_by_root(
         &self,
-        request_id: RequestId,
+        request_id: SyncRequestId,
         peer_id: PeerId,
         data_column_identifiers: Vec<DataColumnIdentifier>,
     ) {
@@ -2290,11 +2336,11 @@ impl<P: Preset> Network<P> {
         self.log(
             Level::Debug,
             format_args!(
-                "sending DataColumnSidecarsByRoot request (request_id: {request_id}, peer_id: {peer_id}, request: {request:?})",
+                "sending DataColumnSidecarsByRoot request (request_id: {request_id:?}, peer_id: {peer_id}, request: {request:?})",
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: 0u32 } }), Request::DataColumnsByRoot(request));
+        self.request(peer_id, AppRequestId::Sync(request_id), Request::DataColumnsByRoot(request));
     }
 
     fn subscribe_to_core_topics(&mut self) {

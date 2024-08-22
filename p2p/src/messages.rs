@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
-    rpc::{GoodbyeReason, StatusMessage}, service::api_types::AppRequestId, types::{EnrForkId, GossipKind}, GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery
+    rpc::{GoodbyeReason, StatusMessage}, service::api_types::{AppRequestId, SyncRequestId}, types::{EnrForkId, GossipKind}, 
+    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
@@ -28,7 +29,7 @@ use types::{
 
 use crate::{
     misc::{
-        AttestationSubnetActions, BeaconCommitteeSubscription, RequestId,
+        AttestationSubnetActions, BeaconCommitteeSubscription, RequestId, 
         SyncCommitteeSubnetAction, SyncCommitteeSubscription,
     },
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
@@ -60,13 +61,13 @@ pub enum P2pToSync<P: Preset> {
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, bool, PeerId),
     RequestedBlock((Arc<SignedBeaconBlock<P>>, PeerId, RequestId)),
     RequestedDataColumnSidecar(Arc<DataColumnSidecar<P>>, PeerId),
-    BlobsByRangeRequestFinished(RequestId),
-    BlobsByRootChunkReceived(BlobIdentifier, PeerId, RequestId),
-    BlocksByRangeRequestFinished(RequestId),
+    BlobsByRangeRequestFinished(SyncRequestId),
+    BlobsByRootChunkReceived(BlobIdentifier, PeerId, SyncRequestId),
+    BlocksByRangeRequestFinished(SyncRequestId),
     BlockByRootRequestFinished(H256),
-    DataColumnsByRangeRequestFinished(RequestId),
+    DataColumnsByRangeRequestFinished(SyncRequestId),
     RequestFailed(PeerId),
-    DataColumnsByRootChunkReceived(DataColumnIdentifier, PeerId, RequestId),
+    DataColumnsByRootChunkReceived(DataColumnIdentifier, PeerId, SyncRequestId),
 }
 
 impl<P: Preset> P2pToSync<P> {
@@ -127,17 +128,17 @@ impl SyncToMetrics {
 pub enum SyncToP2p {
     PruneReceivedBlocks,
     RequestDataColumnsByRange(
-        RequestId,
+        SyncRequestId,
         PeerId,
         Slot,
         u64,
         Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
     ),
-    RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnIdentifier>),
-    RequestBlobsByRange(RequestId, PeerId, Slot, u64),
-    RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
-    RequestBlocksByRange(RequestId, PeerId, Slot, u64),
-    RequestBlockByRoot(RequestId, PeerId, H256),
+    RequestDataColumnsByRoot(SyncRequestId, PeerId, Vec<DataColumnIdentifier>),
+    RequestBlobsByRange(SyncRequestId, PeerId, Slot, u64),
+    RequestBlobsByRoot(SyncRequestId, PeerId, Vec<BlobIdentifier>),
+    RequestBlocksByRange(SyncRequestId, PeerId, Slot, u64),
+    RequestBlockByRoot(SyncRequestId, PeerId, H256),
     RequestPeerStatus(RequestId, PeerId),
     SubscribeToCoreTopics,
     SubscribeToDataColumnTopics,
