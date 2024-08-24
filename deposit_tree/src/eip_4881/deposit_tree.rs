@@ -1,11 +1,10 @@
 use std::ops::Add;
 use core::ops::Range;
 
-use serde::{Deserialize, Serialize};
 use anyhow::{ensure, Result};
 use thiserror::Error;
 use typenum::Unsigned as _;
-use ssz::{mix_in_length, Ssz, SszHash, SszSize, H256};
+use ssz::{mix_in_length, Ssz, SszHash, H256};
 use types::phase0::{
     consts::DepositContractTreeDepth,
     containers::DepositData,
@@ -21,11 +20,11 @@ use super::{
 
 const MAX_DEPOSITS: DepositIndex = 1 << DepositContractTreeDepth::USIZE;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Ssz)]
 pub struct DepositDataTree {
     pub tree: EIP4881MerkleTree,
     pub length: DepositIndex,
-    pub finalized_execution_block: Option<FinalizedExecutionBlock>,
+    pub finalized_execution_block: FinalizedExecutionBlock,
     pub depth: u32
 }
 
@@ -35,7 +34,7 @@ impl DepositDataTree {
         Self {
             tree: EIP4881MerkleTree::create(leaves, depth),
             length,
-            finalized_execution_block: None,
+            finalized_execution_block: FinalizedExecutionBlock::default(),
             depth,
         }
     }
@@ -70,7 +69,7 @@ impl DepositDataTree {
     ) -> Result<(), EIP4881MerkleTreeError> {
         self.tree
             .finalize_deposits(finalized_execution_block.deposit_count, self.depth)?;
-        self.finalized_execution_block = Some(finalized_execution_block);
+        self.finalized_execution_block = finalized_execution_block;
         Ok(())
     }
 
@@ -100,7 +99,7 @@ impl DepositDataTree {
     /// Get snapshot of finalized deposit tree (if tree is finalized)
     #[must_use]
     pub fn get_snapshot(&self) -> Option<DepositTreeSnapshot> {
-        let finalized_execution_block = self.finalized_execution_block.as_ref()?;
+        let finalized_execution_block = self.finalized_execution_block;
         Some(DepositTreeSnapshot {
             finalized: self.tree.get_finalized_hashes(),
             execution_block: FinalizedExecutionBlock {
@@ -124,7 +123,7 @@ impl DepositDataTree {
                 depth,
             )?,
             length: snapshot.execution_block.deposit_count,
-            finalized_execution_block: Some(snapshot.into()),
+            finalized_execution_block: snapshot.into(),
             depth,
         })
     }

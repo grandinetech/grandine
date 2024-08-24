@@ -1,14 +1,14 @@
 use hashing::{hash_256_256, ZERO_HASHES};
-use typenum::Unsigned;
+use typenum::{Unsigned, U32};
 use types::phase0::{consts::DepositContractTreeDepth, primitives::DepositIndex};
-use ssz::{Size, SszHash, SszSize, SszWrite, WriteError, H256};
+use ssz::{Size, SszHash, SszRead, SszSize, SszWrite, WriteError, H256};
 use lazy_static::lazy_static;
 
 use crate::FinalizedDeposit;
 
 lazy_static! {
     static ref ZERO_NODES: Vec<EIP4881MerkleTree> = {
-        (0..=MAX_TREE_DEPTH).map(|n| EIP4881MerkleTree::Zero(n as u32)).collect()
+        (0..=MAX_TREE_DEPTH).map(|n| EIP4881MerkleTree::Zero(n)).collect()
     };
 }
 
@@ -28,16 +28,101 @@ pub enum EIP4881MerkleTree {
 }
 
 impl SszSize for EIP4881MerkleTree {
-    const SIZE: Size = Size::for_untagged_union([
-        u32::SIZE,
-        H256::SIZE,
-        H256::SIZE,
-        H256::SIZE
-    ]);
+    const SIZE: Size = u8::SIZE.add(
+        Size::for_untagged_union([
+            u32::SIZE,
+            H256::SIZE,
+            H256::SIZE,
+            H256::SIZE
+        ])
+    );
 }
 
 impl SszWrite for EIP4881MerkleTree {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        let mut length_before = bytes.len();
+
+        // prefix with code
+        let code: u8 = match self {
+            Self::Zero(_) => 0,
+            Self::Leaf(_) => 1,
+            Self::Finalized(_) => 2,
+            Self::Node(_, _, _) => 3
+        };
+        let size = u8::SIZE.get();
+        bytes.resize(length_before + size, 0);
+        code.write_fixed(&mut bytes[length_before..]);
+        length_before = bytes.len();
+
+        match self {
+            Self::Zero(depth) => {
+                let size = u32::SIZE.get();
+                let length_after = length_before + size;
+                bytes.resize(length_after, 0);
+                depth.write_fixed(&mut bytes[length_before..]);
+            },
+            Self::Leaf(hash) | Self::Finalized(hash) => {
+                let size = H256::SIZE.get();
+                let length_after = length_before + size;
+                bytes.resize(length_after, 0);
+                hash.write_fixed(&mut bytes[length_before..]);
+            },
+            Self::Node(hash, left, right) => {
+                let size = H256::SIZE.get();
+                let length_after = length_before + size;
+                bytes.resize(length_after, 0);
+                hash.write_fixed(&mut bytes[length_before..]);
+                left.as_ref().write_fixed(bytes);
+
+                // write delimiter between left and right branches
+                length_before = bytes.len();
+                let delimiter: u8 = MAX_TREE_DEPTH as u8 + 1; // it's so not to confuse it with Zero()
+                bytes.resize(length_before + u32::SIZE.get(), 0);
+                delimiter.write_fixed(&mut bytes[length_before..]);
+
+                right.as_ref().write_fixed(bytes);
+            },
+        }
+
+        Ok(())
+    }
+}
+
+impl SszHash for EIP4881MerkleTree {
+    fn hash_tree_root(&self) -> H256 {
+        self.hash()
+    }
     
+    type PackingFactor = U32;
+}
+
+impl<C> SszRead<C> for EIP4881MerkleTree {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ssz::ReadError> {
+        let tree_start = u8::SIZE.get();
+        let code_bytes = ssz::subslice(bytes, 0..tree_start)?;
+        let code = u8::from_ssz(context, code_bytes)?;
+        let data = ssz::subslice(bytes, tree_start..bytes.len())?;
+        match code {
+            0 => {
+                let depth = u32::from_ssz(context, data)?;
+                Ok(Self::Zero(depth))
+            },
+            1 => {
+                let hash = H256::from_ssz(context, data)?;
+                Ok(Self::Leaf(hash))
+            },
+            2 => {
+                let hash = H256::from_ssz(context, data)?;
+                Ok(Self::Finalized(hash))
+            },
+            3 => {
+                let hash = H256::from_ssz(context)?;
+            },
+            num if num == (MAX_TREE_DEPTH as u8 + 1) => {
+                Ok(Zero())
+            }
+        }
+    }
 }
 
 impl Default for EIP4881MerkleTree {
@@ -334,13 +419,13 @@ impl EIP4881MerkleTree {
         const SPACES: u32 = 10;
         space += SPACES;
         let (pair, text) = match self {
-            Self::Node(hash, left, right) => (Some((left, right)), format!("Node({})", hash)),
-            Self::Leaf(hash) => (None, format!("Leaf({})", hash)),
+            Self::Node(hash, left, right) => (Some((left, right)), format!("Node({hash})")),
+            Self::Leaf(hash) => (None, format!("Leaf({hash})")),
             Self::Zero(depth) => (
                 None,
                 format!("Z[{}]({})", depth, ZERO_HASHES[*depth as usize]),
             ),
-            Self::Finalized(hash) => (None, format!("Finl({})", hash)),
+            Self::Finalized(hash) => (None, format!("Finl({hash})")),
         };
         if let Some((_, right)) = pair {
             right.print_node(space);
@@ -349,7 +434,7 @@ impl EIP4881MerkleTree {
         for _i in SPACES..space {
             print!(" ");
         }
-        println!("{}", text);
+        println!("{text}");
         if let Some((left, _)) = pair {
             left.print_node(space);
         }
@@ -360,6 +445,7 @@ impl EIP4881MerkleTree {
 ///
 /// The `branch` argument is the main component of the proof: it should be a list of internal
 /// node hashes such that the root can be reconstructed (in bottom-up order).
+#[must_use]
 pub fn verify_merkle_proof(
     leaf: H256,
     branch: &[H256],
@@ -375,7 +461,13 @@ pub fn verify_merkle_proof(
 }
 
 /// Compute a root hash from a leaf and a Merkle proof.
-pub fn merkle_root_from_branch(leaf: H256, branch: &[H256], depth: usize, index: usize) -> H256 {
+#[must_use]
+pub fn merkle_root_from_branch(
+    leaf: H256,
+    branch: &[H256],
+    depth: usize,
+    index: usize
+) -> H256 {
     assert_eq!(branch.len(), depth, "proof length should equal depth");
 
     let mut merkle_root = leaf.clone();
@@ -394,7 +486,7 @@ pub fn merkle_root_from_branch(leaf: H256, branch: &[H256], depth: usize, index:
 
 impl From<InvalidSnapshot> for EIP4881MerkleTreeError {
     fn from(e: InvalidSnapshot) -> Self {
-        EIP4881MerkleTreeError::InvalidSnapshot(e)
+        Self::InvalidSnapshot(e)
     }
 }
 
