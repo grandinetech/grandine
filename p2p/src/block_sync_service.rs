@@ -4,7 +4,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use database::Database;
 use eth1_api::RealController;
-use eth2_libp2p::{rpc::StatusMessage, service::api_types::{SyncRequestId, SingleLookupReqId, Id}, PeerId};       
+use eth2_libp2p::{
+    rpc::StatusMessage,
+    service::api_types::{Id, SingleLookupReqId, SyncRequestId},
+    PeerId,
+};
 use features::Feature;
 use fork_choice_control::SyncMessage;
 use futures::{
@@ -398,7 +402,6 @@ impl<P: Preset> BlockSyncService<P> {
                 target,
                 start_slot,
                 count,
-                ref data_columns,
                 ..
             } = batch;
 
@@ -407,24 +410,43 @@ impl<P: Preset> BlockSyncService<P> {
             if let Some(peer_id) = peer {
                 match target {
                     SyncTarget::DataColumnSidecar => {
-                        let data_columns = data_columns.clone().unwrap_or_default();
-
                         SyncToP2p::RequestDataColumnsByRange(
-                            SyncRequestId::RangeBlockAndBlobs{ id: request_id as Id, },
+                            SyncRequestId::RangeBlockAndBlobs {
+                                id: request_id as Id,
+                            },
                             peer_id,
                             start_slot,
                             count,
-                            data_columns,
                         )
                         .send(&self.sync_to_p2p_tx);
                     }
                     SyncTarget::BlobSidecar => {
-                        SyncToP2p::RequestBlobsByRange(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, start_slot, count)
-                            .send(&self.sync_to_p2p_tx);
+                        SyncToP2p::RequestBlobsByRange(
+                            SyncRequestId::SingleBlob {
+                                id: SingleLookupReqId {
+                                    req_id: request_id as Id,
+                                    lookup_id: request_id as Id,
+                                },
+                            },
+                            peer_id,
+                            start_slot,
+                            count,
+                        )
+                        .send(&self.sync_to_p2p_tx);
                     }
                     SyncTarget::Block => {
-                        SyncToP2p::RequestBlocksByRange(SyncRequestId::SingleBlock { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, start_slot, count)
-                            .send(&self.sync_to_p2p_tx);
+                        SyncToP2p::RequestBlocksByRange(
+                            SyncRequestId::SingleBlock {
+                                id: SingleLookupReqId {
+                                    req_id: request_id as Id,
+                                    lookup_id: request_id as Id,
+                                },
+                            },
+                            peer_id,
+                            start_slot,
+                            count,
+                        )
+                        .send(&self.sync_to_p2p_tx);
                     }
                 }
             }
@@ -522,24 +544,22 @@ impl<P: Preset> BlockSyncService<P> {
                 start_slot,
                 count,
                 target,
-                ref data_columns,
                 ..
             } = batch;
 
             match target {
                 //TODO(feature/eip-7594)
                 SyncTarget::DataColumnSidecar => {
-                    let data_columns = data_columns.clone().unwrap_or_default();
-
                     self.sync_manager
                         .add_data_columns_request_by_range(request_id, batch);
 
                     SyncToP2p::RequestDataColumnsByRange(
-                        SyncRequestId::RangeBlockAndBlobs { id: request_id as Id},
+                        SyncRequestId::RangeBlockAndBlobs {
+                            id: request_id as Id,
+                        },
                         peer_id,
                         start_slot,
                         count,
-                        data_columns,
                     )
                     .send(&self.sync_to_p2p_tx);
                 }
@@ -547,15 +567,35 @@ impl<P: Preset> BlockSyncService<P> {
                     self.sync_manager
                         .add_blob_request_by_range(request_id, batch);
 
-                    SyncToP2p::RequestBlobsByRange(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, start_slot, count)
-                        .send(&self.sync_to_p2p_tx);
+                    SyncToP2p::RequestBlobsByRange(
+                        SyncRequestId::SingleBlob {
+                            id: SingleLookupReqId {
+                                req_id: request_id as Id,
+                                lookup_id: request_id as Id,
+                            },
+                        },
+                        peer_id,
+                        start_slot,
+                        count,
+                    )
+                    .send(&self.sync_to_p2p_tx);
                 }
                 SyncTarget::Block => {
                     self.sync_manager
                         .add_block_request_by_range(request_id, batch);
 
-                    SyncToP2p::RequestBlocksByRange(SyncRequestId::SingleBlock { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, start_slot, count)
-                        .send(&self.sync_to_p2p_tx);
+                    SyncToP2p::RequestBlocksByRange(
+                        SyncRequestId::SingleBlock {
+                            id: SingleLookupReqId {
+                                req_id: request_id as Id,
+                                lookup_id: request_id as Id,
+                            },
+                        },
+                        peer_id,
+                        start_slot,
+                        count,
+                    )
+                    .send(&self.sync_to_p2p_tx);
                 }
             }
         }
@@ -593,8 +633,17 @@ impl<P: Preset> BlockSyncService<P> {
             .add_data_columns_request_by_root(identifiers, peer_id);
 
         if !data_column_identifiers.is_empty() {
-            SyncToP2p::RequestDataColumnsByRoot(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, data_column_identifiers)
-                .send(&self.sync_to_p2p_tx);
+            SyncToP2p::RequestDataColumnsByRoot(
+                SyncRequestId::SingleBlob {
+                    id: SingleLookupReqId {
+                        req_id: request_id as Id,
+                        lookup_id: request_id as Id,
+                    },
+                },
+                peer_id,
+                data_column_identifiers,
+            )
+            .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())
@@ -630,7 +679,17 @@ impl<P: Preset> BlockSyncService<P> {
             .add_blobs_request_by_root(identifiers, peer_id);
 
         if !blob_ids.is_empty() {
-            SyncToP2p::RequestBlobsByRoot(SyncRequestId::SingleBlob { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, blob_ids).send(&self.sync_to_p2p_tx);
+            SyncToP2p::RequestBlobsByRoot(
+                SyncRequestId::SingleBlob {
+                    id: SingleLookupReqId {
+                        req_id: request_id as Id,
+                        lookup_id: request_id as Id,
+                    },
+                },
+                peer_id,
+                blob_ids,
+            )
+            .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())
@@ -658,8 +717,17 @@ impl<P: Preset> BlockSyncService<P> {
             .sync_manager
             .add_block_request_by_root(block_root, peer_id)
         {
-            SyncToP2p::RequestBlockByRoot(SyncRequestId::SingleBlock { id: SingleLookupReqId { req_id: request_id as Id, lookup_id: request_id as Id }}, peer_id, block_root)
-                .send(&self.sync_to_p2p_tx);
+            SyncToP2p::RequestBlockByRoot(
+                SyncRequestId::SingleBlock {
+                    id: SingleLookupReqId {
+                        req_id: request_id as Id,
+                        lookup_id: request_id as Id,
+                    },
+                },
+                peer_id,
+                block_root,
+            )
+            .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())

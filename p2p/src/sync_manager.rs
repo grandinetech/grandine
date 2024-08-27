@@ -1,22 +1,21 @@
 use core::{fmt::Display, hash::Hash, ops::Range, time::Duration};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
-use eth2_libp2p::{discovery::peer_id_to_node_id, rpc::StatusMessage, PeerId};
+use eth2_libp2p::{rpc::StatusMessage, PeerId};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use log::{log, Level};
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
-use ssz::ContiguousList;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
-    eip7594::{ColumnIndex, DataColumnIdentifier, NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
-    phase0::primitives::{Epoch, Slot, H256, NodeId},
+    eip7594::DataColumnIdentifier,
+    phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
 
@@ -64,7 +63,6 @@ pub struct SyncBatch {
     pub peer_id: PeerId,
     pub start_slot: Slot,
     pub count: u64,
-    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, NumberOfColumns>>>,
 }
 
 pub struct SyncManager {
@@ -114,7 +112,7 @@ impl SyncManager {
     pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch> {
         self.log_with_feature(format_args!("remove peer (peer_id: {peer_id})"));
         self.peers.remove(peer_id);
-        
+
         self.block_requests
             .remove_peer(peer_id)
             .chain(self.blob_requests.remove_peer(peer_id))
@@ -138,7 +136,6 @@ impl SyncManager {
                     peer_id,
                     start_slot: batch.start_slot,
                     count: batch.count,
-                    data_columns: batch.data_columns.clone(),
                 };
 
                 match batch.target {
@@ -199,8 +196,6 @@ impl SyncManager {
                 peer_id,
                 start_slot,
                 count,
-                // TODO(feature/eip7594)
-                data_columns: None,
             };
 
             self.log_with_feature(format_args!("back sync batch built: {batch:?})"));
@@ -305,7 +300,8 @@ impl SyncManager {
 
         let mut max_slot = local_head_slot;
         let blob_serve_range_slot = misc::blob_serve_range_slot::<P>(config, current_slot);
-        let data_column_serve_range_slot = misc::data_column_serve_range_slot::<P>(config, current_slot);
+        let data_column_serve_range_slot =
+            misc::data_column_serve_range_slot::<P>(config, current_slot);
 
         let mut sync_batches = vec![];
         for (peer_id, index) in Self::peer_sync_batch_assignments(&peers_to_sync)
@@ -313,15 +309,15 @@ impl SyncManager {
             .take(batches_in_front)
         {
             let start_slot = sync_start_slot + slots_per_request * index;
-            let count = core::cmp::min(remote_head_slot.saturating_sub(start_slot) + 1, slots_per_request);
+            let count = core::cmp::min(
+                remote_head_slot.saturating_sub(start_slot) + 1,
+                slots_per_request,
+            );
 
             max_slot = start_slot + count - 1;
 
             if config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(start_slot)) {
                 // TODO(feature/eip7594): figure out slot range and data columns
-                // fixed `custody_count` with `DATA_COLUMN_SIDECAR_SUBNET_COUNT` for now
-                let node_id = peer_id_to_node_id(&peer_id).map_err(|e| anyhow!(e))?;
-                let peer_custody_columns = eip_7594::get_custody_columns(NodeId::from_be_bytes(node_id.raw()), DATA_COLUMN_SIDECAR_SUBNET_COUNT);
                 if data_column_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
                         target: SyncTarget::DataColumnSidecar,
@@ -329,7 +325,6 @@ impl SyncManager {
                         peer_id,
                         start_slot,
                         count,
-                        data_columns: Some(Arc::new(ContiguousList::try_from(peer_custody_columns).expect("fail to parse peer_custody_columns"))),
                     });
                 }
             } else {
@@ -340,7 +335,6 @@ impl SyncManager {
                         peer_id,
                         start_slot,
                         count,
-                        data_columns: None,
                     });
                 }
             }
@@ -352,7 +346,6 @@ impl SyncManager {
                 peer_id,
                 start_slot,
                 count,
-                data_columns: None,
             });
         }
 
@@ -505,7 +498,8 @@ impl SyncManager {
             "request data columns by range finished (request_id: {request_id})",
         ));
 
-        self.data_column_requests.request_by_range_finished(request_id)
+        self.data_column_requests
+            .request_by_range_finished(request_id)
     }
 
     pub fn received_data_column_sidecar_chunk(
@@ -685,6 +679,7 @@ impl SyncManager {
     pub fn cache_clear(&mut self) {
         self.blob_requests.cache_clear();
         self.block_requests.cache_clear();
+        self.data_column_requests.cache_clear();
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
@@ -700,6 +695,7 @@ impl SyncManager {
         // TODO: Differentiate
         self.blob_requests.track_collection_metrics(metrics);
         self.block_requests.track_collection_metrics(metrics);
+        self.data_column_requests.track_collection_metrics(metrics);
     }
 }
 

@@ -17,7 +17,10 @@ use eth2_libp2p::{
         },
         GoodbyeReason, StatusMessage,
     },
-    service::{api_types::{AppRequestId, Id, SingleLookupReqId, SyncRequestId}, Network as Service},
+    service::{
+        api_types::{AppRequestId, SyncRequestId},
+        Network as Service,
+    },
     types::{core_topics_to_subscribe, EnrForkId, ForkContext, GossipEncoding},
     Context, GossipId, GossipTopic, MessageAcceptance, MessageId, NetworkConfig, NetworkEvent,
     NetworkGlobals, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Request,
@@ -35,6 +38,8 @@ use log::{debug, error, log, warn, Level};
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
 use ssz::{ContiguousList, SszHash as _};
@@ -46,10 +51,7 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::SignedBeaconBlock,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{
-        ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns,
-        DATA_COLUMN_SIDECAR_SUBNET_COUNT,
-    },
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{Phase, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -444,8 +446,8 @@ impl<P: Preset> Network<P> {
                         SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, identifiers) => {
                             self.request_data_columns_by_root(request_id, peer_id, identifiers);
                         }
-                        SyncToP2p::RequestDataColumnsByRange(request_id, peer_id, start_slot, count, columns) => {
-                            self.request_data_columns_by_range(request_id, peer_id, start_slot, count, columns);
+                        SyncToP2p::RequestDataColumnsByRange(request_id, peer_id, start_slot, count) => {
+                            self.request_data_columns_by_range(request_id, peer_id, start_slot, count);
                         }
                         SyncToP2p::RequestPeerStatus(request_id, peer_id) => {
                             self.request_peer_status(request_id, peer_id);
@@ -574,6 +576,23 @@ impl<P: Preset> Network<P> {
     #[must_use]
     pub fn node_id(&self) -> NodeId {
         NodeId::from_be_bytes(self.network_globals.local_enr().node_id().raw())
+    }
+
+    #[must_use]
+    pub fn get_custodial_peers(&self, _epoch: Epoch, column_index: ColumnIndex) -> Vec<PeerId> {
+        self.network_globals()
+            .custody_peers_for_column(column_index)
+    }
+
+    #[must_use]
+    pub fn get_random_custodial_peer(
+        &self,
+        epoch: Epoch,
+        column_index: ColumnIndex,
+    ) -> Option<PeerId> {
+        self.get_custodial_peers(epoch, column_index)
+            .choose(&mut thread_rng())
+            .cloned()
     }
 
     fn publish_beacon_block(&self, beacon_block: Arc<SignedBeaconBlock<P>>) {
@@ -1483,7 +1502,12 @@ impl<P: Preset> Network<P> {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn handle_response(&mut self, peer_id: PeerId, request_id: AppRequestId, response: Response<P>) {
+    fn handle_response(
+        &mut self,
+        peer_id: PeerId,
+        request_id: AppRequestId,
+        response: Response<P>,
+    ) {
         match response {
             Response::Status(remote) => {
                 self.log_with_feature(format_args!(
@@ -1533,18 +1557,18 @@ impl<P: Preset> Network<P> {
                     AppRequestId::Router => {
                         error!("all BlobsByRoot requests belong to sync, peer_id: {peer_id}");
                         return;
-                    },
+                    }
                     AppRequestId::Sync(sync_id) => match sync_id {
                         SyncRequestId::SingleBlock { .. } => {
                             error!("block response to BlobsByRoot request, peer_id: {peer_id}");
                             return;
-                        },
+                        }
                         SyncRequestId::RangeBlockAndBlobs { .. } => {
                             error!("batch syncing do not request BlobsByRoot requests, peer_id: {peer_id}");
-                            return; 
-                        },
+                            return;
+                        }
                         id @ SyncRequestId::SingleBlob { .. } => id,
-                    }
+                    },
                 };
 
                 self.log(
@@ -1585,14 +1609,14 @@ impl<P: Preset> Network<P> {
                     AppRequestId::Router => {
                         error!("all BlocksByRange requests belong to sync, peer_id: {peer_id}");
                         return;
-                    },
+                    }
                     AppRequestId::Sync(sync_id) => match sync_id {
                         SyncRequestId::SingleBlob { .. } | SyncRequestId::SingleBlock { .. } => {
                             error!("block lookup do not request BlocksByRange requests, peer_id: {peer_id}");
                             return;
-                        },
+                        }
                         SyncRequestId::RangeBlockAndBlobs { id } => id,
-                    }
+                    },
                 };
 
                 self.log(
@@ -1629,18 +1653,18 @@ impl<P: Preset> Network<P> {
                     AppRequestId::Router => {
                         error!("all BlocksByRoot requests belong to sync, peer_id: {peer_id}");
                         return;
-                    },
+                    }
                     AppRequestId::Sync(sync_id) => match sync_id {
                         SyncRequestId::SingleBlob { .. } => {
                             error!("blob response to BlocksByRoot request, peer_id: {peer_id}");
                             return;
-                        },
+                        }
                         SyncRequestId::RangeBlockAndBlobs { .. } => {
                             error!("batch syncing do not request BlocksByRoot requests, peer_id: {peer_id}");
-                            return; 
-                        },
+                            return;
+                        }
                         id @ SyncRequestId::SingleBlock { .. } => id,
-                    }
+                    },
                 };
 
                 self.log(
@@ -1715,7 +1739,8 @@ impl<P: Preset> Network<P> {
 
                 if eip_7594::verify_kzg_proofs(&data_column_sidecar).unwrap_or_else(|_| false) {
                     let data_column_identifier = data_column_sidecar.as_ref().into();
-                    let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+                    let data_column_sidecar_slot =
+                        data_column_sidecar.signed_block_header.message.slot;
 
                     if self.register_new_received_data_column_sidecar(
                         data_column_identifier,
@@ -1758,7 +1783,8 @@ impl<P: Preset> Network<P> {
                 if eip_7594::verify_kzg_proofs(&data_column_sidecar).unwrap_or_else(|_| false) {
                     let data_column_identifier: DataColumnIdentifier =
                         data_column_sidecar.as_ref().into();
-                    let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+                    let data_column_sidecar_slot =
+                        data_column_sidecar.signed_block_header.message.slot;
 
                     self.log_with_feature(format_args!(
                         "received data column sidecar from RPC (identifier: {data_column_identifier:?}, slot: {data_column_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id:?})",
@@ -2198,7 +2224,11 @@ impl<P: Preset> Network<P> {
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlobsByRange(request));
+        self.request(
+            peer_id,
+            AppRequestId::Sync(request_id),
+            Request::BlobsByRange(request),
+        );
     }
 
     fn request_blobs_by_root(
@@ -2237,7 +2267,11 @@ impl<P: Preset> Network<P> {
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlobsByRoot(request));
+        self.request(
+            peer_id,
+            AppRequestId::Sync(request_id),
+            Request::BlobsByRoot(request),
+        );
     }
 
     fn request_blocks_by_range(
@@ -2256,7 +2290,11 @@ impl<P: Preset> Network<P> {
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlocksByRange(request));
+        self.request(
+            peer_id,
+            AppRequestId::Sync(request_id),
+            Request::BlocksByRange(request),
+        );
     }
 
     fn request_block_by_root(&self, request_id: SyncRequestId, peer_id: PeerId, block_root: H256) {
@@ -2277,22 +2315,58 @@ impl<P: Preset> Network<P> {
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(request_id), Request::BlocksByRoot(request));
+        self.request(
+            peer_id,
+            AppRequestId::Sync(request_id),
+            Request::BlocksByRoot(request),
+        );
     }
 
     fn request_data_columns_by_range(
         &mut self,
         request_id: SyncRequestId,
-        peer_id: PeerId,
+        _peer_id: PeerId,
         start_slot: Slot,
         count: u64,
-        columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
     ) {
+        let epoch = misc::compute_epoch_at_slot::<P>(start_slot);
+        let custody_columns = self.network_globals.custody_columns(epoch);
+
+        // TODO(feature/das): map data columns request to respective custodial_peer
+        for (custodial_peer, peer_custody_columns) in
+            self.map_peer_custody_columns(epoch, &custody_columns)
+        {
+            let request = DataColumnsByRangeRequest {
+                start_slot,
+                count,
+                columns: Arc::new(
+                    ContiguousList::try_from(peer_custody_columns)
+                        .expect("fail to parse custody_columns"),
+                ),
+            };
+
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "sending DataColumnsByRange request (request_id: {request_id:?} peer_id: {custodial_peer}, request: {request:?})",
+                ),
+            );
+
+            self.request(
+                custodial_peer,
+                AppRequestId::Sync(request_id),
+                Request::DataColumnsByRange(request),
+            );
+        }
+
         // TODO: is count capped in eth2_libp2p?
+        /*
         let request = DataColumnsByRangeRequest {
             start_slot,
             count,
-            columns,
+            columns: Arc::new(
+                ContiguousList::try_from(custody_columns).expect("fail to parse custody_columns"),
+            ),
         };
 
         self.log(
@@ -2302,7 +2376,39 @@ impl<P: Preset> Network<P> {
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(request_id), Request::DataColumnsByRange(request));
+        self.request(
+            peer_id,
+            AppRequestId::Sync(request_id),
+            Request::DataColumnsByRange(request),
+        );
+        */
+
+        self.track_column_subnets_peers();
+    }
+
+    #[must_use]
+    fn map_peer_custody_columns(
+        &self,
+        epoch: Epoch,
+        custody_columns: &Vec<ColumnIndex>,
+    ) -> HashMap<PeerId, Vec<ColumnIndex>> {
+        let mut peer_columns_mapping = HashMap::new();
+
+        for column_index in custody_columns {
+            let Some(custodial_peer) = self.get_random_custodial_peer(epoch, *column_index) else {
+                // this should return no custody column error, rather than warning
+                warn!("No custodial peer for column_index: {column_index}");
+                continue;
+            };
+
+            let peer_custody_columns = peer_columns_mapping
+                .entry(custodial_peer)
+                .or_insert_with(|| vec![]);
+
+            peer_custody_columns.push(*column_index);
+        }
+
+        peer_columns_mapping
     }
 
     fn request_data_columns_by_root(
@@ -2340,7 +2446,11 @@ impl<P: Preset> Network<P> {
             ),
         );
 
-        self.request(peer_id, AppRequestId::Sync(request_id), Request::DataColumnsByRoot(request));
+        self.request(
+            peer_id,
+            AppRequestId::Sync(request_id),
+            Request::DataColumnsByRoot(request),
+        );
     }
 
     fn subscribe_to_core_topics(&mut self) {
@@ -2367,8 +2477,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn subscribe_to_data_column_topics(&mut self) {
-        // TODO(das): for now, subscribe to all data column sidecar subnets
-        for subnet_id in 0..DATA_COLUMN_SIDECAR_SUBNET_COUNT {
+        for subnet_id in self.network_globals.custody_subnets() {
             let subnet = Subnet::DataColumn(subnet_id);
 
             if let Some(topic) = self.subnet_gossip_topic(subnet) {
@@ -2517,6 +2626,26 @@ impl<P: Preset> Network<P> {
         }
     }
 
+    fn track_column_subnets_peers(&self) {
+        if let Some(metrics) = self.metrics.as_ref() {
+            let chain_config = self.controller.chain_config();
+            let current_slot = self.controller.slot();
+
+            if chain_config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(current_slot)) {
+                for subnet_id in self.network_globals.custody_subnets() {
+                    let peer_count = self
+                        .network_globals
+                        .peers
+                        .read()
+                        .good_peers_on_subnet(Subnet::DataColumn(subnet_id))
+                        .count();
+
+                    metrics.set_column_subnet_peers(&subnet_id.to_string(), peer_count);
+                }
+            }
+        }
+    }
+
     const fn start_of_epoch(epoch: Epoch) -> Slot {
         misc::compute_start_slot_at_epoch::<P>(epoch)
     }
@@ -2569,7 +2698,7 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
                             if let Err((request_id, error)) = service.send_request(peer_id, request_id, request) {
-                                warn!("error while sending request: {request_id:?} with error: {error}"); 
+                                warn!("error while sending request: {request_id:?} with error: {error}");
                             }
                         }
                         ServiceInboundMessage::SendResponse(peer_id, peer_request_id, response) => {

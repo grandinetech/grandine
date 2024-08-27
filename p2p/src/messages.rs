@@ -3,19 +3,21 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
-    rpc::{GoodbyeReason, StatusMessage}, service::api_types::{AppRequestId, SyncRequestId}, types::{EnrForkId, GossipKind}, 
-    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery
+    rpc::{GoodbyeReason, StatusMessage},
+    service::api_types::{AppRequestId, SyncRequestId},
+    types::{EnrForkId, GossipKind},
+    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
+    PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use operation_pools::PoolRejectionReason;
 use serde::Serialize;
-use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::Phase,
     phase0::{
         containers::{
@@ -29,7 +31,7 @@ use types::{
 
 use crate::{
     misc::{
-        AttestationSubnetActions, BeaconCommitteeSubscription, RequestId, 
+        AttestationSubnetActions, BeaconCommitteeSubscription, RequestId,
         SyncCommitteeSubnetAction, SyncCommitteeSubscription,
     },
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
@@ -127,13 +129,7 @@ impl SyncToMetrics {
 
 pub enum SyncToP2p {
     PruneReceivedBlocks,
-    RequestDataColumnsByRange(
-        SyncRequestId,
-        PeerId,
-        Slot,
-        u64,
-        Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
-    ),
+    RequestDataColumnsByRange(SyncRequestId, PeerId, Slot, u64),
     RequestDataColumnsByRoot(SyncRequestId, PeerId, Vec<DataColumnIdentifier>),
     RequestBlobsByRange(SyncRequestId, PeerId, Slot, u64),
     RequestBlobsByRoot(SyncRequestId, PeerId, Vec<BlobIdentifier>),

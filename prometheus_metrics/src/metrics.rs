@@ -174,6 +174,9 @@ pub struct Metrics {
 
     // Tick delay metrics
     tick_delay_times: GaugeVec,
+
+    // column subnet metrics
+    column_subnet_peers: IntGaugeVec,
 }
 
 impl Metrics {
@@ -719,6 +722,12 @@ impl Metrics {
                 opts!("TICK_DELAY_TIMES", "Tick delay times"),
                 &["tick"],
             )?,
+
+            // column subnet metrics
+            column_subnet_peers: IntGaugeVec::new(
+                opts!("PEERS_PER_COLUMN_SUBNET", "Number of connected peers per column subnet"),
+                &["subnet_id"],
+            )?,
         })
     }
 
@@ -818,7 +827,9 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_blob_sidecar_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_persist_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_data_column_sidecar_task_times.clone()))?;
-        default_registry.register(Box::new(self.fc_data_column_sidecar_persist_task_times.clone()))?;
+        default_registry.register(Box::new(
+            self.fc_data_column_sidecar_persist_task_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.fc_block_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_attester_slashing_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_preprocess_state_task_times.clone()))?;
@@ -869,6 +880,7 @@ impl Metrics {
         default_registry.register(Box::new(self.jemalloc_bytes_mapped.clone()))?;
         default_registry.register(Box::new(self.jemalloc_bytes_retained.clone()))?;
         default_registry.register(Box::new(self.tick_delay_times.clone()))?;
+        default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
 
         Ok(())
     }
@@ -1086,5 +1098,16 @@ impl Metrics {
                  of labels that tick_delay_times was created with",
             )
             .set(delay.as_secs_f64())
+    }
+
+    // Column subnet metrics
+    pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
+        self.column_subnet_peers
+            .get_metric_with_label_values(&[subnet_id])
+            .expect(
+                "the number of label values should match the number \
+                 of labels that column_subnet_peers was created with",
+            )
+            .set(num_peers as i64)
     }
 }
