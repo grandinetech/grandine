@@ -48,6 +48,11 @@ pub struct Metrics {
     gossip_objects: IntCounterVec,
     pub received_sync_contribution_subsets: IntCounter,
     pub received_aggregated_attestation_subsets: IntCounter,
+    
+    // Custody Subnets / Data Column Verification times
+    column_subnet_peers: IntGaugeVec,
+    pub verified_gossip_data_column_sidecar: IntCounter,
+    pub data_column_sidecar_verification_times: Histogram,
 
     // Extra Network stats
     gossip_block_slot_start_delay_time: Histogram,
@@ -173,10 +178,7 @@ pub struct Metrics {
     pub jemalloc_bytes_retained: IntGauge,
 
     // Tick delay metrics
-    tick_delay_times: GaugeVec,
-
-    // column subnet metrics
-    column_subnet_peers: IntGaugeVec,
+    tick_delay_times: GaugeVec, 
 }
 
 impl Metrics {
@@ -263,6 +265,21 @@ impl Metrics {
                 "RECEIVED_AGGREGATED_ATTESTATION_SUBSETS",
                 "Number of received aggregated attestations that are subsets of already known aggregates"
             )?,
+
+            column_subnet_peers: IntGaugeVec::new(
+                opts!("PEERS_PER_COLUMN_SUBNET", "Number of connected peers per column subnet"),
+                &["subnet_id"],
+            )?,
+
+            verified_gossip_data_column_sidecar: IntCounter::new(
+                "VERIFIED_GOSSIP_DATA_COLUMN_SIDECAR", 
+                "Number of gossip data column sidecar verified for propagation"
+            )?,
+
+            data_column_sidecar_verification_times: Histogram::with_opts(histogram_opts!(
+                "DATA_COLUMN_DELAY_FULL_VERIFICATION",
+                "Time takes to verify a data column sidecar"
+            ))?,
 
             // Extra Network stats
             gossip_block_slot_start_delay_time: Histogram::with_opts(histogram_opts!(
@@ -721,13 +738,7 @@ impl Metrics {
             tick_delay_times: GaugeVec::new(
                 opts!("TICK_DELAY_TIMES", "Tick delay times"),
                 &["tick"],
-            )?,
-
-            // column subnet metrics
-            column_subnet_peers: IntGaugeVec::new(
-                opts!("PEERS_PER_COLUMN_SUBNET", "Number of connected peers per column subnet"),
-                &["subnet_id"],
-            )?,
+            )?, 
         })
     }
 
@@ -754,6 +765,9 @@ impl Metrics {
         default_registry.register(Box::new(
             self.received_aggregated_attestation_subsets.clone(),
         ))?;
+        default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
+        default_registry.register(Box::new(self.verified_gossip_data_column_sidecar.clone()))?;
+        default_registry.register(Box::new(self.data_column_sidecar_verification_times.clone()))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
@@ -880,7 +894,6 @@ impl Metrics {
         default_registry.register(Box::new(self.jemalloc_bytes_mapped.clone()))?;
         default_registry.register(Box::new(self.jemalloc_bytes_retained.clone()))?;
         default_registry.register(Box::new(self.tick_delay_times.clone()))?;
-        default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
 
         Ok(())
     }
@@ -980,6 +993,16 @@ impl Metrics {
                 warn!("unable to register received object over gossip for {labels:?}: {error:?}")
             }
         }
+    }
+
+    pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
+        self.column_subnet_peers
+            .get_metric_with_label_values(&[subnet_id])
+            .expect(
+                "the number of label values should match the number \
+                 of labels that column_subnet_peers was created with",
+            )
+            .set(num_peers as i64)
     }
 
     // Extra Network stats
@@ -1098,16 +1121,5 @@ impl Metrics {
                  of labels that tick_delay_times was created with",
             )
             .set(delay.as_secs_f64())
-    }
-
-    // Column subnet metrics
-    pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
-        self.column_subnet_peers
-            .get_metric_with_label_values(&[subnet_id])
-            .expect(
-                "the number of label values should match the number \
-                 of labels that column_subnet_peers was created with",
-            )
-            .set(num_peers as i64)
-    }
+    } 
 }

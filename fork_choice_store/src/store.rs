@@ -1794,7 +1794,10 @@ impl<P: Preset> Store<P> {
         origin: &DataColumnSidecarOrigin,
         current_slot: Slot,
         mut verifier: impl Verifier + Send,
+        metrics: &Arc<Metrics>,
     ) -> Result<DataColumnSidecarAction<P>> {
+        let _timer = metrics.data_column_sidecar_verification_times.start_timer();
+
         let block_header = data_column_sidecar.signed_block_header.message;
 
         let mut state = self

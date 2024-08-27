@@ -362,6 +362,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             &origin,
             store_snapshot.slot(),
             MultiVerifier::default(),
+            metrics.clone_arc(),
         );
 
         MutatorMessage::DataColumnSidecar {
