@@ -48,7 +48,7 @@ pub struct Metrics {
     gossip_objects: IntCounterVec,
     pub received_sync_contribution_subsets: IntCounter,
     pub received_aggregated_attestation_subsets: IntCounter,
-    
+
     // Custody Subnets / Data Column Verification times
     column_subnet_peers: IntGaugeVec,
     pub verified_gossip_data_column_sidecar: IntCounter,
@@ -178,7 +178,7 @@ pub struct Metrics {
     pub jemalloc_bytes_retained: IntGauge,
 
     // Tick delay metrics
-    tick_delay_times: GaugeVec, 
+    tick_delay_times: GaugeVec,
 }
 
 impl Metrics {
@@ -277,7 +277,7 @@ impl Metrics {
             )?,
 
             data_column_sidecar_verification_times: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_DELAY_FULL_VERIFICATION",
+                "DATA_COLUMN_SIDECAR_VERIFICATION_TIMES",
                 "Time takes to verify a data column sidecar"
             ))?,
 
@@ -738,7 +738,7 @@ impl Metrics {
             tick_delay_times: GaugeVec::new(
                 opts!("TICK_DELAY_TIMES", "Tick delay times"),
                 &["tick"],
-            )?, 
+            )?,
         })
     }
 
@@ -767,7 +767,9 @@ impl Metrics {
         ))?;
         default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
         default_registry.register(Box::new(self.verified_gossip_data_column_sidecar.clone()))?;
-        default_registry.register(Box::new(self.data_column_sidecar_verification_times.clone()))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecar_verification_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
@@ -1121,5 +1123,5 @@ impl Metrics {
                  of labels that tick_delay_times was created with",
             )
             .set(delay.as_secs_f64())
-    } 
+    }
 }

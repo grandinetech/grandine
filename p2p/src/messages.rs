@@ -4,7 +4,6 @@ use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
     rpc::{GoodbyeReason, StatusMessage},
-    service::api_types::{AppRequestId, SyncRequestId},
     types::{EnrForkId, GossipKind},
     GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
     PubsubMessage, ReportSource, Request, Response, Subnet, SubnetDiscovery,
@@ -63,13 +62,13 @@ pub enum P2pToSync<P: Preset> {
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, bool, PeerId),
     RequestedBlock((Arc<SignedBeaconBlock<P>>, PeerId, RequestId)),
     RequestedDataColumnSidecar(Arc<DataColumnSidecar<P>>, PeerId),
-    BlobsByRangeRequestFinished(SyncRequestId),
-    BlobsByRootChunkReceived(BlobIdentifier, PeerId, SyncRequestId),
-    BlocksByRangeRequestFinished(SyncRequestId),
+    BlobsByRangeRequestFinished(RequestId),
+    BlobsByRootChunkReceived(BlobIdentifier, PeerId, RequestId),
+    BlocksByRangeRequestFinished(RequestId),
     BlockByRootRequestFinished(H256),
-    DataColumnsByRangeRequestFinished(SyncRequestId),
+    DataColumnsByRangeRequestFinished(RequestId),
     RequestFailed(PeerId),
-    DataColumnsByRootChunkReceived(DataColumnIdentifier, PeerId, SyncRequestId),
+    DataColumnsByRootChunkReceived(DataColumnIdentifier, PeerId, RequestId),
 }
 
 impl<P: Preset> P2pToSync<P> {
@@ -129,12 +128,12 @@ impl SyncToMetrics {
 
 pub enum SyncToP2p {
     PruneReceivedBlocks,
-    RequestDataColumnsByRange(SyncRequestId, PeerId, Slot, u64),
-    RequestDataColumnsByRoot(SyncRequestId, PeerId, Vec<DataColumnIdentifier>),
-    RequestBlobsByRange(SyncRequestId, PeerId, Slot, u64),
-    RequestBlobsByRoot(SyncRequestId, PeerId, Vec<BlobIdentifier>),
-    RequestBlocksByRange(SyncRequestId, PeerId, Slot, u64),
-    RequestBlockByRoot(SyncRequestId, PeerId, H256),
+    RequestDataColumnsByRange(RequestId, PeerId, Slot, u64),
+    RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnIdentifier>),
+    RequestBlobsByRange(RequestId, PeerId, Slot, u64),
+    RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
+    RequestBlocksByRange(RequestId, PeerId, Slot, u64),
+    RequestBlockByRoot(RequestId, PeerId, H256),
     RequestPeerStatus(RequestId, PeerId),
     SubscribeToCoreTopics,
     SubscribeToDataColumnTopics,
@@ -219,7 +218,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     Publish(PubsubMessage<P>),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
-    SendRequest(PeerId, AppRequestId, Request),
+    SendRequest(PeerId, RequestId, Request),
     SendResponse(PeerId, PeerRequestId, Box<Response<P>>),
     Subscribe(GossipTopic),
     SubscribeKind(GossipKind),
@@ -239,7 +238,7 @@ impl<P: Preset> ServiceInboundMessage<P> {
 }
 
 pub enum ServiceOutboundMessage<P: Preset> {
-    NetworkEvent(NetworkEvent<P>),
+    NetworkEvent(NetworkEvent<RequestId, P>),
 }
 
 impl<P: Preset> ServiceOutboundMessage<P> {
