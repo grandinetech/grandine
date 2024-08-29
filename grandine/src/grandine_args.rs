@@ -303,6 +303,10 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = true)]
     subscribe_all_subnets: bool,
 
+    /// Subscribe to all data column subnets
+    #[clap(long)]
+    subscribe_all_data_column_subnets: bool,
+    
     /// Suggested value for the feeRecipient field of the new payload
     #[clap(long, value_name = "EXECUTION_ADDRESS")]
     suggested_fee_recipient: Option<ExecutionAddress>,
@@ -574,6 +578,9 @@ impl NetworkConfigOptions {
 
         if Feature::SubscribeToAllAttestationSubnets.is_enabled() {
             network_config.subscribe_all_subnets = true;
+        }
+
+        if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
             network_config.subscribe_all_data_column_subnets = true;
         }
 
@@ -852,6 +859,7 @@ impl GrandineArgs {
             state_slot,
             disable_block_verification_pool,
             subscribe_all_subnets,
+            subscribe_all_data_column_subnets,
             suggested_fee_recipient,
             jwt_id,
             jwt_secret,
@@ -1133,6 +1141,7 @@ impl GrandineArgs {
             .chain(disable_block_verification_pool.then_some(Feature::DisableBlockVerificationPool))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
+            .chain(subscribe_all_data_column_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
             .collect();
 
         let auth_options = AuthOptions {
