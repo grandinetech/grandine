@@ -25,10 +25,6 @@ use crate::trusted_setup::settings;
 
 mod trusted_setup;
 
-const MAX_BLOBS_PER_BLOCK: u64 = 6;
-const MAX_CELLS_IN_EXTENDED_MATRIX: usize = (MAX_BLOBS_PER_BLOCK * NumberOfColumns::U64) as usize;
-const CELLS_PER_EXT_BLOB: usize = 128;
-
 #[derive(Debug, Error)]
 pub enum VerifyKzgProofsError {
     #[error(
@@ -188,45 +184,43 @@ fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = Colu
 }
 
 /**
- * Return the full ``ExtendedMatrix``.
+ * Return the full, flattened sequence of matrix entries.
  *
- * This helper demonstrates the relationship between blobs and ``ExtendedMatrix``.
+ * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
  */
-pub fn compute_extended_matrix(
+pub fn compute_matrix(
     blobs: Vec<CKzgBlob>,
-) -> Result<[MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX]> {
+) -> Result<Vec<MatrixEntry>> {
     let kzg_settings = settings();
 
-    let mut extended_matrix: [MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX] =
-        core::array::from_fn(|_| MatrixEntry::default());
+    let mut matrix = vec![];
     for (blob_index, blob) in blobs.iter().enumerate() {
         let (cells, proofs) = CKzgCell::compute_cells_and_kzg_proofs(blob, &kzg_settings)?;
         for (cell_index, (cell, proof)) in cells.into_iter().zip(proofs.into_iter()).enumerate() {
-            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_index] = MatrixEntry {
+            matrix.push(MatrixEntry {
                 cell: try_convert_ckzg_cell_to_cell(&cell)?,
                 kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
                 row_index: blob_index as u64,
                 column_index: cell_index as u64,
-            };
+            });
         }
     }
 
-    Ok(extended_matrix)
+    Ok(matrix)
 }
 
 /**
- * Return the recovered extended matrix.
+ * Recover the full, flattened sequence of matrix entries.
  *
  * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
  */
 pub fn recover_matrix(
     partial_matrix: Vec<MatrixEntry>,
     blob_count: usize,
-) -> Result<[MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX]> {
+) -> Result<Vec<MatrixEntry>> {
     let kzg_settings = settings();
 
-    let mut extended_matrix: [MatrixEntry; MAX_CELLS_IN_EXTENDED_MATRIX] =
-        core::array::from_fn(|_| MatrixEntry::default());
+    let mut matrix = vec![];
     for blob_index in 0..blob_count {
         let (cell_indexs, cells_bytes): (Vec<_>, Vec<_>) = partial_matrix
             .iter()
@@ -251,16 +245,16 @@ pub fn recover_matrix(
             .zip(recovered_proofs.into_iter())
             .enumerate()
         {
-            extended_matrix[blob_index * CELLS_PER_EXT_BLOB + cell_index] = MatrixEntry {
+            matrix.push(MatrixEntry {
                 cell: try_convert_ckzg_cell_to_cell(&cell)?,
                 kzg_proof: KzgProof::try_from(proof.to_bytes().into_inner())?,
                 row_index: blob_index as u64,
                 column_index: cell_index as u64,
-            };
+            });
         }
     }
 
-    Ok(extended_matrix)
+    Ok(matrix)
 }
 
 fn try_convert_ckzg_cell_to_cell(cell: &CKzgCell) -> Result<Cell> {

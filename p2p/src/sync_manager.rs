@@ -127,7 +127,6 @@ impl SyncManager {
             "retrying batch {batch:?}, new peer: {peer:?}, request_id: {request_id}",
         ));
 
-        // NOTE: send and register the batch request
         match peer {
             Some(peer_id) => {
                 let batch = SyncBatch {
