@@ -198,6 +198,7 @@ fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = Colu
  *
  * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
  */
+// TODO: data_column_sidecar_computation metric can be implemented with this function call
 pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
     let kzg_settings = settings();
 
@@ -222,6 +223,7 @@ pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
  *
  * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
  */
+// TODO: reconstructed_columns and columns_reconstruction_time metrics can be implemented with this function call
 pub fn recover_matrix(
     partial_matrix: Vec<MatrixEntry>,
     blob_count: usize,

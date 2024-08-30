@@ -217,6 +217,7 @@ pub struct Store<P: Preset> {
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     custody_columns: HashSet<ColumnIndex>,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset> Store<P> {
@@ -228,6 +229,7 @@ impl<P: Preset> Store<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         finished_initial_forward_sync: bool,
+        metrics: Option<Arc<Metrics>>,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -288,6 +290,7 @@ impl<P: Preset> Store<P> {
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             custody_columns: HashSet::default(),
+            metrics,
         }
     }
 
@@ -1799,6 +1802,10 @@ impl<P: Preset> Store<P> {
         mut verifier: impl Verifier + Send,
         metrics: &Option<Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.data_column_sidecars_submitted_for_processing.inc();
+        }
+
         let _timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_verification_times.start_timer());
@@ -1859,20 +1866,35 @@ impl<P: Preset> Store<P> {
         )?;
 
         // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
+        // data_column_sidecar_inclusion_proof_verification metric should be somewhere here
+        // or maybe inside the verify_sidecar_inclusion_proof() function
+        let _sidecar_inclusion_proof_timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_inclusion_proof_verification.start_timer());
+
         ensure!(
             verify_sidecar_inclusion_proof(&data_column_sidecar),
             Error::DataColumnSidecarInvalidInclusionProof {
                 data_column_sidecar
             }
         );
+        // stop _sidecar_inclusion_proof_timer ?
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
+        // data_column_sidecar_kzg_verification_batch metric should be somewhere here
+        // or maybe inside the verify_kzg_proofs() function
+        // where to put data_column_sidecar_kzg_verification_single?
+        let _sidecar_inclusion_proof_timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_kzg_verification_batch.start_timer());
+
         verify_kzg_proofs(&data_column_sidecar).map_err(|error| {
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar: data_column_sidecar.clone_arc(),
                 error,
             }
         })?;
+        // stop data_column_sidecar_kzg_verification_batch ?
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 1/2:

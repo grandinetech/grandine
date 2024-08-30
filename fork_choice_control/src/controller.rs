@@ -111,6 +111,7 @@ where
             anchor_block,
             anchor_state,
             finished_initial_forward_sync,
+            metrics.clone(),
         );
 
         store.apply_tick(tick)?;

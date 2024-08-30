@@ -2275,6 +2275,7 @@ impl<P: Preset> Network<P> {
 
         let request = DataColumnsByRootRequest::new(
             data_column_identifiers
+                .clone()
                 .try_into()
                 .expect("length is under maximum"),
         );
@@ -2287,6 +2288,10 @@ impl<P: Preset> Network<P> {
         );
 
         self.request(peer_id, request_id, Request::DataColumnsByRoot(request));
+        let custody_columns_count = data_column_identifiers.len();
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.set_custody_columns("by_root", custody_columns_count);
+        }
     }
 
     fn subscribe_to_core_topics(&mut self) {
