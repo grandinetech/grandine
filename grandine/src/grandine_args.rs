@@ -461,6 +461,10 @@ struct NetworkConfigOptions {
     #[clap(long, value_delimiter = ',')]
     libp2p_nodes: Vec<Multiaddr>,
 
+    /// Load p2p private key from KEY_FILE
+    #[clap(long, value_name = "KEY_FILE")]
+    libp2p_private_key_file: Option<PathBuf>,
+
     /// Target number of network peers
     #[clap(long, default_value_t = DEFAULT_TARGET_PEERS)]
     target_peers: usize,
@@ -506,6 +510,7 @@ impl NetworkConfigOptions {
             enr_quic_port_ipv6,
             boot_nodes,
             libp2p_nodes,
+            libp2p_private_key_file,
             target_peers,
             target_subnet_peers,
             trusted_peers,
@@ -525,6 +530,7 @@ impl NetworkConfigOptions {
         network_config.target_peers = target_peers;
         network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
+        network_config.libp2p_private_key_file = libp2p_private_key_file;
         network_config.outbound_rate_limiter_config = Some(OutboundRateLimiterConfig::default());
 
         if let Some(listen_address_ipv6) = listen_address_ipv6 {
