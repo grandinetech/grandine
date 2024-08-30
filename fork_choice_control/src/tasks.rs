@@ -432,9 +432,11 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
             metrics,
         } = self;
 
-        let _timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.fc_data_column_sidecar_persist_task_times.start_timer());
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_data_column_sidecar_persist_task_times
+                .start_timer()
+        });
 
         let data_column_sidecars = store_snapshot.unpersisted_data_column_sidecars();
 

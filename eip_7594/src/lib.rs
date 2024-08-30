@@ -2,6 +2,7 @@ use anyhow::{ensure, Result};
 use c_kzg::{Blob as CKzgBlob, Bytes48, Cell as CKzgCell, KzgProof as CKzgProof};
 use hashing::ZERO_HASHES;
 use helper_functions::predicates::is_valid_merkle_branch;
+use itertools::Itertools;
 use kzg as _;
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
@@ -16,7 +17,10 @@ use types::{
         BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, MatrixEntry,
         NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
     },
-    phase0::{containers::SignedBeaconBlockHeader, primitives::{NodeId, SubnetId}},
+    phase0::{
+        containers::SignedBeaconBlockHeader,
+        primitives::{NodeId, SubnetId},
+    },
     preset::Preset,
     traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
 };
@@ -77,7 +81,7 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
     );
 
     let kzg_settings = settings();
-    
+
     let col_indices: Vec<u64> = vec![*index; column.len()];
 
     let column = column
@@ -128,7 +132,10 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     );
 }
 
-pub fn get_custody_subnets(node_id: NodeId, custody_subnet_count: u64) -> Vec<SubnetId> {
+pub fn get_custody_subnets(
+    node_id: NodeId,
+    custody_subnet_count: u64,
+) -> impl Iterator<Item = SubnetId> {
     assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
 
     let mut subnet_ids = vec![];
@@ -161,26 +168,23 @@ pub fn get_custody_subnets(node_id: NodeId, custody_subnet_count: u64) -> Vec<Su
         current_id = current_id + Uint256::one();
     }
 
-    subnet_ids.into()
+    subnet_ids.into_iter()
 }
 
-pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
-    let mut result = get_custody_subnets(node_id, custody_subnet_count)
-        .into_iter()
+pub fn get_custody_columns(
+    node_id: NodeId,
+    custody_subnet_count: u64,
+) -> impl Iterator<Item = ColumnIndex> {
+    get_custody_subnets(node_id, custody_subnet_count)
         .flat_map(|subnet_id| get_data_columns_for_subnet(subnet_id))
-        .collect::<Vec<_>>();
-
-    result.sort();
-    result
+        .sorted()
 }
 
 fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = ColumnIndex> {
     let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
-    
+
     (0..columns_per_subnet)
-        .map(move |column_index| 
-            (DATA_COLUMN_SIDECAR_SUBNET_COUNT * column_index + subnet_id)
-        )
+        .map(move |column_index| (DATA_COLUMN_SIDECAR_SUBNET_COUNT * column_index + subnet_id))
 }
 
 /**
@@ -188,9 +192,7 @@ fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = Colu
  *
  * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
  */
-pub fn compute_matrix(
-    blobs: Vec<CKzgBlob>,
-) -> Result<Vec<MatrixEntry>> {
+pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
     let kzg_settings = settings();
 
     let mut matrix = vec![];
@@ -232,7 +234,7 @@ pub fn recover_matrix(
                 }
             })
             .unzip();
-        
+
         let cells = cells_bytes
             .into_iter()
             .map(|c| CKzgCell::from_bytes(c).map_err(Into::into))
@@ -394,9 +396,11 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
             (1..=k).fold(1_f64, |acc, i| acc * (n - i + 1) as f64 / i as f64)
         }
     };
-    
+
     let hypergeom_cdf = |k: u64, m: u64, n: u64, big_n: u64| -> f64 {
-        (0..=k).fold(0_f64, |acc, i| acc + math_comb(n, i) * math_comb(m - n, big_n - i) / math_comb(m, big_n))
+        (0..=k).fold(0_f64, |acc, i| {
+            acc + math_comb(n, i) * math_comb(m - n, big_n - i) / math_comb(m, big_n)
+        })
     };
 
     // the probability of successful sampling of an unavailable block
@@ -468,7 +472,10 @@ mod tests {
             result,
         } = case.yaml::<Meta>("meta");
 
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
+        assert_eq!(
+            get_custody_columns(node_id, custody_subnet_count).collect::<Vec<_>>(),
+            result
+        );
     }
 
     #[derive(Deserialize)]

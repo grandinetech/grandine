@@ -23,7 +23,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    eip7594::{DataColumnIdentifier, DataColumnSidecar, ColumnIndex},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
@@ -416,7 +416,10 @@ impl<P: Preset> Storage<P> {
                 data_column_sidecar,
             )?);
 
-            batch.push(serialize(SlotColumnIndex(slot, block_root, index), data_column_id)?);
+            batch.push(serialize(
+                SlotColumnIndex(slot, block_root, index),
+                data_column_id,
+            )?);
 
             persisted_data_column_ids.push(data_column_id);
         }

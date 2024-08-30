@@ -1513,17 +1513,20 @@ impl<P: Preset> Network<P> {
             // > blob sidecar is well-formatted, has valid inclusion proof, and is correct w.r.t. the expected KZG commitments
             // > through `verify_blob_kzg_proof``.
             Response::BlobsByRange(Some(blob_sidecar)) => {
+                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+                let blob_identifier = blob_sidecar.as_ref().into();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received BlobsByRange response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                        blob_sidecar.signed_block_header.message.slot,
+                         (request_id: {request_id}, peer_id: {peer_id}, slot: {blob_sidecar_slot}, blob: {blob_sidecar:?})",
                     ),
                 );
 
-                let blob_identifier = blob_sidecar.as_ref().into();
-                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+                self.log_with_feature(format_args!(
+                    "received blob from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {blob_sidecar_slot}, blob_id: {blob_identifier:?})",
+                ));
 
                 if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
                     let block_seen = self
@@ -1543,20 +1546,19 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRoot(Some(blob_sidecar)) => {
+                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+                let blob_identifier = blob_sidecar.as_ref().into();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received BlobsByRoot response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                        blob_sidecar.signed_block_header.message.slot,
+                         (request_id: {request_id}, peer_id: {peer_id}, slot: {blob_sidecar_slot}, blob: {blob_sidecar:?})",
                     ),
                 );
 
-                let blob_identifier = blob_sidecar.as_ref().into();
-                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
-
                 self.log_with_feature(format_args!(
-                    "received blob from RPC (blob_id: {blob_identifier:?}, slot: {blob_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
+                    "received blob from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {blob_sidecar_slot}, blob_id: {blob_identifier:?})",
                 ));
 
                 if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
@@ -1577,18 +1579,22 @@ impl<P: Preset> Network<P> {
                 ));
             }
             Response::BlocksByRange(Some(block)) => {
+                let block_slot = block.message().slot();
+                let block_root = block.message().hash_tree_root();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received BeaconBlocksByRange response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, block.message.slot: {:?})",
-                        block.message().slot(),
+                         (request_id: {request_id}, peer_id: {peer_id}, slot: {block_slot}, block: {block:?})",
                     ),
                 );
 
-                let block_root = block.message().hash_tree_root();
+                self.log_with_feature(format_args!(
+                    "received beacon block from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {block_slot}, root: {block_root})",
+                ));
 
-                if self.register_new_received_block(block_root, block.message().slot()) {
+                if self.register_new_received_block(block_root, block_slot) {
                     P2pToSync::RequestedBlock((block, peer_id, request_id))
                         .send(&self.channels.p2p_to_sync_tx);
                 }
@@ -1605,28 +1611,25 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRoot(Some(block)) => {
+                let block_slot = block.message().slot();
+                let block_root = block.message().hash_tree_root();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received BeaconBlocksByRoot response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, block: {block:?})",
+                         (request_id: {request_id}, peer_id: {peer_id}, slot: {block_slot}, block: {block:?})",
                     ),
                 );
 
-                let block_root = block.message().hash_tree_root();
-                let block_slot = block.message().slot();
-
-                self.log(
-                    Level::Info,
-                    format_args!(
-                        "received beacon block from RPC (request_id: {request_id}, slot: {block_slot}, root: {block_root:?})",
-                    ),
-                );
+                self.log_with_feature(format_args!(
+                    "received beacon block from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {block_slot}, root: {block_root})",
+                ));
 
                 P2pToSync::BlockByRootRequestFinished(block_root)
                     .send(&self.channels.p2p_to_sync_tx);
 
-                if self.register_new_received_block(block_root, block.message().slot()) {
+                if self.register_new_received_block(block_root, block_slot) {
                     self.controller
                         .on_requested_block(block.clone_arc(), Some(peer_id));
 
@@ -1640,62 +1643,38 @@ impl<P: Preset> Network<P> {
                     "peer {peer_id} terminated BeaconBlocksByRoot response stream for request_id: {request_id}",
                 ));
             }
-            Response::LightClientBootstrap(_) => {
-                // TODO(Altair Light Client Sync Protocol)
+            Response::LightClientBootstrap(_)
+            | Response::LightClientOptimisticUpdate(_)
+            | Response::LightClientFinalityUpdate(_) => {
                 self.log(
                     Level::Debug,
                     format_args!(
-                        "received LightClientBootstrap response chunk (peer_id: {peer_id})",
-                    ),
-                );
-            }
-            Response::LightClientOptimisticUpdate(_) => {
-                self.log(
-                    Level::Debug,
-                    format_args!(
-                        "received LightClientOptimisticUpdate response chunk (peer_id: {peer_id})",
-                    ),
-                );
-            }
-            Response::LightClientFinalityUpdate(_) => {
-                self.log(
-                    Level::Debug,
-                    format_args!(
-                        "received LightClientFinalityUpdate response chunk (peer_id: {peer_id})",
+                        "received {response:?} response chunk (request_id: {request_id}, peer_id: {peer_id})",
                     ),
                 );
             }
             Response::DataColumnsByRange(Some(data_column_sidecar)) => {
+                let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+                let data_column_identifier = data_column_sidecar.as_ref().into();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received DataColumnsByRange response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, data_column_sidecar.slot: {:?})",
-                        data_column_sidecar.signed_block_header.message.slot,
+                        (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, data_column: {data_column_sidecar:?})",
                     ),
                 );
 
-                if eip_7594::verify_kzg_proofs(&data_column_sidecar).unwrap_or_else(|_| false) {
-                    let data_column_identifier = data_column_sidecar.as_ref().into();
-                    let data_column_sidecar_slot =
-                        data_column_sidecar.signed_block_header.message.slot;
+                self.log_with_feature(format_args!(
+                    "received data column sidecar from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, column_id: {data_column_identifier:?})",
+                ));
 
-                    if self.register_new_received_data_column_sidecar(
-                        data_column_identifier,
-                        data_column_sidecar_slot,
-                    ) {
-                        P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
-                            .send(&self.channels.p2p_to_sync_tx);
-                    }
-                } else {
-                    self.log(
-                        Level::Debug,
-                        format_args!(
-                            "received invalid data column sidecar \
-                             (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                            data_column_sidecar.signed_block_header.message.slot,
-                        ),
-                    );
+                if self.register_new_received_data_column_sidecar(
+                    data_column_identifier,
+                    data_column_sidecar_slot,
+                ) {
+                    P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
+                        .send(&self.channels.p2p_to_sync_tx);
                 }
             }
             Response::DataColumnsByRange(None) => {
@@ -1707,53 +1686,39 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::DataColumnsByRoot(Some(data_column_sidecar)) => {
+                let data_column_sidecar_slot = data_column_sidecar.signed_block_header.message.slot;
+                let data_column_identifier = data_column_sidecar.as_ref().into();
+
                 self.log(
                     Level::Debug,
                     format_args!(
                         "received DataColumnsByRoot response chunk \
-                         (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                        data_column_sidecar.signed_block_header.message.slot,
+                        (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, data_column: {data_column_sidecar:?})",
                     ),
                 );
 
-                if eip_7594::verify_kzg_proofs(&data_column_sidecar).unwrap_or_else(|_| false) {
-                    let data_column_identifier: DataColumnIdentifier =
-                        data_column_sidecar.as_ref().into();
-                    let data_column_sidecar_slot =
-                        data_column_sidecar.signed_block_header.message.slot;
+                self.log_with_feature(format_args!(
+                    "received data column sidecar from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, column_id: {data_column_identifier:?})",
+                ));
 
-                    self.log_with_feature(format_args!(
-                        "received data column sidecar from RPC (identifier: {data_column_identifier:?}, slot: {data_column_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id:?})",
-                    ));
+                if self.register_new_received_data_column_sidecar(
+                    data_column_identifier,
+                    data_column_sidecar_slot,
+                ) {
+                    // let block_seen = self
+                    //     .received_block_roots
+                    //     .contains_key(&data_column_identifier.block_root);
 
-                    if self.register_new_received_data_column_sidecar(
-                        data_column_identifier,
-                        data_column_sidecar_slot,
-                    ) {
-                        // let block_seen = self
-                        //     .received_block_roots
-                        //     .contains_key(&data_column_identifier.block_root);
-
-                        P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
-                            .send(&self.channels.p2p_to_sync_tx);
-                    }
-
-                    P2pToSync::DataColumnsByRootChunkReceived(
-                        data_column_identifier,
-                        peer_id,
-                        request_id,
-                    )
-                    .send(&self.channels.p2p_to_sync_tx);
-                } else {
-                    self.log(
-                        Level::Debug,
-                        format_args!(
-                            "received invalid data column sidecar \
-                             (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {:?})",
-                            data_column_sidecar.signed_block_header.message.slot,
-                        ),
-                    );
+                    P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id)
+                        .send(&self.channels.p2p_to_sync_tx);
                 }
+
+                P2pToSync::DataColumnsByRootChunkReceived(
+                    data_column_identifier,
+                    peer_id,
+                    request_id,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
             }
             Response::DataColumnsByRoot(None) => {
                 self.log_with_feature(format_args!(
@@ -2250,29 +2215,26 @@ impl<P: Preset> Network<P> {
         let epoch = misc::compute_epoch_at_slot::<P>(start_slot);
         let custody_columns = self.network_globals.custody_columns(epoch);
 
-        // TODO: is count capped in eth2_libp2p?
-        let request = DataColumnsByRangeRequest {
-            start_slot,
-            count,
-            columns: Arc::new(
-                ContiguousList::try_from(custody_columns).expect("fail to parse custody_columns"),
-            ),
-        };
+        if self.check_good_peers_on_column_subnets(epoch) {
+            // TODO: is count capped in eth2_libp2p?
+            let request = DataColumnsByRangeRequest {
+                start_slot,
+                count,
+                columns: Arc::new(
+                    ContiguousList::try_from(custody_columns)
+                        .expect("fail to parse custody_columns"),
+                ),
+            };
 
-        self.log(
-            Level::Debug,
-            format_args!(
-                "sending DataColumnsByRange request (request_id: {request_id} peer_id: {peer_id}, request: {request:?})",
-            ),
-        );
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "sending DataColumnsByRange request (request_id: {request_id} peer_id: {peer_id}, request: {request:?})",
+                ),
+            );
 
-        self.request(
-            peer_id,
-            request_id,
-            Request::DataColumnsByRange(request),
-        );
-
-        self.track_column_subnets_peers();
+            self.request(peer_id, request_id, Request::DataColumnsByRange(request));
+        }
     }
 
     #[must_use]
@@ -2511,23 +2473,27 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn track_column_subnets_peers(&self) {
-        if let Some(metrics) = self.metrics.as_ref() {
-            let chain_config = self.controller.chain_config();
-            let current_slot = self.controller.slot();
+    /// Checks all custody column subnets for peers. Returns `true` if there is at least one peer in
+    /// every custody column subnet.
+    fn check_good_peers_on_column_subnets(&self, epoch: Epoch) -> bool {
+        let chain_config = self.controller.chain_config();
 
-            if chain_config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(current_slot)) {
-                for subnet_id in self.network_globals.custody_subnets() {
-                    let peer_count = self
-                        .network_globals
-                        .peers
-                        .read()
-                        .good_peers_on_subnet(Subnet::DataColumn(subnet_id))
-                        .count();
+        if chain_config.is_eip7594_fork(epoch) {
+            self.network_globals.custody_subnets().all(|subnet_id| {
+                let peer_count = self
+                    .network_globals
+                    .peers
+                    .read()
+                    .good_custody_subnet_peer(subnet_id)
+                    .count();
 
-                    metrics.set_column_subnet_peers(&subnet_id.to_string(), peer_count);
-                }
-            }
+                self.metrics.as_ref().map(|metrics| {
+                    metrics.set_column_subnet_peers(&subnet_id.to_string(), peer_count)
+                });
+                peer_count > 0
+            })
+        } else {
+            true
         }
     }
 

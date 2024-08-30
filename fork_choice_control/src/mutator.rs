@@ -70,8 +70,8 @@ use crate::{
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask,
-        CheckpointStateTask, DataColumnSidecarTask, PersistBlobSidecarsTask, PreprocessStateTask,
-        PersistDataColumnSidecarsTask,
+        CheckpointStateTask, DataColumnSidecarTask, PersistBlobSidecarsTask,
+        PersistDataColumnSidecarsTask, PreprocessStateTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -248,7 +248,10 @@ where
                     wait_group,
                     persisted_data_column_ids,
                 } => {
-                    self.handle_finish_persisting_data_column_sidecars(wait_group, persisted_data_column_ids);
+                    self.handle_finish_persisting_data_column_sidecars(
+                        wait_group,
+                        persisted_data_column_ids,
+                    );
                 }
                 MutatorMessage::PreprocessedBeaconState { block_root, state } => {
                     self.handle_preprocessed_beacon_state(block_root, &state);
@@ -1147,7 +1150,7 @@ where
                 if let Some(gossip_id) = origin.gossip_id() {
                     P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
                 }
-                
+
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.verified_gossip_data_column_sidecar.inc();
                 }
@@ -1284,7 +1287,8 @@ where
         wait_group: W,
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
     ) {
-        self.store_mut().mark_persisted_data_columns(persisted_data_column_ids);
+        self.store_mut()
+            .mark_persisted_data_columns(persisted_data_column_ids);
 
         self.update_store_snapshot();
 

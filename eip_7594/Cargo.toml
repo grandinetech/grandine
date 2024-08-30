@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 c-kzg = { workspace = true }
 hashing = { workspace = true }
 helper_functions = { workspace = true }
+itertools = { workspace = true }
 kzg = { workspace = true }
 num-traits = { workspace = true }
 ssz = { workspace = true}
