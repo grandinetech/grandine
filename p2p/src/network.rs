@@ -576,18 +576,14 @@ impl<P: Preset> Network<P> {
     }
 
     #[must_use]
-    pub fn get_custodial_peers(&self, _epoch: Epoch, column_index: ColumnIndex) -> Vec<PeerId> {
+    pub fn get_custodial_peers(&self, column_index: ColumnIndex) -> Vec<PeerId> {
         self.network_globals()
             .custody_peers_for_column(column_index)
     }
 
     #[must_use]
-    pub fn get_random_custodial_peer(
-        &self,
-        epoch: Epoch,
-        column_index: ColumnIndex,
-    ) -> Option<PeerId> {
-        self.get_custodial_peers(epoch, column_index)
+    pub fn get_random_custodial_peer(&self, column_index: ColumnIndex) -> Option<PeerId> {
+        self.get_custodial_peers(column_index)
             .choose(&mut thread_rng())
             .cloned()
     }
@@ -2213,8 +2209,9 @@ impl<P: Preset> Network<P> {
         count: u64,
     ) {
         let epoch = misc::compute_epoch_at_slot::<P>(start_slot);
-        let custody_columns = self.network_globals.custody_columns(epoch);
-
+        let custody_columns = self.network_globals.custody_columns();
+        
+        // prevent node from sending excessive requests, since custody peers is not available.
         if self.check_good_peers_on_column_subnets(epoch) {
             // TODO: is count capped in eth2_libp2p?
             let request = DataColumnsByRangeRequest {
@@ -2234,19 +2231,20 @@ impl<P: Preset> Network<P> {
             );
 
             self.request(peer_id, request_id, Request::DataColumnsByRange(request));
+        } else {
+            self.log(
+                Level::Debug,
+                format_args!("Waiting for peers to be available on custody_columns: {custody_columns:?}")
+            );
         }
     }
 
     #[must_use]
-    fn map_peer_custody_columns(
-        &self,
-        epoch: Epoch,
-        custody_columns: &Vec<ColumnIndex>,
-    ) -> HashMap<PeerId, Vec<ColumnIndex>> {
+    fn map_peer_custody_columns(&self, custody_columns: &Vec<ColumnIndex>) -> HashMap<PeerId, Vec<ColumnIndex>> {
         let mut peer_columns_mapping = HashMap::new();
 
         for column_index in custody_columns {
-            let Some(custodial_peer) = self.get_random_custodial_peer(epoch, *column_index) else {
+            let Some(custodial_peer) = self.get_random_custodial_peer(*column_index) else {
                 // this should return no custody column error, rather than warning
                 warn!("No custodial peer for column_index: {column_index}");
                 continue;
@@ -2329,6 +2327,8 @@ impl<P: Preset> Network<P> {
 
             if let Some(topic) = self.subnet_gossip_topic(subnet) {
                 ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
+            } else {
+                warn!("Could not subscribe to gossipsub topic on subnet_id: {subnet_id}");
             }
         }
     }
