@@ -50,6 +50,15 @@ pub enum VerifyKzgProofsError {
     },
 }
 
+#[derive(Debug, Error)]
+pub enum ExtendedSampleError {
+    #[error(
+        "Allowed failtures is out of range: {allowed_failures} in 0 -> {}",
+        NumberOfColumns::U64 / 2
+    )]
+    AllowedFailtureOutOfRange { allowed_failures: u64 },
+}
+
 pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
     let DataColumnSidecar {
         index,
@@ -381,12 +390,14 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
  * This helper demonstrates how to calculate the number of columns to query per slot when
  * allowing given number of failures, assuming uniform random selection without replacement.
 */
-pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
+pub fn get_extended_sample_count(allowed_failures: u64) -> Result<u64> {
     // check that `allowed_failures` within the accepted range [0 -> NUMBER_OF_COLUMNS // 2]
-    assert!((0..(NumberOfColumns::U64 / 2)).contains(&allowed_failures));
-
     // missing chunks for more than a half is the worst case
     let worst_case_missing = NumberOfColumns::U64 / 2 + 1;
+    ensure!(
+        allowed_failures < worst_case_missing,
+        ExtendedSampleError::AllowedFailtureOutOfRange { allowed_failures }
+    );
 
     // modified from [math_lib](https://docs.rs/math_l/latest/src/math_l/math.rs.html#32-38) with compatible types
     let math_comb = |n: u64, k: u64| -> f64 {
@@ -414,18 +425,19 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> u64 {
     // number of unique column IDs
     let mut sample_count = SAMPLES_PER_SLOT;
     while sample_count <= NumberOfColumns::U64 {
-        let prb = hypergeom_cdf(
+        if hypergeom_cdf(
             allowed_failures,
             NumberOfColumns::U64,
             worst_case_missing,
             sample_count,
-        );
-        if prb <= false_positive_threshold {
+        ) <= false_positive_threshold
+        {
             break;
         }
         sample_count += 1;
     }
-    return sample_count;
+
+    Ok(sample_count)
 }
 
 #[cfg(test)]

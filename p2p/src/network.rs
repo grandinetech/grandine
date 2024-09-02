@@ -2210,7 +2210,7 @@ impl<P: Preset> Network<P> {
     ) {
         let epoch = misc::compute_epoch_at_slot::<P>(start_slot);
         let custody_columns = self.network_globals.custody_columns();
-        
+
         // prevent node from sending excessive requests, since custody peers is not available.
         if self.check_good_peers_on_column_subnets(epoch) {
             // TODO: is count capped in eth2_libp2p?
@@ -2234,13 +2234,18 @@ impl<P: Preset> Network<P> {
         } else {
             self.log(
                 Level::Debug,
-                format_args!("Waiting for peers to be available on custody_columns: {custody_columns:?}")
+                format_args!(
+                    "Waiting for peers to be available on custody_columns: {custody_columns:?}"
+                ),
             );
         }
     }
 
     #[must_use]
-    fn map_peer_custody_columns(&self, custody_columns: &Vec<ColumnIndex>) -> HashMap<PeerId, Vec<ColumnIndex>> {
+    fn map_peer_custody_columns(
+        &self,
+        custody_columns: &Vec<ColumnIndex>,
+    ) -> HashMap<PeerId, Vec<ColumnIndex>> {
         let mut peer_columns_mapping = HashMap::new();
 
         for column_index in custody_columns {

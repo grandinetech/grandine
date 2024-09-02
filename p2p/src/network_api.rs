@@ -66,6 +66,7 @@ struct NodeMetadata {
     seq_number: u64,
     attnets: EnrAttestationBitfield,
     syncnets: Option<EnrSyncCommitteeBitfield>,
+    custody_subnet_count: Option<u64>,
 }
 
 #[derive(PartialEq, Eq, Deserialize, Serialize)]
@@ -117,6 +118,7 @@ impl<P: Preset> Network<P> {
             seq_number: metadata.seq_number(),
             attnets: metadata.attnets(),
             syncnets: metadata.syncnets(),
+            custody_subnet_count: metadata.custody_subnet_count(),
         };
 
         NodeIdentity {

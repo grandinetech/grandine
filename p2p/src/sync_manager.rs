@@ -497,6 +497,7 @@ impl SyncManager {
             "request data columns by range finished (request_id: {request_id})",
         ));
 
+        // TODO(feature/das): need to double check, this doesn't has in prev-version
         self.data_column_requests
             .request_by_range_finished(request_id)
     }

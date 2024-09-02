@@ -998,13 +998,18 @@ impl Metrics {
     }
 
     pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
-        self.column_subnet_peers
+        match self
+            .column_subnet_peers
             .get_metric_with_label_values(&[subnet_id])
-            .expect(
-                "the number of label values should match the number \
-                 of labels that column_subnet_peers was created with",
-            )
-            .set(num_peers as i64)
+        {
+            Ok(metric) => metric.set(num_peers as i64),
+            Err(error) => {
+                warn!(
+                    "the number of label values should match the number \
+                 of labels that column_subnet_peers was created: {error:?}"
+                );
+            }
+        }
     }
 
     // Extra Network stats
