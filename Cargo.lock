@@ -3059,6 +3059,7 @@ dependencies = [
  "prometheus_metrics",
  "rayon",
  "reqwest",
+ "reth-libmdbx",
  "runtime",
  "serde",
  "serde_json",

@@ -89,7 +89,6 @@ impl GrandineConfig {
         } = self;
 
         let StorageConfig {
-            db_size,
             archival_epoch_interval,
             ..
         } = storage_config;
@@ -103,12 +102,8 @@ impl GrandineConfig {
         }
 
         info!("data directory: {data_dir:?}");
-        info!("Eth2 database upper limit: {}", db_size.to_string_as(true));
 
-        info!(
-            "Eth1 database upper limit: {}",
-            storage_config.eth1_db_size.to_string_as(true),
-        );
+        self.storage_config.print_db_sizes();
 
         info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
         info!("graffiti: {graffiti:?}");

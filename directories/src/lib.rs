@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use types::config::Config;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Directories {
     pub data_dir: Option<PathBuf>,
     pub store_directory: Option<PathBuf>,

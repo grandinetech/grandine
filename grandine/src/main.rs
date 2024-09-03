@@ -101,13 +101,25 @@ struct Context {
 
 impl Context {
     fn run_with_restart<P: Preset>(self) -> Result<()> {
+        let mut db_size_modifier = 1;
+
         loop {
             // `Context` surprisingly does not implement `UnwindSafe`.
             // Remove the `AssertUnwindSafe` to see the offending types.
             // It is probably unwind safe in practice.
             // All the offending types are trait objects without `UnwindSafe` bounds.
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                let run = self.clone().run::<P>();
+                let mut context = self.clone();
+
+                context.storage_config = context
+                    .storage_config
+                    .with_increased_db_sizes(db_size_modifier);
+
+                if db_size_modifier > 1 {
+                    context.storage_config.print_db_sizes();
+                }
+
+                let run = context.run::<P>();
                 block_on(run)
             }))
             .map_err(panics::payload_into_error);
@@ -118,7 +130,14 @@ impl Context {
 
             match result {
                 Ok(Ok(())) => break Ok(()),
-                Ok(Err(error)) => error!("application runtime failed: {error:?}"),
+                Ok(Err(error)) => {
+                    error!("application runtime failed: {error:?}");
+
+                    if error.downcast_ref::<libmdbx::Error>() == Some(&libmdbx::Error::MapFull) {
+                        info!("increasing environment map size limits");
+                        db_size_modifier *= 2;
+                    }
+                }
                 Err(error) => error!("application runtime panicked: {error:?}"),
             }
         }
