@@ -2,7 +2,7 @@ use std::{io::ErrorKind, path::Path};
 
 use anyhow::{bail, ensure, Result};
 use grandine_version::APPLICATION_NAME;
-use log::info;
+use tracing::info;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

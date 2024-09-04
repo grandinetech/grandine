@@ -6751,7 +6751,6 @@ dependencies = [
  "http_api",
  "keymanager",
  "liveness_tracker",
- "log",
  "metrics",
  "nonzero_ext",
  "num_cpus",
@@ -6768,6 +6767,7 @@ dependencies = [
  "std_ext",
  "thiserror",
  "tokio",
+ "tracing",
  "types",
  "validator",
 ]
