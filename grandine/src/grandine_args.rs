@@ -1,9 +1,5 @@
 use core::{
-    fmt::Display,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    num::{NonZeroU16, NonZeroU64},
-    ops::Not as _,
-    time::Duration,
+    fmt::Display, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, num::{NonZeroU16, NonZeroU64}, ops::Not as _, time::Duration
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -474,6 +470,7 @@ impl NetworkConfigOptions {
         network_dir: PathBuf,
         metrics: bool,
         in_memory: bool,
+        subscribe_all_data_column_subnets: bool,
     ) -> NetworkConfig {
         let Self {
             listen_address,
@@ -580,9 +577,9 @@ impl NetworkConfigOptions {
             network_config.subscribe_all_subnets = true;
         }
 
-        if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
-            network_config.subscribe_all_data_column_subnets = true;
-        }
+        // if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
+            network_config.subscribe_all_data_column_subnets = subscribe_all_data_column_subnets;
+        // }
 
         // Setting this in the last place to overwrite any changes to table filter from other CLI options
         if enable_private_discovery {
@@ -1140,8 +1137,8 @@ impl GrandineArgs {
             .into_iter()
             .chain(disable_block_verification_pool.then_some(Feature::DisableBlockVerificationPool))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
+            // .chain(subscribe_all_data_column_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
-            .chain(subscribe_all_data_column_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
             .collect();
 
         let auth_options = AuthOptions {
@@ -1209,6 +1206,7 @@ impl GrandineArgs {
                 directories.network_dir.clone().unwrap_or_default(),
                 metrics_enabled,
                 in_memory,
+                subscribe_all_data_column_subnets,
             ),
             storage_config,
             unfinalized_states_in_memory,
