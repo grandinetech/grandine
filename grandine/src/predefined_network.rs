@@ -5,7 +5,7 @@ use anyhow::{bail, Context as _, Result};
 use deposit_tree::DepositTree;
 use fork_choice_control::checkpoint_sync;
 use genesis::AnchorCheckpointProvider;
-use log::info;
+use tracing::info;
 use p2p::{Enr, NetworkConfig};
 use reqwest::{Client, Url};
 use ssz::SszRead as _;

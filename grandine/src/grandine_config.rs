@@ -6,11 +6,11 @@ use eth1_api::AuthOptions;
 use features::Feature;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
-use log::info;
 use p2p::NetworkConfig;
 use reqwest::Url;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
+use tracing::info;
 use types::{
     config::Config as ChainConfig,
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Slot, H256},
@@ -110,7 +110,7 @@ impl GrandineConfig {
             storage_config.eth1_db_size.to_string_as(true),
         );
 
-        info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
+        info!("Eth1 RPC URLs: {:?}", eth1_rpc_urls);
         info!("graffiti: {graffiti:?}");
         info!("HTTP API address: {}", http_api_config.address);
 
@@ -151,8 +151,8 @@ impl GrandineConfig {
 
         if !web3signer_config.urls.is_empty() {
             info!(
-                "using Web3Signer API to sign validator messages (API URLs: [{}])",
-                web3signer_config.urls.iter().format(", "),
+                "using Web3Signer API to sign validator messages (API URLs: {:?})",
+                web3signer_config.urls,
             );
         }
 
