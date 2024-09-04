@@ -1,5 +1,9 @@
 use core::{
-    fmt::Display, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, num::{NonZeroU16, NonZeroU64}, ops::Not as _, time::Duration
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    num::{NonZeroU16, NonZeroU64},
+    ops::Not as _,
+    time::Duration,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -302,7 +306,7 @@ struct BeaconNodeOptions {
     /// Subscribe to all data column subnets
     #[clap(long)]
     subscribe_all_data_column_subnets: bool,
-    
+
     /// Suggested value for the feeRecipient field of the new payload
     #[clap(long, value_name = "EXECUTION_ADDRESS")]
     suggested_fee_recipient: Option<ExecutionAddress>,
@@ -578,7 +582,7 @@ impl NetworkConfigOptions {
         }
 
         // if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
-            network_config.subscribe_all_data_column_subnets = subscribe_all_data_column_subnets;
+        network_config.subscribe_all_data_column_subnets = subscribe_all_data_column_subnets;
         // }
 
         // Setting this in the last place to overwrite any changes to table filter from other CLI options
