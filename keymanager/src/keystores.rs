@@ -9,7 +9,7 @@ use bls::{PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use itertools::Itertools as _;
-use log::{info, warn};
+use tracing::{info, warn};
 use serde::Serialize;
 use signer::{KeyOrigin, Signer};
 use slashing_protection::{interchange_format::InterchangeFormat, SlashingProtector};
