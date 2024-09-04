@@ -4,7 +4,7 @@ use derive_more::Display;
 use tracing::info;
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
 pub static PEER_LOG_METRICS: PeerLogMetrics = PeerLogMetrics::new(0);
 

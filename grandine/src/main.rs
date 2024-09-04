@@ -19,7 +19,7 @@ use fork_choice_store::StoreConfig;
 use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
 use http_api::HttpApiConfig;
-use logging::{PEER_LOG_METRICS, setup_tracing};
+use logging::{setup_tracing, PEER_LOG_METRICS};
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use reqwest::{Client, ClientBuilder, Url};
@@ -309,7 +309,7 @@ enum Error {
 
 fn main() -> ExitCode {
     let _guard = setup_tracing();
-    info!("Gradine firing up...");
+    info!("Grandine firing up...");
     if let Err(error) = try_main() {
         error.downcast_ref().map(ClapError::exit);
         error!("{error:?}");

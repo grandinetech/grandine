@@ -5,7 +5,6 @@ use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
 use features::Feature;
 use http_api::HttpApiConfig;
-use itertools::Itertools as _;
 use p2p::NetworkConfig;
 use reqwest::Url;
 use runtime::{MetricsConfig, StorageConfig};
