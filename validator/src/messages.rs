@@ -9,7 +9,7 @@ use types::{
     altair::containers::SignedContributionAndProof,
     combined::{BeaconState, SignedBeaconBlock},
     phase0::{
-        containers::{Attestation, SignedVoluntaryExit},
+        containers::{Attestation, AttesterSlashing, ProposerSlashing, SignedVoluntaryExit},
         primitives::Epoch,
     },
     preset::Preset,
@@ -36,7 +36,9 @@ impl<P: Preset> ApiToValidator<P> {
 }
 
 pub enum ValidatorToApi<P: Preset> {
+    AttesterSlashing(Box<AttesterSlashing<P>>),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
+    ProposerSlashing(Box<ProposerSlashing>),
     VoluntaryExit(Box<SignedVoluntaryExit>),
 }
 

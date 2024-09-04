@@ -1241,6 +1241,7 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/proposer_slashings`
 pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(event_channels): State<Arc<EventChannels>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(proposer_slashing): EthJson<Box<ProposerSlashing>>,
 ) -> Result<(), Error> {
@@ -1249,6 +1250,10 @@ pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
+        if let Err(error) = send_proposer_slashing_event(*proposer_slashing, &event_channels) {
+            warn!("unable to send proposer slashing event: {error}");
+        }
+
         ApiToP2p::PublishProposerSlashing(proposer_slashing).send(&api_to_p2p_tx);
     }
 
@@ -1271,6 +1276,7 @@ pub async fn pool_proposer_slashings<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/voluntary_exits`
 pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(event_channels): State<Arc<EventChannels>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(signed_voluntary_exit): EthJson<Box<SignedVoluntaryExit>>,
 ) -> Result<(), Error> {
@@ -1279,6 +1285,10 @@ pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
+        if let Err(error) = send_voluntary_exit_event(*signed_voluntary_exit, &event_channels) {
+            warn!("unable to send voluntary exit event: {error}");
+        }
+
         ApiToP2p::PublishVoluntaryExit(signed_voluntary_exit).send(&api_to_p2p_tx);
     }
 
@@ -1301,6 +1311,7 @@ pub async fn pool_voluntary_exits<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/attester_slashings`
 pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(event_channels): State<Arc<EventChannels>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attester_slashing): EthJson<Box<AttesterSlashing<P>>>,
 ) -> Result<(), Error> {
@@ -1309,6 +1320,12 @@ pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
+        if let Err(error) =
+            send_attester_slashing_event(*attester_slashing.clone(), &event_channels)
+        {
+            warn!("unable to send attester slashing event: {error}");
+        }
+
         ApiToP2p::PublishAttesterSlashing(attester_slashing).send(&api_to_p2p_tx);
     }
 
@@ -2764,6 +2781,36 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
         }
         Err(error) => return Err(Error::InvalidBlock(error)),
     }
+
+    Ok(())
+}
+
+fn send_attester_slashing_event<P: Preset>(
+    attester_slashing: AttesterSlashing<P>,
+    event_channels: &EventChannels,
+) -> Result<()> {
+    let event = Topic::AttesterSlashing.build(attester_slashing)?;
+    event_channels.attester_slashings.send(event)?;
+
+    Ok(())
+}
+
+fn send_proposer_slashing_event(
+    proposer_slashing: ProposerSlashing,
+    event_channels: &EventChannels,
+) -> Result<()> {
+    let event = Topic::ProposerSlashing.build(proposer_slashing)?;
+    event_channels.proposer_slashings.send(event)?;
+
+    Ok(())
+}
+
+fn send_voluntary_exit_event(
+    voluntary_exit: SignedVoluntaryExit,
+    event_channels: &EventChannels,
+) -> Result<()> {
+    let event = Topic::VoluntaryExit.build(voluntary_exit)?;
+    event_channels.voluntary_exits.send(event)?;
 
     Ok(())
 }

@@ -184,12 +184,14 @@ async fn handle_events<P: Preset>(
 ) -> Result<()> {
     let EventChannels {
         attestations,
+        attester_slashings,
         blocks,
         bls_to_execution_changes,
         chain_reorgs,
         contribution_and_proofs,
         finalized_checkpoints,
         heads,
+        proposer_slashings,
         voluntary_exits,
     } = event_channels.as_ref();
 
@@ -204,10 +206,18 @@ async fn handle_events<P: Preset>(
 
             message = validator_to_api_rx.select_next_some() => {
                 let receivers = match message {
+                    ValidatorToApi::AttesterSlashing(attester_slashing) => {
+                        let event = Topic::AttesterSlashing.build(attester_slashing)?;
+                        attester_slashings.send(event).unwrap_or_default()
+                    }
                     ValidatorToApi::ContributionAndProof(signed_contribution_and_proof) => {
                         let event =
                             Topic::ContributionAndProof.build(signed_contribution_and_proof)?;
                         contribution_and_proofs.send(event).unwrap_or_default()
+                    }
+                    ValidatorToApi::ProposerSlashing(proposer_slashing) => {
+                        let event = Topic::ProposerSlashing.build(proposer_slashing)?;
+                        proposer_slashings.send(event).unwrap_or_default()
                     }
                     ValidatorToApi::VoluntaryExit(signed_voluntary_exit) => {
                         let event = Topic::VoluntaryExit.build(signed_voluntary_exit)?;

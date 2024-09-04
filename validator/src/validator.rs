@@ -288,8 +288,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
                         let outcome = self
                             .block_producer
-                            .handle_external_attester_slashing(*slashing)
+                            .handle_external_attester_slashing(*slashing.clone())
                             .await?;
+
+                        if matches!(outcome, PoolAdditionOutcome::Accept) {
+                            ValidatorToApi::AttesterSlashing(slashing).send(&self.validator_to_api_tx);
+                        }
+
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
@@ -297,6 +302,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .block_producer
                             .handle_external_proposer_slashing(*slashing)
                             .await?;
+
+                        if matches!(outcome, PoolAdditionOutcome::Accept) {
+                            ValidatorToApi::ProposerSlashing(slashing).send(&self.validator_to_api_tx);
+                        }
+
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
