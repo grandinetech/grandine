@@ -22,7 +22,7 @@ use helper_functions::{
     verifier::{MultiVerifier, Triple, Verifier},
 };
 use itertools::Either;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
 use std_ext::ArcExt as _;

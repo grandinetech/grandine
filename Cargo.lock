@@ -565,10 +565,10 @@ dependencies = [
  "futures",
  "helper_functions",
  "itertools 0.13.0",
- "log",
  "prometheus_metrics",
  "rayon",
  "std_ext",
+ "tracing",
  "types",
 ]
 
