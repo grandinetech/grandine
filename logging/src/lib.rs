@@ -38,18 +38,24 @@ impl PeerLogMetrics {
 pub fn setup_tracing() -> impl Drop {
     let log_path = "logs/testing.log";
     let log_appender = RollingFileAppender::new(Rotation::DAILY, "", log_path);
-    let (log_non_blocking, guard) = NonBlocking::new(log_appender);
+    let (file_non_blocking, file_guard) = NonBlocking::new(log_appender);
+
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout).with_ansi(true);
+
+    let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
 
     let env_filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
         .expect("Failed to create EnvFilter");
 
-    tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(env_filter)
-        .with(fmt::layer().with_writer(log_non_blocking).with_ansi(false))
-        .try_init()
+        .with(stdout_layer)
+        .with(file_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
         .expect("Failed to initialize tracing subscriber");
-    info!("This is a message from lib.rs.");
-    println!("Tracing initialized successfully.");
-    guard
+
+    info!("Tracing initialized successfully.");
+    file_guard
 }
