@@ -21,7 +21,6 @@ grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 jemalloc-ctl = { workspace = true }
-log = { workspace = true }
 num_threads = { workspace = true }
 p2p = { workspace = true }
 prometheus = { workspace = true }
@@ -37,6 +36,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true }
 types = { workspace = true }
 

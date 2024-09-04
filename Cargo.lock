@@ -5115,7 +5115,6 @@ dependencies = [
  "helper_functions",
  "http_api_utils",
  "jemalloc-ctl",
- "log",
  "num_threads",
  "p2p",
  "prometheus",
@@ -5131,6 +5130,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower-http",
+ "tracing",
  "transition_functions",
  "types",
 ]
