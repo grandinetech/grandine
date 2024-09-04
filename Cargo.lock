@@ -7399,11 +7399,11 @@ dependencies = [
  "features",
  "futures",
  "helper_functions",
- "log",
  "p2p",
  "serde",
  "ssz",
  "thiserror",
+ "tracing",
  "types",
  "unwrap_none",
 ]

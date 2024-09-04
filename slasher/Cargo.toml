@@ -17,11 +17,11 @@ eth1_api = { workspace = true }
 features = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
-log = { workspace = true }
 p2p = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]

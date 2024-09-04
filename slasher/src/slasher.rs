@@ -11,7 +11,7 @@ use futures::{
     stream::StreamExt,
 };
 use helper_functions::{accessors, misc};
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use p2p::P2pToSlasher;
 use thiserror::Error;
 use types::{
