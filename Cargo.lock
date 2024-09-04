@@ -1046,7 +1046,6 @@ dependencies = [
  "helper_functions",
  "hex-literal",
  "itertools 0.13.0",
- "log",
  "prometheus_metrics",
  "reqwest",
  "serde",
@@ -1055,6 +1054,7 @@ dependencies = [
  "ssz",
  "test-case",
  "thiserror",
+ "tracing",
  "typenum",
  "types",
 ]

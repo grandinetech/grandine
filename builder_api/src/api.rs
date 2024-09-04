@@ -6,7 +6,7 @@ use bls::PublicKeyBytes;
 use derive_more::Constructor;
 use helper_functions::signing::SignForAllForks;
 use itertools::Itertools as _;
-use log::{debug, info};
+use tracing::{debug, info};
 use prometheus_metrics::Metrics;
 use reqwest::{Client, Response, StatusCode, Url};
 use ssz::SszHash as _;
