@@ -5626,6 +5626,7 @@ dependencies = [
  "helper_functions",
  "igd-next",
  "itertools 0.13.0",
+ "log",
  "logging",
  "operation_pools",
  "prometheus-client",
@@ -5643,7 +5644,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tracing",
  "tynm",
  "typenum",
  "types",
@@ -6191,11 +6191,11 @@ dependencies = [
  "anyhow",
  "features",
  "futures",
- "log",
  "once_cell",
  "prometheus",
  "tokio",
  "tokio-stream",
+ "tracing",
  "types",
 ]
 

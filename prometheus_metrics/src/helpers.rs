@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use log::warn;
+use tracing::warn;
 use prometheus::{Histogram, HistogramTimer, HistogramVec};
 use types::phase0::primitives::UnixSeconds;
 
