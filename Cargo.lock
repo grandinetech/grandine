@@ -3600,7 +3600,6 @@ dependencies = [
  "hex-literal",
  "http-body-util",
  "itertools 0.13.0",
- "log",
  "mime",
  "parse-display",
  "prometheus_metrics",

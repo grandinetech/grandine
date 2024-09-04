@@ -13,7 +13,7 @@ use axum::{
     Extension,
 };
 use http_body_util::BodyExt as _;
-use log::info;
+use tracing::info;
 use mime::{APPLICATION_JSON, TEXT_EVENT_STREAM};
 
 use crate::{error::Error, misc::Direction};
