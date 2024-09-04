@@ -33,7 +33,7 @@ use helper_functions::{accessors, misc};
 use http_api_utils::{BlockId, StateId};
 use itertools::{izip, Either, Itertools as _};
 use liveness_tracker::ApiToLiveness;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool,
 };
