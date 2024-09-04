@@ -7,7 +7,7 @@ use fork_choice_control::Wait;
 use futures::{channel::mpsc::UnboundedReceiver, select, StreamExt as _};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use operation_pools::PoolToLivenessMessage;
 use prometheus_metrics::Metrics;
 use types::{
