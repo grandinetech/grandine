@@ -1710,7 +1710,6 @@ dependencies = [
  "fs-err",
  "im",
  "itertools 0.13.0",
- "log",
  "reth-libmdbx",
  "snap",
  "std_ext",
@@ -1718,6 +1717,7 @@ dependencies = [
  "tempfile",
  "test-case",
  "thiserror",
+ "tracing",
  "unwrap_none",
 ]
 
