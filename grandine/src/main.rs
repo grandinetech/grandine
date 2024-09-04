@@ -5,8 +5,7 @@ use std::{
     process::ExitCode,
     sync::Arc,
 };
-use logging::setup_tracing;
-use tracing::{info as tracing_info};
+
 use allocator as _;
 use anyhow::{bail, ensure, Context as _, Result};
 use builder_api::BuilderConfig;
@@ -20,8 +19,7 @@ use fork_choice_store::StoreConfig;
 use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
 use http_api::HttpApiConfig;
-use log::{error, info, warn};
-use logging::PEER_LOG_METRICS;
+use logging::{PEER_LOG_METRICS, setup_tracing};
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use reqwest::{Client, ClientBuilder, Url};
@@ -33,6 +31,7 @@ use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::runtime::Builder;
+use tracing::{error, info, warn};
 use types::{
     config::Config as ChainConfig,
     phase0::primitives::{ExecutionBlockNumber, Slot},
@@ -310,7 +309,7 @@ enum Error {
 
 fn main() -> ExitCode {
     let _guard = setup_tracing();
-    tracing_info!("This is an info message.");
+    info!("Gradine firing up...");
     if let Err(error) = try_main() {
         error.downcast_ref().map(ClapError::exit);
         error!("{error:?}");
