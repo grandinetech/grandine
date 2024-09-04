@@ -7333,7 +7333,6 @@ dependencies = [
  "hex-literal",
  "httpmock",
  "itertools 0.13.0",
- "log",
  "prometheus_metrics",
  "rayon",
  "reqwest",
@@ -7345,6 +7344,7 @@ dependencies = [
  "std_ext",
  "thiserror",
  "tokio",
+ "tracing",
  "types",
 ]
 

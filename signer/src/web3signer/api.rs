@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
-use log::warn;
+use tracing::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{Client, Url};
 use types::{phase0::primitives::H256, preset::Preset};
