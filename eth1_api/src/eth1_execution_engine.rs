@@ -5,7 +5,7 @@ use derive_more::Constructor;
 use either::Either;
 use execution_engine::{ExecutionEngine, PayloadAttributes, PayloadId, PayloadStatusV1};
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
-use log::{info, warn};
+use tracing::{info, warn};
 use tokio::runtime::{Builder, Handle};
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
