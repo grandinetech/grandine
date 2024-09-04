@@ -414,6 +414,8 @@ tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.4.13', features = ['timeout'] }
 tower-http = { version = '0.5.2', features = ['cors', 'trace'] }
 tracing = '0.1.40'
+tracing-appender = "0.2.3"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 triomphe = '0.1.13'
 tynm = '0.1.10'
 typenum = '1.17.0'

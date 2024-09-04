@@ -59,6 +59,7 @@ tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }
+tracing = {workspace = true}
 types = { workspace = true }
 validator = { workspace = true }
 validator_key_cache = { workspace = true }

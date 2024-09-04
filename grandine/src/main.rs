@@ -5,7 +5,8 @@ use std::{
     process::ExitCode,
     sync::Arc,
 };
-
+use logging::setup_tracing;
+use tracing::{info as tracing_info};
 use allocator as _;
 use anyhow::{bail, ensure, Context as _, Result};
 use builder_api::BuilderConfig;
@@ -308,6 +309,8 @@ enum Error {
 }
 
 fn main() -> ExitCode {
+    let _guard = setup_tracing();
+    tracing_info!("This is an info message.");
     if let Err(error) = try_main() {
         error.downcast_ref().map(ClapError::exit);
         error!("{error:?}");
