@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use genesis::AnchorCheckpointProvider;
-use log::info;
+use tracing::info;
 use ssz::{SszHash as _, SszRead, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;

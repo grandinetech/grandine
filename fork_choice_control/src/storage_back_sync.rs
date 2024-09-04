@@ -5,7 +5,7 @@ use arithmetic::U64Ext as _;
 use features::Feature;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::{info, warn};
+use tracing::{info, warn};
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;

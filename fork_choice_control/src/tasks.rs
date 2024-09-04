@@ -17,7 +17,7 @@ use helper_functions::{
     accessors, misc,
     verifier::{MultiVerifier, NullVerifier},
 };
-use log::{debug, warn};
+use tracing::{debug, warn};
 use prometheus_metrics::Metrics;
 use types::{
     combined::SignedBeaconBlock,

@@ -13,7 +13,7 @@ use fork_choice_store::{
     ChainLink, Store,
 };
 use helper_functions::{accessors, misc};
-use log::debug;
+use tracing::debug;
 use serde::Serialize;
 use tap::Pipe as _;
 use types::{

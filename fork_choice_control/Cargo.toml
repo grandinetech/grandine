@@ -26,7 +26,6 @@ genesis = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
 mime = { workspace = true }
 nonzero_ext = { workspace = true }
 num_cpus = { workspace = true }
@@ -42,6 +41,7 @@ std_ext = { workspace = true }
 strum = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true }
 tynm = { workspace = true }
 types = { workspace = true }
