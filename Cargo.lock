@@ -7423,7 +7423,6 @@ dependencies = [
  "helper_functions",
  "hex-literal",
  "itertools 0.13.0",
- "log",
  "refinery",
  "rusqlite",
  "serde",
@@ -7434,6 +7433,7 @@ dependencies = [
  "test-case",
  "test-generator",
  "thiserror",
+ "tracing",
  "types",
 ]
 
