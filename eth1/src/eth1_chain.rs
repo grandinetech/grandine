@@ -8,7 +8,7 @@ use futures::{
     channel::mpsc::UnboundedSender,
     stream::{Stream, TryStreamExt as _},
 };
-use log::{error, info};
+use tracing::{error, info};
 use prometheus_metrics::Metrics;
 use reqwest::Client;
 use std_ext::ArcExt as _;

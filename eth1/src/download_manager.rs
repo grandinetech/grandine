@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use eth1_api::{Eth1Api, Eth1ApiToMetrics, Eth1Block};
 use futures::channel::mpsc::UnboundedSender;
-use log::{info, warn};
+use tracing::{info, warn};
 use prometheus_metrics::Metrics;
 use reqwest::Client;
 use std_ext::ArcExt as _;
