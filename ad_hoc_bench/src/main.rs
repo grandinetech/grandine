@@ -9,7 +9,7 @@ use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdr
 use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
 use jemalloc_ctl::Result as JemallocResult;
-use log::info;
+use tracing::info;
 use rand::seq::SliceRandom as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},

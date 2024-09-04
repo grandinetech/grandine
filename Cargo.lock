@@ -16,8 +16,8 @@ dependencies = [
  "fork_choice_store",
  "futures",
  "jemalloc-ctl",
- "log",
  "rand",
+ "tracing",
  "types",
 ]
 
