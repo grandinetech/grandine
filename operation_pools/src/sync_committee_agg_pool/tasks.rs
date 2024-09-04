@@ -11,7 +11,7 @@ use helper_functions::{
     signing::{SignForSingleFork as _, SignForSingleForkAtSlot as _},
     verifier::{MultiVerifier, Verifier as _},
 };
-use log::{debug, warn};
+use tracing::{debug, warn};
 use prometheus_metrics::Metrics;
 use typenum::Unsigned as _;
 use types::{

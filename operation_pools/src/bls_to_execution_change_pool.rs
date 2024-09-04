@@ -12,7 +12,7 @@ use futures::{
 };
 use helper_functions::predicates;
 use itertools::Itertools as _;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use prometheus_metrics::Metrics;
 use transition_functions::capella;
 use types::{
