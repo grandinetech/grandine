@@ -72,14 +72,20 @@ unsafe_code = 'forbid'
 # A subset of `rustc` lints that are allowed by default.
 # A few notable ones that we do not enable:
 #
-# - `variant_size_differences`
-#   `clippy::large_enum_variant` does nearly the same thing and is enabled by default.
+# - `elided_lifetimes_in_paths`
+#   It hurts readability and doesn't provide a clear benefit.
+#
+# - `keyword_idents_2024`
+#   Starting with Rust 1.79.0, uses of `rand::Rng::gen` trigger `keyword_idents_2024`.
+#   `rand` has renamed the method to `random`, but the change has not been released. See:
+#   - <https://github.com/rust-random/rand/issues/1435>
+#   - <https://github.com/rust-random/rand/pull/1438>
 #
 # - `missing_copy_implementations`
 #   This would be more useful if it only triggered for types that are `Clone` but not `Copy`.
 #
-# - `elided_lifetimes_in_paths`
-#   It hurts readability and doesn't provide a clear benefit.
+# - `variant_size_differences`
+#   `clippy::large_enum_variant` does nearly the same thing and is enabled by default.
 #
 # See the output of `rustc --warn help` for a full list of lints available in the current version.
 # They are documented at <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>.
@@ -87,11 +93,13 @@ absolute_paths_not_starting_with_crate = 'warn'
 anonymous_parameters                   = 'warn'
 deprecated_in_future                   = 'warn'
 indirect_structural_match              = 'warn'
+keyword_idents_2018                    = 'warn'
 let_underscore_drop                    = 'warn'
 macro_use_extern_crate                 = 'warn'
 meta_variable_misuse                   = 'warn'
 non_ascii_idents                       = 'warn'
 non_local_definitions                  = 'warn'
+redundant_lifetimes                    = 'warn'
 trivial_casts                          = 'warn'
 trivial_numeric_casts                  = 'warn'
 unit_bindings                          = 'warn'
