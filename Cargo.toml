@@ -136,6 +136,9 @@ wildcard_dependencies   = 'warn'
 #   It is triggered by functions that return `core::convert::Infallible` or
 #   types parameterized with it like `anyhow::Result<core::convert::Infallible>`.
 #
+# - `clippy::integer_division_remainder_used`
+#   Most of our code is not cryptographic.
+#
 # - `clippy::iter_over_hash_type`
 #   Iteration order often does not matter.
 #   `HashMap`s and `HashSet`s tend to be faster than their ordered counterparts.
