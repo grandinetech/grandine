@@ -273,9 +273,9 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
         indices.extend(get_active_validator_indices(state, relative_epoch));
 
         match indices.last().copied().unwrap_or_default() {
-            0..=0xff => PackedIndices::U8(pack(indices)),
-            0x100..=0xffff => PackedIndices::U16(pack(indices)),
-            0x1_0000..=0xffff_ffff => PackedIndices::U32(pack(indices)),
+            0..0x100 => PackedIndices::U8(pack(indices)),
+            0x100..0x1_0000 => PackedIndices::U16(pack(indices)),
+            0x1_0000..0x1_0000_0000 => PackedIndices::U32(pack(indices)),
             0x1_0000_0000..=u64::MAX => PackedIndices::U64(indices.into()),
         }
     })
