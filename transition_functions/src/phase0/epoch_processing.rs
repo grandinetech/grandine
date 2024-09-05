@@ -1,11 +1,10 @@
-use core::ops::Mul as _;
+use core::{cell::LazyCell, ops::Mul as _};
 use std::collections::HashMap;
 
 use anyhow::Result;
 use helper_functions::{
     accessors::get_current_epoch, misc::vec_of_default, mutators::decrease_balance,
 };
-use once_cell::unsync::Lazy;
 use prometheus_metrics::METRICS;
 use typenum::Unsigned as _;
 use types::{
@@ -144,7 +143,7 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
     let current_epoch = get_current_epoch(state);
 
     // Calculating this lazily saves 30-40 μs in typical networks.
-    let adjusted_total_slashing_balance = Lazy::new(|| {
+    let adjusted_total_slashing_balance = LazyCell::new(|| {
         state
             .slashings
             .into_iter()

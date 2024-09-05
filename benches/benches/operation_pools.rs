@@ -2,6 +2,7 @@
 // See <https://github.com/rust-lang/rust/issues/57274>.
 #![allow(unused_crate_dependencies)]
 
+use core::cell::LazyCell;
 use std::sync::Arc;
 
 use allocator as _;
@@ -9,7 +10,6 @@ use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{goerli, holesky, LazyBeaconState};
 use helper_functions::accessors;
-use once_cell::unsync::Lazy;
 use operation_pools::AttestationPacker;
 use std_ext::ArcExt as _;
 use types::{config::Config, phase0::containers::Attestation, preset::Preset};
@@ -21,26 +21,30 @@ fn main() {
         .benchmark_greedy_attestation_packing(
             "greedy attestation packing in Goerli at slot 547813",
             LazyBeaconState::new(|| goerli::beacon_state(547_813, 6)),
-            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119 - 1)),
-            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119)),
+            LazyCell::new(|| {
+                goerli::attestations_sorted_by_data("aggregate_attestations", 17119 - 1)
+            }),
+            LazyCell::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119)),
         )
         .benchmark_optimal_attestation_packing(
             "optimal attestation packing in Goerli at slot 547813",
             LazyBeaconState::new(|| goerli::beacon_state(547_813, 6)),
-            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119 - 1)),
-            Lazy::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119)),
+            LazyCell::new(|| {
+                goerli::attestations_sorted_by_data("aggregate_attestations", 17119 - 1)
+            }),
+            LazyCell::new(|| goerli::attestations_sorted_by_data("aggregate_attestations", 17119)),
         )
         .benchmark_greedy_attestation_packing(
             "greedy attestation packing in Holesky at slot 50015",
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
+            LazyCell::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
+            LazyCell::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
         )
         .benchmark_optimal_attestation_packing(
             "optimal attestation packing in Holesky at slot 50015",
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
-            Lazy::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
+            LazyCell::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
+            LazyCell::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
         )
         .final_summary();
 }
@@ -51,12 +55,12 @@ impl Criterion {
         &mut self,
         group_name: &str,
         state: LazyBeaconState<P>,
-        previous_aggregates: Lazy<Vec<Attestation<P>>>,
-        current_aggregates: Lazy<Vec<Attestation<P>>>,
+        previous_aggregates: LazyCell<Vec<Attestation<P>>>,
+        current_aggregates: LazyCell<Vec<Attestation<P>>>,
     ) -> &mut Self {
         let config = Arc::new(Config::mainnet());
 
-        let packer = Lazy::new(|| {
+        let packer = LazyCell::new(|| {
             let state = state.force().clone_arc();
             let latest_block_root = accessors::latest_block_root(&state);
 
@@ -69,9 +73,9 @@ impl Criterion {
             .bench_function(
                 "AttestationPacker::pack_proposable_attestations_greedily",
                 |bencher| {
-                    let packer = Lazy::force(&packer);
-                    let previous_aggregates = Lazy::force(&previous_aggregates);
-                    let current_aggregates = Lazy::force(&current_aggregates);
+                    let packer = LazyCell::force(&packer);
+                    let previous_aggregates = LazyCell::force(&previous_aggregates);
+                    let current_aggregates = LazyCell::force(&current_aggregates);
 
                     bencher.iter_with_large_drop(|| {
                         packer.pack_proposable_attestations_greedily(
@@ -89,12 +93,12 @@ impl Criterion {
         &mut self,
         group_name: &str,
         state: LazyBeaconState<P>,
-        previous_aggregates: Lazy<Vec<Attestation<P>>>,
-        current_aggregates: Lazy<Vec<Attestation<P>>>,
+        previous_aggregates: LazyCell<Vec<Attestation<P>>>,
+        current_aggregates: LazyCell<Vec<Attestation<P>>>,
     ) -> &mut Self {
         let config = Arc::new(Config::mainnet());
 
-        let packer = Lazy::new(|| {
+        let packer = LazyCell::new(|| {
             let state = state.force().clone_arc();
             let latest_block_root = accessors::latest_block_root(&state);
 
@@ -107,9 +111,9 @@ impl Criterion {
             .bench_function(
                 "AttestationPacker::pack_proposable_attestations_optimally",
                 |bencher| {
-                    let packer = Lazy::force(&packer);
-                    let previous_aggregates = Lazy::force(&previous_aggregates);
-                    let current_aggregates = Lazy::force(&current_aggregates);
+                    let packer = LazyCell::force(&packer);
+                    let previous_aggregates = LazyCell::force(&previous_aggregates);
+                    let current_aggregates = LazyCell::force(&current_aggregates);
 
                     bencher.iter_with_large_drop(|| {
                         packer.pack_proposable_attestations_optimally(

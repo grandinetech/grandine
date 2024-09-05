@@ -1,4 +1,4 @@
-use core::ops::Mul as _;
+use core::{cell::LazyCell, ops::Mul as _};
 use std::collections::HashMap;
 
 use anyhow::Result;
@@ -9,7 +9,6 @@ use helper_functions::{
     mutators::decrease_balance,
     predicates::is_in_inactivity_leak,
 };
-use once_cell::unsync::Lazy;
 use prometheus_metrics::METRICS;
 use ssz::PersistentList;
 use typenum::Unsigned as _;
@@ -212,7 +211,7 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
     let total_active_balance = total_active_balance(state);
 
     // Calculating this lazily saves 30-40 μs in typical networks.
-    let adjusted_total_slashing_balance = Lazy::new(|| {
+    let adjusted_total_slashing_balance = LazyCell::new(|| {
         state
             .slashings
             .into_iter()

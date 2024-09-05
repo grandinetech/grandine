@@ -2,6 +2,7 @@
 // See <https://github.com/rust-lang/rust/issues/57274>.
 #![allow(unused_crate_dependencies)]
 
+use core::cell::LazyCell;
 use std::sync::Arc;
 
 use allocator as _;
@@ -9,7 +10,6 @@ use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
 use itertools::Itertools as _;
-use once_cell::unsync::Lazy;
 use ssz::{SszRead as _, SszWrite as _};
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -82,7 +82,7 @@ impl Criterion {
         config: &Config,
         state: &LazyBeaconState<P>,
     ) -> &mut Self {
-        let ssz_bytes = Lazy::new(|| state_to_ssz(state.force()));
+        let ssz_bytes = LazyCell::new(|| state_to_ssz(state.force()));
 
         // `BeaconState` is never deserialized from JSON. Deserializing the combined `BeaconState`
         // would require another use of `#[serde(untagged)]`, which is rarely a good idea.
@@ -118,8 +118,8 @@ impl Criterion {
         config: &Config,
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
-        let ssz_bytes = Lazy::new(|| blocks_to_ssz(blocks.force()));
-        let json_bytes = Lazy::new(|| blocks_to_json_directly(blocks.force()));
+        let ssz_bytes = LazyCell::new(|| blocks_to_ssz(blocks.force()));
+        let json_bytes = LazyCell::new(|| blocks_to_json_directly(blocks.force()));
 
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(blocks.count()))

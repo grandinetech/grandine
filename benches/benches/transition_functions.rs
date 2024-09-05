@@ -2,6 +2,7 @@
 // See <https://github.com/rust-lang/rust/issues/57274>.
 #![allow(unused_crate_dependencies)]
 
+use core::cell::LazyCell;
 use std::sync::Arc;
 
 use allocator as _;
@@ -10,7 +11,6 @@ use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
 use helper_functions::{accessors, misc};
-use once_cell::unsync::Lazy;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased};
 use types::{
@@ -236,7 +236,7 @@ impl Criterion {
         state: &LazyBeaconState<P>,
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
-        let state_before_last_epoch_processing = Lazy::new(|| {
+        let state_before_last_epoch_processing = LazyCell::new(|| {
             let [_, transition_blocks @ .., last_block] = blocks.force() else {
                 panic!("blocks should contain at least two blocks")
             };
@@ -307,7 +307,7 @@ impl Criterion {
         state: &LazyBeaconState<P>,
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
-        let rest = Lazy::new(|| {
+        let rest = LazyCell::new(|| {
             blocks
                 .force()
                 .split_first()
@@ -318,7 +318,7 @@ impl Criterion {
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(blocks.count()))
             .bench_function("untrusted with single state", |bencher| {
-                let rest = Lazy::force(&rest);
+                let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched_ref(
                     || state.force().clone_arc(),
@@ -327,7 +327,7 @@ impl Criterion {
                 );
             })
             .bench_function("untrusted with intermediate states", |bencher| {
-                let rest = Lazy::force(&rest);
+                let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched(
                     || state.force().clone_arc(),
@@ -336,7 +336,7 @@ impl Criterion {
                 );
             })
             .bench_function("trusted with single state", |bencher| {
-                let rest = Lazy::force(&rest);
+                let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched_ref(
                     || state.force().clone_arc(),
@@ -345,7 +345,7 @@ impl Criterion {
                 );
             })
             .bench_function("trusted with intermediate states", |bencher| {
-                let rest = Lazy::force(&rest);
+                let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched(
                     || state.force().clone_arc(),

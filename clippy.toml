@@ -60,6 +60,8 @@ disallowed-types = [
     { path = 'tokio::fs::File',        reason = 'use fs_err::tokio::File for more helpful error messages'        },
     { path = 'tokio::fs::OpenOptions', reason = 'use fs_err::tokio::OpenOptions for more helpful error messages' },
     { path = 'tokio::fs::ReadDir',     reason = 'use fs_err::tokio::ReadDir for more helpful error messages'     },
+
+    { path = 'once_cell::unsync::Lazy', reason = 'use core::cell::LazyCell' },
 ]
 enforced-import-renames = [
     { path = 'core::fmt::Result', rename = 'FmtResult' },

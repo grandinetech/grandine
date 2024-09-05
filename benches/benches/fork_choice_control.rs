@@ -2,6 +2,7 @@
 // See <https://github.com/rust-lang/rust/issues/57274>.
 #![allow(unused_crate_dependencies)]
 
+use core::cell::LazyCell;
 use std::sync::Arc;
 
 use allocator as _;
@@ -11,7 +12,6 @@ use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
 use eth2_libp2p::GossipId;
 use fork_choice_control::BenchController;
-use once_cell::unsync::Lazy;
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{
@@ -154,7 +154,7 @@ impl Criterion {
             (controller, mutator_handle, blocks)
         };
 
-        let expected_head_block_root = Lazy::new(|| {
+        let expected_head_block_root = LazyCell::new(|| {
             blocks
                 .force()
                 .last()
@@ -221,7 +221,7 @@ impl Criterion {
         state: &LazyBeaconState<P>,
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
-        let controller = Lazy::new(|| {
+        let controller = LazyCell::new(|| {
             let expected_head_block_root = blocks
                 .force()
                 .last()
@@ -248,7 +248,7 @@ impl Criterion {
         self.benchmark_group("Controller::head")
             .throughput(Throughput::Elements(1))
             .bench_function(function_id, |bencher| {
-                let (controller, _) = Lazy::force(&controller);
+                let (controller, _) = LazyCell::force(&controller);
 
                 bencher.iter_with_large_drop(|| controller.head());
             });

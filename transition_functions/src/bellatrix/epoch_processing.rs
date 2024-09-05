@@ -1,4 +1,4 @@
-use core::ops::Mul as _;
+use core::{cell::LazyCell, ops::Mul as _};
 
 use anyhow::Result;
 use helper_functions::{
@@ -6,7 +6,6 @@ use helper_functions::{
     misc::vec_of_default,
     mutators::decrease_balance,
 };
-use once_cell::unsync::Lazy;
 use prometheus_metrics::METRICS;
 use typenum::Unsigned as _;
 use types::{
@@ -133,7 +132,7 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
     let (balances, slashings) = state.balances_mut_with_slashings();
 
     // Calculating this lazily saves 30-40 μs in typical networks.
-    let adjusted_total_slashing_balance = Lazy::new(|| {
+    let adjusted_total_slashing_balance = LazyCell::new(|| {
         slashings
             .into_iter()
             .sum::<Gwei>()

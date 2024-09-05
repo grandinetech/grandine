@@ -18,7 +18,6 @@ hashing = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 num-integer = { workspace = true }
-once_cell = { workspace = true }
 prometheus_metrics = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }

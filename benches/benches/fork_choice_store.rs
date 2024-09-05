@@ -2,7 +2,7 @@
 // See <https://github.com/rust-lang/rust/issues/57274>.
 #![allow(unused_crate_dependencies)]
 
-use core::convert::Infallible as Never;
+use core::{cell::LazyCell, convert::Infallible as Never};
 use std::sync::Arc;
 
 use allocator as _;
@@ -18,7 +18,6 @@ use fork_choice_store::{
 };
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
-use once_cell::unsync::Lazy;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
@@ -52,7 +51,7 @@ impl Criterion {
 
         assert!(misc::is_epoch_start::<Mainnet>(next_epoch_start_slot));
 
-        let store_before_next_ordinary_slot = Lazy::new(|| {
+        let store_before_next_ordinary_slot = LazyCell::new(|| {
             let run = || -> Result<_> {
                 let config = Arc::new(Config::holesky());
                 let anchor_state = CAPELLA_BEACON_STATE.force().clone_arc();
@@ -93,8 +92,8 @@ impl Criterion {
             run().expect("all data should be processed successfully")
         });
 
-        let store_before_next_epoch = Lazy::new(|| {
-            let mut store = Lazy::force(&store_before_next_ordinary_slot).clone();
+        let store_before_next_epoch = LazyCell::new(|| {
+            let mut store = LazyCell::force(&store_before_next_ordinary_slot).clone();
 
             process_slot(&mut store, next_ordinary_slot)
                 .expect("slot should be processed successfully");
@@ -107,7 +106,7 @@ impl Criterion {
             .bench_function(
                 format!("at slot {next_ordinary_slot} in Holesky"),
                 |bencher| {
-                    let store = Lazy::force(&store_before_next_ordinary_slot);
+                    let store = LazyCell::force(&store_before_next_ordinary_slot);
 
                     bencher.iter_batched_ref(
                         || store.clone(),
@@ -119,7 +118,7 @@ impl Criterion {
             .bench_function(
                 format!("at slot {next_epoch_start_slot} in Holesky"),
                 |bencher| {
-                    let store = Lazy::force(&store_before_next_epoch);
+                    let store = LazyCell::force(&store_before_next_epoch);
 
                     bencher.iter_batched_ref(
                         || store.clone(),
