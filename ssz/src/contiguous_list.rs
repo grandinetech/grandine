@@ -60,7 +60,9 @@ impl<T, N> IntoIterator for ContiguousList<T, N> {
     type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        Vec::from(self.elements).into_iter()
+        // `Box::into_iter` cannot be called like a method until Rust 2024.
+        // See <https://github.com/rust-lang/rust/pull/124097/>.
+        Box::into_iter(self.elements)
     }
 }
 
