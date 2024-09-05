@@ -242,8 +242,7 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
 ) -> &PackedIndices {
     fn pack<T>(indices: Vec<ValidatorIndex>) -> Arc<[T]>
     where
-        ValidatorIndex: TryInto<T>,
-        <ValidatorIndex as TryInto<T>>::Error: Debug,
+        ValidatorIndex: TryInto<T, Error: Debug>,
     {
         // This relies on `std::vec::IntoIter` implementing `TrustedLen`.
         // See the documentation for the `FromIterator` impl for `Arc`.

@@ -65,7 +65,7 @@ impl Keystore {
 #[serde(
     bound(
         serialize = "for <'t> &'t T: ToHex",
-        deserialize = "T: FromHex, T::Error: Display",
+        deserialize = "T: FromHex<Error: Display>",
     ),
     deny_unknown_fields
 )]
@@ -171,7 +171,7 @@ impl<T> Crypto<T> {
 #[serde(
     bound(
         serialize = "F: Serialize, for <'m> &'m M: ToHex",
-        deserialize = "F: Deserialize<'de>, M: FromHex, M::Error: Display",
+        deserialize = "F: Deserialize<'de>, M: FromHex<Error: Display>",
     ),
     deny_unknown_fields
 )]

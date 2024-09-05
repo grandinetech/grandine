@@ -16,27 +16,23 @@ use try_from_iterator::TryFromIterator;
 
 #[derive(Deserialize, Serialize)]
 #[serde(bound(
-    deserialize = "T: Deserialize<'de> + FromStr, T::Err: Display",
+    deserialize = "T: Deserialize<'de> + FromStr<Err: Display>",
     serialize = "T: Serialize + Display",
 ))]
 struct Wrapper<T>(#[serde(with = "crate::string_or_native")] T);
 
 pub fn deserialize<'de, I, T, D>(deserializer: D) -> Result<T, D::Error>
 where
-    I: Deserialize<'de> + FromStr,
-    I::Err: Display,
-    T: TryFromIterator<I>,
-    T::Error: Display,
+    I: Deserialize<'de> + FromStr<Err: Display>,
+    T: TryFromIterator<I, Error: Display>,
     D: Deserializer<'de>,
 {
     struct AnyVisitor<I, T>(PhantomData<(I, T)>);
 
     impl<'de, I, T> Visitor<'de> for AnyVisitor<I, T>
     where
-        I: Deserialize<'de> + FromStr,
-        I::Err: Display,
-        T: TryFromIterator<I>,
-        T::Error: Display,
+        I: Deserialize<'de> + FromStr<Err: Display>,
+        T: TryFromIterator<I, Error: Display>,
     {
         type Value = T;
 

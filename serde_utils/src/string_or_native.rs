@@ -24,17 +24,12 @@ use serde::{
 
 pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
-    T: Deserialize<'de> + FromStr,
-    T::Err: Display,
+    T: Deserialize<'de> + FromStr<Err: Display>,
     D: Deserializer<'de>,
 {
     struct AnyVisitor<T>(PhantomData<T>);
 
-    impl<'de, T> Visitor<'de> for AnyVisitor<T>
-    where
-        T: Deserialize<'de> + FromStr,
-        T::Err: Display,
-    {
+    impl<'de, T: Deserialize<'de> + FromStr<Err: Display>> Visitor<'de> for AnyVisitor<T> {
         type Value = T;
 
         fn expecting(&self, formatter: &mut Formatter) -> FmtResult {

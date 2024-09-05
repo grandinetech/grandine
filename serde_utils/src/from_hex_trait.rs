@@ -9,11 +9,7 @@ use serde_with::{DeserializeAs, SerializeAs};
 // implement `TryFrom<Vec<u8>>` rather than `FromHex`.
 pub enum FromHexTrait {}
 
-impl<'de, T> DeserializeAs<'de, T> for FromHexTrait
-where
-    T: FromHex,
-    T::Error: Display,
-{
+impl<'de, T: FromHex<Error: Display>> DeserializeAs<'de, T> for FromHexTrait {
     fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {
         hex::serde::deserialize(deserializer)
     }

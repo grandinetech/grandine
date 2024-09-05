@@ -1,8 +1,7 @@
 use core::{
-    fmt::{Formatter, LowerHex, Result as FmtResult},
+    fmt::{Display, Formatter, LowerHex, Result as FmtResult},
     marker::PhantomData,
 };
-use std::error::Error as StdError;
 
 use num_traits::Num;
 use serde::{
@@ -14,17 +13,12 @@ use crate::shared;
 
 pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
-    T: Num,
-    T::FromStrRadixErr: StdError + Send + Sync + 'static,
+    T: Num<FromStrRadixErr: Display>,
     D: Deserializer<'de>,
 {
     struct HexVisitor<T>(PhantomData<T>);
 
-    impl<'de, T> Visitor<'de> for HexVisitor<T>
-    where
-        T: Num,
-        T::FromStrRadixErr: StdError + Send + Sync + 'static,
-    {
+    impl<'de, T: Num<FromStrRadixErr: Display>> Visitor<'de> for HexVisitor<T> {
         type Value = T;
 
         fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
