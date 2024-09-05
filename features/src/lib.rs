@@ -11,16 +11,8 @@ use log::{info, warn};
 use parse_display::{Display, FromStr};
 use variant_count::VariantCount;
 
-// This is the only way to initialize a static array without repeating the value. See:
-// - <https://github.com/rust-lang/rust/pull/79270>
-// - <https://github.com/rust-lang/rust-clippy/issues/7665>
-//
-// The documentation of `clippy::declare_interior_mutable_const` acknowledges this:
-// <https://rust-lang.github.io/rust-clippy/rust-1.75.0/#/declare_interior_mutable_const>
-#[allow(clippy::declare_interior_mutable_const)]
-const FALSE: AtomicBool = AtomicBool::new(false);
-
-static FEATURES: [AtomicBool; Feature::VARIANT_COUNT] = [FALSE; Feature::VARIANT_COUNT];
+static FEATURES: [AtomicBool; Feature::VARIANT_COUNT] =
+    [const { AtomicBool::new(false) }; Feature::VARIANT_COUNT];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Display, FromStr, VariantCount)]
 pub enum Feature {
