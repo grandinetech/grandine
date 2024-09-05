@@ -1,8 +1,11 @@
 use core::ops::RangeInclusive;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    sync::{Arc, LazyLock},
+};
 
 use itertools::Itertools as _;
-use once_cell::sync::Lazy;
 use spec_test_utils::Case;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -13,44 +16,44 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
-// `Lazy` implements `core::ops::Deref`, which is more confusing than useful.
+// `LazyLock` implements `core::ops::Deref`, which is more confusing than useful.
 // Explicit forcing is better.
 
 pub struct LazyBeaconState<P: Preset> {
-    state: Lazy<Arc<BeaconState<P>>>,
+    state: LazyLock<Arc<BeaconState<P>>>,
 }
 
 impl<P: Preset> LazyBeaconState<P> {
     #[must_use]
     pub const fn new(thunk: fn() -> Arc<BeaconState<P>>) -> Self {
-        let state = Lazy::new(thunk);
+        let state = LazyLock::new(thunk);
         Self { state }
     }
 
     pub fn force(&self) -> &Arc<BeaconState<P>> {
-        Lazy::force(&self.state)
+        LazyLock::force(&self.state)
     }
 }
 
 pub struct LazyBeaconBlock<P: Preset> {
-    block: Lazy<Arc<SignedBeaconBlock<P>>>,
+    block: LazyLock<Arc<SignedBeaconBlock<P>>>,
 }
 
 impl<P: Preset> LazyBeaconBlock<P> {
     #[must_use]
     pub(crate) const fn new(thunk: fn() -> Arc<SignedBeaconBlock<P>>) -> Self {
-        let block = Lazy::new(thunk);
+        let block = LazyLock::new(thunk);
         Self { block }
     }
 
     pub fn force(&self) -> &Arc<SignedBeaconBlock<P>> {
-        Lazy::force(&self.block)
+        LazyLock::force(&self.block)
     }
 }
 
 pub struct LazyBeaconBlocks<P: Preset> {
     expected_count: u64,
-    blocks: Lazy<Vec<Arc<SignedBeaconBlock<P>>>>,
+    blocks: LazyLock<Vec<Arc<SignedBeaconBlock<P>>>>,
 }
 
 impl<P: Preset> LazyBeaconBlocks<P> {
@@ -61,7 +64,7 @@ impl<P: Preset> LazyBeaconBlocks<P> {
     ) -> Self {
         Self {
             expected_count,
-            blocks: Lazy::new(thunk),
+            blocks: LazyLock::new(thunk),
         }
     }
 
@@ -71,7 +74,7 @@ impl<P: Preset> LazyBeaconBlocks<P> {
     }
 
     pub fn force(&self) -> &[Arc<SignedBeaconBlock<P>>] {
-        let blocks = Lazy::force(&self.blocks);
+        let blocks = LazyLock::force(&self.blocks);
         let actual_count = u64::try_from(blocks.len()).expect("block count should fit in u64");
 
         assert_eq!(actual_count, self.expected_count);

@@ -9,6 +9,5 @@ workspace = true
 [dependencies]
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-once_cell = { workspace = true }
 spec_test_utils = { workspace = true }
 types = { workspace = true }

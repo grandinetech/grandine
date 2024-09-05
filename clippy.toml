@@ -61,6 +61,7 @@ disallowed-types = [
     { path = 'tokio::fs::OpenOptions', reason = 'use fs_err::tokio::OpenOptions for more helpful error messages' },
     { path = 'tokio::fs::ReadDir',     reason = 'use fs_err::tokio::ReadDir for more helpful error messages'     },
 
+    { path = 'once_cell::sync::Lazy',   reason = 'use std::sync::LazyLock'  },
     { path = 'once_cell::unsync::Lazy', reason = 'use core::cell::LazyCell' },
 ]
 enforced-import-renames = [
