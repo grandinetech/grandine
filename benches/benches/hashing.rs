@@ -89,7 +89,7 @@ fn main() {
     criterion.final_summary();
 }
 
-// Arrays of arbitrary length do not implement `Default` as of Rust 1.78.0.
+// Arrays of arbitrary length do not implement `Default` as of Rust 1.80.1.
 // See <https://github.com/rust-lang/rust/issues/61415>.
 // We work around that by using `PublicKeyBytes` and `SignatureBytes` instead.
 

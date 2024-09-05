@@ -2031,7 +2031,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.78.0.
+        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.80.1.
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
@@ -2105,7 +2105,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.78.0.
+        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.80.1.
         self.waiting_for_checkpoint_states
             .retain(|target, waiting| {
                 let prune = target.epoch < finalized_epoch;
