@@ -12,7 +12,7 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     phase0::primitives::{Slot, H256},
-    preset::Preset,
+    preset::{Preset, SyncSubcommitteeSize},
 };
 
 pub type AggregateMap<P> = HashMap<ContributionData, Arc<RwLock<Vec<Aggregate<P>>>>>;
@@ -64,6 +64,6 @@ impl ContributionData {
 
 #[derive(Clone, Copy, Default)]
 pub struct Aggregate<P: Preset> {
-    pub aggregation_bits: BitVector<P::SyncSubcommitteeSize>,
+    pub aggregation_bits: BitVector<SyncSubcommitteeSize<P>>,
     pub signature: AggregateSignature,
 }

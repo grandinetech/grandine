@@ -37,7 +37,7 @@ use types::{
             CommitteeIndex, DomainType, Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H256,
         },
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
     traits::{BeaconState, PostAltairBeaconState},
 };
 
@@ -121,7 +121,7 @@ pub fn get_block_root_at_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot
     ensure!(slot < state.slot(), Error::SlotOutOfRange);
 
     ensure!(
-        state.slot() <= slot + P::SlotsPerHistoricalRoot::U64,
+        state.slot() <= slot + SlotsPerHistoricalRoot::<P>::U64,
         Error::SlotOutOfRange,
     );
 
@@ -139,7 +139,7 @@ pub fn epoch_boundary_block_root<P: Preset>(
     head_block_root: H256,
 ) -> H256
 where
-    P::SlotsPerHistoricalRoot: IsGreaterOrEqual<Sub1<P::SlotsPerEpoch>, Output = True>,
+    SlotsPerHistoricalRoot<P>: IsGreaterOrEqual<Sub1<P::SlotsPerEpoch>, Output = True>,
 {
     let epoch = get_current_epoch(head_state);
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
@@ -745,7 +745,7 @@ pub fn get_sync_subcommittee_pubkeys<P: Preset>(
     };
 
     let index = usize::try_from(subcommittee_index)?;
-    let size = P::SyncSubcommitteeSize::USIZE;
+    let size = SyncSubcommitteeSize::<P>::USIZE;
     let offset = index * size;
 
     Ok(&sync_committee.pubkeys[offset..offset + size])

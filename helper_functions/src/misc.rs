@@ -32,7 +32,7 @@ use types::{
             SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
         },
     },
-    preset::Preset,
+    preset::{Preset, SyncSubcommitteeSize},
     traits::{
         BeaconState, PostAltairBeaconState, PostDenebBeaconBlockBody, SignedBeaconBlock as _,
     },
@@ -227,7 +227,7 @@ pub fn compute_subnets_for_sync_committee<P: Preset>(
         .iter()
         .enumerate()
         .filter(|(_, pubkey)| *pubkey == target_pubkey)
-        .map(|(position, _)| position.div_typenum::<P::SyncSubcommitteeSize>())
+        .map(|(position, _)| position.div_typenum::<SyncSubcommitteeSize<P>>())
         .for_each(|position| subnets.set(position, true));
 
     Ok(subnets)

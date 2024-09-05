@@ -78,7 +78,7 @@ use types::{
             UnixSeconds, ValidatorIndex, Version, H256,
         },
     },
-    preset::Preset,
+    preset::{Preset, SyncSubcommitteeSize},
     traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -728,7 +728,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
     let validators = validator_indices.clone();
 
     let validator_aggregates = validator_indices
-        .chunks_exact(P::SyncSubcommitteeSize::USIZE)
+        .chunks_exact(SyncSubcommitteeSize::<P>::USIZE)
         .collect();
 
     let response = StateSyncCommitteeResponse {

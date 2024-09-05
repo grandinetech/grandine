@@ -16,16 +16,16 @@ use crate::{
         containers::{Eth1Data, PendingAttestation, Validator},
         primitives::{Gwei, H256},
     },
-    preset::Preset,
+    preset::{MaxAttestationsPerEpoch, Preset, SlotsPerEth1VotingPeriod, SlotsPerHistoricalRoot},
 };
 
 pub type RecentRoots<P> =
-    PersistentVector<H256, <P as Preset>::SlotsPerHistoricalRoot, UnhashedBundleSize<H256>>;
+    PersistentVector<H256, SlotsPerHistoricalRoot<P>, UnhashedBundleSize<H256>>;
 
 pub type HistoricalRoots<P> =
     PersistentList<H256, <P as Preset>::HistoricalRootsLimit, UnhashedBundleSize<H256>>;
 
-pub type Eth1DataVotes<P> = PersistentList<Eth1Data, <P as Preset>::SlotsPerEth1VotingPeriod>;
+pub type Eth1DataVotes<P> = PersistentList<Eth1Data, SlotsPerEth1VotingPeriod<P>>;
 
 pub type Validators<P> = PersistentList<Validator, <P as Preset>::ValidatorRegistryLimit>;
 
@@ -38,8 +38,7 @@ pub type RandaoMixes<P> =
 pub type Slashings<P> =
     PersistentVector<Gwei, <P as Preset>::EpochsPerSlashingsVector, UnhashedBundleSize<Gwei>>;
 
-pub type Attestations<P> =
-    PersistentList<PendingAttestation<P>, <P as Preset>::MaxAttestationsPerEpoch>;
+pub type Attestations<P> = PersistentList<PendingAttestation<P>, MaxAttestationsPerEpoch<P>>;
 
 pub type EpochParticipation<P> = PersistentList<
     ParticipationFlags,

@@ -24,7 +24,7 @@ use types::{
         containers::{Deposit, Eth1Data},
         primitives::{DepositIndex, ExecutionBlockNumber, UnixSeconds},
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerEth1VotingPeriod},
     traits::BeaconState,
 };
 
@@ -191,7 +191,7 @@ pub trait Eth1Storage {
             .filter(|vote| **vote == eth1_vote)
             .count();
 
-        let eth1_data = if (existing_vote_count + 1) * 2 > P::SlotsPerEth1VotingPeriod::USIZE {
+        let eth1_data = if (existing_vote_count + 1) * 2 > SlotsPerEth1VotingPeriod::<P>::USIZE {
             eth1_vote
         } else {
             state.eth1_data()
@@ -384,7 +384,7 @@ fn voting_period_start_time<P: Preset>(
 ) -> UnixSeconds {
     let eth1_voting_period_start_slot = state_at_slot
         .slot()
-        .prev_multiple_of(P::SlotsPerEth1VotingPeriod::non_zero());
+        .prev_multiple_of(SlotsPerEth1VotingPeriod::<P>::non_zero());
 
     compute_timestamp_at_slot(config, state_at_slot, eth1_voting_period_start_slot)
 }
@@ -678,7 +678,7 @@ mod tests {
 
         // The genesis block cannot contain an `Eth1Data` vote.
         let first_slot = GENESIS_SLOT + 1;
-        let half_of_voting_period = <Minimal as Preset>::SlotsPerEth1VotingPeriod::U64 / 2;
+        let half_of_voting_period = SlotsPerEth1VotingPeriod::<Minimal>::U64 / 2;
         let last_slot = first_slot + half_of_voting_period;
 
         assert_eq!(first_slot, 1);

@@ -15,7 +15,7 @@ use crate::{
         },
         primitives::{Slot, ValidatorIndex, H256},
     },
-    preset::Preset,
+    preset::{Preset, SyncSubcommitteeSize},
 };
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
@@ -140,14 +140,14 @@ pub struct SyncCommittee<P: Preset> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Hash, Debug, Deserialize, Serialize, Ssz)]
-#[serde(deny_unknown_fields)]
+#[serde(bound = "", deny_unknown_fields)]
 pub struct SyncCommitteeContribution<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
     pub beacon_block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub subcommittee_index: SubcommitteeIndex,
-    pub aggregation_bits: BitVector<P::SyncSubcommitteeSize>,
+    pub aggregation_bits: BitVector<SyncSubcommitteeSize<P>>,
     pub signature: AggregateSignatureBytes,
 }
 

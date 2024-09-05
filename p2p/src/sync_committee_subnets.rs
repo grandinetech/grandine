@@ -9,7 +9,7 @@ use typenum::Unsigned as _;
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
     phase0::primitives::{Epoch, Slot, SubnetId},
-    preset::Preset,
+    preset::{Preset, SyncSubcommitteeSize},
 };
 
 use crate::misc::{SyncCommitteeSubnetAction, SyncCommitteeSubscription};
@@ -98,7 +98,7 @@ impl<P: Preset> SyncCommitteeSubnets<P> {
 
             for subnet_id in sync_committee_indices
                 .into_iter()
-                .map(UsizeExt::div_typenum::<P::SyncSubcommitteeSize>)
+                .map(UsizeExt::div_typenum::<SyncSubcommitteeSize<P>>)
             {
                 let subnet_state = &mut self.states[subnet_id];
                 let expiration = subnet_state.max_expiration(until_epoch);

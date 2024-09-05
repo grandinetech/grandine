@@ -1,6 +1,11 @@
 #![allow(clippy::module_name_repetitions)]
 
-use core::{fmt::Debug, hash::Hash, num::NonZeroU64, ops::Sub};
+use core::{
+    fmt::Debug,
+    hash::Hash,
+    num::NonZeroU64,
+    ops::{Div, Mul, Sub},
+};
 
 use arithmetic::NonZeroExt as _;
 use bls::CachedPublicKey;
@@ -44,8 +49,18 @@ use ::{enum_iterator::Sequence, strum::VariantNames};
 /// See [presets in `consensus-specs`](https://github.com/ethereum/consensus-specs/tree/aac851f860fa384916f62027b2dbe3318a354c5b/presets).
 pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'static {
     // Phase 0
-    type EpochsPerEth1VotingPeriod: Unsigned + NonZero;
-    type EpochsPerHistoricalRoot: Unsigned + NonZero;
+    type EpochsPerEth1VotingPeriod: Unsigned
+        + NonZero
+        + Mul<Self::SlotsPerEpoch, Output: Unsigned + NonZero + Send + Sync>;
+    type EpochsPerHistoricalRoot: Unsigned
+        + NonZero
+        + Mul<
+            Self::SlotsPerEpoch,
+            Output: PersistentVectorElements<H256, UnhashedBundleSize<H256>>
+                        + IsGreaterOrEqual<Sub1<Self::SlotsPerEpoch>, Output = True>
+                        + Send
+                        + Sync,
+        >;
     type EpochsPerHistoricalVector: PersistentVectorElements<H256, UnhashedBundleSize<H256>>
         + Debug
         + Send
@@ -55,7 +70,12 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
     type HistoricalRootsLimit: Unsigned + Debug + Send + Sync;
-    type MaxAttestations: MerkleElements<Attestation<Self>> + Eq + Debug + Send + Sync;
+    type MaxAttestations: MerkleElements<Attestation<Self>>
+        + Mul<Self::SlotsPerEpoch, Output: Unsigned + Send + Sync>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
     type MaxAttesterSlashings: MerkleElements<AttesterSlashing<Self>> + Eq + Debug + Send + Sync;
     type MaxDeposits: MerkleElements<Deposit> + Eq + Debug + Send + Sync;
     type MaxProposerSlashings: MerkleElements<ProposerSlashing> + Eq + Debug + Send + Sync;
@@ -77,6 +97,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + MerkleElements<CachedPublicKey>
         + BitVectorBits
         + MerkleBits
+        + Div<SyncCommitteeSubnetCount, Output: BitVectorBits + MerkleBits + NonZero>
         + Eq
         + Debug
         + Send
@@ -101,7 +122,9 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     //                      the preset even in `consensus-specs`.
     //                      Consider adding bounds to verify they are consistent.
     // Deneb
-    type FieldElementsPerBlob: Unsigned + NonZero;
+    type FieldElementsPerBlob: Unsigned
+        + NonZero
+        + Mul<BytesPerFieldElement, Output: ByteVectorBytes + MerkleElements<u8>>;
     type KzgCommitmentInclusionProofDepth: ContiguousVectorElements<H256>
         + MerkleElements<H256>
         + ArrayLength<H256, ArrayType: Copy>
@@ -112,36 +135,6 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + MerkleElements<KzgCommitment>
         + MerkleElements<KzgProof>
         + Eq
-        + Debug
-        + Send
-        + Sync;
-
-    // Derived type-level variables
-    type BytesPerBlob: ByteVectorBytes + MerkleElements<u8>;
-    // This is a [manual desugaring] of associated type bounds as described in RFC 2289.
-    // This is needed because feature `associated_type_bounds` is not stable.
-    // The [alternative desugaring] would be preferable if feature `implied_bounds` were stable.
-    //
-    // [manual desugaring]:      https://github.com/rust-lang/rfcs/blob/a0df6023eff2353b19367c29c9006898cd2c3fed/text/2289-associated-type-bounds.md#the-desugaring-for-associated-types
-    // [alternative desugaring]: https://github.com/rust-lang/rfcs/blob/a0df6023eff2353b19367c29c9006898cd2c3fed/text/2289-associated-type-bounds.md#an-alternative-desugaring-of-bounds-on-associated-types
-    type MaxAttestationsPerEpoch: Unsigned + Debug + Send + Sync;
-    type SlotsPerEth1VotingPeriod: Unsigned + NonZero + Debug + Send + Sync;
-    // The `Eq` bound is needed to work around a `clippy::derive_partial_eq_without_eq` false
-    // positive for `HistoricalBatch`.
-    type SlotsPerHistoricalRoot: PersistentVectorElements<H256, UnhashedBundleSize<H256>>
-        + IsGreaterOrEqual<Sub1<Self::SlotsPerEpoch>, Output = True>
-        + Eq
-        + Debug
-        + Send
-        + Sync;
-    // This variable has been renamed a number of times and no longer even exists in
-    // `consensus-specs`, but it's still needed in our implementation.
-    type SyncSubcommitteeSize: BitVectorBits
-        + MerkleBits
-        + Unsigned
-        + NonZero
-        + Eq
-        + Hash
         + Debug
         + Send
         + Sync;
@@ -239,13 +232,6 @@ impl Preset for Mainnet {
     type MaxBlobsPerBlock = U6;
     type KzgCommitmentInclusionProofDepth = U17;
 
-    // Derived type-level variables
-    type BytesPerBlob = Prod<BytesPerFieldElement, Self::FieldElementsPerBlob>;
-    type MaxAttestationsPerEpoch = Prod<Self::MaxAttestations, Self::SlotsPerEpoch>;
-    type SlotsPerEth1VotingPeriod = Prod<Self::EpochsPerEth1VotingPeriod, Self::SlotsPerEpoch>;
-    type SlotsPerHistoricalRoot = Prod<Self::EpochsPerHistoricalRoot, Self::SlotsPerEpoch>;
-    type SyncSubcommitteeSize = Quot<Self::SyncCommitteeSize, SyncCommitteeSubnetCount>;
-
     // Meta
     const NAME: PresetName = PresetName::Mainnet;
 }
@@ -319,13 +305,6 @@ impl Preset for Minimal {
     type MaxBlobCommitmentsPerBlock = U16;
     type KzgCommitmentInclusionProofDepth = U9;
 
-    // Derived type-level variables
-    type BytesPerBlob = Prod<BytesPerFieldElement, Self::FieldElementsPerBlob>;
-    type MaxAttestationsPerEpoch = Prod<Self::MaxAttestations, Self::SlotsPerEpoch>;
-    type SlotsPerEth1VotingPeriod = Prod<Self::EpochsPerEth1VotingPeriod, Self::SlotsPerEpoch>;
-    type SlotsPerHistoricalRoot = Prod<Self::EpochsPerHistoricalRoot, Self::SlotsPerEpoch>;
-    type SyncSubcommitteeSize = Quot<Self::SyncCommitteeSize, SyncCommitteeSubnetCount>;
-
     // Meta
     const NAME: PresetName = PresetName::Minimal;
 
@@ -386,19 +365,10 @@ impl Preset for Medalla {
         type MaxBlobCommitmentsPerBlock;
         type MaxBlobsPerBlock;
         type KzgCommitmentInclusionProofDepth;
-
-        // Derived type-level variables
-        type BytesPerBlob;
-        type MaxAttestationsPerEpoch;
-        type SlotsPerHistoricalRoot;
-        type SyncSubcommitteeSize;
     }
 
     // Phase 0
     type EpochsPerEth1VotingPeriod = U32;
-
-    // Derived type-level variables
-    type SlotsPerEth1VotingPeriod = Prod<Self::EpochsPerEth1VotingPeriod, Self::SlotsPerEpoch>;
 
     // Meta
     const NAME: PresetName = PresetName::Medalla;
@@ -408,6 +378,22 @@ impl Preset for Medalla {
     const MIN_SLASHING_PENALTY_QUOTIENT: NonZeroU64 = nonzero!(32_u64);
     const PROPORTIONAL_SLASHING_MULTIPLIER: u64 = 3;
 }
+
+// Derived type-level variables
+pub type BytesPerBlob<P> = Prod<<P as Preset>::FieldElementsPerBlob, BytesPerFieldElement>;
+
+pub type MaxAttestationsPerEpoch<P> =
+    Prod<<P as Preset>::MaxAttestations, <P as Preset>::SlotsPerEpoch>;
+
+pub type SlotsPerEth1VotingPeriod<P> =
+    Prod<<P as Preset>::EpochsPerEth1VotingPeriod, <P as Preset>::SlotsPerEpoch>;
+
+pub type SlotsPerHistoricalRoot<P> =
+    Prod<<P as Preset>::EpochsPerHistoricalRoot, <P as Preset>::SlotsPerEpoch>;
+
+// This variable has been renamed a number of times and no longer even exists in `consensus-specs`,
+// but it's still needed in our implementation.
+pub type SyncSubcommitteeSize<P> = Quot<<P as Preset>::SyncCommitteeSize, SyncCommitteeSubnetCount>;
 
 #[derive(Clone, Copy, Debug, Display, EnumString, DeserializeFromStr, SerializeDisplay)]
 #[strum(serialize_all = "lowercase")]
@@ -578,7 +564,7 @@ impl Phase0Preset {
             min_epochs_to_inactivity_penalty: P::MIN_EPOCHS_TO_INACTIVITY_PENALTY,
             min_seed_lookahead: P::MIN_SEED_LOOKAHEAD,
             slots_per_epoch: P::SlotsPerEpoch::non_zero(),
-            slots_per_historical_root: P::SlotsPerHistoricalRoot::non_zero(),
+            slots_per_historical_root: SlotsPerHistoricalRoot::<P>::non_zero(),
 
             // > State list lengths
             epochs_per_historical_vector: P::EpochsPerHistoricalVector::non_zero(),

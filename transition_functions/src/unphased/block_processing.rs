@@ -31,7 +31,7 @@ use types::{
         },
         primitives::{DepositIndex, ValidatorIndex, H256},
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerEth1VotingPeriod},
     traits::{BeaconBlock, BeaconBlockBody, BeaconState},
 };
 
@@ -173,7 +173,7 @@ pub fn process_eth1_data<P: Preset>(
         .filter(|vote| **vote == body.eth1_data())
         .count();
 
-    if vote_count * 2 > P::SlotsPerEth1VotingPeriod::USIZE {
+    if vote_count * 2 > SlotsPerEth1VotingPeriod::<P>::USIZE {
         *state.eth1_data_mut() = body.eth1_data();
     }
 
