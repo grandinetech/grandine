@@ -22,9 +22,9 @@ pub use crate::{
     shared::{read_offset_unchecked, subslice, write_offset},
     size::Size,
     type_level::{
-        ArrayLengthCopy, BitVectorBits, ByteVectorBytes, BytesToDepth, ContiguousVectorElements,
-        FitsInU64, MerkleBits, MerkleElements, MinimumBundleSize, PersistentVectorElements,
-        ProofSize, UnhashedBundleSize,
+        BitVectorBits, ByteVectorBytes, BytesToDepth, ContiguousVectorElements, FitsInU64,
+        MerkleBits, MerkleElements, MinimumBundleSize, PersistentVectorElements, ProofSize,
+        UnhashedBundleSize,
     },
     uint256::Uint256,
     zero_default::ZeroDefault,

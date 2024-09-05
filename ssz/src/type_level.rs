@@ -5,7 +5,7 @@ use core::ops::{Add, Shr, Sub};
 use ethereum_types::H256;
 use generic_array::ArrayLength;
 use typenum::{
-    op, Add1, Diff, IsGreaterOrEqual, IsLess, Len, Length, Log2, Min, Minimum, NonZero, PowerOfTwo,
+    op, Diff, IsGreaterOrEqual, IsLess, Len, Length, Log2, Min, Minimum, NonZero, PowerOfTwo,
     Shleft, Sub1, Sum, True, Unsigned, B1, U1, U3, U31, U5, U64, U7,
 };
 
@@ -50,19 +50,19 @@ where
         Diff<ChunksToDepth<Self>, Minimum<ChunksToDepth<Self>, Log2<T::PackingFactor>>>;
 }
 
-pub trait ByteVectorBytes: ContiguousVectorElements<u8> + ArrayLengthCopy<u8> {}
+pub trait ByteVectorBytes: ContiguousVectorElements<u8> + ArrayLength<u8, ArrayType: Copy> {}
 
-impl<N: ContiguousVectorElements<u8> + ArrayLengthCopy<u8>> ByteVectorBytes for N {}
+impl<N: ContiguousVectorElements<u8> + ArrayLength<u8, ArrayType: Copy>> ByteVectorBytes for N {}
 
 pub trait BitVectorBits: Unsigned {
-    type Bytes: ArrayLengthCopy<u8>;
+    type Bytes: ArrayLength<u8, ArrayType: Copy>;
 }
 
 impl<N> BitVectorBits for N
 where
     Self: Add<U7> + Unsigned,
     Sum<Self, U7>: Shr<U3>,
-    BitsToBytes<Self>: ArrayLengthCopy<u8>,
+    BitsToBytes<Self>: ArrayLength<u8, ArrayType: Copy>,
 {
     type Bytes = BitsToBytes<Self>;
 }
@@ -84,37 +84,14 @@ where
     type MerkleTreeDepth = BitsToDepth<Self>;
 }
 
-// This is a [manual desugaring] of an associated type bound as described in RFC 2289.
-// This is needed because feature `associated_type_bounds` is not stable.
-// The [alternative desugaring] would be preferable if feature `implied_bounds` were stable.
-//
-// [manual desugaring]:      https://github.com/rust-lang/rfcs/blob/a0df6023eff2353b19367c29c9006898cd2c3fed/text/2289-associated-type-bounds.md#the-desugaring-for-associated-types
-// [alternative desugaring]: https://github.com/rust-lang/rfcs/blob/a0df6023eff2353b19367c29c9006898cd2c3fed/text/2289-associated-type-bounds.md#an-alternative-desugaring-of-bounds-on-associated-types
-pub trait ArrayLengthCopy<T>:
-    ArrayLength<T, ArrayType = <Self as ArrayLengthCopy<T>>::ArrayType>
+pub trait ProofSize:
+    ArrayLength<H256> + ArrayLength<Box<[H256]>> + Add<B1, Output: ArrayLength<H256>>
 {
-    type ArrayType: Copy;
 }
 
-impl<T, N> ArrayLengthCopy<T> for N
-where
-    Self: ArrayLength<T>,
-    <Self as ArrayLength<T>>::ArrayType: Copy,
+impl<N> ProofSize for N where
+    Self: ArrayLength<H256> + ArrayLength<Box<[H256]>> + Add<B1, Output: ArrayLength<H256>>
 {
-    type ArrayType = <Self as ArrayLength<T>>::ArrayType;
-}
-
-pub trait ProofSize: ArrayLength<H256> + ArrayLength<Box<[H256]>> {
-    // `ProofSize::WithLength` is another manual desugaring of an associated type bound.
-    type WithLength: ArrayLength<H256>;
-}
-
-impl<N> ProofSize for N
-where
-    Self: ArrayLength<H256> + ArrayLength<Box<[H256]>> + Add<B1>,
-    Add1<Self>: ArrayLength<H256>,
-{
-    type WithLength = Add1<Self>;
 }
 
 type BitsToBytes<N> = op!((N + U7) >> U3);

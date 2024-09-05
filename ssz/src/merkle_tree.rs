@@ -25,7 +25,7 @@ use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use ssz_derive::Ssz;
 use static_assertions::assert_type_eq_all;
-use typenum::Unsigned as _;
+use typenum::{Add1, Unsigned as _};
 
 use crate::{
     consts::{Endianness, BYTES_PER_CHUNK},
@@ -279,7 +279,7 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
     }
 }
 
-pub type ProofWithLength<N> = ContiguousVector<H256, <N as ProofSize>::WithLength>;
+pub type ProofWithLength<N> = ContiguousVector<H256, Add1<N>>;
 
 /// [`mix_in_length`](https://github.com/ethereum/consensus-specs/blob/4c54bddb6cd144ca8a0a01b7155f43b295c70458/ssz/simple-serialize.md#merkleization)
 ///

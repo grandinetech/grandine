@@ -12,13 +12,12 @@ use crate::{
     error::ReadError,
     porcelain::{SszHash, SszRead, SszSize, SszWrite},
     size::Size,
-    type_level::{ArrayLengthCopy, ContiguousVectorElements, MerkleElements},
+    type_level::{ContiguousVectorElements, MerkleElements},
 };
 
 #[derive(From, Derivative, Serialize)]
 #[derivative(
     Clone(bound = ""),
-    Copy(bound = "N: ArrayLengthCopy<u8>"),
     PartialEq(bound = ""),
     Eq(bound = ""),
     Default(bound = "")
@@ -28,6 +27,8 @@ pub struct ByteVector<N: ArrayLength<u8>> {
     #[serde(with = "serde_utils::prefixed_hex_or_bytes_slice")]
     bytes: ContiguousVector<u8, N>,
 }
+
+impl<N: ArrayLength<u8, ArrayType: Copy>> Copy for ByteVector<N> {}
 
 // This sort of code arguably belongs in an impl of `core::fmt::LowerHex` rather than `Debug`,
 // but we don't ever format byte vectors directly and we need a `Debug` impl anyway.

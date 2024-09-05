@@ -20,14 +20,13 @@ use crate::{
     porcelain::{SszHash, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
-    type_level::{ArrayLengthCopy, ContiguousVectorElements, MerkleElements},
+    type_level::{ContiguousVectorElements, MerkleElements},
 };
 
 #[derive(Deref, DerefMut, AsRef, Derivative, Serialize)]
 #[as_ref(forward)]
 #[derivative(
     Clone(bound = "T: Clone"),
-    Copy(bound = "T: Copy, N: ArrayLengthCopy<T>"),
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq"),
     Default(bound = "T: Default"),
@@ -37,6 +36,8 @@ use crate::{
 pub struct ContiguousVector<T, N: ArrayLength<T>> {
     elements: GenericArray<T, N>,
 }
+
+impl<T: Copy, N: ArrayLength<T, ArrayType: Copy>> Copy for ContiguousVector<T, N> {}
 
 impl<T, N: ArrayLength<T>, A: Into<GenericArray<T, N>>> From<A> for ContiguousVector<T, N> {
     fn from(array: A) -> Self {

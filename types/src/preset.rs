@@ -4,12 +4,13 @@ use core::{fmt::Debug, hash::Hash, num::NonZeroU64, ops::Sub};
 
 use arithmetic::NonZeroExt as _;
 use bls::CachedPublicKey;
+use generic_array::ArrayLength;
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use ssz::{
-    ArrayLengthCopy, BitVectorBits, ByteVectorBytes, ContiguousVectorElements, FitsInU64,
-    MerkleBits, MerkleElements, PersistentVectorElements, UnhashedBundleSize,
+    BitVectorBits, ByteVectorBytes, ContiguousVectorElements, FitsInU64, MerkleBits,
+    MerkleElements, PersistentVectorElements, UnhashedBundleSize,
 };
 use strum::{Display, EnumString};
 use typenum::{
@@ -103,7 +104,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     type FieldElementsPerBlob: Unsigned + NonZero;
     type KzgCommitmentInclusionProofDepth: ContiguousVectorElements<H256>
         + MerkleElements<H256>
-        + ArrayLengthCopy<H256>
+        + ArrayLength<H256, ArrayType: Copy>
         + Debug
         + Eq;
     type MaxBlobCommitmentsPerBlock: MerkleElements<KzgCommitment> + Eq + Debug + Send + Sync;
