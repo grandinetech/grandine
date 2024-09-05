@@ -14,7 +14,7 @@ use typenum::U16;
 
 impl SszSize for bool {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 
@@ -49,7 +49,7 @@ impl SszHash for bool {
 
 impl SszSize for u8 {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 
@@ -81,7 +81,7 @@ impl SszHash for u8 {
 #[cfg(test)]
 impl SszSize for u16 {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 
@@ -115,7 +115,7 @@ impl SszHash for u16 {
 
 impl SszSize for u32 {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 
@@ -146,7 +146,7 @@ impl SszHash for u32 {
 
 impl SszSize for u64 {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 
@@ -179,7 +179,7 @@ impl SszHash for u64 {
 
 impl SszSize for u128 {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 

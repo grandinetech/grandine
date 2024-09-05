@@ -135,7 +135,7 @@ impl<'de> Deserialize<'de> for Uint256 {
             }
 
             fn visit_bytes<E: Error>(self, bytes: &[u8]) -> Result<Self::Value, E> {
-                let expected = core::mem::size_of::<Uint256>();
+                let expected = size_of::<Uint256>();
                 let actual = bytes.len();
 
                 if actual != expected {
@@ -167,7 +167,7 @@ impl Serialize for Uint256 {
         if serializer.is_human_readable() {
             serializer.collect_str(self)
         } else {
-            let mut bytes = [0; core::mem::size_of::<Self>()];
+            let mut bytes = [0; size_of::<Self>()];
             self.into_raw().to_little_endian(&mut bytes);
             serializer.serialize_bytes(&bytes)
         }
@@ -176,7 +176,7 @@ impl Serialize for Uint256 {
 
 impl SszSize for Uint256 {
     const SIZE: Size = Size::Fixed {
-        size: core::mem::size_of::<Self>(),
+        size: size_of::<Self>(),
     };
 }
 
@@ -185,10 +185,7 @@ impl<C> SszRead<C> for Uint256 {
     fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         let mut raw = RawUint256::default();
 
-        for (chunk, limb) in bytes
-            .chunks_exact(core::mem::size_of::<u64>())
-            .zip(raw.0.iter_mut())
-        {
+        for (chunk, limb) in bytes.chunks_exact(size_of::<u64>()).zip(raw.0.iter_mut()) {
             *limb = Endianness::read_u64(chunk);
         }
 
@@ -200,7 +197,7 @@ impl SszWrite for Uint256 {
     #[inline]
     fn write_fixed(&self, bytes: &mut [u8]) {
         for (chunk, limb) in bytes
-            .chunks_exact_mut(core::mem::size_of::<u64>())
+            .chunks_exact_mut(size_of::<u64>())
             .zip(self.into_raw().0)
         {
             Endianness::write_u64(chunk, limb);
@@ -249,7 +246,7 @@ impl Uint256 {
 
     // `<RawUint256 as From<[u8; 32]>>::from` is not `const`.
     #[must_use]
-    pub const fn from_be_bytes(bytes: [u8; core::mem::size_of::<Self>()]) -> Self {
+    pub const fn from_be_bytes(bytes: [u8; size_of::<Self>()]) -> Self {
         #[rustfmt::skip]
         let [
             b0,  b1,  b2,  b3,  b4,  b5,  b6,  b7,

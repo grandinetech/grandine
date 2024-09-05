@@ -11,8 +11,8 @@ use types::{
     preset::Preset,
 };
 
-const EPOCH_SIZE: usize = core::mem::size_of::<Epoch>();
-const H256_SIZE: usize = core::mem::size_of::<H256>();
+const EPOCH_SIZE: usize = size_of::<Epoch>();
+const H256_SIZE: usize = size_of::<H256>();
 const INDEXED_ATTESTATION_KEY_LENGTH: usize = EPOCH_SIZE + H256_SIZE;
 
 type IndexedAttestationKey = [u8; INDEXED_ATTESTATION_KEY_LENGTH];

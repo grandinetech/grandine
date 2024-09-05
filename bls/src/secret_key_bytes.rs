@@ -13,7 +13,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::SecretKey;
 
 // Unlike public keys and signatures, secret keys are not compressed.
-const SIZE: usize = core::mem::size_of::<SecretKey>();
+const SIZE: usize = size_of::<SecretKey>();
 
 #[derive(Default, AsRef, AsMut, From, Zeroize, ZeroizeOnDrop, Deserialize)]
 #[as_ref(forward)]

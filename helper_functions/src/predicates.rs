@@ -151,7 +151,7 @@ pub fn is_aggregator<P: Preset>(
     let committee = accessors::beacon_committee(state, slot, committee_index)?;
 
     let dividend = hashing::hash_768(slot_signature)
-        .index(..core::mem::size_of::<u64>())
+        .index(..size_of::<u64>())
         .try_into()
         .map(u64::from_le_bytes)
         .expect("slice has the same length as u64");
@@ -170,7 +170,7 @@ pub fn is_aggregator<P: Preset>(
 #[must_use]
 pub fn is_sync_committee_aggregator<P: Preset>(signature: SignatureBytes) -> bool {
     let dividend = hashing::hash_768(signature)
-        .index(..core::mem::size_of::<u64>())
+        .index(..size_of::<u64>())
         .try_into()
         .map(u64::from_le_bytes)
         .expect("slice has the same length as u64");

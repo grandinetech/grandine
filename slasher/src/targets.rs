@@ -10,7 +10,7 @@ use types::{
     preset::Preset,
 };
 
-const VALIDATOR_INDEX_SIZE: usize = core::mem::size_of::<ValidatorIndex>();
+const VALIDATOR_INDEX_SIZE: usize = size_of::<ValidatorIndex>();
 const TARGET_KEY_LENGTH: usize = VALIDATOR_INDEX_SIZE;
 // Weaks Subjectivity period from https://hackmd.io/@sproul/min-max-slasher
 pub const TARGETS_LENGTH: u64 = 54000;

@@ -1068,12 +1068,6 @@ pub struct BlockPhaseError {
     payload_phase: Phase,
 }
 
-#[derive(Debug, Error)]
-#[error("payload phase not supported (payload: {payload_phase})")]
-pub struct ExecutionPayloadPhaseError {
-    payload_phase: Phase,
-}
-
 #[cfg(test)]
 mod spec_tests {
     use spec_test_utils::Case;

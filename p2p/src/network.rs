@@ -821,7 +821,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn handle_request(
-        &mut self,
+        &self,
         peer_id: PeerId,
         peer_request_id: PeerRequestId,
         request: Request,
@@ -867,7 +867,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn handle_status_request(
-        &mut self,
+        &self,
         peer_id: PeerId,
         peer_request_id: PeerRequestId,
         remote: StatusMessage,
@@ -1468,7 +1468,7 @@ impl<P: Preset> Network<P> {
         P2pToSync::StatusPeer(peer_id).send(&self.channels.p2p_to_sync_tx);
     }
 
-    fn request_peer_status(&mut self, request_id: RequestId, peer_id: PeerId) {
+    fn request_peer_status(&self, request_id: RequestId, peer_id: PeerId) {
         let status = self.local_status();
 
         debug!(
@@ -1497,7 +1497,7 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn check_status(&mut self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
+    fn check_status(&self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
         if local.fork_digest != remote.fork_digest {
             warn!(
                 "local fork digest doesn't match remote fork digest \
@@ -1569,7 +1569,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn request_blobs_by_range(
-        &mut self,
+        &self,
         request_id: RequestId,
         peer_id: PeerId,
         start_slot: Slot,
@@ -1621,7 +1621,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn request_blocks_by_range(
-        &mut self,
+        &self,
         request_id: RequestId,
         peer_id: PeerId,
         start_slot: Slot,
@@ -1656,7 +1656,7 @@ impl<P: Preset> Network<P> {
         self.request(peer_id, request_id, Request::BlocksByRoot(request));
     }
 
-    fn subscribe_to_core_topics(&mut self) {
+    fn subscribe_to_core_topics(&self) {
         // `subscribe_kind` locks `gossipsub_subscriptions` for writing.
         // Read current subscriptions before subscribing to avoid a deadlock.
         let subscribed_topics = self

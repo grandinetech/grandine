@@ -334,7 +334,7 @@ struct ChecksumMessage {
 }
 
 impl FromHex for ChecksumMessage {
-    type Error = <[u8; core::mem::size_of::<Self>()] as FromHex>::Error;
+    type Error = <[u8; size_of::<Self>()] as FromHex>::Error;
 
     fn from_hex<T: AsRef<[u8]>>(digits: T) -> Result<Self, Self::Error> {
         let bytes = FromHex::from_hex(digits)?;

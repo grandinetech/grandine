@@ -944,7 +944,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
-    async fn publish_aggregates_and_proofs(&mut self, wait_group: &W, slot_head: &SlotHead<P>) {
+    async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self

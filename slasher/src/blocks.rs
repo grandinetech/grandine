@@ -19,8 +19,8 @@ use crate::{
     status::{ExplainedProposerSlashing, ProposerSlashingReason},
 };
 
-const VALIDATOR_INDEX_SIZE: usize = core::mem::size_of::<ValidatorIndex>();
-const SLOT_SIZE: usize = core::mem::size_of::<Slot>();
+const VALIDATOR_INDEX_SIZE: usize = size_of::<ValidatorIndex>();
+const SLOT_SIZE: usize = size_of::<Slot>();
 const BLOCK_RECORD_KEY_LENGTH: usize = SLOT_SIZE + VALIDATOR_INDEX_SIZE;
 
 type BlockRecordKey = [u8; BLOCK_RECORD_KEY_LENGTH];

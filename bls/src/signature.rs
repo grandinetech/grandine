@@ -11,7 +11,7 @@ use rand::Rng as _;
 
 use crate::{consts::DOMAIN_SEPARATION_TAG, Error, PublicKey, SignatureBytes};
 
-const MULTI_VERIFY_RANDOM_BYTES: usize = core::mem::size_of::<NonZeroU64>();
+const MULTI_VERIFY_RANDOM_BYTES: usize = size_of::<NonZeroU64>();
 const MULTI_VERIFY_RANDOM_BITS: usize = MULTI_VERIFY_RANDOM_BYTES * 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, From)]

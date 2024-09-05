@@ -294,7 +294,7 @@ fn hash_of_length(length: usize) -> H256 {
     assert_type_eq_all!(Endianness, LittleEndian);
 
     let mut hash = H256::zero();
-    hash[..core::mem::size_of::<usize>()].copy_from_slice(&length.to_le_bytes());
+    hash[..size_of::<usize>()].copy_from_slice(&length.to_le_bytes());
     hash
 }
 

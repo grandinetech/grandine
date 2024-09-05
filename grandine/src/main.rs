@@ -50,8 +50,6 @@ use crate::{
 
 #[cfg(any(feature = "preset-mainnet", test))]
 use types::preset::Mainnet;
-#[cfg(any(feature = "preset-medalla", test))]
-use types::preset::Medalla;
 #[cfg(any(feature = "preset-minimal", test))]
 use types::preset::Minimal;
 
@@ -515,8 +513,6 @@ fn try_main() -> Result<()> {
     match context.chain_config.preset_base {
         #[cfg(any(feature = "preset-mainnet", test))]
         PresetName::Mainnet => context.run_with_restart::<Mainnet>(),
-        #[cfg(any(feature = "preset-medalla", test))]
-        PresetName::Medalla => context.run_with_restart::<Medalla>(),
         #[cfg(any(feature = "preset-minimal", test))]
         PresetName::Minimal => context.run_with_restart::<Minimal>(),
         #[allow(unreachable_patterns)]

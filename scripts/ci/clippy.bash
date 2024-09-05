@@ -74,6 +74,15 @@ options=(
     # The `--` lets callers pass `--deny warnings` to the script.
     # Lint settings must be specified after a `--`.
     --
+
+    # `clippy::lint_groups_priority` produces false positives.
+    # The `--allow` option seems to be the only way to suppress them.
+    # See <https://github.com/rust-lang/rust-clippy/issues/12270>. A fix was implemented in
+    # <https://github.com/rust-lang/rust-clippy/pull/12827> but did not make it into Rust 1.80.0.
+    # The issue used to be mitigated by <https://github.com/rust-lang/rust-clippy/issues/12729>
+    # until that was fixed in <https://github.com/rust-lang/rust-clippy/pull/12730>,
+    # which somehow did make into Rust 1.80.0 despite being merged in the same release cycle.
+    --allow clippy::lint_groups_priority
 )
 
 exec cargo clippy "${options[@]}" "$@"

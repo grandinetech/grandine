@@ -68,7 +68,7 @@ pub fn secret_key(validator_index: ValidatorIndex) -> SecretKey {
     let secret_key_uint = BigUint::from_bytes_le(index_hash.as_bytes()) % &curve_order;
     let unpadded = secret_key_uint.to_bytes_be();
     let mut padded = SecretKeyBytes::default();
-    padded.as_mut()[core::mem::size_of::<SecretKeyBytes>() - unpadded.len()..]
+    padded.as_mut()[size_of::<SecretKeyBytes>() - unpadded.len()..]
         .copy_from_slice(unpadded.as_slice());
     padded
         .try_into()

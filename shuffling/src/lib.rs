@@ -131,7 +131,7 @@ pub fn shuffle_single<P: Preset>(mut index: u64, index_count: NonZeroU64, seed: 
 
 fn compute_pivot(seed: H256, round: u8, index_count: NonZeroU64) -> u64 {
     hashing::hash_256_8(seed, round)
-        .index(..core::mem::size_of::<u64>())
+        .index(..size_of::<u64>())
         .try_into()
         .map(u64::from_le_bytes)
         .expect("slice has the same size as u64")

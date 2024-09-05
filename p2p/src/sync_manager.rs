@@ -463,7 +463,7 @@ impl SyncManager {
         self.block_requests.request_by_range_finished(request_id)
     }
 
-    pub fn block_by_root_request_finished(&mut self, block_root: H256) {
+    pub fn block_by_root_request_finished(&self, block_root: H256) {
         self.log(
             Level::Debug,
             format_args!("request block by root finished (block_root: {block_root:?})"),

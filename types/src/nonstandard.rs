@@ -130,7 +130,7 @@ pub type UsizeVec = SmallVec<[usize; 2]>;
 
 assert_eq_size!(UsizeVec, Vec<usize>);
 
-type U64Vec = SmallVec<[u64; 2 * core::mem::size_of::<usize>() / core::mem::size_of::<u64>()]>;
+type U64Vec = SmallVec<[u64; 2 * size_of::<usize>() / size_of::<u64>()]>;
 
 assert_eq_size!(U64Vec, Vec<u64>);
 

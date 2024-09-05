@@ -7,8 +7,8 @@ use types::phase0::{
     primitives::{Epoch, ValidatorIndex, H256},
 };
 
-const EPOCH_SIZE: usize = core::mem::size_of::<Epoch>();
-const VALIDATOR_INDEX_SIZE: usize = core::mem::size_of::<ValidatorIndex>();
+const EPOCH_SIZE: usize = size_of::<Epoch>();
+const VALIDATOR_INDEX_SIZE: usize = size_of::<ValidatorIndex>();
 const ATTESTATION_VOTE_KEY_LENGTH: usize = EPOCH_SIZE + VALIDATOR_INDEX_SIZE;
 
 // TargetEpoch,ValidatorIndex -> AttestationDataRoot

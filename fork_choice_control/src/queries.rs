@@ -786,7 +786,7 @@ impl<P: Preset> Snapshot<'_, P> {
     /// > Let a node be an *optimistic node* if its fork choice is in one of the following states:
     /// > 1. `is_optimistic(opt_store, head) is True`
     /// > 2. Blocks from every viable (with respect to FFG) branch have transitioned from
-    /// > `NOT_VALIDATED` to `INVALIDATED` leaving the block tree without viable branches
+    /// >    `NOT_VALIDATED` to `INVALIDATED` leaving the block tree without viable branches
     ///
     /// [Optimistic Sync specification]: https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/sync/optimistic.md#helpers
     #[must_use]

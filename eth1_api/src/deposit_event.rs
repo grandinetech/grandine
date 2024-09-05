@@ -166,7 +166,7 @@ impl DepositEvent {
         "649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"
     ));
 
-    const LENGTH: usize = core::mem::size_of::<RawDepositEvent>();
+    const LENGTH: usize = size_of::<RawDepositEvent>();
 }
 
 #[allow(clippy::default_trait_access)]
