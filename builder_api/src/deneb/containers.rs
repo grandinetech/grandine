@@ -10,7 +10,6 @@ use types::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
-    nonstandard::Phase,
     phase0::primitives::Uint256,
     preset::Preset,
 };
@@ -29,13 +28,6 @@ pub struct BuilderBid<P: Preset> {
 pub struct SignedBuilderBid<P: Preset> {
     pub message: BuilderBid<P>,
     pub signature: SignatureBytes,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(bound = "", deny_unknown_fields)]
-pub struct GetHeaderResponse<P: Preset> {
-    pub version: Phase,
-    pub data: SignedBuilderBid<P>,
 }
 
 #[derive(Debug, Deserialize)]

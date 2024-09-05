@@ -12,6 +12,9 @@ pub enum ProposerSlashingReason {
 #[derive(Debug)]
 pub struct ExplainedProposerSlashing {
     pub slashing: ProposerSlashing,
+    // `ExplainedProposerSlashing.reason` is used for logging through the `Debug` impl.
+    // Implementing `Display` might be more appropriate but also more verbose.
+    #[allow(dead_code)]
     pub reason: ProposerSlashingReason,
 }
 
@@ -26,5 +29,8 @@ pub enum AttesterSlashingReason {
 #[derive(Debug)]
 pub struct ExplainedAttesterSlashing<P: Preset> {
     pub slashing: AttesterSlashing<P>,
+    // `ExplainedAttesterSlashing.reason` is used for logging through the `Debug` impl.
+    // Implementing `Display` might be more appropriate but also more verbose.
+    #[allow(dead_code)]
     pub reason: AttesterSlashingReason,
 }
