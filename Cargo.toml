@@ -154,6 +154,9 @@ wildcard_dependencies   = 'warn'
 #   Setting it to deny (as opposed to forbid) makes no sense.
 #   `core::mem::forget` is impossible to use by mistake.
 #
+# - `clippy::renamed_function_params`
+#   It's unidiomatic.
+#
 # - `clippy::single_call_fn`.
 #   It's unidiomatic and conflicts with lints like `clippy::too_many_lines`.
 #   Public functions are not exempt from it if `avoid-breaking-exported-api` is `false`.
