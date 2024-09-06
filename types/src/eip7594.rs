@@ -26,6 +26,7 @@ pub type KzgCommitmentsInclusionProofDepth = U4;
 
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
 
+// TODO(feature/das): convert to type const
 pub const CUSTODY_REQUIREMENT: u64 = 4;
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 128;
 pub const SAMPLES_PER_SLOT: u64 = 8;

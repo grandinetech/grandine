@@ -17,12 +17,9 @@ use types::{
         BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, MatrixEntry,
         NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
     },
-    phase0::{
-        containers::SignedBeaconBlockHeader,
-        primitives::{NodeId, SubnetId},
-    },
+    phase0::primitives::{NodeId, SubnetId},
     preset::Preset,
-    traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
+    traits::{PostDenebBeaconBlockBody, SignedBeaconBlock as _},
 };
 
 use crate::trusted_setup::settings;
@@ -275,31 +272,21 @@ fn try_convert_ckzg_cell_to_cell(cell: &CKzgCell) -> Result<Cell> {
 }
 
 pub fn get_data_column_sidecars<P: Preset>(
-    signed_block: SignedBeaconBlock<P>,
+    signed_block: &SignedBeaconBlock<P>,
     blobs: impl Iterator<Item = Blob<P>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
-    let (beacon_block, signature) = signed_block.split();
-
-    if let Some(post_deneb_beacon_block_body) = beacon_block.body().post_deneb() {
+    if let Some(post_deneb_beacon_block_body) = signed_block.message().body().post_deneb() {
         let kzg_commitments_inclusion_proof =
             kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
+        let signed_block_header = signed_block.to_header();
 
         let kzg_settings = settings();
-
-        let signed_block_header = SignedBeaconBlockHeader {
-            message: beacon_block.to_header(),
-            signature,
-        };
-
-        let c_kzg_blobs = blobs
-            .map(|blob| CKzgBlob::from_bytes(blob.as_bytes()).map_err(Into::into))
-            .collect::<Result<Vec<CKzgBlob>>>()?;
-
-        let cells_and_proofs = c_kzg_blobs
-            .into_iter()
+        let cells_and_proofs = blobs
             .map(|blob| {
-                CKzgCell::compute_cells_and_kzg_proofs(&blob, &kzg_settings).map_err(Into::into)
+                let c_kzg_blob = CKzgBlob::from_bytes(blob.as_bytes())?;
+                CKzgCell::compute_cells_and_kzg_proofs(&c_kzg_blob, &kzg_settings)
+                    .map_err(Into::into)
             })
             .collect::<Result<Vec<_>>>()?;
 

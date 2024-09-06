@@ -1514,7 +1514,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         if self.chain_config.is_eip7594_fork(epoch) {
             for data_column_sidecar in eip_7594::get_data_column_sidecars(
-                (*block).clone(),
+                &block,
                 block_blobs.unwrap_or_default().into_iter(),
             )? {
                 let data_column_sidecar = Arc::new(data_column_sidecar);

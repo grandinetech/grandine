@@ -1004,19 +1004,10 @@ impl<P: Preset> Store<P> {
                 }
             }
         }
-
-        // > Check the block is valid and compute the post-state
-        combined::custom_state_transition(
-            &self.chain_config,
-            state.make_mut(),
-            &block,
-            ProcessSlots::IfNeeded,
-            state_root_policy,
-            execution_engine,
-            verifier,
-            NullSlotReport,
-        )?;
-
+        
+        // > [Modified in EIP7594] Check if blob data is available
+        //
+        // If not, this block MAY be queued and subsequently considered when blob data becomes available
         if self
             .chain_config
             .is_eip7594_fork(accessors::get_current_epoch(&state))
@@ -1031,6 +1022,18 @@ impl<P: Preset> Store<P> {
                 return Ok(BlockAction::DelayUntilBlobs(block));
             }
         }
+        
+        // > Check the block is valid and compute the post-state
+        combined::custom_state_transition(
+            &self.chain_config,
+            state.make_mut(),
+            &block,
+            ProcessSlots::IfNeeded,
+            state_root_policy,
+            execution_engine,
+            verifier,
+            NullSlotReport,
+        )?;
 
         let attester_slashing_results = block
             .message()

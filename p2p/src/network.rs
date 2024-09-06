@@ -230,6 +230,10 @@ impl<P: Preset> Network<P> {
                             self.publish_blob_sidecar(blob_sidecar);
                             true
                         },
+                        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
+                            self.publish_data_column_sidecar(data_column_sidecar);
+                            true
+                        },
                         ApiToP2p::PublishAggregateAndProof(aggregate_and_proof) => {
                             self.publish_aggregate_and_proof(aggregate_and_proof);
                             true
@@ -2029,6 +2033,11 @@ impl<P: Preset> Network<P> {
     }
 
     fn check_status(&mut self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
+        // TODO(feature/das): fork_digest mismatch, which cause peer removed
+        self.log_with_feature(format_args!(
+            "checking fork digest with local: {} <> remote: {} from peer_id: {peer_id}",
+            local.fork_digest, remote.fork_digest,
+        ));
         if local.fork_digest != remote.fork_digest {
             self.log(
                 Level::Warn,

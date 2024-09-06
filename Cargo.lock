@@ -3534,6 +3534,7 @@ dependencies = [
  "dedicated_executor",
  "deposit_tree",
  "educe",
+ "eip_7594",
  "enum-iterator",
  "eth1",
  "eth1_api",

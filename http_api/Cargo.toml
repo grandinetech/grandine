@@ -16,6 +16,7 @@ builder_api = { workspace = true }
 byteorder = { workspace = true }
 educe = { workspace = true }
 enum-iterator = { workspace = true }
+eip_7594 = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }
