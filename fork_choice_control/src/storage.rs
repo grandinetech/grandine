@@ -379,11 +379,14 @@ impl<P: Preset> Storage<P> {
             // Deserialize-serialize BlobIdentifier as an additional measure
             // to prevent other types of data getting accidentally deleted.
             blobs_to_remove.push(BlobIdentifier::from_ssz_default(value_bytes)?);
-            keys_to_remove.push(key_bytes);
+            keys_to_remove.push(key_bytes.into_owned());
         }
 
         for blob_id in blobs_to_remove {
-            self.database.delete(blob_id.to_ssz()?)?;
+            let BlobIdentifier { block_root, index } = blob_id;
+            let key = BlobSidecarByBlobId(block_root, index).to_string();
+
+            self.database.delete(key)?;
         }
 
         for key in keys_to_remove {
@@ -711,6 +714,30 @@ impl<P: Preset> Storage<P> {
                 .count()
         })
     }
+
+    pub fn slot_by_blob_id_count(&self) -> Result<usize> {
+        let results = self
+            .database
+            .iterator_ascending((H256::zero()).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .filter(|(key_bytes, _)| SlotBlobId::has_prefix(key_bytes))
+                .count()
+        })
+    }
+
+    pub fn blob_sidecar_by_blob_id_count(&self) -> Result<usize> {
+        let results = self
+            .database
+            .iterator_ascending((H256::zero()).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .filter(|(key_bytes, _)| BlobSidecarByBlobId::has_prefix(key_bytes))
+                .count()
+        })
+    }
 }
 
 #[derive(Default, Debug)]
@@ -846,6 +873,11 @@ pub struct BlobSidecarByBlobId(pub H256, pub BlobIndex);
 
 impl BlobSidecarByBlobId {
     const PREFIX: &'static str = "o";
+
+    #[cfg(test)]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
 }
 
 #[derive(Display)]
@@ -885,4 +917,77 @@ pub enum Error {
 
 pub fn serialize(key: impl Display, value: impl SszWrite) -> Result<(String, Vec<u8>)> {
     Ok((key.to_string(), value.to_ssz()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use bytesize::ByteSize;
+    use tempfile::TempDir;
+    use types::preset::Mainnet;
+
+    use super::*;
+
+    #[test]
+    #[allow(clippy::similar_names)]
+    fn test_prune_old_blob_sidecars() -> Result<()> {
+        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10))?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            database,
+            nonzero!(64_u64),
+            true,
+        );
+
+        let blob_id_0 = BlobIdentifier {
+            block_root: H256::zero(),
+            index: 0,
+        };
+
+        // slot 5
+        let blob_id_5 = BlobIdentifier {
+            block_root: H256::zero(),
+            index: 1,
+        };
+
+        let mut blob_sidecar_5 = BlobSidecar::default();
+        blob_sidecar_5.signed_block_header.message.slot = 5;
+
+        // slot 10
+        let blob_id_10 = BlobIdentifier {
+            block_root: H256::zero(),
+            index: 2,
+        };
+
+        let mut blob_sidecar_10 = BlobSidecar::default();
+        blob_sidecar_10.signed_block_header.message.slot = 10;
+
+        let blob_sidecars = vec![
+            BlobSidecarWithId {
+                blob_sidecar: Arc::new(BlobSidecar::default()),
+                blob_id: blob_id_0,
+            },
+            BlobSidecarWithId {
+                blob_sidecar: Arc::new(blob_sidecar_5),
+                blob_id: blob_id_5,
+            },
+            BlobSidecarWithId {
+                blob_sidecar: Arc::new(blob_sidecar_10),
+                blob_id: blob_id_10,
+            },
+        ];
+
+        let persisted = storage.append_blob_sidecars(blob_sidecars)?;
+
+        assert_eq!(persisted, vec![blob_id_0, blob_id_5, blob_id_10]);
+        assert_eq!(storage.slot_by_blob_id_count()?, 3);
+        assert_eq!(storage.blob_sidecar_by_blob_id_count()?, 3);
+
+        storage.prune_old_blob_sidecars(6)?;
+
+        assert_eq!(storage.slot_by_blob_id_count()?, 1);
+        assert_eq!(storage.blob_sidecar_by_blob_id_count()?, 1);
+
+        Ok(())
+    }
 }

@@ -47,6 +47,7 @@ tynm = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
+bytesize = { workspace = true }
 duplicate = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
@@ -54,6 +55,7 @@ fs-err = { workspace = true }
 serde-aux = { workspace = true }
 spec_test_utils = { workspace = true }
 tap = { workspace = true }
+tempfile = { workspace = true }
 test-generator = { workspace = true }
 unwrap_none = { workspace = true }
 
