@@ -474,7 +474,6 @@ impl NetworkConfigOptions {
         network_dir: PathBuf,
         metrics: bool,
         in_memory: bool,
-        subscribe_all_data_column_subnets: bool,
     ) -> NetworkConfig {
         let Self {
             listen_address,
@@ -581,9 +580,9 @@ impl NetworkConfigOptions {
             network_config.subscribe_all_subnets = true;
         }
 
-        // if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
-        network_config.subscribe_all_data_column_subnets = subscribe_all_data_column_subnets;
-        // }
+        if Feature::SubscribeToAllDataColumnSubnets.is_enabled() {
+            network_config.subscribe_all_data_column_subnets = true;
+        }
 
         // Setting this in the last place to overwrite any changes to table filter from other CLI options
         if enable_private_discovery {
@@ -1141,9 +1140,12 @@ impl GrandineArgs {
             .into_iter()
             .chain(disable_block_verification_pool.then_some(Feature::DisableBlockVerificationPool))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
-            // .chain(subscribe_all_data_column_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
+            .chain(subscribe_all_data_column_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
-            .collect();
+            .collect::<Vec<_>>();
+
+        // enabling these features here, because it being used in below network config conversion
+        features.iter().for_each(|f| f.enable());
 
         let auth_options = AuthOptions {
             secrets_path: jwt_secret,
@@ -1210,7 +1212,6 @@ impl GrandineArgs {
                 directories.network_dir.clone().unwrap_or_default(),
                 metrics_enabled,
                 in_memory,
-                subscribe_all_data_column_subnets,
             ),
             storage_config,
             unfinalized_states_in_memory,
