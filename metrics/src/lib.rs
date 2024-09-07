@@ -5,7 +5,7 @@ pub use crate::{
 };
 pub fn initialize_metrics_module() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO) // Adjust log level as needed
+        .with_max_level(tracing::Level::INFO) // log level 
         .init();
 }
 

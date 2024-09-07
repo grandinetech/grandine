@@ -4,6 +4,7 @@ use anyhow::Result;
 use features::Feature;
 use helper_functions::misc;
 use itertools::izip;
+use tracing::{info, debug, instrument};
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -243,26 +244,41 @@ impl<P: Preset> AttestationSubnets<P> {
 
             *subnet_state = match subnet_state {
                 // If persistent subscription exists at current slot, do not change anything
-                Persistent { expiration } => Persistent {
-                    expiration: *expiration,
-                },
+                Persistent { expiration } => {
+                    debug!(subnet_id, ?expiration, "State remains persistent");
+                    Persistent {
+                        expiration: *expiration,
+                    }
+                }
                 // If validator is aggregator, subscribe to subnet or extend existing subscription
                 // (except if persistent subscription already exists)
-                Subscribed { expiration } if is_aggregator => Subscribed {
-                    expiration: (*expiration).max(slot + 1),
-                },
+                Subscribed { expiration } if is_aggregator => {
+                    debug!(subnet_id, ?expiration, "Aggregator extending subscription");
+                    Subscribed {
+                        expiration: (*expiration).max(slot + 1),
+                    }
+                }
                 // Ignore DiscoveringPeers expiration for the new subscription
-                Irrelevant | DiscoveringPeers { .. } if is_aggregator => Subscribed {
-                    expiration: slot + 1,
-                },
+                Irrelevant | DiscoveringPeers { .. } if is_aggregator => {
+                    info!(subnet_id, "Aggregator subscribing to subnet");
+                    Subscribed {
+                        expiration: slot + 1,
+                    }
+                }
                 // If validator is not an aggregator, and subscription exists at current slot, do not change anything
-                Subscribed { expiration } => Subscribed {
-                    expiration: *expiration,
-                },
+                Subscribed { expiration } => {
+                    debug!(subnet_id, ?expiration, "Non-aggregator keeping subscription");
+                    Subscribed {
+                        expiration: *expiration,
+                    }
+                }
                 // If validator is not an aggregator, discover peers in subnet
-                Irrelevant | DiscoveringPeers { .. } => DiscoveringPeers {
-                    expiration: subnet_state.max_expiration(slot + 1),
-                },
+                Irrelevant | DiscoveringPeers { .. } => {
+                    debug!(subnet_id, "Discovering peers for subnet");
+                    DiscoveringPeers {
+                        expiration: subnet_state.max_expiration(slot + 1),
+                    }
+                }
             };
         }
 
