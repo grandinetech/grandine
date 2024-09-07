@@ -1,0 +1,169 @@
+2024-09-07T11:14:37.473981Z  INFO logging: Tracing initialized successfully.
+2024-09-07T11:14:37.474180Z  INFO grandine: Grandine firing up...
+2024-09-07T11:14:37.515494Z  INFO grandine: starting beacon node
+2024-09-07T11:14:37.515604Z  INFO grandine::grandine_config: network: mainnet
+2024-09-07T11:14:37.515672Z  INFO grandine::grandine_config: data directory: "/home/gitpod/.grandine/mainnet"
+2024-09-07T11:14:37.515727Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-09-07T11:14:37.515773Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-09-07T11:14:37.515840Z  INFO grandine::grandine_config: Eth1 RPC URLs: []
+2024-09-07T11:14:37.515934Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d3939333930613400000000000000000000]
+2024-09-07T11:14:37.515976Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-09-07T11:14:37.516007Z  INFO grandine::grandine_config: validator API disabled
+2024-09-07T11:14:37.516033Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-09-07T11:14:37.516082Z  INFO grandine::grandine_config: slasher enabled: false
+2024-09-07T11:14:37.516116Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-99390a4/x86_64-linux
+2024-09-07T11:14:37.516155Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-09-07T11:14:37.516193Z  INFO grandine::grandine_config: back sync enabled: false
+2024-09-07T11:14:37.517612Z  INFO runtime::schema: initialized data directory with schema version 0.2.3
+2024-09-07T11:14:37.707915Z  INFO database: database: /home/gitpod/.grandine/mainnet/beacon/eth1_cache with name eth1
+2024-09-07T11:14:39.860526Z  INFO database: database: /home/gitpod/.grandine/mainnet/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-09-07T11:14:39.861706Z  INFO fork_choice_control::storage: latest state checkpoint was not found; attempting to find stored state by iteration
+2024-09-07T11:14:39.862167Z  INFO fork_choice_control::storage: loaded state at slot 0
+2024-09-07T11:14:40.092087Z  INFO database: database: /home/gitpod/.grandine/mainnet/beacon/sync with name sync
+2024-09-07T11:14:40.095561Z  INFO database: database: /home/gitpod/.grandine/mainnet/validator with name proposer-configs
+2024-09-07T11:14:40.112864Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-09-07T11:14:40.120070Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAkvZSwAzk9pYp5vd8duNWWow6D36NuAULJJnVP7ZsFRPRA
+2024-09-07T11:14:50.206968Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-09-07T11:15:07.005044Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 96)
+2024-09-07T11:15:08.454103Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 2, root: 0xace2240dfe1fd056fba17e84e617578c5ec2dd96f6190009b32116dc7b9aae67, head slot: 121, head root: 0x53dab559e4382a2e196d256e70cbc566147406cbad2461d2145d05ed2b3f1f62)
+2024-09-07T11:15:09.076906Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:15:11.831592Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 96
+2024-09-07T11:15:11.833274Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 3, root: 0xd924a743f197bde8672015aac88fcad90aa599b0a3a2076740d062c05f536600, head slot: 154, head root: 0x8cff0e1339949127df4c2f1a1331498840f899efb663307e47be800da574c655)
+2024-09-07T11:15:11.962757Z  INFO fork_choice_control::storage: saving state in slot 0
+2024-09-07T11:15:14.940971Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 4, root: 0x944b198acd9cb2defa4a717736166ed6219a6b110b080c85c021c219a7a9a0dc, head slot: 185, head root: 0xb889263cda93241c37fa18a734e48036170210558c125d5f0b9305a901ee87a6)
+2024-09-07T11:15:15.239718Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 128
+2024-09-07T11:15:15.542586Z  INFO runtime::runtime: saving current chain before exit…
+2024-09-07T11:15:15.684126Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 192)
+2024-09-07T11:15:16.131274Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 128
+2024-09-07T11:15:16.418620Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 52)
+2024-09-07T11:20:26.116616Z  INFO logging: Tracing initialized successfully.
+2024-09-07T11:20:26.116787Z  INFO grandine: Grandine firing up...
+2024-09-07T11:20:26.156175Z  INFO grandine: starting beacon node
+2024-09-07T11:20:26.156252Z  INFO grandine::grandine_config: network: mainnet
+2024-09-07T11:20:26.156297Z  INFO grandine::grandine_config: data directory: "/home/gitpod/.grandine/mainnet"
+2024-09-07T11:20:26.156338Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-09-07T11:20:26.156374Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-09-07T11:20:26.156439Z  INFO grandine::grandine_config: Eth1 RPC URLs: []
+2024-09-07T11:20:26.156548Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d3939333930613400000000000000000000]
+2024-09-07T11:20:26.156597Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-09-07T11:20:26.156626Z  INFO grandine::grandine_config: validator API disabled
+2024-09-07T11:20:26.156658Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-09-07T11:20:26.156713Z  INFO grandine::grandine_config: slasher enabled: false
+2024-09-07T11:20:26.156747Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-99390a4/x86_64-linux
+2024-09-07T11:20:26.156788Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-09-07T11:20:26.156812Z  INFO grandine::grandine_config: back sync enabled: false
+2024-09-07T11:20:26.179968Z  INFO database: database: /home/gitpod/.grandine/mainnet/beacon/eth1_cache with name eth1
+2024-09-07T11:20:28.079054Z  INFO database: database: /home/gitpod/.grandine/mainnet/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-09-07T11:20:28.233843Z  INFO fork_choice_control::storage: loaded state at slot 128
+2024-09-07T11:20:30.656126Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:30.873694Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:30.979894Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.000633Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.023890Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.047316Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.090439Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.118503Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.140456Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.165866Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.190145Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.230793Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.255878Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.297419Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.321385Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.346046Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.370306Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.404208Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:31.429512Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 128)
+2024-09-07T11:20:32.339209Z  INFO database: database: /home/gitpod/.grandine/mainnet/beacon/sync with name sync
+2024-09-07T11:20:32.341678Z  INFO database: database: /home/gitpod/.grandine/mainnet/validator with name proposer-configs
+2024-09-07T11:20:32.359900Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-09-07T11:20:32.367151Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAkvZSwAzk9pYp5vd8duNWWow6D36NuAULJJnVP7ZsFRPRA
+2024-09-07T11:20:32.638982Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 192)
+2024-09-07T11:20:42.454119Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-09-07T11:20:54.568877Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 5, root: 0x54ef28a8a9f863d5b4ee91a1defd2879f4029862e25b3a7d33019fc43fb76e23, head slot: 217, head root: 0x0e42e7ffe65473f142dde4030841b9afd890bfda3cf228ad7a7f1ec66f9b5c97)
+2024-09-07T11:20:55.021458Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 224)
+2024-09-07T11:20:56.352986Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 6, root: 0x922728a1a20301e518d41f09884a34fc50c9f0d2fcf8894c7db654f0aea0f328, head slot: 249, head root: 0x4e122c95ee0480277462c7f3f69856bec77c11b3b5ec1aa1778cf65979f86c7b)
+2024-09-07T11:20:56.543011Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 192
+2024-09-07T11:20:57.148940Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 256)
+2024-09-07T11:20:58.357505Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 7, root: 0x298771e7ee0af390393a7c354de1b625c7407a9cc8f29ff4687c8495c601ec92, head slot: 282, head root: 0xffd35c38df4193161238128a2271aef6e1fa5e1f41ed2889df094f2dff7e1e1d)
+2024-09-07T11:20:58.570342Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 224
+2024-09-07T11:20:58.937445Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 288)
+2024-09-07T11:21:00.250524Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 8, root: 0x9cd3a9048a8e37e21f67485421edc4b95b73077eba1621cb446b0ce1ab5f1f57, head slot: 313, head root: 0xca7900fea0b946241846d24a2b49d2020dfb0b84521bf31c9202c731fd5217f9)
+2024-09-07T11:21:00.524309Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 256
+2024-09-07T11:21:01.043328Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 320)
+2024-09-07T11:21:02.888953Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 9, root: 0x1e69b805836952b1b79e0a12cf94f3495ea59ca4a632a3c5997999cb5f9cd5d0, head slot: 346, head root: 0x04b94dd297a640b926f6c762e16ab8b303e54543e1b97407ae32c18d7f68f205)
+2024-09-07T11:21:03.215386Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 288
+2024-09-07T11:21:03.488906Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 352)
+2024-09-07T11:21:05.421468Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 10, root: 0x76ed0a81c6bf78152015153137a8c037d628022b5b4c258c52ae92ba2b6bc54d, head slot: 377, head root: 0x96c9842f81880741d3c5965524d1c8f0d3d1d4380a3af6fa61207d74f9ee44a3)
+2024-09-07T11:21:05.719865Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 320
+2024-09-07T11:21:06.063992Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 384)
+2024-09-07T11:21:07.481333Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 11, root: 0x03409dd1ea96a11296515cdf319c2b1c939c99af8de9fec56165f05e1217651e, head slot: 409, head root: 0xdbaa1e690576380834238bac0578f7ff95b708d822e62e8c3d6f403fd347956c)
+2024-09-07T11:21:07.758095Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 352
+2024-09-07T11:21:09.054129Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 12, root: 0x9d09d82044ff765c193b0d787a38a595b1fcc47f4a5e9b5b13a656b5aee18e21, head slot: 442, head root: 0xdd71740b61c7739990cc8e3ae2c7cb36cca77cd091904421247d9158218820cb)
+2024-09-07T11:21:09.242300Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 384
+2024-09-07T11:21:09.377346Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 448)
+2024-09-07T11:21:10.622999Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 13, root: 0xc6b7c41c87b4bf0fc24e4d744312d82e0fe88a4c1ecccac923332eeb9bfe33c5, head slot: 472, head root: 0xf0e3dc342f6c2c92c41c06a250221d5974c505256fcbfc3c7d9cdcf78f4399f8)
+2024-09-07T11:21:12.938085Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 14, root: 0x47744037077ef657a36539aecf2dd179ff7f150b879a2ec29b4e21e69c6e7e50, head slot: 504, head root: 0xe31d6c6ef6e6938d4e2b10c3a25947e34e6446c0f9d0de06576d3bdb44630401)
+2024-09-07T11:21:13.421136Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 448
+2024-09-07T11:21:15.261458Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 15, root: 0x4cb9f72cef82a2799d7b6ca8724e23f95e597b7b67331955d203885a4394c8e6, head slot: 536, head root: 0xcd8adc55b1024f77261d3b6c8713f217750507b008ab08a9ff054698f8a84f24)
+2024-09-07T11:21:15.816194Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 544)
+2024-09-07T11:21:17.650540Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 16, root: 0xdf6c026f30ebc81ce3bd5add17fab099f95912658f4e0212895ab7c8cf7f6140, head slot: 568, head root: 0x50f39e4f0717125f4723e2e9ed467b194fd597abe3bf915309f46af41dc67567)
+2024-09-07T11:21:19.798303Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 17, root: 0x3b6b52e4ea17c263a57f4aa4feba38694f7d7ff820e582aa78d666e9b7ce09ce, head slot: 600, head root: 0xeb5df8615825482d6b824049a867045e46f7b19e135fcecb959ec4fcb45e5563)
+2024-09-07T11:21:20.056135Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 544
+2024-09-07T11:21:20.652858Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 608)
+2024-09-07T11:21:22.244873Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 18, root: 0x98bcae964aff154e72864af77e792fd187e573c57246b3494c1339490f4f87ac, head slot: 633, head root: 0x7dff19ae41cec51639c33bd4feb325e68894a5a5b35effce1e6a7c0c6e3d233c)
+2024-09-07T11:21:22.727207Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 640)
+2024-09-07T11:21:23.798189Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 19, root: 0xa854c641facc238c22b16b5722d8678e271d788a2d3cd5015429192066b0273b, head slot: 663, head root: 0xfbdaa65657f82bea07055d32f0f4e766df18f872312a3df14c08a2f49edbf4c9)
+2024-09-07T11:21:23.977227Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 608
+2024-09-07T11:21:24.285785Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 672)
+2024-09-07T11:21:25.067611Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 20, root: 0x23bbcc5e453f5b13e86904d7cc831aea21c24c9375e1e7e4bc21f53c82216672, head slot: 695, head root: 0x13d6ee13baf9aa775be7b868639abd19611de9e22b2d960454fcae14b83bdca9)
+2024-09-07T11:21:25.274045Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 640
+2024-09-07T11:21:25.721969Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 704)
+2024-09-07T11:21:27.728910Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 21, root: 0x95c53600001676b34a3e615a0c71fc272b6fd9d5a8e8bd9b8d248399d30b4e7f, head slot: 729, head root: 0xb480edf3335a15f56f4cb7498279ccb28abc3f4590718ba4d28b6c862cc1ea68)
+2024-09-07T11:21:27.968364Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 672
+2024-09-07T11:21:28.233060Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 736)
+2024-09-07T11:21:29.205492Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 22, root: 0x2c0e1109cff8c127f59eeae5c692590301980424312ffff65531daa669618dcf, head slot: 760, head root: 0xb8758b2a9f8e5d975761ca6521b5963097f11881c23c65bcba480ccad1b69731)
+2024-09-07T11:21:29.675843Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 704
+2024-09-07T11:21:31.414180Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 23, root: 0x872392b690517caba6916e476b5c74f9f80cf4f1c0a1038644a3a7d0b71256b5, head slot: 791, head root: 0x0511fc6cb26cf9d22f07cafe472e03cadd5ac2fdac1b14b42067b1623c38e764)
+2024-09-07T11:21:31.616653Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 736
+2024-09-07T11:21:33.037750Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 24, root: 0x6af78144624a2401b75d3fc89254ad05d2fbfa652fa8ad930f6d0a1601f9abc4, head slot: 823, head root: 0xe25eda53d1f9aec46ac4748e623abc4544a800dd791d6116eae3cc883745d881)
+2024-09-07T11:21:33.588076Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 832)
+2024-09-07T11:21:34.602078Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 25, root: 0x425c52e1cacda7e5bdbf080e7b95a522259fc08bdc9df4e61b23c0b6ed8da1f0, head slot: 855, head root: 0xdc2cbe24aba5eb51d7abdb98030587d047330c1b0d2a949e6258105c9cf81332)
+2024-09-07T11:21:34.984902Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 864)
+2024-09-07T11:21:36.217926Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 26, root: 0x4c0bc9b664d1199aac7bb8659cd850dd57b782bfaca1fdabfc750bf8c5c8f343, head slot: 888, head root: 0xb2434f99ddf46b0c58cbd2e45a0dab931e47f7b5f136891faa208c8efef87c5f)
+2024-09-07T11:21:36.642155Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 832
+2024-09-07T11:21:37.139954Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 896)
+2024-09-07T11:21:38.329550Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 27, root: 0x4720242331dff12985febad2704bebd454294f3ff8c0d9fc90a3d50ceb8d80f2, head slot: 920, head root: 0x85e4db6a98c42e856fa6b4cd9b761c48621e6200a99c60bae7ef2e424701ad62)
+2024-09-07T11:21:38.624200Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 864
+2024-09-07T11:21:40.071398Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 28, root: 0xd23b46b4496c07f99efdaaeaff2bac9df250bfe30acc9bf34ebff678caa17df0, head slot: 951, head root: 0xb6d9ded6993390fdf043a5ca869cb0570459cb90bec93968f1875959bc1a31dd)
+2024-09-07T11:21:40.325323Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 896
+2024-09-07T11:21:40.931778Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 960)
+2024-09-07T11:21:41.846507Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 29, root: 0xeb1ab0e965b482ccc772274fd4cb8b8545547e4ff40661a07d48f33958d18437, head slot: 983, head root: 0x0dfe0d9d3a9a2c4fcc83cf3da4d6aa17d759d46a54cf88751794be08be70aa09)
+2024-09-07T11:21:42.240492Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 992)
+2024-09-07T11:21:43.306562Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 30, root: 0xd75c5bb2b2ddc7425511051f59d2480ab6f55a8c0ff8459c291289dea7092214, head slot: 1015, head root: 0x5c17a136d3e527b4352ced0be25e6a6249701e9f2aea1953a28712c87a981ccb)
+2024-09-07T11:21:43.474977Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 960
+2024-09-07T11:21:43.833155Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 1024)
+2024-09-07T11:21:44.949748Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 31, root: 0xe1ac1ef51acf1c82e6eae33c724767fc6d6cd684b7170a7e1dc6f9f24e746eea, head slot: 1047, head root: 0x28abb44f0572388eede7c73ec63a0ad35600fb5cdb054bc89034794ad30704e0)
+2024-09-07T11:21:45.169283Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 992
+2024-09-07T11:21:47.275638Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 32, root: 0x2622c3026b6617667c59692d14f20249d43ff842b0f15f863e48af9487dc3a23, head slot: 1079, head root: 0xac61dcb808551e9b1a4578a3163907c21f4930fc12d859a700e9e22077e3a33b)
+2024-09-07T11:21:47.526367Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 1024
+2024-09-07T11:21:47.666043Z  INFO fork_choice_control::storage: saving state in slot 1024
+2024-09-07T11:21:47.923846Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 1088)
+2024-09-07T11:21:50.232987Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 33, root: 0x952851d8c8bb216796b7ebb0e6048194650a08c46894f25cab97b0db1f25ceac, head slot: 1111, head root: 0x8b1201efe87739697c1150f93324da0e861822888a00c5ac395368854ce1f811)
+2024-09-07T11:21:51.841876Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 1120)
+2024-09-07T11:21:55.737804Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 34, root: 0x946dd56127121d321043e906927b5eb6556267c6eb9db6b1b7450f23e52eff33, head slot: 1143, head root: 0x186f6fa9a5fbcf28f95a30d261a9c70d5cb6440aabb4712f68a4cf2965de8f00)
+2024-09-07T11:21:56.639544Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 1088
+2024-09-07T11:21:57.125062Z  INFO fork_choice_control::storage: saving state in slot 1024
+2024-09-07T11:21:58.145464Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 1152)
+2024-09-07T11:22:02.027943Z  WARN discv5::handler: Authentication response already sent. Dropping session. Node: Node: 0xedf4..b1ff, addr: 34.31.2.184:5050
+2024-09-07T11:22:02.031492Z  WARN discv5::service: RPC Request failed: id: 054e2fa7edff9e09, error InvalidRemotePacket
+2024-09-07T11:22:02.031855Z  WARN discv5::service: RPC Request failed: id: 34fe6193a48372e1, error InvalidRemotePacket
+2024-09-07T11:22:02.033471Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 35, root: 0x2f2c7a323b7bdb02417b7fa41ad617e9de1bfd36d6173770a899ee4b01720151, head slot: 1175, head root: 0x4ed4960085a70c1f4c1ecd71230e364fddd347e88327a3aa7fd7bc56864b6ba0)
+2024-09-07T11:22:02.728807Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 1120
+2024-09-07T11:22:03.920277Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 1184)
+2024-09-07T11:22:06.617474Z  INFO runtime::runtime: saving current chain before exit…
+2024-09-07T11:22:06.634644Z  WARN discv5::handler: Failed to inform of response channel closed
+2024-09-07T11:22:06.641257Z  WARN discv5::handler: Failed to inform of response channel closed
+2024-09-07T11:22:06.721862Z  WARN discv5::handler: Failed to inform of response channel closed
+2024-09-07T11:22:07.231485Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 1120
+2024-09-07T11:22:07.556818Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 78)
