@@ -63,9 +63,6 @@ impl<P: Preset> MetricsService<P> {
         validator_keys: Arc<HashSet<PublicKeyBytes>>,
         channels: MetricsChannels,
     ) -> Self {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG) // More detailed logging
-            .init();
         Self {
             config,
             controller,

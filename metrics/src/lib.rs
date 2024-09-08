@@ -3,11 +3,7 @@ pub use crate::{
     server::{run_metrics_server, MetricsServerConfig},
     service::{MetricsChannels, MetricsService, MetricsServiceConfig},
 };
-pub fn initialize_metrics_module() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO) // log level 
-        .init();
-}
+
 
 mod beaconchain;
 mod gui;

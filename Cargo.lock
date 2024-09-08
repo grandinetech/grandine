@@ -5645,6 +5645,8 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
  "tynm",
  "typenum",
  "types",

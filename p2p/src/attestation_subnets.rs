@@ -4,7 +4,7 @@ use anyhow::Result;
 use features::Feature;
 use helper_functions::misc;
 use itertools::izip;
-use tracing::{info, debug, instrument};
+use tracing::{info, debug};
 use typenum::Unsigned as _;
 use types::{
     config::Config,
