@@ -21,7 +21,8 @@ use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
 use helper_functions::misc;
 use http_api_utils::ApiError;
-use log::{info, warn};
+use tracing::{info, warn};
+use tracing_subscriber::{fmt, EnvFilter};// yet to implement
 use prometheus::TextEncoder;
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;

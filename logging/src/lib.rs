@@ -1,6 +1,10 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use derive_more::Display;
+use tracing::info;
+use tracing_appender::non_blocking::NonBlocking;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
 pub static PEER_LOG_METRICS: PeerLogMetrics = PeerLogMetrics::new(0);
 
@@ -29,4 +33,29 @@ impl PeerLogMetrics {
         self.target_peer_count
             .store(target_peer_count, Ordering::Relaxed)
     }
+}
+
+pub fn setup_tracing() -> impl Drop {
+    let log_path = "logs/testing.log";
+    let log_appender = RollingFileAppender::new(Rotation::DAILY, "", log_path);
+    let (file_non_blocking, file_guard) = NonBlocking::new(log_appender);
+
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout).with_ansi(true);
+
+    let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .expect("Failed to create EnvFilter");
+
+    let subscriber = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stdout_layer)
+        .with(file_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to initialize tracing subscriber");
+
+    info!("Tracing initialized successfully.");
+    file_guard
 }

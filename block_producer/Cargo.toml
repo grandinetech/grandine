@@ -25,7 +25,6 @@ futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 keymanager = { workspace = true }
-log = { workspace = true }
 nonzero_ext = { workspace = true }
 operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
@@ -36,6 +35,7 @@ std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true }
 try_from_iterator = { workspace = true }
 tynm = { workspace = true }

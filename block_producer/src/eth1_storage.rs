@@ -13,7 +13,7 @@ use deposit_tree::DepositTree;
 use eth1::{DepositEvent, Eth1Block, Eth1Chain};
 use helper_functions::misc::compute_timestamp_at_slot;
 use itertools::Itertools as _;
-use log::{error, warn};
+use tracing::{error, warn};
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use thiserror::Error;

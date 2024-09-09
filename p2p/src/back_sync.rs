@@ -6,7 +6,7 @@ use derive_more::Display;
 use eth1_api::RealController;
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
 use types::{

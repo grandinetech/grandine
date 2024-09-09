@@ -17,7 +17,7 @@ use anyhow::Result;
 use derivative::Derivative;
 use derive_more::From;
 use execution_engine::ExecutionEngine;
-use log::debug;
+use tracing::debug;
 use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
 use types::preset::Preset;

@@ -1,6 +1,6 @@
 use eth2_libp2p::GossipId;
 use futures::channel::mpsc::UnboundedSender;
-use log::debug;
+use tracing::debug;
 use serde::Serialize;
 use types::{
     altair::containers::SyncCommitteeMessage, capella::containers::SignedBlsToExecutionChange,

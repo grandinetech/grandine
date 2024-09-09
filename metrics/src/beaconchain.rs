@@ -12,7 +12,7 @@ use chrono::DateTime;
 use eth1_api::{Eth1ConnectionData, Eth1Metrics};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::{accessors, predicates};
-use log::warn;
+use tracing::warn;
 use p2p::metrics::PEERS_CONNECTED;
 use prometheus::IntGauge;
 use psutil::{cpu::CpuTimes, process::Process};

@@ -9,7 +9,7 @@ use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use nonzero_ext::nonzero;
 use reqwest::{Client, Url};
 use ssz::{Ssz, SszRead, SszReadDefault as _, SszWrite};

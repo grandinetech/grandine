@@ -10,9 +10,9 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 im = { workspace = true }
-log = { workspace = true }
 parking_lot = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }

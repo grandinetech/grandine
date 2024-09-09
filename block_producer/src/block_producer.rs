@@ -23,7 +23,7 @@ use futures::{
 use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
-use log::{error, info, warn};
+use tracing::{error, info, warn};
 use nonzero_ext::nonzero;
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PoolAdditionOutcome, PoolRejectionReason,

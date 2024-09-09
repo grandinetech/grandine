@@ -2,7 +2,7 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use anyhow::Result;
-use log::warn;
+use tracing::warn;
 use once_cell::sync::OnceCell;
 use prometheus::{
     histogram_opts, opts, Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec,

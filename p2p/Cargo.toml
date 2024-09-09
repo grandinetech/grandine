@@ -38,6 +38,8 @@ slog-stdlog = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }

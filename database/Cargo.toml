@@ -13,11 +13,11 @@ fs-err = { workspace = true }
 im = { workspace = true }
 itertools = { workspace = true }
 libmdbx = { workspace = true }
-log = { workspace = true }
 snap = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 unwrap_none = { workspace = true }
 
 [dev-dependencies]

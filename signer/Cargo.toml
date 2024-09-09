@@ -14,7 +14,6 @@ builder_api = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
 prometheus_metrics = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
@@ -24,6 +23,7 @@ slashing_protection = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
