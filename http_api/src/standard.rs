@@ -2474,13 +2474,15 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    let data_column_sidecars = data_column_sidecars.into_iter().map(Arc::new).collect_vec();
-
-    for data_column_sidecar in data_column_sidecars {
-        controller.on_api_data_column_sidecar(data_column_sidecar.clone_arc());
-        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&api_to_p2p_tx);
-    }
-
+    let data_column_sidecars = data_column_sidecars
+        .into_iter()
+        .map(|dcs| {
+            let data_column_sidecar = Arc::new(dcs);
+            controller.on_api_data_column_sidecar(data_column_sidecar.clone_arc());
+            data_column_sidecar
+        }).collect_vec();
+    
+    ApiToP2p::PublishDataColumnSidecars(data_column_sidecars).send(&api_to_p2p_tx);
     ApiToP2p::PublishBeaconBlock(block.clone_arc()).send(&api_to_p2p_tx);
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
@@ -2572,11 +2574,14 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    let data_column_sidecars = data_column_sidecars.into_iter().map(Arc::new).collect_vec();
-
-    for data_column_sidecar in &data_column_sidecars {
-        controller.on_api_data_column_sidecar(data_column_sidecar.clone_arc());
-    }
+    let data_column_sidecars = data_column_sidecars
+        .into_iter()
+        .map(|dcs| {
+            let data_column_sidecar = Arc::new(dcs);
+            controller.on_api_data_column_sidecar(data_column_sidecar.clone_arc());
+            data_column_sidecar
+        })
+        .collect_vec();
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
 
@@ -2584,10 +2589,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(accept_or_ignore_status)) => {
-            for data_column_sidecar in data_column_sidecars {
-                ApiToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&api_to_p2p_tx);
-            }
-
+            ApiToP2p::PublishDataColumnSidecars(data_column_sidecars).send(&api_to_p2p_tx);
             ApiToP2p::PublishBeaconBlock(block.clone_arc()).send(&api_to_p2p_tx);
 
             match accept_or_ignore_status {

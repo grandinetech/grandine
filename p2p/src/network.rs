@@ -31,7 +31,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::misc;
-use log::{debug, error, log, warn, Level};
+use log::{debug, error, log, warn, info, Level};
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -230,8 +230,8 @@ impl<P: Preset> Network<P> {
                             self.publish_blob_sidecar(blob_sidecar);
                             true
                         },
-                        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
-                            self.publish_data_column_sidecar(data_column_sidecar);
+                        ApiToP2p::PublishDataColumnSidecars(data_column_sidecars) => {
+                            self.publish_data_column_sidecars(data_column_sidecars);
                             true
                         },
                         ApiToP2p::PublishAggregateAndProof(aggregate_and_proof) => {
@@ -403,8 +403,8 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishBlobSidecar(blob_sidecar) => {
                             self.publish_blob_sidecar(blob_sidecar);
                         }
-                        ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
-                            self.publish_data_column_sidecar(data_column_sidecar);
+                        ValidatorToP2p::PublishDataColumnSidecars(data_column_sidecars) => {
+                            self.publish_data_column_sidecars(data_column_sidecars);
                         }
                         ValidatorToP2p::PublishSingularAttestation(attestation, subnet_id) => {
                             self.publish_singular_attestation(attestation, subnet_id);
@@ -616,21 +616,23 @@ impl<P: Preset> Network<P> {
         ))));
     }
 
-    fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
-        let subnet_id = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
-        let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+    fn publish_data_column_sidecars(&self, data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>) {
+        let messages = data_column_sidecars
+            .into_iter()
+            .map(|data_column_sidecar| PubsubMessage::DataColumnSidecar(Box::new((
+                misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index),
+                data_column_sidecar,
+            ))))
+            .collect::<Vec<_>>();
 
         self.log(
             Level::Debug,
             format_args!(
-                "publishing data column sidecar: {data_column_identifier:?}, subnet_id: {subnet_id}"
+                "publishing data column sidecars: {messages:?}"
             ),
         );
 
-        self.publish(PubsubMessage::DataColumnSidecar(Box::new((
-            subnet_id,
-            data_column_sidecar,
-        ))));
+        self.publish_batch(messages);
     }
 
     fn publish_singular_attestation(&self, attestation: Arc<Attestation<P>>, subnet_id: SubnetId) {
@@ -2366,6 +2368,10 @@ impl<P: Preset> Network<P> {
     fn publish(&self, message: PubsubMessage<P>) {
         ServiceInboundMessage::Publish(message).send(&self.network_to_service_tx);
     }
+    
+    fn publish_batch(&self, messages: Vec<PubsubMessage<P>>) {
+        ServiceInboundMessage::PublishBatch(messages).send(&self.network_to_service_tx);
+    }
 
     fn request(&self, peer_id: PeerId, request_id: RequestId, request: Request) {
         ServiceInboundMessage::SendRequest(peer_id, request_id, request)
@@ -2550,6 +2556,9 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::Publish(message) => {
                             service.publish(vec![message]);
+                        }
+                        ServiceInboundMessage::PublishBatch(messages) => {
+                            service.publish(messages);
                         }
                         ServiceInboundMessage::ReportPeer(peer_id, action, source, msg) => {
                             service.report_peer(&peer_id, action, source, msg);

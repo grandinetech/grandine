@@ -1513,19 +1513,27 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let block = Arc::new(beacon_block.clone());
 
         if self.chain_config.is_eip7594_fork(epoch) {
-            for data_column_sidecar in eip_7594::get_data_column_sidecars(
+            let data_column_sidecars = eip_7594::get_data_column_sidecars(
                 &block,
                 block_blobs.unwrap_or_default().into_iter(),
-            )? {
-                let data_column_sidecar = Arc::new(data_column_sidecar);
+            )?;
 
-                self.controller.on_own_data_column_sidecar(
-                    wait_group.clone(),
-                    data_column_sidecar.clone_arc(),
-                );
+            let messages = data_column_sidecars
+                .into_iter()
+                .map(|dcs| {
+                    let data_column_sidecar = Arc::new(dcs);
 
-                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
-            }
+                    self.controller.on_own_data_column_sidecar(
+                        wait_group.clone(),
+                        data_column_sidecar.clone_arc(),
+                    );
+                    data_column_sidecar
+                })
+                .collect::<Vec<_>>();
+
+            info!("publishing data column sidecars: {:?}", messages,);
+
+            ValidatorToP2p::PublishDataColumnSidecars(messages).send(&self.p2p_tx);
         } else {
             for blob_sidecar in misc::construct_blob_sidecars(
                 &block,
@@ -1536,6 +1544,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.controller
                     .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+
+                info!("publishing blob sidecar: {:?}", blob_sidecar.clone(),);
 
                 ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
             }
@@ -2158,6 +2168,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         })
     }
 
+    // TODO: filter out duplicate messages
     async fn own_sync_committee_messages(
         &self,
         slot_head: &SlotHead<P>,
@@ -2191,6 +2202,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .pipe(group_into_btreemap))
     }
 
+    // TODO: filter out duplicate messages
     async fn own_contributions_and_proofs(
         &self,
         slot_head: &SlotHead<P>,
