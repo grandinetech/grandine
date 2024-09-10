@@ -26,7 +26,6 @@ helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }
 liveness_tracker = { workspace = true }
-log = { workspace = true }
 mediatype = { workspace = true }
 metrics = { workspace = true }
 mime = { workspace = true }
@@ -49,6 +48,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }

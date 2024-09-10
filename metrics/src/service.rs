@@ -6,7 +6,7 @@ use bls::PublicKeyBytes;
 use directories::Directories;
 use eth1_api::{Eth1ApiToMetrics, Eth1Metrics, RealController};
 use futures::{channel::mpsc::UnboundedReceiver, future::Either, select, StreamExt as _};
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use p2p::SyncToMetrics;
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;

@@ -12,7 +12,6 @@ axum = { workspace = true }
 features = { workspace = true }
 http-body-util = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
 mime = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true }

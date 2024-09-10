@@ -2,7 +2,7 @@ use anyhow::Result;
 use either::Either;
 use execution_engine::{PayloadAttributes, PayloadId, PayloadStatusV1};
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
-use log::debug;
+use tracing::debug;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::Phase,

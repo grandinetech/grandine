@@ -7,7 +7,7 @@ use derivative::Derivative;
 use fs_err::File;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use rusqlite::{Connection, OptionalExtension, Rows, Transaction, TransactionBehavior};
 use ssz::{SszReadDefault as _, SszWrite as _};
 use thiserror::Error;

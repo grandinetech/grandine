@@ -10,7 +10,7 @@ use bytesize::ByteSize;
 use im::OrdMap;
 use itertools::Either;
 use libmdbx::{DatabaseFlags, Environment, Geometry, WriteFlags};
-use log::info;
+use tracing::info;
 use snap::raw::{Decoder, Encoder};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;

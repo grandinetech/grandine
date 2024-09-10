@@ -5,7 +5,7 @@ use chrono::{Local, TimeZone as _};
 use eth1_api::{DepositEvent, Eth1Block};
 use futures::stream::{Stream, TryStreamExt as _};
 use genesis::Incremental;
-use log::info;
+use tracing::info;
 use ssz::{SszRead as _, SszWrite as _};
 use thiserror::Error;
 use types::{

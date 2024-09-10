@@ -8,7 +8,7 @@ use axum::{
     response::Response,
 };
 use features::Feature;
-use log::{info, warn};
+use tracing::{info, warn};
 use tracing::Span;
 
 use crate::{misc::ApiMetrics, ApiError};

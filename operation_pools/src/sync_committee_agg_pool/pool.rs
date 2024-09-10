@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::{anyhow, Result};
 use helper_functions::accessors;
 use itertools::Itertools as _;
-use log::debug;
+use tracing::debug;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tokio::sync::RwLock;

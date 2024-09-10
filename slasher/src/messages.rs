@@ -1,5 +1,5 @@
 use futures::channel::mpsc::UnboundedSender;
-use log::warn;
+use tracing::warn;
 use types::{
     phase0::{
         containers::{AttesterSlashing, ProposerSlashing},

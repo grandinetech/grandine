@@ -1,6 +1,6 @@
 use anyhow::Result;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
-use log::debug;
+use tracing::debug;
 use types::nonstandard::SystemStats;
 
 pub enum ApiToMetrics {

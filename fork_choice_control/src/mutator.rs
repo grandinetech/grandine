@@ -39,7 +39,7 @@ use fork_choice_store::{
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
 use itertools::{Either, Itertools as _};
-use log::{debug, error, info, warn};
+use tracing::{debug, error, info, warn};
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;

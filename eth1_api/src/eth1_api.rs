@@ -11,7 +11,7 @@ use execution_engine::{
     ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
-use log::warn;
+use tracing::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{header::HeaderMap, Client, Url};
 use serde::{de::DeserializeOwned, Deserialize};

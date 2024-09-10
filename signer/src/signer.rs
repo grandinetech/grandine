@@ -13,7 +13,7 @@ use futures::{
 };
 use helper_functions::misc;
 use itertools::{izip, Itertools as _};
-use log::{info, warn};
+use tracing::{info, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use reqwest::{Client, Url};

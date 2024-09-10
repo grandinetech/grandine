@@ -15,7 +15,6 @@ fs-err = { workspace = true }
 glob = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
 refinery = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
@@ -23,6 +22,7 @@ serde_json = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]

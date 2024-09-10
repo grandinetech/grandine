@@ -16,7 +16,7 @@ use futures::{
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::ApiMetrics;
 use liveness_tracker::ApiToLiveness;
-use log::{debug, info};
+use tracing::{debug, info};
 use metrics::ApiToMetrics;
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PoolToApiMessage, SyncCommitteeAggPool,

@@ -17,6 +17,6 @@ fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
 futures = { workspace = true }
 jemalloc-ctl = { workspace = true }
-log = { workspace = true }
 rand = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }

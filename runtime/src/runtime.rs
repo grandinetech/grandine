@@ -26,7 +26,7 @@ use genesis::AnchorCheckpointProvider;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
-use log::{info, warn};
+use tracing::{info, warn};
 use metrics::{run_metrics_server, MetricsChannels, MetricsService};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, Manager, SyncCommitteeAggPool,

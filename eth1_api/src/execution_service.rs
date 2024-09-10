@@ -6,7 +6,7 @@ use either::Either;
 use execution_engine::{ForkChoiceUpdatedResponse, PayloadAttributes, PayloadStatusV1};
 use fork_choice_control::Wait;
 use futures::{channel::mpsc::UnboundedReceiver, StreamExt as _};
-use log::warn;
+use tracing::warn;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::Phase,

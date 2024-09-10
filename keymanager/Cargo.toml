@@ -15,7 +15,6 @@ eip_2335 = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,6 +24,7 @@ std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 uuid = { workspace = true }
 validator_key_cache = { workspace = true }

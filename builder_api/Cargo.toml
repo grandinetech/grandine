@@ -14,13 +14,13 @@ derive_more = { workspace = true }
 helper_functions = { workspace = true }
 hex-literal = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
 prometheus_metrics = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 

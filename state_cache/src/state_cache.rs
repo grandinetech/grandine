@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use im::{HashMap, OrdMap};
-use log::{info, warn};
+use tracing::{info, warn};
 use parking_lot::{Mutex, MutexGuard};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
