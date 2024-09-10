@@ -1531,8 +1531,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 })
                 .collect::<Vec<_>>();
 
-            info!("publishing data column sidecars: {:?}", messages,);
-
             ValidatorToP2p::PublishDataColumnSidecars(messages).send(&self.p2p_tx);
         } else {
             for blob_sidecar in misc::construct_blob_sidecars(
@@ -1544,8 +1542,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.controller
                     .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
-
-                info!("publishing blob sidecar: {:?}", blob_sidecar.clone(),);
 
                 ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
             }

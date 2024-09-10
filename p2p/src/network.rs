@@ -31,7 +31,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::misc;
-use log::{debug, error, log, warn, info, Level};
+use log::{debug, error, log, warn, Level};
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -619,17 +619,17 @@ impl<P: Preset> Network<P> {
     fn publish_data_column_sidecars(&self, data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>) {
         let messages = data_column_sidecars
             .into_iter()
-            .map(|data_column_sidecar| PubsubMessage::DataColumnSidecar(Box::new((
-                misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index),
-                data_column_sidecar,
-            ))))
+            .map(|data_column_sidecar| {
+                PubsubMessage::DataColumnSidecar(Box::new((
+                    misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index),
+                    data_column_sidecar,
+                )))
+            })
             .collect::<Vec<_>>();
 
         self.log(
             Level::Debug,
-            format_args!(
-                "publishing data column sidecars: {messages:?}"
-            ),
+            format_args!("publishing data column sidecars: {messages:?}"),
         );
 
         self.publish_batch(messages);
@@ -2035,11 +2035,6 @@ impl<P: Preset> Network<P> {
     }
 
     fn check_status(&mut self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
-        // TODO(feature/das): fork_digest mismatch, which cause peer removed
-        self.log_with_feature(format_args!(
-            "checking fork digest with local: {} <> remote: {} from peer_id: {peer_id}",
-            local.fork_digest, remote.fork_digest,
-        ));
         if local.fork_digest != remote.fork_digest {
             self.log(
                 Level::Warn,
@@ -2368,7 +2363,7 @@ impl<P: Preset> Network<P> {
     fn publish(&self, message: PubsubMessage<P>) {
         ServiceInboundMessage::Publish(message).send(&self.network_to_service_tx);
     }
-    
+
     fn publish_batch(&self, messages: Vec<PubsubMessage<P>>) {
         ServiceInboundMessage::PublishBatch(messages).send(&self.network_to_service_tx);
     }

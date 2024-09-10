@@ -3203,6 +3203,9 @@ impl<P: Preset> Store<P> {
 
         let block_root = block.hash_tree_root();
 
+        // get custody column count, or custody columns with column index
+        // then, replace the const number of columns with custody columns
+        // since we don't need to do peer sampling to maintained all of the columns
         (0..NumberOfColumns::U64)
             .filter(|index| {
                 !self
