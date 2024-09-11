@@ -4,10 +4,16 @@ on: [push]
 
 jobs:
   build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     steps:
+    - name: Disable autocrlf (Windows)
+      if: runner.os == 'Windows'
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@v4
       with:
         submodules: true
@@ -19,14 +25,18 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Run cargo build
       run: cargo build --release --features default-networks
-    - name: Check if code is formatted
+    - name: Check if code is formatted (Linux)
+      if: runner.os == 'Linux'
       run: cargo fmt --check
-    - name: Run Clippy
+    - name: Run Clippy (Linux)
+      if: runner.os == 'Linux'
       run: scripts/ci/clippy.bash --deny warnings
     - name: Run tests
       run: cargo test --release --no-fail-fast
-    - name: Check consensus-spec-tests coverage
+    - name: Check consensus-spec-tests coverage (Linux)
+      if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb
     # Ignore RUSTSEC-2023-0071 because we don't use RSA in `jwt-simple` 
-    - name: Run cargo audit
+    - name: Run cargo audit (Linux)
+      if: runner.os == 'Linux'
       run: cargo audit --ignore RUSTSEC-2024-0370 --ignore RUSTSEC-2023-0071

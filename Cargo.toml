@@ -504,6 +504,7 @@ try_from_iterator = { path = 'try_from_iterator' }
 types = { path = 'types' }
 validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
+winsafe = { git = 'https://github.com/rodrigocfd/winsafe', features = ['kernel', 'psapi'] }
 
 # Banned crates
 #

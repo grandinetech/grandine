@@ -190,7 +190,7 @@ pub async fn prometheus_metrics<P: Preset, W: Wait>(
     if let Err(error) = scrape_system_stats(metrics.clone_arc(), metrics_to_metrics_tx).await {
         warn!("Unable to scrape system stats: {error:?}");
     }
-
+    #[cfg(not(target_os = "windows"))]
     if let Err(error) = scrape_jemalloc_stats(&metrics) {
         warn!("Unable to scrape jemalloc stats: {error:?}");
     }
@@ -291,6 +291,7 @@ async fn scrape_system_stats(
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 fn scrape_jemalloc_stats(metrics: &Arc<Metrics>) -> Result<()> {
     jemalloc_ctl::epoch::advance().map_err(AnyhowError::msg)?;
 
