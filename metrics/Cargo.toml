@@ -20,7 +20,6 @@ futures = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
-jemalloc-ctl = { workspace = true }
 log = { workspace = true }
 num_threads = { workspace = true }
 p2p = { workspace = true }
@@ -39,6 +38,9 @@ tokio-stream = { workspace = true }
 tower-http = { workspace = true }
 transition_functions = { workspace = true }
 types = { workspace = true }
+
+[target.'cfg(not(windows))'.dependencies]
+jemalloc-ctl = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
