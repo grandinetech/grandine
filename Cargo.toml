@@ -67,7 +67,7 @@ resolver = '2'
 edition = '2021'
 
 [workspace.lints.rust]
-unsafe_code = 'forbid'
+unsafe_code = 'deny'
 
 # A subset of `rustc` lints that are allowed by default.
 # A few notable ones that we do not enable:
@@ -497,6 +497,12 @@ try_from_iterator = { path = 'try_from_iterator' }
 types = { path = 'types' }
 validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+] }
 
 # Banned crates
 #

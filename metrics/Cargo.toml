@@ -27,7 +27,6 @@ prometheus = { workspace = true }
 # `prometheus-client` is only needed for libp2p metrics.
 prometheus-client = { workspace = true }
 prometheus_metrics = { workspace = true }
-psutil = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 std_ext = { workspace = true }
@@ -41,6 +40,10 @@ types = { workspace = true }
 
 [target.'cfg(not(windows))'.dependencies]
 jemalloc-ctl = { workspace = true }
+psutil = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
