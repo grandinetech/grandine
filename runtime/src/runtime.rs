@@ -526,6 +526,11 @@ pub async fn run_after_genesis<P: Preset>(
     )
     .await?;
 
+    if chain_config.is_eip7594_enabled() {
+        let custody_columns = network.network_globals().custody_columns();
+        controller.on_store_custody_columns(custody_columns);
+    }
+
     let subnet_service = SubnetService::new(
         attestation_agg_pool.clone_arc(),
         network.node_id(),

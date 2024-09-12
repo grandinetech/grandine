@@ -10,6 +10,7 @@
 
 use core::panic::AssertUnwindSafe;
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     thread::{Builder, JoinHandle},
     time::Instant,
@@ -34,7 +35,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
+    eip7594::{ColumnIndex, DataColumnSidecar},
     nonstandard::ValidationOutcome,
     phase0::{
         containers::{Attestation, AttesterSlashing, SignedAggregateAndProof},
@@ -54,6 +55,7 @@ use crate::{
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
+        StoreCustodyColumnsTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -172,6 +174,10 @@ where
 
     pub fn chain_config(&self) -> &Arc<ChainConfig> {
         self.storage().config()
+    }
+
+    pub fn on_store_custody_columns(&self, custody_columns: Vec<ColumnIndex>) {
+        self.spawn_store_custody_columns(custody_columns)
     }
 
     // This should be called at the start of every tick.
@@ -549,6 +555,15 @@ where
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
+    }
+
+    fn spawn_store_custody_columns(&self, custody_columns: Vec<ColumnIndex>) {
+        if !self.owned_store_snapshot().has_custody_columns_stored() {
+            MutatorMessage::StoreCustodyColumns {
+                custody_columns: HashSet::from_iter(custody_columns),
+            }
+            .send(&self.owned_mutator_tx());
+        }
     }
 
     pub(crate) fn spawn(&self, task: impl Spawn<P, E, W>) {

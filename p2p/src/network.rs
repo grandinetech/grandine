@@ -1526,10 +1526,6 @@ impl<P: Preset> Network<P> {
                     ),
                 );
 
-                self.log_with_feature(format_args!(
-                    "received blob from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {blob_sidecar_slot}, blob_id: {blob_identifier:?})",
-                ));
-
                 if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
                     let block_seen = self
                         .received_block_roots
@@ -1559,10 +1555,6 @@ impl<P: Preset> Network<P> {
                     ),
                 );
 
-                self.log_with_feature(format_args!(
-                    "received blob from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {blob_sidecar_slot}, blob_id: {blob_identifier:?})",
-                ));
-
                 if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
                     let block_seen = self
                         .received_block_roots
@@ -1591,10 +1583,6 @@ impl<P: Preset> Network<P> {
                          (request_id: {request_id}, peer_id: {peer_id}, slot: {block_slot}, block: {block:?})",
                     ),
                 );
-
-                self.log_with_feature(format_args!(
-                    "received beacon block from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {block_slot}, root: {block_root})",
-                ));
 
                 if self.register_new_received_block(block_root, block_slot) {
                     P2pToSync::RequestedBlock((block, peer_id, request_id))
@@ -1667,10 +1655,6 @@ impl<P: Preset> Network<P> {
                     ),
                 );
 
-                self.log_with_feature(format_args!(
-                    "received data column sidecar from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, column_id: {data_column_identifier:?})",
-                ));
-
                 if self.register_new_received_data_column_sidecar(
                     data_column_identifier,
                     data_column_sidecar_slot,
@@ -1698,10 +1682,6 @@ impl<P: Preset> Network<P> {
                         (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, data_column: {data_column_sidecar:?})",
                     ),
                 );
-
-                self.log_with_feature(format_args!(
-                    "received data column sidecar from RPC (request_id: {request_id}, peer_id: {peer_id}, slot: {data_column_sidecar_slot}, column_id: {data_column_identifier:?})",
-                ));
 
                 if self.register_new_received_data_column_sidecar(
                     data_column_identifier,

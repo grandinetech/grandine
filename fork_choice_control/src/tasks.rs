@@ -1,5 +1,6 @@
 use core::panic::AssertUnwindSafe;
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     time::Instant,
 };
@@ -22,7 +23,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::SignedBeaconBlock,
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
+    eip7594::{ColumnIndex, DataColumnSidecar},
     nonstandard::RelativeEpoch,
     phase0::{
         containers::{Attestation, AttesterSlashing, Checkpoint, SignedAggregateAndProof},
@@ -372,6 +373,22 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             submission_time,
         }
         .send(&mutator_tx);
+    }
+}
+
+pub struct StoreCustodyColumnsTask<P: Preset, W> {
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub custody_columns: HashSet<ColumnIndex>,
+}
+
+impl<P: Preset, W> Run for StoreCustodyColumnsTask<P, W> {
+    fn run(self) {
+        let Self {
+            mutator_tx,
+            custody_columns,
+        } = self;
+
+        MutatorMessage::StoreCustodyColumns { custody_columns }.send(&mutator_tx);
     }
 }
 

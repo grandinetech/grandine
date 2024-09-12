@@ -709,12 +709,6 @@ impl Config {
 
         enum_iterator::all().skip(1).zip(fields)
     }
-
-    pub fn data_columns_per_subnet(&self) -> usize {
-        self.number_of_columns
-            .checked_div(self.data_column_sidecar_subnet_count as usize)
-            .expect("subnet count must be greater than 0")
-    }
 }
 
 #[derive(Debug, Error)]

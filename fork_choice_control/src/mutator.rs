@@ -15,7 +15,7 @@
 // (in fact, the opposite may be true because `p2p_tx` would have to be cloned for each task).
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{
         mpsc::{Receiver, Sender},
         Arc,
@@ -46,7 +46,7 @@ use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    eip7594::{DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -271,6 +271,9 @@ where
                 ),
                 MutatorMessage::Stop { save_to_storage } => {
                     break self.handle_stop(save_to_storage);
+                }
+                MutatorMessage::StoreCustodyColumns { custody_columns } => {
+                    self.handle_store_custody_columns(custody_columns)
                 }
             }
         }
@@ -1460,6 +1463,13 @@ where
         }
 
         Ok(())
+    }
+
+    fn handle_store_custody_columns(&mut self, custody_columns: HashSet<ColumnIndex>) {
+        info!("storing custody columns: {custody_columns:?} for further data availability check");
+
+        self.store_mut()
+            .store_custody_columns(custody_columns.into());
     }
 
     #[allow(clippy::cognitive_complexity)]

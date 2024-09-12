@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     time::Instant,
 };
@@ -18,7 +19,7 @@ use tap::Pipe as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
-    eip7594::DataColumnIdentifier,
+    eip7594::{ColumnIndex, DataColumnIdentifier},
     phase0::{
         containers::{Attestation, Checkpoint},
         primitives::{
@@ -135,6 +136,9 @@ pub enum MutatorMessage<P: Preset, W> {
     // `Controller::wait_for_tasks` after that.
     Stop {
         save_to_storage: bool,
+    },
+    StoreCustodyColumns {
+        custody_columns: HashSet<ColumnIndex>,
     },
 }
 
