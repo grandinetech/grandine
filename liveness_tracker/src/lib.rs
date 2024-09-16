@@ -21,13 +21,12 @@ use types::{
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
-use validator::ValidatorToLiveness;
 
-pub use crate::messages::ApiToLiveness;
+pub use crate::messages::{ApiToLiveness, ValidatorToLiveness};
 
 mod messages;
 
-const EPOCHS_TO_KEEP_LIVE_VALIDATORS: u64 = 1;
+const EPOCHS_TO_KEEP_LIVE_VALIDATORS: u64 = 2;
 
 pub struct LivenessTracker<P: Preset, W: Wait> {
     controller: ApiController<P, W>,

@@ -19,6 +19,7 @@ deposit_tree = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 directories = { workspace = true }
+doppelganger_protection = { workspace = true }
 eip_2335 = { workspace = true }
 enum-iterator = { workspace = true }
 eth1 = { workspace = true }

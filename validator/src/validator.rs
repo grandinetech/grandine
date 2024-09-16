@@ -17,6 +17,7 @@ use builder_api::{
 };
 use clock::{Tick, TickKind};
 use derive_more::Display;
+use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
@@ -35,6 +36,7 @@ use helper_functions::{
 };
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
+use liveness_tracker::ValidatorToLiveness;
 use log::{debug, error, info, log, warn, Level};
 use once_cell::sync::OnceCell;
 use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
@@ -68,7 +70,7 @@ use types::{
 };
 
 use crate::{
-    messages::{ApiToValidator, ValidatorToApi, ValidatorToLiveness},
+    messages::{ApiToValidator, InternalMessage, ValidatorToApi},
     misc::{Aggregator, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
@@ -131,6 +133,7 @@ pub struct Validator<P: Preset, W: Wait> {
     own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
     validator_votes: HashMap<Epoch, Vec<ValidatorVote>>,
     builder_api: Option<Arc<BuilderApi>>,
+    doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
     last_registration_epoch: Option<Epoch>,
     proposer_configs: Arc<ProposerConfigs>,
     signer: Arc<Signer>,
@@ -141,6 +144,8 @@ pub struct Validator<P: Preset, W: Wait> {
         BTreeMap<Epoch, BTreeMap<PublicKeyBytes, (ValidatorRegistrationV1, Signature)>>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     metrics: Option<Arc<Metrics>>,
+    internal_tx: UnboundedSender<InternalMessage>,
+    internal_rx: UnboundedReceiver<InternalMessage>,
     validator_to_api_tx: UnboundedSender<ValidatorToApi<P>>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
@@ -155,6 +160,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         controller: ApiController<P, W>,
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
+        doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
         proposer_configs: Arc<ProposerConfigs>,
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
@@ -173,6 +179,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             validator_to_liveness_tx,
             validator_to_slasher_tx,
         } = channels;
+
+        let (internal_tx, internal_rx) = futures::channel::mpsc::unbounded();
 
         let own_beacon_committee_members = Arc::new(OwnBeaconCommitteeMembers::new(
             controller.chain_config().clone_arc(),
@@ -199,6 +207,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_aggregators: BTreeMap::new(),
             validator_votes: HashMap::new(),
             builder_api,
+            doppelganger_protection,
             last_registration_epoch: None,
             proposer_configs,
             signer,
@@ -208,6 +217,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             subnet_service_tx,
             registered_validators: BTreeMap::new(),
             metrics,
+            internal_rx,
+            internal_tx,
             validator_to_api_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
@@ -224,6 +235,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .unwrap_or_else(|| EitherFuture::Right(futures::stream::pending()));
 
             select! {
+                message = self.internal_rx.select_next_some() => match message {
+                    InternalMessage::DoppelgangerProtectionResult(result) => {
+                        result?;
+                    }
+                },
+
                 message = self.fork_choice_rx.select_next_some() => match message {
                     ValidatorMessage::Tick(wait_group, tick) => {
                         self.handle_tick(wait_group, tick).await?;
@@ -490,6 +507,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
+        if tick.is_start_of_slot() {
+            if let Some(doppelganger_protection) = &self.doppelganger_protection {
+                let doppelganger_protection = doppelganger_protection.clone_arc();
+                let internal_tx = self.internal_tx.clone();
+
+                tokio::spawn(async move {
+                    let result = doppelganger_protection
+                        .detect_doppelgangers::<P>(slot)
+                        .await;
+
+                    InternalMessage::DoppelgangerProtectionResult(result).send(&internal_tx);
+                });
+            }
+        }
+
         self.attestation_agg_pool
             .compute_proposer_indices(slot_head.beacon_state.clone_arc());
 
@@ -626,6 +658,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         if !signer_snapshot.has_key(public_key.to_bytes()) {
             return Ok(());
+        }
+
+        let doppelganger_protection = self
+            .doppelganger_protection
+            .as_deref()
+            .map(DoppelgangerProtection::load);
+
+        if let Some(doppelganger_protection) = &doppelganger_protection {
+            if !doppelganger_protection.is_validator_active(public_key.to_bytes()) {
+                info!(
+                    "Validator {public_key:?} skipping proposer duty in slot {} \
+                     since not enough time has passed to ensure there are \
+                     no doppelganger validators participating on network. \
+                     Validator will start performing duties on slot {}.",
+                    slot_head.slot(),
+                    doppelganger_protection.tracking_end_slot::<P>(public_key.to_bytes()),
+                );
+                return Ok(());
+            }
         }
 
         let _propose_timer = self
@@ -1223,9 +1274,29 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ),
             };
 
+            let doppelganger_protection = self
+                .doppelganger_protection
+                .as_deref()
+                .map(DoppelgangerProtection::load);
+
             own_members
                 .iter()
-                .map(|member| {
+                .filter_map(|member| {
+                    if let Some(doppelganger_protection) = &doppelganger_protection {
+                        if !doppelganger_protection.is_validator_active(member.public_key) {
+                            info!(
+                                "Validator {:?} skipping attesting duty in slot {} \
+                                 since not enough time has passed to ensure there are \
+                                 no doppelganger validators participating on network. \
+                                 Validator will start performing duties on slot {}.",
+                                member.public_key,
+                                slot_head.slot(),
+                                doppelganger_protection.tracking_end_slot::<P>(member.public_key),
+                            );
+                            return None;
+                        }
+                    }
+
                     let data = AttestationData {
                         slot: slot_head.slot(),
                         index: member.committee_index,
@@ -1241,7 +1312,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         public_key: member.public_key,
                     };
 
-                    (triple, (data, member))
+                    Some((triple, (data, member)))
                 })
                 .unzip()
         });
@@ -1805,9 +1876,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     fn refresh_signer_keys(&self) {
         let signer = self.signer.clone_arc();
+        let head_state = self.controller.head_state().value;
+        let current_slot = self.controller.slot();
 
         tokio::spawn(async move {
             signer.load_keys_from_web3signer().await;
+
+            signer.update_doppelganger_protection_pubkeys(&head_state, current_slot);
         });
     }
 

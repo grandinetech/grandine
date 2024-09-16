@@ -16,6 +16,7 @@ clock = { workspace = true }
 database = { workspace = true }
 dedicated_executor = { workspace = true }
 directories = { workspace = true }
+doppelganger_protection = { workspace = true }
 eth1 = { workspace = true }
 eth1_api = { workspace = true }
 fork_choice_control = { workspace = true }

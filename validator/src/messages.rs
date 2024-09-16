@@ -1,17 +1,13 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
-use anyhow::Error;
+use anyhow::{Error, Result};
 use bls::PublicKeyBytes;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::warn;
 use types::{
     altair::containers::SignedContributionAndProof,
-    combined::{BeaconState, SignedBeaconBlock},
-    phase0::{
-        containers::{Attestation, AttesterSlashing, ProposerSlashing, SignedVoluntaryExit},
-        primitives::Epoch,
-    },
+    phase0::containers::{AttesterSlashing, ProposerSlashing, SignedVoluntaryExit},
     preset::Preset,
 };
 
@@ -35,6 +31,18 @@ impl<P: Preset> ApiToValidator<P> {
     }
 }
 
+pub enum InternalMessage {
+    DoppelgangerProtectionResult(Result<()>),
+}
+
+impl InternalMessage {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            warn!("send internal validator message failed because the receiver was dropped");
+        }
+    }
+}
+
 pub enum ValidatorToApi<P: Preset> {
     AttesterSlashing(Box<AttesterSlashing<P>>),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
@@ -46,22 +54,6 @@ impl<P: Preset> ValidatorToApi<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             warn!("send from validator to HTTP API failed because the receiver was dropped");
-        }
-    }
-}
-
-pub enum ValidatorToLiveness<P: Preset> {
-    Epoch(Epoch),
-    Head(Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>),
-    ValidAttestation(Arc<Attestation<P>>),
-}
-
-impl<P: Preset> ValidatorToLiveness<P> {
-    pub fn send(self, tx: &UnboundedSender<Self>) {
-        if tx.unbounded_send(self).is_err() {
-            warn!(
-                "send from validator to liveness tracker failed because the receiver was dropped"
-            );
         }
     }
 }

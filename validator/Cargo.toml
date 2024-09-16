@@ -18,6 +18,7 @@ constant_time_eq = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 directories = { workspace = true }
+doppelganger_protection = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }
@@ -30,6 +31,7 @@ hex = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }
 keymanager = { workspace = true }
+liveness_tracker = { workspace = true }
 log = { workspace = true }
 once_cell = { workspace = true }
 operation_pools = { workspace = true }

@@ -9,6 +9,7 @@ use bytesize::ByteSize;
 use clock::Tick;
 use database::Database;
 use dedicated_executor::DedicatedExecutor;
+use doppelganger_protection::DoppelgangerProtection;
 use eth1::{Eth1Chain, Eth1Config};
 use eth1_api::{
     Eth1Api, Eth1ApiToMetrics, Eth1ConnectionData, Eth1ExecutionEngine, Eth1Metrics,
@@ -51,6 +52,7 @@ use tokio::signal::unix::SignalKind;
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::fn_params_excessive_bools)]
 pub async fn run_after_genesis<P: Preset>(
     chain_config: Arc<ChainConfig>,
     store_config: StoreConfig,
@@ -69,6 +71,7 @@ pub async fn run_after_genesis<P: Preset>(
     back_sync_enabled: bool,
     metrics_config: MetricsConfig,
     track_liveness: bool,
+    detect_doppelgangers: bool,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
     slashing_protection_history_limit: u64,
@@ -281,23 +284,39 @@ pub async fn run_after_genesis<P: Preset>(
         )
     });
 
-    let liveness_tracker = track_liveness.then(|| {
-        let (api_tx, api_to_liveness_rx) = mpsc::unbounded();
-        let (pool_tx, pool_to_liveness_rx) = mpsc::unbounded();
-        let (validator_tx, validator_to_liveness_rx) = mpsc::unbounded();
+    let (liveness_tracker, doppelganger_protection) = track_liveness
+        .then(|| {
+            let (api_tx, api_to_liveness_rx) = mpsc::unbounded();
+            let (pool_tx, pool_to_liveness_rx) = mpsc::unbounded();
+            let (validator_tx, validator_to_liveness_rx) = mpsc::unbounded();
 
-        api_to_liveness_tx = Some(api_tx);
-        pool_to_liveness_tx = Some(pool_tx);
-        validator_to_liveness_tx = Some(validator_tx);
+            api_to_liveness_tx = Some(api_tx.clone());
+            pool_to_liveness_tx = Some(pool_tx);
+            validator_to_liveness_tx = Some(validator_tx);
 
-        LivenessTracker::new(
-            controller.clone_arc(),
-            metrics.clone(),
-            api_to_liveness_rx,
-            pool_to_liveness_rx,
-            validator_to_liveness_rx,
-        )
-    });
+            let liveness_tracker = Some(LivenessTracker::new(
+                controller.clone_arc(),
+                metrics.clone(),
+                api_to_liveness_rx,
+                pool_to_liveness_rx,
+                validator_to_liveness_rx,
+            ));
+
+            let doppelganger_protection =
+                detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new(api_tx)));
+
+            (liveness_tracker, doppelganger_protection)
+        })
+        .unwrap_or((None, None));
+
+    if let Some(doppelganger_protection) = doppelganger_protection.as_ref() {
+        signer.enable_doppelganger_protection(doppelganger_protection);
+
+        signer.update_doppelganger_protection_pubkeys(
+            &controller.head_state().value,
+            controller.slot(),
+        );
+    }
 
     let block_sync_service_channels = BlockSyncServiceChannels {
         fork_choice_to_sync_rx,
@@ -511,6 +530,7 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         attestation_agg_pool.clone_arc(),
         builder_api,
+        doppelganger_protection,
         keymanager.proposer_configs().clone_arc(),
         signer.clone_arc(),
         slashing_protector,

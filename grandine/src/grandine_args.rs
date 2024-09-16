@@ -349,6 +349,11 @@ struct BeaconNodeOptions {
     #[clap(long)]
     track_liveness: bool,
 
+    /// Enable doppelganger protection (liveness tracking must be enabled for this feature)
+    /// [default: disabled]
+    #[clap(long, requires("track_liveness"))]
+    detect_doppelgangers: bool,
+
     /// Enable in-memory mode.
     /// No data will be stored in data-dir.
     /// [default: disabled]
@@ -876,6 +881,7 @@ impl GrandineArgs {
             metrics_port,
             remote_metrics_url,
             track_liveness,
+            detect_doppelgangers,
             in_memory,
         } = beacon_node_options;
 
@@ -1227,6 +1233,7 @@ impl GrandineArgs {
             http_api_config,
             metrics_config,
             track_liveness,
+            detect_doppelgangers,
             use_validator_key_cache,
             slashing_protection_history_limit,
             in_memory,

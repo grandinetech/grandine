@@ -26,6 +26,7 @@ options=(
     --package database
     --package deposit_tree
     --package directories
+    --package doppelganger_protection
     --package eip_2335
     --package eth1
     --package eth1_api

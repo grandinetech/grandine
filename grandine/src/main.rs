@@ -95,6 +95,7 @@ struct Context {
     http_api_config: HttpApiConfig,
     metrics_config: MetricsConfig,
     track_liveness: bool,
+    detect_doppelgangers: bool,
     slashing_protection_history_limit: u64,
     validator_enabled: bool,
 }
@@ -137,6 +138,13 @@ impl Context {
                         info!("increasing environment map size limits");
                         db_size_modifier *= 2;
                     }
+
+                    if matches!(
+                        error.downcast_ref::<doppelganger_protection::Error>(),
+                        Some(&doppelganger_protection::Error::DoppelgangersDetected { .. })
+                    ) {
+                        break Err(error);
+                    }
                 }
                 Err(error) => error!("application runtime panicked: {error:?}"),
             }
@@ -169,6 +177,7 @@ impl Context {
             http_api_config,
             metrics_config,
             track_liveness,
+            detect_doppelgangers,
             slashing_protection_history_limit,
             validator_enabled,
         } = self;
@@ -297,6 +306,7 @@ impl Context {
             back_sync,
             metrics_config,
             track_liveness,
+            detect_doppelgangers,
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
             slashing_protection_history_limit,
@@ -378,6 +388,7 @@ fn try_main() -> Result<()> {
         http_api_config,
         metrics_config,
         track_liveness,
+        detect_doppelgangers,
         use_validator_key_cache,
         slashing_protection_history_limit,
         in_memory,
@@ -525,6 +536,7 @@ fn try_main() -> Result<()> {
         http_api_config,
         metrics_config,
         track_liveness,
+        detect_doppelgangers,
         slashing_protection_history_limit,
         validator_enabled,
     };

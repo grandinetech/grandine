@@ -6,6 +6,7 @@ use std::{
 use anyhow::Result;
 use arc_swap::{ArcSwap, Guard};
 use bls::{PublicKeyBytes, SecretKey, Signature};
+use doppelganger_protection::DoppelgangerProtection;
 use futures::{
     lock::Mutex,
     stream::{FuturesUnordered, TryStreamExt as _},
@@ -20,7 +21,11 @@ use reqwest::{Client, Url};
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use types::{combined::BeaconState, phase0::primitives::H256, preset::Preset};
+use types::{
+    combined::BeaconState,
+    phase0::primitives::{Slot, H256},
+    preset::Preset,
+};
 
 use crate::{
     types::{ForkInfo, SigningMessage, SigningTriple},
@@ -68,9 +73,23 @@ impl Signer {
         let snapshot = ArcSwap::from_pointee(Snapshot {
             sign_methods,
             web3signer: Web3Signer::new(client, web3signer_config, metrics),
+            doppelganger_protection: None,
         });
 
         Self { snapshot }
+    }
+
+    pub fn enable_doppelganger_protection(
+        &self,
+        doppelganger_protection: &Arc<DoppelgangerProtection>,
+    ) {
+        self.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
+
+            snapshot.enable_doppelganger_protection(doppelganger_protection.clone_arc());
+
+            snapshot
+        });
     }
 
     pub async fn load_keys_from_web3signer(&self) {
@@ -115,15 +134,36 @@ impl Signer {
     {
         self.snapshot.rcu(f)
     }
+
+    pub fn update_doppelganger_protection_pubkeys<P: Preset>(
+        &self,
+        beacon_state: &BeaconState<P>,
+        current_slot: Slot,
+    ) {
+        let snapshot = self.load();
+        let public_keys = snapshot.keys().copied();
+
+        if let Some(doppelganger_protection) = &snapshot.doppelganger_protection {
+            doppelganger_protection.add_tracked_validators(public_keys, beacon_state, current_slot);
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Snapshot {
     sign_methods: HashMap<PublicKeyBytes, SignMethod>,
     web3signer: Web3Signer,
+    doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
 }
 
 impl Snapshot {
+    pub fn enable_doppelganger_protection(
+        &mut self,
+        doppelganger_protection: Arc<DoppelgangerProtection>,
+    ) {
+        self.doppelganger_protection = Some(doppelganger_protection);
+    }
+
     #[must_use]
     pub fn has_key(&self, public_key: PublicKeyBytes) -> bool {
         self.sign_methods.contains_key(&public_key)
@@ -247,12 +287,27 @@ impl Snapshot {
         let fork_info = ForkInfo::from(beacon_state);
         let mut signing_triples_count = 0;
 
+        let doppelganger_protection = self
+            .doppelganger_protection
+            .as_deref()
+            .map(DoppelgangerProtection::load);
+
         for (index, triple) in triples.into_iter().enumerate() {
             let SigningTriple {
                 message,
                 signing_root,
                 public_key,
             } = triple;
+
+            if let Some(doppelganger_protection) = &doppelganger_protection {
+                if !doppelganger_protection.is_validator_active(public_key) {
+                    warn!(
+                        "Doppelganger protection prevented validator {public_key:?} from signing a message \
+                         since not enough time has passed to ensure there are no duplicate validators participating on network",
+                    );
+                    continue;
+                }
+            }
 
             match message {
                 SigningMessage::Attestation(attestation_data) => {

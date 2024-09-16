@@ -56,6 +56,7 @@ pub struct GrandineConfig {
     pub http_api_config: HttpApiConfig,
     pub metrics_config: MetricsConfig,
     pub track_liveness: bool,
+    pub detect_doppelgangers: bool,
     pub use_validator_key_cache: bool,
     pub slashing_protection_history_limit: u64,
     pub in_memory: bool,

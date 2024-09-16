@@ -16,6 +16,7 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
         .filter_module("block_producer", LevelFilter::Info)
         .filter_module("builder_api", LevelFilter::Info)
         .filter_module("dedicated_executor", LevelFilter::Info)
+        .filter_module("doppelganger_protection", LevelFilter::Info)
         .filter_module("eth1", LevelFilter::Info)
         .filter_module("eth1_api", LevelFilter::Info)
         .filter_module("eth2_libp2p", LevelFilter::Info)

@@ -13,6 +13,7 @@ members = [
     'database',
     'deposit_tree',
     'directories',
+    'doppelganger_protection',
     'eip_2335',
     'eth1',
     'eth1_api',
@@ -455,6 +456,7 @@ clock = { path = 'clock' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
 directories = { path = 'directories' }
+doppelganger_protection = { path = 'doppelganger_protection' }
 eip_2335 = { path = 'eip_2335' }
 eth1 = { path = 'eth1' }
 eth1_api = { path = 'eth1_api' }

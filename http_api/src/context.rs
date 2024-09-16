@@ -301,6 +301,7 @@ impl<P: Preset> Context<P> {
             controller.clone_arc(),
             attestation_agg_pool.clone_arc(),
             None,
+            None,
             keymanager.proposer_configs().clone_arc(),
             signer,
             slashing_protector,

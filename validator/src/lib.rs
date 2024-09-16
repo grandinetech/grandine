@@ -1,6 +1,6 @@
 pub use crate::{
     api::{run_validator_api, ValidatorApiConfig},
-    messages::{ApiToValidator, ValidatorToApi, ValidatorToLiveness},
+    messages::{ApiToValidator, ValidatorToApi},
     validator::{Channels as ValidatorChannels, Validator},
     validator_config::ValidatorConfig,
 };
