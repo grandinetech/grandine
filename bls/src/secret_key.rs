@@ -6,7 +6,7 @@ use core::{
 use std::borrow::ToOwned;
 
 use blst::min_pk::SecretKey as RawSecretKey;
-use derive_more::DebugCustom;
+use derive_more::Debug;
 use serde::Serialize;
 use ssz::{SszHash, SszWrite};
 use static_assertions::assert_not_impl_any;
@@ -15,9 +15,9 @@ use crate::{consts::DOMAIN_SEPARATION_TAG, Error, PublicKey, SecretKeyBytes, Sig
 
 // `RawSecretKey` already implements `Zeroize` (with `zeroize(drop)`):
 // <https://github.com/supranational/blst/blob/v0.3.10/bindings/rust/src/lib.rs#L458-L460>
-#[derive(DebugCustom)]
+#[derive(Debug)]
 // Inspired by `DebugSecret` from the `secrecy` crate.
-#[debug(fmt = "[REDACTED]")]
+#[debug("[REDACTED]")]
 pub struct SecretKey(RawSecretKey);
 
 // Prevent `SecretKey` from implementing some traits to avoid leaking secret keys.

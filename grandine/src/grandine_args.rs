@@ -3,7 +3,6 @@
 #![allow(clippy::doc_markdown)]
 
 use core::{
-    fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     num::{NonZeroU16, NonZeroU64},
     ops::Not as _,
@@ -1242,7 +1241,7 @@ impl GrandineArgs {
 }
 
 #[derive(Debug, Display)]
-#[display(fmt = "{variable:?}: expected {expected} but found {actual}")]
+#[display("{variable:?}: expected {expected} but found {actual}")]
 struct Difference {
     variable: String,
     expected: Value,

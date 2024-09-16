@@ -10,7 +10,7 @@ use core::{
 };
 
 use byteorder::ByteOrder as _;
-use derive_more::{Add, DebugCustom, Display, From, Into, LowerHex, Mul, Shr, Sub};
+use derive_more::{Add, Debug, Display, From, Into, LowerHex, Mul, Shr, Sub};
 use ethereum_types::{FromDecStrErr, FromStrRadixErr, H256, U256 as RawUint256};
 use num_traits::{Num, One, Zero};
 use serde::{
@@ -40,12 +40,12 @@ use crate::{
     Sub,
     Mul,
     Shr,
-    DebugCustom,
+    Debug,
     Display,
     LowerHex,
 )]
 #[mul(forward)]
-#[debug(fmt = "{_0}")]
+#[debug("{_0}")]
 pub struct Uint256(RawUint256);
 
 impl TryFrom<Uint256> for u64 {

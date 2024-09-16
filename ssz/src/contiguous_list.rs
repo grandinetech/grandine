@@ -16,8 +16,7 @@ use crate::{
     type_level::MerkleElements,
 };
 
-#[derive(Deref, DerefMut, AsRef, Derivative, Serialize)]
-#[as_ref(forward)]
+#[derive(Deref, DerefMut, Derivative, Serialize)]
 #[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
@@ -31,9 +30,14 @@ pub struct ContiguousList<T, N> {
     #[deref]
     #[deref_mut]
     elements: Box<[T]>,
-    #[as_ref(ignore)]
     #[derivative(Debug = "ignore")]
     phantom: PhantomData<N>,
+}
+
+impl<T, N> AsRef<[T]> for ContiguousList<T, N> {
+    fn as_ref(&self) -> &[T] {
+        self.elements.as_ref()
+    }
 }
 
 impl<T, N: Unsigned> TryFrom<Vec<T>> for ContiguousList<T, N> {

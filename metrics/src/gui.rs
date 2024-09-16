@@ -18,7 +18,7 @@ pub fn get_stats(system: &System) -> Result<SystemStats> {
         core_count: system.cpus().len(),
         grandine_used_memory: grandine.memory(),
         grandine_total_cpu_percentage: grandine.cpu_usage(),
-        system_cpu_percentage: system.global_cpu_info().cpu_usage(),
+        system_cpu_percentage: system.global_cpu_usage(),
         system_used_memory: system.used_memory(),
         system_total_memory: system.total_memory(),
     })

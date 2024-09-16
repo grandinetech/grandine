@@ -271,7 +271,7 @@ pub struct WithBlobsAndMev<T, P: Preset> {
 
 impl<T, P: Preset> WithBlobsAndMev<T, P> {
     #[must_use]
-    pub fn with_default(value: T) -> Self {
+    pub const fn with_default(value: T) -> Self {
         Self::new(value, None, None, None, None)
     }
 
@@ -460,12 +460,12 @@ pub struct WithOrigin<T> {
 
 impl<T: Clone> WithOrigin<T> {
     #[must_use]
-    pub fn new_from_genesis(value: T) -> Self {
+    pub const fn new_from_genesis(value: T) -> Self {
         Self::new(value, Origin::Genesis)
     }
 
     #[must_use]
-    pub fn new_from_checkpoint(value: T) -> Self {
+    pub const fn new_from_checkpoint(value: T) -> Self {
         Self::new(value, Origin::CheckpointSync)
     }
 

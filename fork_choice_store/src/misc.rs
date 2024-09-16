@@ -1,12 +1,12 @@
 use core::{
-    fmt::{Debug, Formatter, Result as FmtResult},
+    fmt::{Formatter, Result as FmtResult},
     num::NonZeroUsize,
 };
 use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
 use derivative::Derivative;
-use derive_more::DebugCustom;
+use derive_more::Debug;
 use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
@@ -683,8 +683,8 @@ impl<P: Preset> ApplyTickChanges<P> {
 
 // This uses `NonZeroUsize` to make `Option<SegmentId>` fit in 1 word of memory.
 // The current version doesn't use nearly as many `Option`s, making it less useful.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, DebugCustom)]
-#[debug(fmt = "{_0}")]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+#[debug("{_0}")]
 pub struct SegmentId(NonZeroUsize);
 
 assert_eq_size!(Option<SegmentId>, usize);

@@ -87,7 +87,7 @@ const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
 const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
 
 #[derive(Display)]
-#[display(fmt = "too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
+#[display("too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
 struct HeadFarBehind {
     head_slot: Slot,
     max_empty_slots: u64,

@@ -1,4 +1,4 @@
-use core::{fmt::Display, marker::PhantomData, num::NonZeroU64};
+use core::{marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{bail, ensure, Context as _, Error as AnyhowError, Result};
@@ -774,7 +774,7 @@ impl<P: Preset> BlockCheckpoint<P> {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:020}", Self::PREFIX)]
+#[display("{}{_0:020}", Self::PREFIX)]
 pub struct BlockRootBySlot(pub Slot);
 
 impl TryFrom<Cow<'_, [u8]>> for BlockRootBySlot {
@@ -804,7 +804,7 @@ impl BlockRootBySlot {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct FinalizedBlockByRoot(pub H256);
 
 impl FinalizedBlockByRoot {
@@ -817,7 +817,7 @@ impl FinalizedBlockByRoot {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct UnfinalizedBlockByRoot(pub H256);
 
 impl UnfinalizedBlockByRoot {
@@ -825,7 +825,7 @@ impl UnfinalizedBlockByRoot {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct StateByBlockRoot(pub H256);
 
 impl StateByBlockRoot {
@@ -833,7 +833,7 @@ impl StateByBlockRoot {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct SlotByStateRoot(pub H256);
 
 impl SlotByStateRoot {
@@ -841,7 +841,7 @@ impl SlotByStateRoot {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}{_1}", Self::PREFIX)]
+#[display("{}{_0:x}{_1}", Self::PREFIX)]
 pub struct BlobSidecarByBlobId(pub H256, pub BlobIndex);
 
 impl BlobSidecarByBlobId {
@@ -849,7 +849,7 @@ impl BlobSidecarByBlobId {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
+#[display("{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
 pub struct SlotBlobId(pub Slot, pub H256, pub BlobIndex);
 
 impl SlotBlobId {

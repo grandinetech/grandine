@@ -4,7 +4,7 @@ use core::{
 };
 
 use anyhow::Result;
-use derive_more::DebugCustom;
+use derive_more::Debug;
 use im::{
     vector::{Iter, IterMut},
     Vector,
@@ -228,8 +228,8 @@ impl<P: Preset> Segment<P> {
 // If the proposal in <https://github.com/ethereum/consensus-specs/pull/2197> gets accepted,
 // identifying blocks in a segment by their position may no longer be an option.
 // Slots should work as a substitute but would require binary search or interpolation search.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, DebugCustom)]
-#[debug(fmt = "{_0}")]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Debug)]
+#[debug("{_0}")]
 pub struct Position(usize);
 
 impl Position {

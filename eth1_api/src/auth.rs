@@ -18,7 +18,7 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 #[cfg(test)]
-use derive_more::DebugCustom;
+use derive_more::Debug;
 
 const JWT_SECRET_SIZE_MIN_BYTES: usize = 32;
 
@@ -116,8 +116,8 @@ impl Auth {
     }
 }
 
-#[cfg_attr(test, derive(DebugCustom))]
-#[cfg_attr(test, debug(fmt = "[REDACTED]"))]
+#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, debug("[REDACTED]"))]
 struct Secret {
     key: HS256Key,
 }

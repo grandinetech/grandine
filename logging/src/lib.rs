@@ -5,7 +5,7 @@ use derive_more::Display;
 pub static PEER_LOG_METRICS: PeerLogMetrics = PeerLogMetrics::new(0);
 
 #[derive(Display, Debug)]
-#[display(fmt = "peers: {connected_peer_count:?}/{target_peer_count:?}")]
+#[display("peers: {connected_peer_count:?}/{target_peer_count:?}")]
 pub struct PeerLogMetrics {
     connected_peer_count: AtomicUsize,
     target_peer_count: AtomicUsize,

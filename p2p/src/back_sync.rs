@@ -273,7 +273,7 @@ impl<P: Preset> From<&SignedBeaconBlock<P>> for SyncCheckpoint {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:020}", Self::PREFIX)]
+#[display("{}{_0:020}", Self::PREFIX)]
 struct BackSyncDataBySlot(Slot);
 
 impl BackSyncDataBySlot {

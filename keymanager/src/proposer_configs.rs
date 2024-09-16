@@ -1,4 +1,3 @@
-use core::fmt::Display;
 use std::{path::Path, str};
 
 use anyhow::{ensure, Result};
@@ -134,7 +133,7 @@ fn parse_graffiti(string: &str) -> Result<H256> {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct FeeRecipientByPubkey(pub PublicKeyBytes);
 
 impl FeeRecipientByPubkey {
@@ -142,7 +141,7 @@ impl FeeRecipientByPubkey {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct GasLimitByPubkey(pub PublicKeyBytes);
 
 impl GasLimitByPubkey {
@@ -150,7 +149,7 @@ impl GasLimitByPubkey {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}", Self::PREFIX)]
+#[display("{}{_0:x}", Self::PREFIX)]
 pub struct GraffitiByPubkey(pub PublicKeyBytes);
 
 impl GraffitiByPubkey {
