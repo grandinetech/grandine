@@ -397,6 +397,16 @@ struct NetworkConfigOptions {
     #[clap(long)]
     disable_enr_auto_update: bool,
 
+    /// Disable outbound rate limiting     
+    /// [default: enabled]
+    #[clap(long)]
+    disable_outbound_rate_limiting: bool,
+
+    /// Disable inbound rate limiting     
+    /// [default: enabled]
+    #[clap(long)]
+    disable_inbound_rate_limiting: bool,
+
     /// discv5 IPv4 port
     #[clap(long, default_value_t = DEFAULT_LIBP2P_IPV4_PORT)]
     discovery_port: NonZeroU16,
@@ -483,6 +493,8 @@ impl NetworkConfigOptions {
             disable_enr_auto_update,
             disable_quic,
             disable_peer_scoring,
+            disable_outbound_rate_limiting,
+            disable_inbound_rate_limiting,
             disable_upnp,
             discovery_port,
             discovery_port_ipv6,
@@ -587,6 +599,16 @@ impl NetworkConfigOptions {
         // Setting this in the last place to overwrite any changes to table filter from other CLI options
         if enable_private_discovery {
             network_config.discv5_config.table_filter = |_| true;
+        }
+
+        // the outbound rate limiting is enabled by default with default params.
+        if !disable_outbound_rate_limiting {
+            network_config.outbound_rate_limiter_config = Some(Default::default());
+        }
+
+        // the inbound rate limiting is enabled by default with default params.
+        if !disable_inbound_rate_limiting {
+            network_config.inbound_rate_limiter_config = Some(Default::default());
         }
 
         network_config
@@ -1140,7 +1162,10 @@ impl GrandineArgs {
             .into_iter()
             .chain(disable_block_verification_pool.then_some(Feature::DisableBlockVerificationPool))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
-            .chain(subscribe_all_data_column_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
+            .chain(
+                subscribe_all_data_column_subnets
+                    .then_some(Feature::SubscribeToAllDataColumnSubnets),
+            )
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
             .collect::<Vec<_>>();
 
