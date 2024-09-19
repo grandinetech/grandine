@@ -316,7 +316,6 @@ impl SyncManager {
             max_slot = start_slot + count - 1;
 
             if config.is_eip7594_fork(misc::compute_epoch_at_slot::<P>(start_slot)) {
-                // TODO(feature/eip7594): figure out slot range and data columns
                 if data_column_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
                         target: SyncTarget::DataColumnSidecar,
@@ -338,7 +337,6 @@ impl SyncManager {
                 }
             }
 
-            // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
             sync_batches.push(SyncBatch {
                 target: SyncTarget::Block,
                 direction: SyncDirection::Forward,
@@ -497,7 +495,6 @@ impl SyncManager {
             "request data columns by range finished (request_id: {request_id})",
         ));
 
-        // TODO(feature/das): need to double check, this doesn't has in prev-version
         self.data_column_requests
             .request_by_range_finished(request_id)
     }
