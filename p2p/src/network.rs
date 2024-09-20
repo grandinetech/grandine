@@ -2195,7 +2195,7 @@ impl<P: Preset> Network<P> {
         count: u64,
     ) {
         let epoch = misc::compute_epoch_at_slot::<P>(start_slot);
-        let custody_columns = self.network_globals.custody_columns();
+        let custody_columns = self.network_globals.custody_columns(epoch);
 
         // prevent node from sending excessive requests, since custody peers is not available.
         if self.check_good_peers_on_column_subnets(epoch) {
@@ -2288,10 +2288,6 @@ impl<P: Preset> Network<P> {
         );
 
         self.request(peer_id, request_id, Request::DataColumnsByRoot(request));
-        let custody_columns_count = data_column_identifiers.len();
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.set_custody_columns("by_root", custody_columns_count);
-        }
     }
 
     fn subscribe_to_core_topics(&mut self) {

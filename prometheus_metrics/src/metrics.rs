@@ -54,14 +54,14 @@ pub struct Metrics {
     pub data_column_sidecars_submitted_for_processing: IntCounter,
     pub verified_gossip_data_column_sidecar: IntCounter,
     pub data_column_sidecar_verification_times: Histogram,
-    pub reconstructed_columns: IntCounter,
-    pub columns_reconstruction_time: Histogram,
+    pub reconstructed_columns: IntCounter, // TODO
+    pub columns_reconstruction_time: Histogram, // TODO
     pub data_column_sidecar_computation: Histogram,
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
-    pub data_column_sidecar_kzg_verification_single: Histogram,
+    pub data_column_sidecar_kzg_verification_single: Histogram, // TODO?
     pub data_column_sidecar_kzg_verification_batch: Histogram,
-    pub custody_columns_count: IntGauge,
-
+    pub beacon_custody_columns_count_total: IntCounter, // TODO
+    
     // Extra Network stats
     gossip_block_slot_start_delay_time: Histogram,
 
@@ -281,53 +281,53 @@ impl Metrics {
             )?,
 
             data_column_sidecars_submitted_for_processing: IntCounter::new(
-                "DATA_COLUMN_SIDECARS_SUBMITTED_FOR_PROCESSING", 
+                "beacon_data_column_sidecar_processing_requests_total", 
                 "Number of data column sidecars submitted for processing"
             )?,
 
             verified_gossip_data_column_sidecar: IntCounter::new(
-                "VERIFIED_GOSSIP_DATA_COLUMN_SIDECAR", 
-                "Number of gossip data column sidecar verified for propagation"
+                "beacon_data_column_sidecar_processing_successes_total", 
+                "Number of data column sidecars verified for gossip"
             )?,
 
             data_column_sidecar_verification_times: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_SIDECAR_VERIFICATION_TIMES",
-                "Time taken to verify a data column sidecar"
+                "beacon_data_column_sidecar_gossip_verification_seconds",
+                "Full runtime of data column sidecars gossip verification"
             ))?,
 
             reconstructed_columns: IntCounter::new(
-                "RECONSTRUCTED_COLUMNS", 
+                "beacon_data_availability_reconstructed_columns_total", 
                 "Total count of reconstructed columns"
             )?,
 
             columns_reconstruction_time: Histogram::with_opts(histogram_opts!(
-                "COLUMNS_RECONSTRUCTION_TIME",
+                "beacon_data_availability_reconstruction_time_seconds",
                 "Time taken to reconstruct columns"
             ))?,
 
             data_column_sidecar_computation: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_SIDECAR_COMPUTATION",
+                "beacon_data_column_sidecar_computation_seconds",
                 "Time taken to compute data column sidecar, including cells, proofs and inclusion proof"
             ))?,
 
             data_column_sidecar_inclusion_proof_verification: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_SIDECAR_INCLUSION_PROOF_VERIFICATION",
+                "beacon_data_column_sidecar_inclusion_proof_verification_seconds",
                 "Time taken to verify data column sidecar inclusion proof"
             ))?,
 
             data_column_sidecar_kzg_verification_single: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_SIDECAR_KZG_VERIFICATION_SINGLE",
+                "beacon_kzg_verification_data_column_single_seconds",
                 "Runtime of single data column kzg verification"
             ))?,
 
             data_column_sidecar_kzg_verification_batch: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_SIDECAR_KZG_VERIFICATION_BATCH",
+                "beacon_kzg_verification_data_column_batch_seconds",
                 "Runtime of batched data column kzg verification"
             ))?,
 
-            custody_columns_count: IntGauge::new(
-                "CUSTODY_COLUMNS_COUNT",
-                "Total count of columns in custody",
+            beacon_custody_columns_count_total: IntCounter::new(
+                "beacon_custody_columns_count_total",
+                "Total count of columns in custody within the data availability boundary"
             )?,
 
             // Extra Network stats
@@ -836,7 +836,9 @@ impl Metrics {
         default_registry.register(Box::new(
             self.data_column_sidecar_kzg_verification_batch.clone(),
         ))?;
-        default_registry.register(Box::new(self.custody_columns_count.clone()))?;
+        default_registry.register(Box::new(
+            self.beacon_custody_columns_count_total.clone(),
+        ))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
@@ -1078,11 +1080,6 @@ impl Metrics {
                 );
             }
         }
-    }
-
-    pub fn set_custody_columns(&self, label: &str, custody_columns_count: usize) {
-        self.custody_columns_count
-            .set(custody_columns_count as i64)
     }
     
     // Extra Network stats

@@ -2040,6 +2040,7 @@ dependencies = [
  "itertools 0.12.1",
  "kzg",
  "num-traits",
+ "prometheus",
  "serde",
  "sha2 0.10.8",
  "spec_test_utils",

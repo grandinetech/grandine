@@ -1806,7 +1806,7 @@ impl<P: Preset> Store<P> {
             metrics.data_column_sidecars_submitted_for_processing.inc();
         }
 
-        let _timer = metrics
+        let _data_column_sidecar_verification_timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_verification_times.start_timer());
 
@@ -1866,35 +1866,32 @@ impl<P: Preset> Store<P> {
         )?;
 
         // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
-        // data_column_sidecar_inclusion_proof_verification metric should be somewhere here
-        // or maybe inside the verify_sidecar_inclusion_proof() function
-        let _sidecar_inclusion_proof_timer = metrics
+        let _data_column_sidecar_inclusion_proof_verification = metrics
             .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_inclusion_proof_verification.start_timer());
+            .map(|metrics| &metrics.data_column_sidecar_inclusion_proof_verification);
 
         ensure!(
-            verify_sidecar_inclusion_proof(&data_column_sidecar),
+            verify_sidecar_inclusion_proof(&data_column_sidecar, _data_column_sidecar_inclusion_proof_verification),
             Error::DataColumnSidecarInvalidInclusionProof {
                 data_column_sidecar
             }
         );
-        // stop _sidecar_inclusion_proof_timer ?
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-        // data_column_sidecar_kzg_verification_batch metric should be somewhere here
-        // or maybe inside the verify_kzg_proofs() function
-        // where to put data_column_sidecar_kzg_verification_single?
-        let _sidecar_inclusion_proof_timer = metrics
+        let _data_column_sidecar_kzg_verification_single = metrics
             .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_kzg_verification_batch.start_timer());
+            .map(|metrics| &metrics.data_column_sidecar_kzg_verification_single);
 
-        verify_kzg_proofs(&data_column_sidecar).map_err(|error| {
-            Error::DataColumnSidecarInvalid {
-                data_column_sidecar: data_column_sidecar.clone_arc(),
-                error,
+        verify_kzg_proofs(
+            &data_column_sidecar, 
+            _data_column_sidecar_kzg_verification_single)
+            .map_err(|error| {
+                Error::DataColumnSidecarInvalid {
+                    data_column_sidecar: data_column_sidecar.clone_arc(),
+                    error,
+                }
             }
-        })?;
-        // stop data_column_sidecar_kzg_verification_batch ?
+        )?;
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 1/2:
@@ -1984,6 +1981,10 @@ impl<P: Preset> Store<P> {
                 computed,
             }
         );
+
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.verified_gossip_data_column_sidecar.inc();
+        }
 
         Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
     }

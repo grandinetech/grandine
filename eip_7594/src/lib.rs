@@ -5,6 +5,7 @@ use helper_functions::predicates::is_valid_merkle_branch;
 use itertools::Itertools;
 use kzg as _;
 use num_traits::One as _;
+use prometheus::Histogram;
 use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
 use thiserror::Error;
@@ -56,7 +57,14 @@ pub enum ExtendedSampleError {
     AllowedFailtureOutOfRange { allowed_failures: u64 },
 }
 
-pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
+pub fn verify_kzg_proofs<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+    data_column_sidecar_kzg_verification_single: Option<&Histogram>,
+) -> Result<bool> {
+    if let Some(_metric) = data_column_sidecar_kzg_verification_single {
+        let _timer = _metric.start_timer();
+    }
+
     let DataColumnSidecar {
         index,
         column,
@@ -118,7 +126,12 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
 
 pub fn verify_sidecar_inclusion_proof<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
+    data_column_sidecar_inclusion_proof_verification: Option<&Histogram>,
 ) -> bool {
+    if let Some(_metric) = data_column_sidecar_inclusion_proof_verification {
+        let _timer = _metric.start_timer();
+    }
+
     let DataColumnSidecar {
         kzg_commitments,
         signed_block_header,
@@ -198,7 +211,7 @@ fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = Colu
  *
  * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
  */
-// TODO: data_column_sidecar_computation metric can be implemented with this function call
+// TODO: implement data_column_sidecar_computation
 pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
     let kzg_settings = settings();
 
@@ -223,7 +236,7 @@ pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
  *
  * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
  */
-// TODO: reconstructed_columns and columns_reconstruction_time metrics can be implemented with this function call
+// TODO: implement reconstructed_columns and columns_reconstruction_time metrics
 pub fn recover_matrix(
     partial_matrix: Vec<MatrixEntry>,
     blob_count: usize,

@@ -1153,10 +1153,7 @@ where
                 if let Some(gossip_id) = origin.gossip_id() {
                     P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
                 }
-
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.verified_gossip_data_column_sidecar.inc();
-                }
+                
                 self.accept_data_column_sidecar(&wait_group, data_column_sidecar);
             }
             Ok(DataColumnSidecarAction::Ignore) => {
