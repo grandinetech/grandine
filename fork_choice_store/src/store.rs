@@ -217,7 +217,6 @@ pub struct Store<P: Preset> {
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     custody_columns: HashSet<ColumnIndex>,
-    metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset> Store<P> {
@@ -229,7 +228,6 @@ impl<P: Preset> Store<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         finished_initial_forward_sync: bool,
-        metrics: Option<Arc<Metrics>>,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -290,7 +288,6 @@ impl<P: Preset> Store<P> {
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             custody_columns: HashSet::default(),
-            metrics,
         }
     }
 
