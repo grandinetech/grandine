@@ -55,7 +55,7 @@ pub struct Metrics {
     pub verified_gossip_data_column_sidecar: IntCounter,
     pub data_column_sidecar_verification_times: Histogram,
     pub reconstructed_columns: IntCounter, // TODO
-    pub columns_reconstruction_time: Histogram, // TODO
+    pub columns_reconstruction_time: Histogram,
     pub data_column_sidecar_computation: Histogram,
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
     pub data_column_sidecar_kzg_verification_single: Histogram, // TODO?

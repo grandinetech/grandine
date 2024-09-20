@@ -1866,25 +1866,18 @@ impl<P: Preset> Store<P> {
         )?;
 
         // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
-        let _data_column_sidecar_inclusion_proof_verification = metrics
-            .as_ref()
-            .map(|metrics| &metrics.data_column_sidecar_inclusion_proof_verification);
-
         ensure!(
-            verify_sidecar_inclusion_proof(&data_column_sidecar, _data_column_sidecar_inclusion_proof_verification),
+            verify_sidecar_inclusion_proof(&data_column_sidecar, metrics),
             Error::DataColumnSidecarInvalidInclusionProof {
                 data_column_sidecar
             }
         );
 
         // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-        let _data_column_sidecar_kzg_verification_single = metrics
-            .as_ref()
-            .map(|metrics| &metrics.data_column_sidecar_kzg_verification_single);
-
         verify_kzg_proofs(
             &data_column_sidecar, 
-            _data_column_sidecar_kzg_verification_single)
+            metrics
+        )
             .map_err(|error| {
                 Error::DataColumnSidecarInvalid {
                     data_column_sidecar: data_column_sidecar.clone_arc(),

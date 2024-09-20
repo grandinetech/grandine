@@ -2195,7 +2195,7 @@ impl<P: Preset> Network<P> {
         count: u64,
     ) {
         let epoch = misc::compute_epoch_at_slot::<P>(start_slot);
-        let custody_columns = self.network_globals.custody_columns(epoch);
+        let custody_columns = self.network_globals.custody_columns();
 
         // prevent node from sending excessive requests, since custody peers is not available.
         if self.check_good_peers_on_column_subnets(epoch) {
