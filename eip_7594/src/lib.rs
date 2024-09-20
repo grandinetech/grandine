@@ -5,8 +5,10 @@ use helper_functions::predicates::is_valid_merkle_branch;
 use itertools::Itertools;
 use kzg as _;
 use num_traits::One as _;
+use prometheus_metrics::Metrics;
 use sha2::{Digest as _, Sha256};
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszHash, Uint256};
+use std::sync::Arc;
 use thiserror::Error;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned;
@@ -56,7 +58,14 @@ pub enum ExtendedSampleError {
     AllowedFailtureOutOfRange { allowed_failures: u64 },
 }
 
-pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
+pub fn verify_kzg_proofs<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+    metrics: &Option<Arc<Metrics>>,
+) -> Result<bool> {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.data_column_sidecar_verification_times.start_timer();
+    }
+
     let DataColumnSidecar {
         index,
         column,
@@ -118,7 +127,12 @@ pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) 
 
 pub fn verify_sidecar_inclusion_proof<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
+    metrics: &Option<Arc<Metrics>>
 ) -> bool {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.data_column_sidecar_inclusion_proof_verification.start_timer();
+    }
+
     let DataColumnSidecar {
         kzg_commitments,
         signed_block_header,
@@ -198,7 +212,14 @@ fn get_data_columns_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = Colu
  *
  * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
  */
-pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
+pub fn compute_matrix(
+        blobs: Vec<CKzgBlob>,
+        metrics: &Option<Arc<Metrics>>,
+    ) -> Result<Vec<MatrixEntry>> {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.data_column_sidecar_computation.start_timer();
+    }
+
     let kzg_settings = settings();
 
     let mut matrix = vec![];
@@ -222,10 +243,16 @@ pub fn compute_matrix(blobs: Vec<CKzgBlob>) -> Result<Vec<MatrixEntry>> {
  *
  * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
  */
+// TODO: implement reconstructed_columns metric
 pub fn recover_matrix(
     partial_matrix: Vec<MatrixEntry>,
     blob_count: usize,
+    metrics: &Option<Arc<Metrics>>
 ) -> Result<Vec<MatrixEntry>> {
+    if let Some(metrics) = metrics.as_ref() {
+        let _timer = metrics.columns_reconstruction_time.start_timer();
+    }
+
     let kzg_settings = settings();
 
     let mut matrix = vec![];

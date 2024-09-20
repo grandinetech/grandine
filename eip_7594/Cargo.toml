@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
+prometheus_metrics = { workspace = true }
 
 [dev-dependencies]
 duplicate = { workspace = true }
