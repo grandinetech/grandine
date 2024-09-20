@@ -49,11 +49,19 @@ pub struct Metrics {
     pub received_sync_contribution_subsets: IntCounter,
     pub received_aggregated_attestation_subsets: IntCounter,
 
-    // Custody Subnets / Data Column Verification times
+    // Custody Subnets / PeerDAS
     column_subnet_peers: IntGaugeVec,
+    pub data_column_sidecars_submitted_for_processing: IntCounter,
     pub verified_gossip_data_column_sidecar: IntCounter,
     pub data_column_sidecar_verification_times: Histogram,
-
+    pub reconstructed_columns: IntCounter, // TODO
+    pub columns_reconstruction_time: Histogram,
+    pub data_column_sidecar_computation: Histogram,
+    pub data_column_sidecar_inclusion_proof_verification: Histogram,
+    pub data_column_sidecar_kzg_verification_single: Histogram, // TODO?
+    pub data_column_sidecar_kzg_verification_batch: Histogram,
+    pub beacon_custody_columns_count_total: IntCounter, // TODO
+    
     // Extra Network stats
     gossip_block_slot_start_delay_time: Histogram,
 
@@ -266,20 +274,61 @@ impl Metrics {
                 "Number of received aggregated attestations that are subsets of already known aggregates"
             )?,
 
+            // Custody Subnets / PeerDAS
             column_subnet_peers: IntGaugeVec::new(
                 opts!("PEERS_PER_COLUMN_SUBNET", "Number of connected peers per column subnet"),
                 &["subnet_id"],
             )?,
 
+            data_column_sidecars_submitted_for_processing: IntCounter::new(
+                "beacon_data_column_sidecar_processing_requests_total", 
+                "Number of data column sidecars submitted for processing"
+            )?,
+
             verified_gossip_data_column_sidecar: IntCounter::new(
-                "VERIFIED_GOSSIP_DATA_COLUMN_SIDECAR", 
-                "Number of gossip data column sidecar verified for propagation"
+                "beacon_data_column_sidecar_processing_successes_total", 
+                "Number of data column sidecars verified for gossip"
             )?,
 
             data_column_sidecar_verification_times: Histogram::with_opts(histogram_opts!(
-                "DATA_COLUMN_SIDECAR_VERIFICATION_TIMES",
-                "Time takes to verify a data column sidecar"
+                "beacon_data_column_sidecar_gossip_verification_seconds",
+                "Full runtime of data column sidecars gossip verification"
             ))?,
+
+            reconstructed_columns: IntCounter::new(
+                "beacon_data_availability_reconstructed_columns_total", 
+                "Total count of reconstructed columns"
+            )?,
+
+            columns_reconstruction_time: Histogram::with_opts(histogram_opts!(
+                "beacon_data_availability_reconstruction_time_seconds",
+                "Time taken to reconstruct columns"
+            ))?,
+
+            data_column_sidecar_computation: Histogram::with_opts(histogram_opts!(
+                "beacon_data_column_sidecar_computation_seconds",
+                "Time taken to compute data column sidecar, including cells, proofs and inclusion proof"
+            ))?,
+
+            data_column_sidecar_inclusion_proof_verification: Histogram::with_opts(histogram_opts!(
+                "beacon_data_column_sidecar_inclusion_proof_verification_seconds",
+                "Time taken to verify data column sidecar inclusion proof"
+            ))?,
+
+            data_column_sidecar_kzg_verification_single: Histogram::with_opts(histogram_opts!(
+                "beacon_kzg_verification_data_column_single_seconds",
+                "Runtime of single data column kzg verification"
+            ))?,
+
+            data_column_sidecar_kzg_verification_batch: Histogram::with_opts(histogram_opts!(
+                "beacon_kzg_verification_data_column_batch_seconds",
+                "Runtime of batched data column kzg verification"
+            ))?,
+
+            beacon_custody_columns_count_total: IntCounter::new(
+                "beacon_custody_columns_count_total",
+                "Total count of columns in custody within the data availability boundary"
+            )?,
 
             // Extra Network stats
             gossip_block_slot_start_delay_time: Histogram::with_opts(histogram_opts!(
@@ -766,9 +815,29 @@ impl Metrics {
             self.received_aggregated_attestation_subsets.clone(),
         ))?;
         default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
+        default_registry.register(Box::new(self.data_column_sidecars_submitted_for_processing.clone()))?;
         default_registry.register(Box::new(self.verified_gossip_data_column_sidecar.clone()))?;
         default_registry.register(Box::new(
             self.data_column_sidecar_verification_times.clone(),
+        ))?;
+        default_registry.register(Box::new(self.reconstructed_columns.clone(),))?;
+        default_registry.register(Box::new(
+            self.columns_reconstruction_time.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecar_computation.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecar_inclusion_proof_verification.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecar_kzg_verification_single.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecar_kzg_verification_batch.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.beacon_custody_columns_count_total.clone(),
         ))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
@@ -997,6 +1066,7 @@ impl Metrics {
         }
     }
 
+    // Custody Subnets / PeerDAS
     pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
         match self
             .column_subnet_peers
@@ -1011,7 +1081,7 @@ impl Metrics {
             }
         }
     }
-
+    
     // Extra Network stats
     pub fn observe_block_duration_to_slot(&self, block_slot_timestamp: UnixSeconds) {
         match helpers::duration_from_now_to(block_slot_timestamp) {
