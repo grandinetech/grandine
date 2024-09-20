@@ -1802,7 +1802,7 @@ impl<P: Preset> Store<P> {
         mut verifier: impl Verifier + Send,
         metrics: &Option<Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        if let Some(metrics) = self.metrics.as_ref() {
+        if let Some(metrics) = metrics.as_ref() {
             metrics.data_column_sidecars_submitted_for_processing.inc();
         }
 
@@ -1975,7 +1975,7 @@ impl<P: Preset> Store<P> {
             }
         );
 
-        if let Some(metrics) = self.metrics.as_ref() {
+        if let Some(metrics) = metrics.as_ref() {
             metrics.verified_gossip_data_column_sidecar.inc();
         }
 

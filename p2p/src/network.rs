@@ -2275,7 +2275,6 @@ impl<P: Preset> Network<P> {
 
         let request = DataColumnsByRootRequest::new(
             data_column_identifiers
-                .clone()
                 .try_into()
                 .expect("length is under maximum"),
         );
