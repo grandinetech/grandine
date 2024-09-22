@@ -3,10 +3,10 @@ use std::{backtrace::Backtrace, sync::Arc};
 
 use anyhow::{bail, Result};
 use features::Feature;
-use log::warn;
 use state_cache::{StateCache, StateWithRewards};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
+use tracing::{info, trace, warn}; 
 use thiserror::Error;
 use transition_functions::combined;
 use types::{
@@ -25,6 +25,7 @@ pub struct StateCacheProcessor<P: Preset> {
 impl<P: Preset> StateCacheProcessor<P> {
     #[must_use]
     pub fn new(state_cache_lock_timeout: Duration) -> Self {
+        info!("Creating new StateCacheProcessor with lock timeout of {:?}", state_cache_lock_timeout);
         Self {
             state_cache: StateCache::new(state_cache_lock_timeout),
         }
@@ -36,12 +37,19 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
+        trace!("Retrieving state before or at slot {}", slot);
         self.state_cache
             .before_or_at_slot(block_root, slot)
             .ok()
             .flatten()
-            .map(|(state, _)| state)
-            .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
+            .map(|(state, _)| {
+                trace!("State found in cache for block root {:?} and slot {}", block_root, slot);
+                state
+            })
+            .or_else(|| {
+                trace!("State not found in cache, trying store");
+                store_state_before_or_at_slot(store, block_root, slot)
+            })
     }
 
     pub fn existing_state_at_slot(
@@ -50,6 +58,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
+        trace!("Checking existing state at slot {}", slot);
         self.before_or_at_slot(store, block_root, slot)
             .filter(|state| state.slot() == slot)
     }
@@ -61,15 +70,22 @@ impl<P: Preset> StateCacheProcessor<P> {
         ignore_missing_rewards: bool,
         f: impl FnOnce() -> Result<StateWithRewards<P>>,
     ) -> Result<StateWithRewards<P>> {
+        trace!(
+            "Attempting to get or insert state for block root {:?} at slot {}",
+            block_root,
+            slot
+        );
         self.state_cache
             .get_or_insert_with(block_root, slot, ignore_missing_rewards, f)
     }
 
     pub fn len(&self) -> Result<usize> {
+        trace!("Getting length of state cache");
         self.state_cache.len()
     }
 
     pub fn prune(&self, last_pruned_slot: Slot) -> Result<()> {
+        trace!("Pruning state cache up to slot {}", last_pruned_slot);
         self.state_cache.prune(last_pruned_slot)
     }
 
@@ -79,6 +95,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
+        trace!("Trying to get state at slot {} for block root {:?}", slot, block_root);
         self.try_get_state_at_slot(
             store,
             block_root,
@@ -93,6 +110,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
+        trace!("Getting state at slot {} for block root {:?}", slot, block_root);
         self.try_state_at_slot(store, block_root, slot)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
@@ -104,6 +122,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
+        trace!("Quietly getting state at slot {} for block root {:?}", slot, block_root);
         self.try_get_state_at_slot(store, block_root, slot, false)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
@@ -116,6 +135,12 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
+        trace!(
+            "Processing slots for state from slot {} to {} for block root {:?}",
+            state.slot(),
+            slot,
+            block_root
+        );
         let post_state = process_slots(
             store,
             state,
@@ -125,6 +150,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         )?;
 
         if store.is_forward_synced() {
+            trace!("Inserting processed state into state cache for block root {:?}", block_root);
             self.state_cache
                 .insert(block_root, (post_state.clone_arc(), None))?;
         }
@@ -139,25 +165,31 @@ impl<P: Preset> StateCacheProcessor<P> {
         slot: Slot,
         warn_on_slot_processing: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
+        trace!("Attempting to get state at slot {} for block root {:?}", slot, block_root);
         if !store.is_forward_synced() {
             return match self.before_or_at_slot(store, block_root, slot) {
-                Some(state) => Ok(Some(process_slots(
-                    store,
-                    state,
-                    block_root,
-                    slot,
-                    warn_on_slot_processing,
-                )?)),
+                Some(state) => {
+                    trace!("State found, processing slots");
+                    Ok(Some(process_slots(
+                        store,
+                        state,
+                        block_root,
+                        slot,
+                        warn_on_slot_processing,
+                    )?))
+                }
                 None => Ok(None),
             };
         }
 
         self.state_cache
             .get_or_try_insert_with(block_root, slot, true, |pre_state| {
+                trace!("State not found in cache, attempting to retrieve or process");
                 let Some(state) = pre_state
                     .map(|(state, _)| state.clone_arc())
                     .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
                 else {
+                    trace!("No state found before or at slot");
                     return Ok(None);
                 };
 
@@ -177,6 +209,7 @@ fn process_slots<P: Preset>(
     slot: Slot,
     warn_on_slot_processing: bool,
 ) -> Result<Arc<BeaconState<P>>> {
+    trace!("Processing slots from {} to {} for block root {:?}", state.slot(), slot, block_root);
     if state.slot() < slot {
         if warn_on_slot_processing && store.is_forward_synced() {
             // `Backtrace::force_capture` can be costly and a warning may be excessive,

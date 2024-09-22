@@ -13,6 +13,7 @@ use itertools::Itertools as _;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use tracing::{error};
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -53,37 +54,44 @@ where
 {
     #[must_use]
     pub fn slot(&self) -> Slot {
+        tracing::debug!("Fetching slot from store snapshot");
         self.store_snapshot().slot()
     }
 
     #[must_use]
     pub fn phase(&self) -> Phase {
+        tracing::debug!("Fetching phase from store snapshot");
         self.store_snapshot().phase()
     }
 
     #[must_use]
     pub fn justified_checkpoint(&self) -> Checkpoint {
+        tracing::debug!("Fetching justified checkpoint from store snapshot");
         self.store_snapshot().justified_checkpoint()
     }
 
     #[must_use]
     pub fn finalized_epoch(&self) -> Epoch {
+        tracing::debug!("Fetching finalized epoch from store snapshot");
         self.store_snapshot().finalized_epoch()
     }
 
     #[must_use]
     pub fn finalized_root(&self) -> H256 {
+        tracing::debug!("Fetching finalized root from store snapshot");
         self.store_snapshot().finalized_root()
     }
 
     #[must_use]
     pub fn genesis_time(&self) -> UnixSeconds {
+        tracing::debug!("Fetching genesis time from the state of last finalized block");
         let store = self.store_snapshot();
         store.last_finalized().state(&store).genesis_time()
     }
 
     #[must_use]
     pub fn anchor_block(&self) -> Arc<SignedBeaconBlock<P>> {
+        tracing::debug!("Fetching anchor block");
         self.store_snapshot().anchor().block.clone_arc()
     }
 
@@ -94,6 +102,7 @@ where
     ///
     /// [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
     pub fn justified_state(&self) -> Result<WithStatus<Arc<BeaconState<P>>>> {
+        tracing::debug!("Fetching justified state from store snapshot");
         let store = self.store_snapshot();
 
         // `rustfmt` formats the method chain below in a surprising and counterproductive way.
@@ -101,11 +110,12 @@ where
         // <https://github.com/rust-lang/rustfmt/issues/3514> proposes adding an option.
         // <https://github.com/rust-lang/rustfmt/pull/4886> implements the option.
         #[rustfmt::skip]
-        let chain_link = store
-            .justified_chain_link()
-            .ok_or_else(|| Error::JustifiedBlockPruned {
+        let chain_link = store.justified_chain_link().ok_or_else(|| {
+            tracing::error!("Justified block has been pruned");
+            Error::JustifiedBlockPruned {
                 justified_checkpoint: store.justified_checkpoint(),
                 finalized_checkpoint: store.finalized_checkpoint(),
+            }
             })?;
 
         Ok(WithStatus {
@@ -117,6 +127,7 @@ where
 
     #[must_use]
     pub fn last_finalized_block_root(&self) -> WithStatus<H256> {
+        tracing::debug!("Fetching last finalized block root");
         let store = self.store_snapshot();
         let chain_link = store.last_finalized();
 
@@ -129,6 +140,7 @@ where
 
     #[must_use]
     pub fn last_finalized_block(&self) -> WithStatus<Arc<SignedBeaconBlock<P>>> {
+        tracing::debug!("Fetching last finalized block");
         let store = self.store_snapshot();
         let chain_link = store.last_finalized();
 
@@ -147,6 +159,7 @@ where
     /// [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
     #[must_use]
     pub fn last_finalized_state(&self) -> WithStatus<Arc<BeaconState<P>>> {
+        tracing::debug!("Fetching last finalized state");
         let store = self.store_snapshot();
         let chain_link = store.last_finalized();
 
@@ -160,12 +173,14 @@ where
     // TODO(Grandine Team): This will incorrectly return `None` for archived slots.
     #[must_use]
     pub fn finalized_block_root_before_or_at(&self, slot: Slot) -> Option<H256> {
+        tracing::debug!("Fetching finalized block root before or at slot: {:?}", slot);
         self.store_snapshot()
             .finalized_before_or_at(slot)
             .map(|chain_link| chain_link.block_root)
     }
 
     pub fn checkpoint_state(&self, checkpoint: Checkpoint) -> Result<Option<Arc<BeaconState<P>>>> {
+        tracing::debug!("Fetching checkpoint state for: {:?}", checkpoint);
         self.snapshot().checkpoint_state(checkpoint)
     }
 
@@ -175,9 +190,11 @@ where
     // [Eth Beacon Node API specification]: https://ethereum.github.io/beacon-APIs/
     #[must_use]
     pub fn fork_tips(&self) -> Vec<ForkTip> {
+        tracing::debug!("Fetching fork tips");
         let store = self.store_snapshot();
 
         if store.unfinalized().is_empty() {
+            tracing::debug!("No unfinalized blocks, returning head");
             return vec![(store.head(), store.head().is_optimistic()).into()];
         }
 
@@ -197,6 +214,7 @@ where
 
     #[must_use]
     pub fn fork_choice_context(&self) -> ForkChoiceContext {
+        tracing::debug!("Fetching fork choice context");
         let store = self.store_snapshot();
 
         let fork_choice_nodes = store
@@ -205,6 +223,12 @@ where
             .flatten()
             .map(|unfinalized_block| {
                 let chain_link = &unfinalized_block.chain_link;
+
+                tracing::debug!(
+                    "Adding fork choice node for slot: {:?}, block root: {:?}",
+                    chain_link.slot(),
+                    chain_link.block_root
+                );
 
                 ForkChoiceNode {
                     slot: chain_link.slot(),
@@ -228,6 +252,7 @@ where
 
     #[must_use]
     pub fn head(&self) -> WithStatus<ChainLink<P>> {
+        tracing::debug!("Fetching the head of the chain");
         let store = self.store_snapshot();
         let head = store.head();
 
@@ -240,11 +265,13 @@ where
 
     #[must_use]
     pub fn head_slot(&self) -> Slot {
+        tracing::debug!("Fetching the slot of the head of the chain");
         self.store_snapshot().head().slot()
     }
 
     #[must_use]
     pub fn head_block_root(&self) -> WithStatus<H256> {
+        tracing::debug!("Fetching the block root of the head of the chain");
         let store = self.store_snapshot();
         let head = store.head();
 
@@ -257,6 +284,7 @@ where
 
     #[must_use]
     pub fn head_block(&self) -> WithStatus<Arc<SignedBeaconBlock<P>>> {
+        tracing::debug!("Fetching the head block");
         let store = self.store_snapshot();
         let head = store.head();
 
@@ -269,6 +297,7 @@ where
 
     #[must_use]
     pub fn head_state(&self) -> WithStatus<Arc<BeaconState<P>>> {
+        tracing::debug!("Fetching the head state");
         let store = self.store_snapshot();
         let head = store.head();
 
@@ -281,15 +310,18 @@ where
 
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
+        tracing::debug!("Checking if forward synced");
         self.store_snapshot().is_forward_synced()
     }
 
     #[must_use]
     pub fn state_by_chain_link(&self, chain_link: &ChainLink<P>) -> Arc<BeaconState<P>> {
+        tracing::debug!("Fetching state by chain link: {:?}", chain_link.block_root);
         chain_link.state(&self.store_snapshot())
     }
 
     pub fn state_at_slot(&self, slot: Slot) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        tracing::debug!("Fetching state at slot: {:?}", slot);
         self.snapshot().state_at_slot(slot)
     }
 
@@ -298,6 +330,7 @@ where
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
+        tracing::debug!("Fetching state before or at slot: {:?}, for block root: {:?}", slot, block_root);
         self.store_snapshot()
             .state_before_or_at_slot(block_root, slot)
     }
@@ -310,6 +343,7 @@ where
         &self,
         state_root: H256,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        tracing::debug!("Fetching state by state root: {:?}", state_root);
         let store = self.store_snapshot();
 
         if let Some(with_status) = store.state_by_state_root(state_root) {
@@ -325,6 +359,7 @@ where
     }
 
     pub fn exibits_equivocation(&self, block: &Arc<SignedBeaconBlock<P>>) -> bool {
+        tracing::debug!("Checking if block exhibits equivocation: {:?}", block.message().slot());
         let block_slot = block.message().slot();
         let store = self.store_snapshot();
 
@@ -340,6 +375,7 @@ where
     }
 
     pub fn check_block_root(&self, block_root: H256) -> Result<Option<WithStatus<H256>>> {
+        tracing::debug!("Checking block root: {:?}", block_root);
         let store = self.store_snapshot();
 
         if let Some(chain_link) = store.chain_link(block_root) {
@@ -365,6 +401,7 @@ where
         &self,
         block_root: H256,
     ) -> Result<Option<WithStatus<Arc<SignedBeaconBlock<P>>>>> {
+        tracing::debug!("Fetching block by root: {:?}", block_root);
         if let Some(with_status) = self.store_snapshot().block(block_root) {
             return Ok(Some(with_status.cloned()));
         }
@@ -381,6 +418,7 @@ where
     }
 
     pub fn block_by_slot(&self, slot: Slot) -> Result<Option<WithStatus<BlockWithRoot<P>>>> {
+        tracing::debug!("Fetching block by slot: {:?}", slot);
         let store = self.store_snapshot();
 
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
@@ -405,11 +443,13 @@ where
     }
 
     pub fn block_root_by_slot(&self, slot: Slot) -> Result<Option<H256>> {
+        tracing::debug!("Fetching block root by slot: {:?}", slot);
         self.storage()
             .block_root_by_slot_with_store(self.store_snapshot().as_ref(), slot)
     }
 
     pub fn blocks_by_range(&self, range: Range<Slot>) -> Result<Vec<BlockWithRoot<P>>> {
+        tracing::debug!("Fetching blocks by range: {:?}", range);
         self.snapshot().blocks_by_range(range)
     }
 
@@ -417,6 +457,7 @@ where
         &self,
         blob_ids: impl IntoIterator<Item = BlobIdentifier> + Send,
     ) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+        tracing::debug!("Fetching blob sidecars by IDs");
         let snapshot = self.snapshot();
         let storage = self.storage();
 
@@ -437,6 +478,7 @@ where
     }
 
     pub fn blob_sidecars_by_range(&self, range: Range<Slot>) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+        tracing::debug!("Fetching blob sidecars by range: {:?}", range);
         let canonical_chain_blocks = self.blocks_by_range(range)?;
 
         let blob_ids =
@@ -470,6 +512,7 @@ where
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,
     ) -> Result<Vec<WithStatus<Arc<SignedBeaconBlock<P>>>>> {
+        tracing::debug!("Fetching blocks by root");
         block_roots
             .into_iter()
             .map(|root| self.block_by_root(root))
@@ -478,6 +521,7 @@ where
     }
 
     pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
+        tracing::debug!("Entering preprocessed_state_at_current_slot");
         let store = self.store_snapshot();
         let head = store.head();
 

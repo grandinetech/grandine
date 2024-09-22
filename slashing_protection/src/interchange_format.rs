@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
 use serde::{Deserialize, Serialize};
+use tracing::{info, error};
 use thiserror::Error;
 use types::phase0::primitives::{Epoch, Slot, H256};
 
@@ -68,14 +69,17 @@ impl InterchangeFormat {
     }
 
     pub fn load_from_file(file: impl AsRef<Path>) -> Result<Self> {
+        info!("Loading interchange format from file: {:?}", file.as_ref());
         let bytes = fs_err::read(file)?;
         let data = serde_json::from_slice(bytes.as_slice())?;
+        info!("Successfully loaded interchange format from file.");
         Ok(data)
     }
 
     pub fn validate(&self, genesis_validators_root: H256) -> Result<()> {
         let version = self.metadata.interchange_format_version;
 
+        info!("Validating interchange format version: {}", version);
         ensure!(
             version == INTERCHANGE_FORMAT_VERSION,
             Error::UnsupportedVersion { version },
@@ -92,6 +96,7 @@ impl InterchangeFormat {
             },
         );
 
+        info!("Validation successful for genesis validators root.");
         Ok(())
     }
 }

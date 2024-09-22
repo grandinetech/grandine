@@ -1,0 +1,1211 @@
+2024-09-21T22:02:41.086606Z  INFO logging: Tracing initialized successfully.
+2024-09-21T22:02:41.086800Z  INFO grandine: Grandine firing up...
+2024-09-21T22:02:41.124257Z  INFO grandine: starting beacon node
+2024-09-21T22:02:41.124360Z  INFO grandine::grandine_config: network: mainnet
+2024-09-21T22:02:41.124383Z  INFO grandine::grandine_config: data directory: "/Users/mercynaps/.grandine/mainnet"
+2024-09-21T22:02:41.124416Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-09-21T22:02:41.124428Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-09-21T22:02:41.124509Z  INFO grandine::grandine_config: Eth1 RPC URLs: []
+2024-09-21T22:02:41.124674Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d3138613435663700000000000000000000]
+2024-09-21T22:02:41.124947Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-09-21T22:02:41.125289Z  INFO grandine::grandine_config: validator API disabled
+2024-09-21T22:02:41.125302Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-09-21T22:02:41.125327Z  INFO grandine::grandine_config: slasher enabled: false
+2024-09-21T22:02:41.125339Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-18a45f7/aarch64-macos
+2024-09-21T22:02:41.125380Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-09-21T22:02:41.125391Z  INFO grandine::grandine_config: back sync enabled: false
+2024-09-21T22:02:41.165181Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/beacon/eth1_cache with name eth1
+2024-09-21T22:02:42.993816Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-09-21T22:02:43.122452Z  INFO fork_choice_control::storage: loaded state at slot 3264
+2024-09-21T22:02:45.373952Z  INFO fork_choice_store::state_cache_processor: Creating new StateCacheProcessor with lock timeout of 1.5s
+2024-09-21T22:02:45.512262Z  INFO fork_choice_control::block_processor: Validating block with slot: 3265
+2024-09-21T22:02:45.514596Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6e55ae834ac5bed05e3dda60150818e1392f645c0e4ca61930b0f83764351209, slot: 3265
+2024-09-21T22:02:45.664337Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3265
+2024-09-21T22:02:45.664362Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3265
+2024-09-21T22:02:45.676277Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.680534Z  INFO fork_choice_control::block_processor: Validating block with slot: 3266
+2024-09-21T22:02:45.681527Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xeb458ab3bc24832b23277caa8307568f1d7fdebb4a56e87e50ecbed561c21c16, slot: 3266
+2024-09-21T22:02:45.684111Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3266
+2024-09-21T22:02:45.684124Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3266
+2024-09-21T22:02:45.694482Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.695070Z  INFO fork_choice_control::block_processor: Validating block with slot: 3267
+2024-09-21T22:02:45.696561Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe0d853faa1eb3de48582ffb29fc53602efbeb0e414fb1d667840e23f3309f325, slot: 3267
+2024-09-21T22:02:45.700098Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3267
+2024-09-21T22:02:45.700110Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3267
+2024-09-21T22:02:45.711009Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.711562Z  INFO fork_choice_control::block_processor: Validating block with slot: 3268
+2024-09-21T22:02:45.714116Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa117aea172535c38bbacc54ee9bde71f4b68612a11abbc80ec161d554c7aa31d, slot: 3268
+2024-09-21T22:02:45.719211Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3268
+2024-09-21T22:02:45.719220Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3268
+2024-09-21T22:02:45.730963Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.731619Z  INFO fork_choice_control::block_processor: Validating block with slot: 3269
+2024-09-21T22:02:45.732670Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcbd96fa4d4293d7205ddef2949f01efed7a167c80650c15bdf4c909d33829e14, slot: 3269
+2024-09-21T22:02:45.735353Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3269
+2024-09-21T22:02:45.735363Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3269
+2024-09-21T22:02:45.746402Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.747046Z  INFO fork_choice_control::block_processor: Validating block with slot: 3270
+2024-09-21T22:02:45.748300Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9165a1c531821056cf71c3eabc564954f418fbea7f65ea8b352f13d5f4d3cec4, slot: 3270
+2024-09-21T22:02:45.751363Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3270
+2024-09-21T22:02:45.751373Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3270
+2024-09-21T22:02:45.764602Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.765146Z  INFO fork_choice_control::block_processor: Validating block with slot: 3271
+2024-09-21T22:02:45.766432Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9d1f33b5f99f4a7cc9847d1bb04b7bacb2c11bccf3dff905488bea22d53221e7, slot: 3271
+2024-09-21T22:02:45.769588Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3271
+2024-09-21T22:02:45.769600Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3271
+2024-09-21T22:02:45.781061Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.781761Z  INFO fork_choice_control::block_processor: Validating block with slot: 3272
+2024-09-21T22:02:45.782733Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x176f6a6e7b600ab6b03957b40a92ca73bbb045fa965686dc89a2e161a2aca52c, slot: 3272
+2024-09-21T22:02:45.785203Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3272
+2024-09-21T22:02:45.785213Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3272
+2024-09-21T22:02:45.797341Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.798133Z  INFO fork_choice_control::block_processor: Validating block with slot: 3273
+2024-09-21T22:02:45.800127Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc71d594812c45046658c9be1bfaa629f31fd2f1c2c207339b06b4769d6aa179d, slot: 3273
+2024-09-21T22:02:45.804698Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3273
+2024-09-21T22:02:45.804708Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3273
+2024-09-21T22:02:45.817101Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.817726Z  INFO fork_choice_control::block_processor: Validating block with slot: 3274
+2024-09-21T22:02:45.818792Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb01c14c57a7c1c79378b272785ee35f020d1b2c12366feb069738ca803cca911, slot: 3274
+2024-09-21T22:02:45.821615Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3274
+2024-09-21T22:02:45.821631Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3274
+2024-09-21T22:02:45.833738Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.834438Z  INFO fork_choice_control::block_processor: Validating block with slot: 3275
+2024-09-21T22:02:45.835777Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1300162e462269b8bafdf98dd173c37484520a937edfd722fcac37bce153784a, slot: 3275
+2024-09-21T22:02:45.838969Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3275
+2024-09-21T22:02:45.838981Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3275
+2024-09-21T22:02:45.850900Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.851123Z  INFO fork_choice_control::block_processor: Validating block with slot: 3276
+2024-09-21T22:02:45.852065Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1765dfdac49d67a45450cedac37d97ea161423966833ded0ed7156027d9a47a1, slot: 3276
+2024-09-21T22:02:45.854526Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3276
+2024-09-21T22:02:45.854537Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3276
+2024-09-21T22:02:45.866514Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.867223Z  INFO fork_choice_control::block_processor: Validating block with slot: 3277
+2024-09-21T22:02:45.868160Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf4d18a120778fd44c5619fd2f5f8a0e42897f84a0cb455bc7a495d7ec603f1c3, slot: 3277
+2024-09-21T22:02:45.870608Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3277
+2024-09-21T22:02:45.870617Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3277
+2024-09-21T22:02:45.882802Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.883346Z  INFO fork_choice_control::block_processor: Validating block with slot: 3278
+2024-09-21T22:02:45.884285Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x22a83497f89e922b7180931bc4bcdc01d5b92afd9953c98486f1ff85792ed2b9, slot: 3278
+2024-09-21T22:02:45.886757Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3278
+2024-09-21T22:02:45.886768Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3278
+2024-09-21T22:02:45.899598Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.900008Z  INFO fork_choice_control::block_processor: Validating block with slot: 3279
+2024-09-21T22:02:45.902329Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x69e86d01b37aeb26b342161d29bc294d9c9de3c70cc2f189d44bb344f4b62262, slot: 3279
+2024-09-21T22:02:45.907279Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3279
+2024-09-21T22:02:45.907304Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3279
+2024-09-21T22:02:45.920471Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.921084Z  INFO fork_choice_control::block_processor: Validating block with slot: 3280
+2024-09-21T22:02:45.922084Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x07e40e5f67b1589c5fcfd80f393088c87eb58d2e6571547bb090c1d7588b67d8, slot: 3280
+2024-09-21T22:02:45.924795Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3280
+2024-09-21T22:02:45.924816Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3280
+2024-09-21T22:02:45.938782Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.939198Z  INFO fork_choice_control::block_processor: Validating block with slot: 3281
+2024-09-21T22:02:45.940392Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe16516fdeaebaa3fcfc0358d3029a910be9aeb6c5083c2dfbff49095f1432f07, slot: 3281
+2024-09-21T22:02:45.943381Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3281
+2024-09-21T22:02:45.943410Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3281
+2024-09-21T22:02:45.960162Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.960722Z  INFO fork_choice_control::block_processor: Validating block with slot: 3282
+2024-09-21T22:02:45.961714Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd4c751c93cf89b6c41ddedb19de301ce477e7d5be18921fa66e6e70a1dd67e7e, slot: 3282
+2024-09-21T22:02:45.964333Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3282
+2024-09-21T22:02:45.964344Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3282
+2024-09-21T22:02:45.978630Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.979385Z  INFO fork_choice_control::block_processor: Validating block with slot: 3283
+2024-09-21T22:02:45.980678Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xae6f5677cee55d94f903a4581609a276fa0aa510a85adbb774182a3ad18c1d5e, slot: 3283
+2024-09-21T22:02:45.983869Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3283
+2024-09-21T22:02:45.983884Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3283
+2024-09-21T22:02:45.998567Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:45.999310Z  INFO fork_choice_control::block_processor: Validating block with slot: 3284
+2024-09-21T22:02:46.001978Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd4e74752f11f7600ad154d72aedea531994e09bf2430c2612d96bea3142db463, slot: 3284
+2024-09-21T22:02:46.008106Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3284
+2024-09-21T22:02:46.008132Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3284
+2024-09-21T22:02:46.024592Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:46.025457Z  INFO fork_choice_control::block_processor: Validating block with slot: 3285
+2024-09-21T22:02:46.027011Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdbbfa78780977b4cb999eabe86b2df0698a4873c4bdb59e5054895879fcf1ca8, slot: 3285
+2024-09-21T22:02:46.030656Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3285
+2024-09-21T22:02:46.030673Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3285
+2024-09-21T22:02:46.046654Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:46.047160Z  INFO fork_choice_control::block_processor: Validating block with slot: 3286
+2024-09-21T22:02:46.048633Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1a196ca2a080d3c59b8b9be464bcbbe9869b32edd68afe665c8a74010f25f2be, slot: 3286
+2024-09-21T22:02:46.052053Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3286
+2024-09-21T22:02:46.052098Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3286
+2024-09-21T22:02:46.096159Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3264)
+2024-09-21T22:02:46.099003Z  INFO fork_choice_control::block_processor: Validating block with slot: 3287
+2024-09-21T22:02:46.102587Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8cd2a28c0556b577c3a07e76117bfc133abc24633a4f42de03bc6d87b720abd0, slot: 3287
+2024-09-21T22:02:46.106206Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3287
+2024-09-21T22:02:46.106226Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3287
+2024-09-21T22:02:46.131473Z  INFO fork_choice_control::block_processor: Validating block with slot: 3288
+2024-09-21T22:02:46.133161Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa4ccc8ff06693242b8551ac493e926bd49b1162b4ed020d1d6a325077946c96e, slot: 3288
+2024-09-21T22:02:46.138592Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3288
+2024-09-21T22:02:46.138619Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3288
+2024-09-21T22:02:46.164095Z  INFO fork_choice_control::block_processor: Validating block with slot: 3289
+2024-09-21T22:02:46.165918Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x240f7fec2d039d349faedd721d39be8675bee09ff664a01f0cfbda1056a10fe1, slot: 3289
+2024-09-21T22:02:46.170044Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3289
+2024-09-21T22:02:46.170059Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3289
+2024-09-21T22:02:46.186635Z  INFO fork_choice_control::block_processor: Validating block with slot: 3290
+2024-09-21T22:02:46.187994Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3fbb29e41bb728ead10d34aef2be421f5214841b8d08d40613adcd54c7f2523d, slot: 3290
+2024-09-21T22:02:46.191532Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3290
+2024-09-21T22:02:46.191557Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3290
+2024-09-21T22:02:46.209097Z  INFO fork_choice_control::block_processor: Validating block with slot: 3291
+2024-09-21T22:02:46.210352Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x96e1ec4816847b71ec4aa2c2100b8e62bc538b4df1d3e120261c67fe0dd84145, slot: 3291
+2024-09-21T22:02:46.213751Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3291
+2024-09-21T22:02:46.213773Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3291
+2024-09-21T22:02:46.235334Z  INFO fork_choice_control::block_processor: Validating block with slot: 3292
+2024-09-21T22:02:46.236925Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfb88b142bef02bf7915cc08a7e6ad89cfedb6db9a87ca112d4dc15547653fd8f, slot: 3292
+2024-09-21T22:02:46.241079Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3292
+2024-09-21T22:02:46.241105Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3292
+2024-09-21T22:02:46.259557Z  INFO fork_choice_control::block_processor: Validating block with slot: 3293
+2024-09-21T22:02:46.261146Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x411af93d3acacae4ed6ef993d474f014c95c640470056bd874c4049dd651241a, slot: 3293
+2024-09-21T22:02:46.264680Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3293
+2024-09-21T22:02:46.264820Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3293
+2024-09-21T22:02:46.287413Z  INFO fork_choice_control::block_processor: Validating block with slot: 3294
+2024-09-21T22:02:46.288662Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb67b4c7188ecc2f3f082fd231e2c521df15b5db505bfd7ff5b4eaf0a01c7c6ad, slot: 3294
+2024-09-21T22:02:46.291901Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3294
+2024-09-21T22:02:46.291914Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3294
+2024-09-21T22:02:46.310142Z  INFO fork_choice_control::block_processor: Validating block with slot: 3295
+2024-09-21T22:02:46.311354Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0a33c0f4e560173d1f84fe731e2c546539ede8c1ebcfe64fdffe1adee107499d, slot: 3295
+2024-09-21T22:02:46.314429Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3295
+2024-09-21T22:02:46.314448Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3295
+2024-09-21T22:02:46.332117Z  INFO fork_choice_control::block_processor: Validating block with slot: 3296
+2024-09-21T22:02:46.333251Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x26f7d8052a9565d50324f0f6fc085cbbe49a3ab01b0a555acd1c982e4e81be8e, slot: 3296
+2024-09-21T22:02:46.388185Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3296
+2024-09-21T22:02:46.388208Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3296
+2024-09-21T22:02:46.400154Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3296)
+2024-09-21T22:02:46.400876Z  INFO fork_choice_control::block_processor: Validating block with slot: 3297
+2024-09-21T22:02:46.403205Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5e2a54be94da34be99be6d39215748bba965efeb1940d992ae7f8b02a46edf8e, slot: 3297
+2024-09-21T22:02:46.482910Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3297
+2024-09-21T22:02:46.482939Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3297
+2024-09-21T22:02:46.494527Z  INFO fork_choice_control::block_processor: Validating block with slot: 3298
+2024-09-21T22:02:46.495574Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcfea84051774130a6b882f35a8566d6b2a4ce25f5d2daacc9d7e04cfb3fef8b0, slot: 3298
+2024-09-21T22:02:46.498200Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3298
+2024-09-21T22:02:46.498213Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3298
+2024-09-21T22:02:46.510769Z  INFO fork_choice_control::block_processor: Validating block with slot: 3299
+2024-09-21T22:02:46.512394Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9ebf12836c802ce810078e6f210e57574b3f5af779bfbcedeab38e77028b8693, slot: 3299
+2024-09-21T22:02:46.516200Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3299
+2024-09-21T22:02:46.516219Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3299
+2024-09-21T22:02:46.530903Z  INFO fork_choice_control::block_processor: Validating block with slot: 3300
+2024-09-21T22:02:46.532203Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4aad5ed50155e910c049f996ebe782884fc7c2a6066459e8b3c2b8903dad8141, slot: 3300
+2024-09-21T22:02:46.535365Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3300
+2024-09-21T22:02:46.535382Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3300
+2024-09-21T22:02:46.552638Z  INFO fork_choice_control::block_processor: Validating block with slot: 3301
+2024-09-21T22:02:46.555738Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x20447d4b8f86d5f01e585a66288ade5b0923e1027ed5af9ee57933bd36d23e6f, slot: 3301
+2024-09-21T22:02:46.560142Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3301
+2024-09-21T22:02:46.560172Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3301
+2024-09-21T22:02:46.578677Z  INFO fork_choice_control::block_processor: Validating block with slot: 3302
+2024-09-21T22:02:46.582487Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x45f2c786699ff514eba9c85fe3108fe62409bfde30dc866b1a25191987820eef, slot: 3302
+2024-09-21T22:02:46.589183Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3302
+2024-09-21T22:02:46.589209Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3302
+2024-09-21T22:02:46.604960Z  INFO fork_choice_control::block_processor: Validating block with slot: 3303
+2024-09-21T22:02:46.606397Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x44c26ce31f85e5f15410dbadf25b68ff9f13c8d04390c64b8baa4ef7e53b3349, slot: 3303
+2024-09-21T22:02:46.609351Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3303
+2024-09-21T22:02:46.609375Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3303
+2024-09-21T22:02:46.623581Z  INFO fork_choice_control::block_processor: Validating block with slot: 3304
+2024-09-21T22:02:46.625836Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x46248219afd935960ffb4da2cac8a51b7b8922c3e2ea914f1577ff8d49b12236, slot: 3304
+2024-09-21T22:02:46.631212Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3304
+2024-09-21T22:02:46.631239Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3304
+2024-09-21T22:02:46.649269Z  INFO fork_choice_control::block_processor: Validating block with slot: 3305
+2024-09-21T22:02:46.651151Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3884131fbd204c0f3796dfa71599c84a875500142b3f3dea9784b9abdeaefe95, slot: 3305
+2024-09-21T22:02:46.655505Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3305
+2024-09-21T22:02:46.655553Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3305
+2024-09-21T22:02:46.670311Z  INFO fork_choice_control::block_processor: Validating block with slot: 3306
+2024-09-21T22:02:46.671830Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x30ecb331bfe75b77e77ce8d494f6e0fa0ca48cd2e59dd8883d7fdf240f3e0605, slot: 3306
+2024-09-21T22:02:46.675525Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3306
+2024-09-21T22:02:46.675547Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3306
+2024-09-21T22:02:46.690336Z  INFO fork_choice_control::block_processor: Validating block with slot: 3308
+2024-09-21T22:02:46.692522Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb46cb4da68d8d564d82010f5afb3f6d72a46e3d59abbb2d4234f92382176e7f1, slot: 3308
+2024-09-21T22:02:46.800031Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3308
+2024-09-21T22:02:46.800058Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3308
+2024-09-21T22:02:46.819139Z  INFO fork_choice_control::block_processor: Validating block with slot: 3309
+2024-09-21T22:02:46.821026Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa4f2a98012c4722cdc10cfa38e4e70e735062eccb0322f8d39db007a0309e01f, slot: 3309
+2024-09-21T22:02:46.825330Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3309
+2024-09-21T22:02:46.825355Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3309
+2024-09-21T22:02:46.842006Z  INFO fork_choice_control::block_processor: Validating block with slot: 3310
+2024-09-21T22:02:46.843242Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4df0afd59726f0a95b535863b6b440a616611abb4ab927a37082244e7885e130, slot: 3310
+2024-09-21T22:02:46.846241Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3310
+2024-09-21T22:02:46.846264Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3310
+2024-09-21T22:02:46.868160Z  INFO fork_choice_control::block_processor: Validating block with slot: 3311
+2024-09-21T22:02:46.869415Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6007ee78adcfd97caaec7069033fc260d1a59825636ffb7df6a93d98131128b5, slot: 3311
+2024-09-21T22:02:46.872578Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3311
+2024-09-21T22:02:46.872603Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3311
+2024-09-21T22:02:46.890391Z  INFO fork_choice_control::block_processor: Validating block with slot: 3312
+2024-09-21T22:02:46.891499Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9b700e3f580c36463c79e6dc71a839dde8cc8a474b26b6b18f73d11cb0fe280b, slot: 3312
+2024-09-21T22:02:46.894307Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3312
+2024-09-21T22:02:46.894359Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3312
+2024-09-21T22:02:46.910222Z  INFO fork_choice_control::block_processor: Validating block with slot: 3313
+2024-09-21T22:02:46.911784Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xbd5e7036782fd19c9ebee0db8026ab437eed310b8aea88b24a7616d8494b1dd0, slot: 3313
+2024-09-21T22:02:46.915468Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3313
+2024-09-21T22:02:46.915486Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3313
+2024-09-21T22:02:46.931497Z  INFO fork_choice_control::block_processor: Validating block with slot: 3314
+2024-09-21T22:02:46.932629Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x55cf1269ab47ae0471e39df467258f59a1a613fdfe055a2e67ef093667e9bfb1, slot: 3314
+2024-09-21T22:02:46.935654Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3314
+2024-09-21T22:02:46.935676Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3314
+2024-09-21T22:02:46.957594Z  INFO fork_choice_control::block_processor: Validating block with slot: 3315
+2024-09-21T22:02:46.958935Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x31bea67eaff20f47ab0b7379096cf3cf276f79c44425ab5a1075a6864a394255, slot: 3315
+2024-09-21T22:02:46.962015Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3315
+2024-09-21T22:02:46.962028Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3315
+2024-09-21T22:02:46.980645Z  INFO fork_choice_control::block_processor: Validating block with slot: 3316
+2024-09-21T22:02:46.981633Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x583593d35a431ae6a0f3dee9f5a4f69989253ef144abca22a22eca283cd283d2, slot: 3316
+2024-09-21T22:02:46.984229Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3316
+2024-09-21T22:02:46.984244Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3316
+2024-09-21T22:02:47.001688Z  INFO fork_choice_control::block_processor: Validating block with slot: 3317
+2024-09-21T22:02:47.002898Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x643d398ec4cbb6faf125cb5ea536b19f7231e3cfd454e63415e491c55cf70037, slot: 3317
+2024-09-21T22:02:47.006009Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3317
+2024-09-21T22:02:47.006032Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3317
+2024-09-21T22:02:47.023315Z  INFO fork_choice_control::block_processor: Validating block with slot: 3318
+2024-09-21T22:02:47.027002Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xce3fe9cffc126d33ce603bd76b49122cb21e7b8baafc2fe18cc37a44610414d6, slot: 3318
+2024-09-21T22:02:47.035091Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3318
+2024-09-21T22:02:47.035114Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3318
+2024-09-21T22:02:47.055289Z  INFO fork_choice_control::block_processor: Validating block with slot: 3319
+2024-09-21T22:02:47.059214Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1441a7266f3022504375776d4fa452dbae5a798f8d2d9319c6a0ec525f0f4bfd, slot: 3319
+2024-09-21T22:02:47.065547Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3319
+2024-09-21T22:02:47.065570Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3319
+2024-09-21T22:02:47.084566Z  INFO fork_choice_control::block_processor: Validating block with slot: 3320
+2024-09-21T22:02:47.086331Z  INFO fork_choice_control::block_processor: Validating block with slot: 3321
+2024-09-21T22:02:47.087919Z  INFO fork_choice_control::block_processor: Validating block with slot: 3322
+2024-09-21T22:02:47.089308Z  INFO fork_choice_control::block_processor: Validating block with slot: 3323
+2024-09-21T22:02:47.091058Z  INFO fork_choice_control::block_processor: Validating block with slot: 3324
+2024-09-21T22:02:47.092638Z  INFO fork_choice_control::block_processor: Validating block with slot: 3326
+2024-09-21T22:02:47.094303Z  INFO fork_choice_control::block_processor: Validating block with slot: 3327
+2024-09-21T22:02:47.099137Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/beacon/sync with name sync
+2024-09-21T22:02:47.103083Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/validator with name proposer-configs
+2024-09-21T22:02:47.163420Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-09-21T22:02:47.194336Z  INFO fork_choice_control::block_processor: Validating block with slot: 3320
+2024-09-21T22:02:47.195470Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd88f62ffca932cb2039d75df9b9b4871e6f10fa1334539965639f6477e7ab533, slot: 3320
+2024-09-21T22:02:47.198465Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3320
+2024-09-21T22:02:47.198487Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3320
+2024-09-21T22:02:47.206405Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAm1MjWUF4J3qsovL8Wzccfuzy28tTQ8dmA2sazksHeR3bs
+2024-09-21T22:02:47.228386Z  INFO fork_choice_control::block_processor: Validating block with slot: 3321
+2024-09-21T22:02:47.230692Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x2b7b711eb7ca25fc4e298906a6cfa6e30cdf3bb906d22330a78e7ef95a6f0d3c, slot: 3321
+2024-09-21T22:02:47.234324Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3321
+2024-09-21T22:02:47.234352Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3321
+2024-09-21T22:02:47.256136Z  INFO fork_choice_control::block_processor: Validating block with slot: 3322
+2024-09-21T22:02:47.257458Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8695dcc6c85f82db2e138af02e32c802e9263fc267295784954e34f88657dd3b, slot: 3322
+2024-09-21T22:02:47.260809Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3322
+2024-09-21T22:02:47.260834Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3322
+2024-09-21T22:02:47.288178Z  INFO fork_choice_control::block_processor: Validating block with slot: 3323
+2024-09-21T22:02:47.289666Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc79003305563067a8dae731dd50dfc2d8ef9d2dd84479766f28891789a0c52e2, slot: 3323
+2024-09-21T22:02:47.292982Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3323
+2024-09-21T22:02:47.293005Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3323
+2024-09-21T22:02:47.312787Z  INFO fork_choice_control::block_processor: Validating block with slot: 3324
+2024-09-21T22:02:47.314351Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x7f6a9b41140ff7d1723b351892423c36a6b7c4c6da6bcdaece87f6697112f28b, slot: 3324
+2024-09-21T22:02:47.317949Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3324
+2024-09-21T22:02:47.317969Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3324
+2024-09-21T22:02:47.361575Z  INFO fork_choice_control::block_processor: Validating block with slot: 3326
+2024-09-21T22:02:47.373681Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xbce392f2135993254ec78387ae1e994b294319f26640b950f18591f2a7e5f8b7, slot: 3326
+2024-09-21T22:02:47.429048Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3326
+2024-09-21T22:02:47.429077Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3326
+2024-09-21T22:02:47.475137Z  INFO fork_choice_control::block_processor: Validating block with slot: 3327
+2024-09-21T22:02:47.476842Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x95b1c9c671e5e996f02ff033e81d514a3c08d47c6d957c12ade1d4f0c5e332a0, slot: 3327
+2024-09-21T22:02:47.480159Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3327
+2024-09-21T22:02:47.480183Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3327
+2024-09-21T22:02:57.266229Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-09-21T22:02:59.750120Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xf7fa..2492 addr=54.178.44.198:9000 error=Timeout received=13 expected=3
+2024-09-21T22:03:01.835192Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3fa6..2490 addr=24.6.178.194:9000 error=Timeout received=8 expected=3
+2024-09-21T22:03:02.009379Z  WARN discv5::handler: Authentication response already sent. Dropping session. Node: Node: 0x3fdf..831a, addr: 174.139.79.90:30303
+2024-09-21T22:03:02.048770Z  WARN discv5::service: RPC Request failed: id: 016565e8b146bb8a, error InvalidRemotePacket
+2024-09-21T22:03:02.048954Z  WARN discv5::service: RPC Request failed: id: 4b8b34cc9fab164a, error InvalidRemotePacket
+2024-09-21T22:03:03.953293Z  WARN discv5::handler: Authentication response already sent. Dropping session. Node: Node: 0x3ff3..e483, addr: 71.212.119.181:30306
+2024-09-21T22:03:03.953523Z  WARN discv5::service: RPC Request failed: id: c7cce73f56d2bebe, error InvalidRemotePacket
+2024-09-21T22:03:03.953643Z  WARN discv5::service: RPC Request failed: id: 653f9ab5dc86536f, error InvalidRemotePacket
+2024-09-21T22:03:04.816158Z  WARN discv5::handler: Authentication response already sent. Dropping session. Node: Node: 0x3fe2..ea7a, addr: 198.200.84.45:30333
+2024-09-21T22:03:04.818293Z  WARN discv5::service: RPC Request failed: id: 613bf225eeb34cae, error InvalidRemotePacket
+2024-09-21T22:03:04.818416Z  WARN discv5::service: RPC Request failed: id: b4de8c0f91dbe5e6, error InvalidRemotePacket
+2024-09-21T22:03:05.720044Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xb403..b511 addr=136.52.1.91:12000 error=Timeout received=15 expected=3
+2024-09-21T22:03:08.959061Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xb450..9b66 addr=45.47.128.41:9000 error=Timeout received=10 expected=3
+2024-09-21T22:03:09.121024Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xb4e5..6f90 addr=97.126.31.89:12004 error=Timeout received=10 expected=3
+2024-09-21T22:03:10.311844Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xb4b7..061d addr=72.46.86.143:32295 error=Timeout received=10 expected=3
+2024-09-21T22:03:10.765085Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xb494..fc7f addr=178.62.228.167:9009 error=Timeout received=4 expected=3
+2024-09-21T22:03:11.837807Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xb4ce..2410 addr=95.217.113.104:12000 error=Timeout received=10 expected=3
+2024-09-21T22:03:12.028972Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3fea..fc6c addr=135.181.227.84:12000 error=Timeout received=15 expected=3
+2024-09-21T22:03:15.052088Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3131..8ce1 addr=13.244.85.136:32000 error=Timeout received=12 expected=3
+2024-09-21T22:03:15.064978Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3107..49ee addr=109.123.234.146:9000 error=Timeout received=10 expected=3
+2024-09-21T22:03:15.118380Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x31fb..cf5c addr=67.160.180.217:9909 error=Timeout received=12 expected=3
+2024-09-21T22:03:21.112512Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3f7f..8e7a addr=68.183.130.10:9009 error=Timeout received=11 expected=3
+2024-09-21T22:03:21.233555Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x312f..33ef addr=172.207.34.93:9000 error=Timeout received=10 expected=3
+2024-09-21T22:03:21.908627Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3107..ffef addr=51.83.237.108:9000 error=Timeout received=12 expected=3
+2024-09-21T22:03:23.062572Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x3f12..2da2 addr=117.27.228.173:41913 error=Timeout received=11 expected=3
+2024-09-21T22:03:24.063934Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xf7fa..2492 addr=54.178.44.198:9000 error=Timeout received=13 expected=3
+2024-09-21T22:03:28.995317Z  INFO fork_choice_control::block_processor: Validating block with slot: 3552
+2024-09-21T22:03:29.005936Z  INFO fork_choice_control::block_processor: Validating block with slot: 3553
+2024-09-21T22:03:29.015064Z  INFO fork_choice_control::block_processor: Validating block with slot: 3554
+2024-09-21T22:03:29.039151Z  INFO fork_choice_control::block_processor: Validating block with slot: 3555
+2024-09-21T22:03:29.053347Z  INFO fork_choice_control::block_processor: Validating block with slot: 3556
+2024-09-21T22:03:29.063168Z  INFO fork_choice_control::block_processor: Validating block with slot: 3557
+2024-09-21T22:03:29.075922Z  INFO fork_choice_control::block_processor: Validating block with slot: 3558
+2024-09-21T22:03:29.103491Z  INFO fork_choice_control::block_processor: Validating block with slot: 3560
+2024-09-21T22:03:29.118549Z  INFO fork_choice_control::block_processor: Validating block with slot: 3561
+2024-09-21T22:03:29.136419Z  INFO fork_choice_control::block_processor: Validating block with slot: 3562
+2024-09-21T22:03:29.154726Z  INFO fork_choice_control::block_processor: Validating block with slot: 3564
+2024-09-21T22:03:29.159573Z  INFO fork_choice_control::block_processor: Validating block with slot: 3565
+2024-09-21T22:03:29.411984Z  INFO fork_choice_control::block_processor: Validating block with slot: 3566
+2024-09-21T22:03:29.414327Z  INFO fork_choice_control::block_processor: Validating block with slot: 3567
+2024-09-21T22:03:29.424300Z  INFO fork_choice_control::block_processor: Validating block with slot: 3568
+2024-09-21T22:03:29.435990Z  INFO fork_choice_control::block_processor: Validating block with slot: 3569
+2024-09-21T22:03:29.456928Z  INFO fork_choice_control::block_processor: Validating block with slot: 3570
+2024-09-21T22:03:29.465278Z  INFO fork_choice_control::block_processor: Validating block with slot: 3571
+2024-09-21T22:03:29.488663Z  INFO fork_choice_control::block_processor: Validating block with slot: 3572
+2024-09-21T22:03:29.508932Z  INFO fork_choice_control::block_processor: Validating block with slot: 3573
+2024-09-21T22:03:29.514249Z  INFO fork_choice_control::block_processor: Validating block with slot: 3574
+2024-09-21T22:03:29.535895Z  INFO fork_choice_control::block_processor: Validating block with slot: 3575
+2024-09-21T22:03:29.541704Z  INFO fork_choice_control::block_processor: Validating block with slot: 3576
+2024-09-21T22:03:29.559788Z  INFO fork_choice_control::block_processor: Validating block with slot: 3577
+2024-09-21T22:03:29.587857Z  INFO fork_choice_control::block_processor: Validating block with slot: 3579
+2024-09-21T22:03:29.593493Z  INFO fork_choice_control::block_processor: Validating block with slot: 3580
+2024-09-21T22:03:29.619134Z  INFO fork_choice_control::block_processor: Validating block with slot: 3581
+2024-09-21T22:03:29.622000Z  INFO fork_choice_control::block_processor: Validating block with slot: 3582
+2024-09-21T22:03:29.647131Z  INFO fork_choice_control::block_processor: Validating block with slot: 3583
+2024-09-21T22:03:29.817161Z  INFO fork_choice_control::block_processor: Validating block with slot: 3584
+2024-09-21T22:03:29.841177Z  INFO fork_choice_control::block_processor: Validating block with slot: 3585
+2024-09-21T22:03:29.889060Z  INFO fork_choice_control::block_processor: Validating block with slot: 3586
+2024-09-21T22:03:29.901194Z  INFO fork_choice_control::block_processor: Validating block with slot: 3587
+2024-09-21T22:03:29.901217Z  INFO fork_choice_control::block_processor: Validating block with slot: 3589
+2024-09-21T22:03:29.901240Z  INFO fork_choice_control::block_processor: Validating block with slot: 3588
+2024-09-21T22:03:29.903748Z  INFO fork_choice_control::block_processor: Validating block with slot: 3590
+2024-09-21T22:03:29.926686Z  INFO fork_choice_control::block_processor: Validating block with slot: 3591
+2024-09-21T22:03:29.926690Z  INFO fork_choice_control::block_processor: Validating block with slot: 3592
+2024-09-21T22:03:29.946772Z  INFO fork_choice_control::block_processor: Validating block with slot: 3593
+2024-09-21T22:03:29.963615Z  INFO fork_choice_control::block_processor: Validating block with slot: 3595
+2024-09-21T22:03:29.963619Z  INFO fork_choice_control::block_processor: Validating block with slot: 3594
+2024-09-21T22:03:29.974744Z  INFO fork_choice_control::block_processor: Validating block with slot: 3596
+2024-09-21T22:03:29.991562Z  INFO fork_choice_control::block_processor: Validating block with slot: 3597
+2024-09-21T22:03:29.991559Z  INFO fork_choice_control::block_processor: Validating block with slot: 3598
+2024-09-21T22:03:30.017294Z  INFO fork_choice_control::block_processor: Validating block with slot: 3599
+2024-09-21T22:03:30.018802Z  INFO fork_choice_control::block_processor: Validating block with slot: 3600
+2024-09-21T22:03:30.023567Z  INFO fork_choice_control::block_processor: Validating block with slot: 3601
+2024-09-21T22:03:30.023579Z  INFO fork_choice_control::block_processor: Validating block with slot: 3602
+2024-09-21T22:03:30.516780Z  INFO fork_choice_control::block_processor: Validating block with slot: 3605
+2024-09-21T22:03:30.516785Z  INFO fork_choice_control::block_processor: Validating block with slot: 3603
+2024-09-21T22:03:30.516801Z  INFO fork_choice_control::block_processor: Validating block with slot: 3608
+2024-09-21T22:03:30.516851Z  INFO fork_choice_control::block_processor: Validating block with slot: 3604
+2024-09-21T22:03:30.517002Z  INFO fork_choice_control::block_processor: Validating block with slot: 3607
+2024-09-21T22:03:30.558968Z  INFO fork_choice_control::block_processor: Validating block with slot: 3609
+2024-09-21T22:03:30.607190Z  INFO fork_choice_control::block_processor: Validating block with slot: 3296
+2024-09-21T22:03:30.607229Z  INFO fork_choice_control::block_processor: Validating block with slot: 3299
+2024-09-21T22:03:30.607261Z  INFO fork_choice_control::block_processor: Validating block with slot: 3297
+2024-09-21T22:03:30.607266Z  INFO fork_choice_control::block_processor: Validating block with slot: 3302
+2024-09-21T22:03:30.607275Z  INFO fork_choice_control::block_processor: Validating block with slot: 3298
+2024-09-21T22:03:30.607345Z  INFO fork_choice_control::block_processor: Validating block with slot: 3303
+2024-09-21T22:03:30.607402Z  INFO fork_choice_control::block_processor: Validating block with slot: 3300
+2024-09-21T22:03:30.608312Z  INFO fork_choice_control::block_processor: Validating block with slot: 3304
+2024-09-21T22:03:30.608750Z  INFO fork_choice_control::block_processor: Validating block with slot: 3305
+2024-09-21T22:03:30.609190Z  INFO fork_choice_control::block_processor: Validating block with slot: 3306
+2024-09-21T22:03:30.609862Z  INFO fork_choice_control::block_processor: Validating block with slot: 3301
+2024-09-21T22:03:30.610101Z  INFO fork_choice_control::block_processor: Validating block with slot: 3308
+2024-09-21T22:03:30.611254Z  INFO fork_choice_control::block_processor: Validating block with slot: 3309
+2024-09-21T22:03:30.611501Z  INFO fork_choice_control::block_processor: Validating block with slot: 3310
+2024-09-21T22:03:30.612029Z  INFO fork_choice_control::block_processor: Validating block with slot: 3314
+2024-09-21T22:03:30.612067Z  INFO fork_choice_control::block_processor: Validating block with slot: 3315
+2024-09-21T22:03:30.612326Z  INFO fork_choice_control::block_processor: Validating block with slot: 3311
+2024-09-21T22:03:30.612842Z  INFO fork_choice_control::block_processor: Validating block with slot: 3316
+2024-09-21T22:03:30.612846Z  INFO fork_choice_control::block_processor: Validating block with slot: 3317
+2024-09-21T22:03:30.613329Z  INFO fork_choice_control::block_processor: Validating block with slot: 3318
+2024-09-21T22:03:30.614552Z  INFO fork_choice_control::block_processor: Validating block with slot: 3319
+2024-09-21T22:03:30.614628Z  INFO fork_choice_control::block_processor: Validating block with slot: 3323
+2024-09-21T22:03:30.614626Z  INFO fork_choice_control::block_processor: Validating block with slot: 3322
+2024-09-21T22:03:30.614656Z  INFO fork_choice_control::block_processor: Validating block with slot: 3312
+2024-09-21T22:03:30.614722Z  INFO fork_choice_control::block_processor: Validating block with slot: 3313
+2024-09-21T22:03:30.615703Z  INFO fork_choice_control::block_processor: Validating block with slot: 3324
+2024-09-21T22:03:30.615730Z  INFO fork_choice_control::block_processor: Validating block with slot: 3326
+2024-09-21T22:03:30.617051Z  INFO fork_choice_control::block_processor: Validating block with slot: 3327
+2024-09-21T22:03:30.617370Z  INFO fork_choice_control::block_processor: Validating block with slot: 3321
+2024-09-21T22:03:30.617531Z  INFO fork_choice_control::block_processor: Validating block with slot: 3320
+2024-09-21T22:03:30.620412Z  INFO fork_choice_control::block_processor: Validating block with slot: 3329
+2024-09-21T22:03:30.620443Z  INFO fork_choice_control::block_processor: Validating block with slot: 3611
+2024-09-21T22:03:30.620454Z  INFO fork_choice_control::block_processor: Validating block with slot: 3330
+2024-09-21T22:03:30.620472Z  INFO fork_choice_control::block_processor: Validating block with slot: 3613
+2024-09-21T22:03:30.620854Z  INFO fork_choice_control::block_processor: Validating block with slot: 3610
+2024-09-21T22:03:30.620970Z  INFO fork_choice_control::block_processor: Validating block with slot: 3612
+2024-09-21T22:03:30.623255Z  INFO fork_choice_control::block_processor: Validating block with slot: 3614
+2024-09-21T22:03:30.623300Z  INFO fork_choice_control::block_processor: Validating block with slot: 3615
+2024-09-21T22:03:30.624112Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xed4242073f675d2c17c557c0cf98cea7d286c9c32b9d42ef1e643cf022e2ba9f, slot: 3329
+2024-09-21T22:03:30.631060Z  INFO fork_choice_control::block_processor: Validating block with slot: 3334
+2024-09-21T22:03:30.631071Z  INFO fork_choice_control::block_processor: Validating block with slot: 3333
+2024-09-21T22:03:30.631087Z  INFO fork_choice_control::block_processor: Validating block with slot: 3332
+2024-09-21T22:03:30.631102Z  INFO fork_choice_control::block_processor: Validating block with slot: 3331
+2024-09-21T22:03:30.631118Z  INFO fork_choice_control::block_processor: Validating block with slot: 3335
+2024-09-21T22:03:30.631127Z  INFO fork_choice_control::block_processor: Validating block with slot: 3336
+2024-09-21T22:03:30.635633Z  INFO fork_choice_control::block_processor: Validating block with slot: 3337
+2024-09-21T22:03:30.635689Z  INFO fork_choice_control::block_processor: Validating block with slot: 3338
+2024-09-21T22:03:30.660555Z  INFO fork_choice_control::block_processor: Validating block with slot: 3339
+2024-09-21T22:03:30.734544Z  INFO fork_choice_control::block_processor: Validating block with slot: 3340
+2024-09-21T22:03:30.774813Z  INFO fork_choice_control::block_processor: Validating block with slot: 3341
+2024-09-21T22:03:30.779386Z  INFO fork_choice_control::block_processor: Validating block with slot: 3342
+2024-09-21T22:03:30.779426Z  INFO fork_choice_control::block_processor: Validating block with slot: 3343
+2024-09-21T22:03:30.817492Z  INFO fork_choice_control::block_processor: Validating block with slot: 3344
+2024-09-21T22:03:30.817521Z  INFO fork_choice_control::block_processor: Validating block with slot: 3345
+2024-09-21T22:03:30.817539Z  INFO fork_choice_control::block_processor: Validating block with slot: 3346
+2024-09-21T22:03:30.817564Z  INFO fork_choice_control::block_processor: Validating block with slot: 3347
+2024-09-21T22:03:30.823935Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3329
+2024-09-21T22:03:30.823958Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3329
+2024-09-21T22:03:30.835216Z  INFO fork_choice_control::block_processor: Validating block with slot: 3330
+2024-09-21T22:03:30.836211Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x67f1f6eb67433dfb5e23ae353eaf19c7068302910e144db8a4eabe6923fe62cc, slot: 3330
+2024-09-21T22:03:30.855951Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3330
+2024-09-21T22:03:30.855975Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3330
+2024-09-21T22:03:30.867184Z  INFO fork_choice_control::block_processor: Validating block with slot: 3331
+2024-09-21T22:03:30.869552Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd6b6a28ce1268bd883c0b1ccf6b1a1631b5c41150930a54236a9f8a70448f678, slot: 3331
+2024-09-21T22:03:30.893312Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3331
+2024-09-21T22:03:30.893332Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3331
+2024-09-21T22:03:30.905316Z  INFO fork_choice_control::block_processor: Validating block with slot: 3332
+2024-09-21T22:03:30.906439Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdc89df0b86fb45e5e6f0875b7d2a3e55fb64b8222c755d01775d9b7ab4c28eb7, slot: 3332
+2024-09-21T22:03:30.926933Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3332
+2024-09-21T22:03:30.926957Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3332
+2024-09-21T22:03:30.939062Z  INFO fork_choice_control::block_processor: Validating block with slot: 3333
+2024-09-21T22:03:30.940321Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb948c4b07668d90a294f4c6fde65b8a4d9fa9a41342e57fe94b95a2335efab81, slot: 3333
+2024-09-21T22:03:30.964316Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3333
+2024-09-21T22:03:30.964338Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3333
+2024-09-21T22:03:30.976867Z  INFO fork_choice_control::block_processor: Validating block with slot: 3334
+2024-09-21T22:03:30.977843Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb0a66399fae8673629f708cc41dfbf575fedc1699eb51d392028cbe4c10d1b8e, slot: 3334
+2024-09-21T22:03:30.997273Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3334
+2024-09-21T22:03:30.997290Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3334
+2024-09-21T22:03:31.009639Z  INFO fork_choice_control::block_processor: Validating block with slot: 3335
+2024-09-21T22:03:31.010627Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x66a9012229e6a7a3ef37adc35b0bb254a788e6d9ce96fbd31edc30ea90b3e609, slot: 3335
+2024-09-21T22:03:31.030084Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3335
+2024-09-21T22:03:31.030100Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3335
+2024-09-21T22:03:31.042632Z  INFO fork_choice_control::block_processor: Validating block with slot: 3336
+2024-09-21T22:03:31.043715Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe89a5051e22b9ba7138f5733343482945ca1366154777e12199de6a6d400d177, slot: 3336
+2024-09-21T22:03:31.061777Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3336
+2024-09-21T22:03:31.061793Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3336
+2024-09-21T22:03:31.075180Z  INFO fork_choice_control::block_processor: Validating block with slot: 3337
+2024-09-21T22:03:31.077316Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xebf8e6db7f930cf42a4d596bf1a982da8ae5f5983d8693e4aafb7b2b611fd80a, slot: 3337
+2024-09-21T22:03:31.103593Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3337
+2024-09-21T22:03:31.103613Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3337
+2024-09-21T22:03:31.116404Z  INFO fork_choice_control::block_processor: Validating block with slot: 3338
+2024-09-21T22:03:31.118704Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf33d918f38ea908d4e16ef27336babf843896396b6f94f4009a879859c2cbfa2, slot: 3338
+2024-09-21T22:03:31.144694Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3338
+2024-09-21T22:03:31.144718Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3338
+2024-09-21T22:03:31.158131Z  INFO fork_choice_control::block_processor: Validating block with slot: 3339
+2024-09-21T22:03:31.159784Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf9cfb383f865232513093565fffd19f63f7e5d9494c90ff3f0e030946a0be692, slot: 3339
+2024-09-21T22:03:31.184315Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3339
+2024-09-21T22:03:31.184336Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3339
+2024-09-21T22:03:31.197538Z  INFO fork_choice_control::block_processor: Validating block with slot: 3340
+2024-09-21T22:03:31.198507Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x2c897d7be4414bb0c8514d74c90591fc6be025234123b77021cf6316351b386b, slot: 3340
+2024-09-21T22:03:31.225080Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3340
+2024-09-21T22:03:31.225102Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3340
+2024-09-21T22:03:31.239061Z  INFO fork_choice_control::block_processor: Validating block with slot: 3341
+2024-09-21T22:03:31.240069Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1d0d0dc4e56ba75f6b37c437cdcb140b6e61545a7b01585b03a6938383eb4740, slot: 3341
+2024-09-21T22:03:31.261069Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3341
+2024-09-21T22:03:31.261094Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3341
+2024-09-21T22:03:31.276231Z  INFO fork_choice_control::block_processor: Validating block with slot: 3342
+2024-09-21T22:03:31.277938Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x858ec2436f5f0335d9929d662efab83373e17433796dee61d74630daf9ca64ae, slot: 3342
+2024-09-21T22:03:31.303322Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3342
+2024-09-21T22:03:31.303346Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3342
+2024-09-21T22:03:31.304214Z  INFO fork_choice_control::block_processor: Validating block with slot: 3348
+2024-09-21T22:03:31.304254Z  INFO fork_choice_control::block_processor: Validating block with slot: 3352
+2024-09-21T22:03:31.304248Z  INFO fork_choice_control::block_processor: Validating block with slot: 3353
+2024-09-21T22:03:31.304266Z  INFO fork_choice_control::block_processor: Validating block with slot: 3351
+2024-09-21T22:03:31.304272Z  INFO fork_choice_control::block_processor: Validating block with slot: 3354
+2024-09-21T22:03:31.304292Z  INFO fork_choice_control::block_processor: Validating block with slot: 3350
+2024-09-21T22:03:31.304346Z  INFO fork_choice_control::block_processor: Validating block with slot: 3355
+2024-09-21T22:03:31.305234Z  INFO fork_choice_control::block_processor: Validating block with slot: 3356
+2024-09-21T22:03:31.305595Z  INFO fork_choice_control::block_processor: Validating block with slot: 3357
+2024-09-21T22:03:31.306395Z  INFO fork_choice_control::block_processor: Validating block with slot: 3358
+2024-09-21T22:03:31.319643Z  INFO fork_choice_control::block_processor: Validating block with slot: 3343
+2024-09-21T22:03:31.320757Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8f02d57151e4076533cf88286df43fb1c2c15d8dba707a075503bd1ef0a1621d, slot: 3343
+2024-09-21T22:03:31.341288Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3343
+2024-09-21T22:03:31.341310Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3343
+2024-09-21T22:03:31.351046Z  INFO fork_choice_control::block_processor: Validating block with slot: 3359
+2024-09-21T22:03:31.351142Z  INFO fork_choice_control::block_processor: Validating block with slot: 3424
+2024-09-21T22:03:31.351187Z  INFO fork_choice_control::block_processor: Validating block with slot: 3425
+2024-09-21T22:03:31.351434Z  INFO fork_choice_control::block_processor: Validating block with slot: 3426
+2024-09-21T22:03:31.352133Z  INFO fork_choice_control::block_processor: Validating block with slot: 3428
+2024-09-21T22:03:31.353177Z  INFO fork_choice_control::block_processor: Validating block with slot: 3429
+2024-09-21T22:03:31.353268Z  INFO fork_choice_control::block_processor: Validating block with slot: 3430
+2024-09-21T22:03:31.354029Z  INFO fork_choice_control::block_processor: Validating block with slot: 3431
+2024-09-21T22:03:31.354355Z  INFO fork_choice_control::block_processor: Validating block with slot: 3427
+2024-09-21T22:03:31.354559Z  INFO fork_choice_control::block_processor: Validating block with slot: 3432
+2024-09-21T22:03:31.354798Z  INFO fork_choice_control::block_processor: Validating block with slot: 3434
+2024-09-21T22:03:31.355066Z  INFO fork_choice_control::block_processor: Validating block with slot: 3435
+2024-09-21T22:03:31.355163Z  INFO fork_choice_control::block_processor: Validating block with slot: 3436
+2024-09-21T22:03:31.355341Z  INFO fork_choice_control::block_processor: Validating block with slot: 3437
+2024-09-21T22:03:31.355875Z  INFO fork_choice_control::block_processor: Validating block with slot: 3438
+2024-09-21T22:03:31.356194Z  INFO fork_choice_control::block_processor: Validating block with slot: 3433
+2024-09-21T22:03:31.357769Z  INFO fork_choice_control::block_processor: Validating block with slot: 3344
+2024-09-21T22:03:31.359061Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa34b81f7ad02ef03bf908e78bc9d7b7d1409794674b74d0f05b50a4377bf7e4d, slot: 3344
+2024-09-21T22:03:31.377831Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3344
+2024-09-21T22:03:31.377851Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3344
+2024-09-21T22:03:31.392699Z  INFO fork_choice_control::block_processor: Validating block with slot: 3345
+2024-09-21T22:03:31.393667Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb91987399522644813aba106691c596a7840400f1b902369b4b2e740fa6e77fe, slot: 3345
+2024-09-21T22:03:31.412698Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3345
+2024-09-21T22:03:31.412718Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3345
+2024-09-21T22:03:31.428242Z  INFO fork_choice_control::block_processor: Validating block with slot: 3346
+2024-09-21T22:03:31.429435Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf8ca8d89b4fd252c15a1bc5bc6075208cac05506396621f2b7d615e66cfd34f2, slot: 3346
+2024-09-21T22:03:31.449306Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3346
+2024-09-21T22:03:31.449327Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3346
+2024-09-21T22:03:31.451875Z  INFO fork_choice_control::block_processor: Validating block with slot: 3439
+2024-09-21T22:03:31.451929Z  INFO fork_choice_control::block_processor: Validating block with slot: 3441
+2024-09-21T22:03:31.451972Z  INFO fork_choice_control::block_processor: Validating block with slot: 3440
+2024-09-21T22:03:31.451995Z  INFO fork_choice_control::block_processor: Validating block with slot: 3445
+2024-09-21T22:03:31.452108Z  INFO fork_choice_control::block_processor: Validating block with slot: 3443
+2024-09-21T22:03:31.452874Z  INFO fork_choice_control::block_processor: Validating block with slot: 3446
+2024-09-21T22:03:31.453054Z  INFO fork_choice_control::block_processor: Validating block with slot: 3447
+2024-09-21T22:03:31.453581Z  INFO fork_choice_control::block_processor: Validating block with slot: 3448
+2024-09-21T22:03:31.454097Z  INFO fork_choice_control::block_processor: Validating block with slot: 3449
+2024-09-21T22:03:31.455806Z  INFO fork_choice_control::block_processor: Validating block with slot: 3450
+2024-09-21T22:03:31.457083Z  INFO fork_choice_control::block_processor: Validating block with slot: 3454
+2024-09-21T22:03:31.457507Z  INFO fork_choice_control::block_processor: Validating block with slot: 3451
+2024-09-21T22:03:31.458480Z  INFO fork_choice_control::block_processor: Validating block with slot: 3455
+2024-09-21T22:03:31.458564Z  INFO fork_choice_control::block_processor: Validating block with slot: 3457
+2024-09-21T22:03:31.458998Z  INFO fork_choice_control::block_processor: Validating block with slot: 3452
+2024-09-21T22:03:31.459563Z  INFO fork_choice_control::block_processor: Validating block with slot: 3458
+2024-09-21T22:03:31.459582Z  INFO fork_choice_control::block_processor: Validating block with slot: 3459
+2024-09-21T22:03:31.460641Z  INFO fork_choice_control::block_processor: Validating block with slot: 3460
+2024-09-21T22:03:31.460806Z  INFO fork_choice_control::block_processor: Validating block with slot: 3461
+2024-09-21T22:03:31.462556Z  INFO fork_choice_control::block_processor: Validating block with slot: 3442
+2024-09-21T22:03:31.462627Z  INFO fork_choice_control::block_processor: Validating block with slot: 3463
+2024-09-21T22:03:31.463600Z  INFO fork_choice_control::block_processor: Validating block with slot: 3464
+2024-09-21T22:03:31.464774Z  INFO fork_choice_control::block_processor: Validating block with slot: 3444
+2024-09-21T22:03:31.465365Z  INFO fork_choice_control::block_processor: Validating block with slot: 3453
+2024-09-21T22:03:31.466332Z  INFO fork_choice_control::block_processor: Validating block with slot: 3462
+2024-09-21T22:03:31.480831Z  INFO fork_choice_control::block_processor: Validating block with slot: 3347
+2024-09-21T22:03:31.482267Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x179947f3ebefa9e26ca20d2b9700a6d876d8f6bf028a265075e7f9fc5bbf74db, slot: 3347
+2024-09-21T22:03:31.508108Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3347
+2024-09-21T22:03:31.508215Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3347
+2024-09-21T22:03:31.525999Z  INFO fork_choice_control::block_processor: Validating block with slot: 3348
+2024-09-21T22:03:31.527905Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x75a10ee51b7df613afbdd9282526b756b6a638bbf59ce054e3aa2bf64d7050b8, slot: 3348
+2024-09-21T22:03:31.552867Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3348
+2024-09-21T22:03:31.552887Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3348
+2024-09-21T22:03:31.568028Z  INFO fork_choice_control::block_processor: Validating block with slot: 3350
+2024-09-21T22:03:31.569862Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x202001eebf0112719b9e8aff3eec691ce32056576446001eded0e84bb14d7791, slot: 3350
+2024-09-21T22:03:31.603951Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3350
+2024-09-21T22:03:31.603978Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3350
+2024-09-21T22:03:31.619619Z  INFO fork_choice_control::block_processor: Validating block with slot: 3351
+2024-09-21T22:03:31.621149Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x854b3281d09b9cfe32d78edeee5e16d515c53c209cac3ebdae73e8f445d88146, slot: 3351
+2024-09-21T22:03:31.640117Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3351
+2024-09-21T22:03:31.640141Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3351
+2024-09-21T22:03:31.667928Z  INFO fork_choice_control::block_processor: Validating block with slot: 3465
+2024-09-21T22:03:31.668108Z  INFO fork_choice_control::block_processor: Validating block with slot: 3467
+2024-09-21T22:03:31.669185Z  INFO fork_choice_control::block_processor: Validating block with slot: 3468
+2024-09-21T22:03:31.669630Z  INFO fork_choice_control::block_processor: Validating block with slot: 3469
+2024-09-21T22:03:31.671982Z  INFO fork_choice_control::block_processor: Validating block with slot: 3466
+2024-09-21T22:03:31.676861Z  INFO fork_choice_control::block_processor: Validating block with slot: 3471
+2024-09-21T22:03:31.676876Z  INFO fork_choice_control::block_processor: Validating block with slot: 3470
+2024-09-21T22:03:31.676903Z  INFO fork_choice_control::block_processor: Validating block with slot: 3472
+2024-09-21T22:03:31.676912Z  INFO fork_choice_control::block_processor: Validating block with slot: 3476
+2024-09-21T22:03:31.676916Z  INFO fork_choice_control::block_processor: Validating block with slot: 3475
+2024-09-21T22:03:31.678802Z  INFO fork_choice_control::block_processor: Validating block with slot: 3473
+2024-09-21T22:03:31.679744Z  INFO fork_choice_control::block_processor: Validating block with slot: 3474
+2024-09-21T22:03:31.682267Z  INFO fork_choice_control::block_processor: Validating block with slot: 3477
+2024-09-21T22:03:31.682273Z  INFO fork_choice_control::block_processor: Validating block with slot: 3478
+2024-09-21T22:03:31.682283Z  INFO fork_choice_control::block_processor: Validating block with slot: 3479
+2024-09-21T22:03:31.682520Z  INFO fork_choice_control::block_processor: Validating block with slot: 3480
+2024-09-21T22:03:31.689725Z  INFO fork_choice_control::block_processor: Validating block with slot: 3481
+2024-09-21T22:03:31.690039Z  INFO fork_choice_control::block_processor: Validating block with slot: 3482
+2024-09-21T22:03:31.690043Z  INFO fork_choice_control::block_processor: Validating block with slot: 3483
+2024-09-21T22:03:31.690732Z  INFO fork_choice_control::block_processor: Validating block with slot: 3485
+2024-09-21T22:03:31.691156Z  INFO fork_choice_control::block_processor: Validating block with slot: 3484
+2024-09-21T22:03:31.691915Z  INFO fork_choice_control::block_processor: Validating block with slot: 3486
+2024-09-21T22:03:31.709381Z  INFO fork_choice_control::block_processor: Validating block with slot: 3352
+2024-09-21T22:03:31.709385Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 103, root: 0x26f7d8052a9565d50324f0f6fc085cbbe49a3ab01b0a555acd1c982e4e81be8e, head slot: 3351, head root: 0x854b3281d09b9cfe32d78edeee5e16d515c53c209cac3ebdae73e8f445d88146)
+2024-09-21T22:03:31.710392Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8adf847a45664f7e3f210d9986c135633e8c6140f501c39806e8bb513d587733, slot: 3352
+2024-09-21T22:03:31.730415Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3352
+2024-09-21T22:03:31.730436Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3352
+2024-09-21T22:03:31.746435Z  INFO fork_choice_control::block_processor: Validating block with slot: 3353
+2024-09-21T22:03:31.747553Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc602d8b044acf3b75195842d0348927edb1a51ba8d3c68c95e22098397fddc34, slot: 3353
+2024-09-21T22:03:31.767144Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3353
+2024-09-21T22:03:31.767168Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3353
+2024-09-21T22:03:31.783167Z  INFO fork_choice_control::block_processor: Validating block with slot: 3354
+2024-09-21T22:03:31.784295Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1643bebfb1c8454cdb80d86cadaf8f0e6d1c053d43ae71812e854e5c7e283ddd, slot: 3354
+2024-09-21T22:03:31.807222Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3354
+2024-09-21T22:03:31.807243Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3354
+2024-09-21T22:03:31.823708Z  INFO fork_choice_control::block_processor: Validating block with slot: 3355
+2024-09-21T22:03:31.824699Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x156027e03f2a9a41f425d352b08096f37274c5179fc4ba88d8609864dd024e14, slot: 3355
+2024-09-21T22:03:31.845717Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3355
+2024-09-21T22:03:31.845740Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3355
+2024-09-21T22:03:31.851618Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 3296
+2024-09-21T22:03:31.854176Z  INFO fork_choice_control::block_processor: Validating block with slot: 3487
+2024-09-21T22:03:31.862645Z  INFO fork_choice_control::block_processor: Validating block with slot: 3356
+2024-09-21T22:03:31.863615Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfffce46019c4ea1d76df0d74b70d04fa4c290e8ee342f9c423f5d85982ba1546, slot: 3356
+2024-09-21T22:03:31.883244Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3356
+2024-09-21T22:03:31.883265Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3356
+2024-09-21T22:03:31.900350Z  INFO fork_choice_control::block_processor: Validating block with slot: 3357
+2024-09-21T22:03:31.901493Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6a5a41f843583628dff14b9343ae275fd4ab50e9027d47e05906895c3260f068, slot: 3357
+2024-09-21T22:03:31.920047Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3357
+2024-09-21T22:03:31.920068Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3357
+2024-09-21T22:03:31.936881Z  INFO fork_choice_control::block_processor: Validating block with slot: 3358
+2024-09-21T22:03:31.938441Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x327e3f3dc6f9aa1238386df09d5f74c8373dcd0ccfa233c84a917143d7da6d91, slot: 3358
+2024-09-21T22:03:31.964324Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3358
+2024-09-21T22:03:31.964341Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3358
+2024-09-21T22:03:31.981369Z  INFO fork_choice_control::block_processor: Validating block with slot: 3359
+2024-09-21T22:03:31.983765Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x57385a0e4e8c95a455c694fe16c0f3ea89142d257fa4ca3bdf60dabb842443f2, slot: 3359
+2024-09-21T22:03:32.012418Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3359
+2024-09-21T22:03:32.012439Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3359
+2024-09-21T22:03:32.480726Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xde80..7305 addr=65.21.227.211:9000 error=Timeout received=13 expected=3
+2024-09-21T22:03:33.196653Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xde8c..5353 addr=24.230.32.231:9112 error=Timeout received=13 expected=3
+2024-09-21T22:03:41.623590Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xeb58..b1b0 addr=3.9.20.214:12001 error=Timeout received=15 expected=3
+2024-09-21T22:03:41.644265Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xeb4e..98e6 addr=194.33.43.94:9100 error=Timeout received=13 expected=3
+2024-09-21T22:03:41.929445Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xeb70..d121 addr=217.122.168.238:12103 error=Timeout received=11 expected=3
+2024-09-21T22:03:42.695458Z  INFO fork_choice_control::block_processor: Validating block with slot: 3392
+2024-09-21T22:03:42.711693Z  INFO fork_choice_control::block_processor: Validating block with slot: 3393
+2024-09-21T22:03:42.900523Z  INFO fork_choice_control::block_processor: Validating block with slot: 3394
+2024-09-21T22:03:42.900552Z  INFO fork_choice_control::block_processor: Validating block with slot: 3396
+2024-09-21T22:03:42.900551Z  INFO fork_choice_control::block_processor: Validating block with slot: 3395
+2024-09-21T22:03:42.906303Z  INFO fork_choice_control::block_processor: Validating block with slot: 3397
+2024-09-21T22:03:42.917484Z  INFO fork_choice_control::block_processor: Validating block with slot: 3398
+2024-09-21T22:03:42.933390Z  INFO fork_choice_control::block_processor: Validating block with slot: 3399
+2024-09-21T22:03:42.972737Z  INFO fork_choice_control::block_processor: Validating block with slot: 3401
+2024-09-21T22:03:42.972741Z  INFO fork_choice_control::block_processor: Validating block with slot: 3400
+2024-09-21T22:03:42.989780Z  INFO fork_choice_control::block_processor: Validating block with slot: 3402
+2024-09-21T22:03:43.005805Z  INFO fork_choice_control::block_processor: Validating block with slot: 3403
+2024-09-21T22:03:43.017759Z  INFO fork_choice_control::block_processor: Validating block with slot: 3404
+2024-09-21T22:03:43.059806Z  INFO fork_choice_control::block_processor: Validating block with slot: 3405
+2024-09-21T22:03:43.072032Z  INFO fork_choice_control::block_processor: Validating block with slot: 3406
+2024-09-21T22:03:43.091990Z  INFO fork_choice_control::block_processor: Validating block with slot: 3407
+2024-09-21T22:03:43.242229Z  INFO fork_choice_control::block_processor: Validating block with slot: 3409
+2024-09-21T22:03:43.242224Z  INFO fork_choice_control::block_processor: Validating block with slot: 3408
+2024-09-21T22:03:43.260036Z  INFO fork_choice_control::block_processor: Validating block with slot: 3410
+2024-09-21T22:03:43.291055Z  INFO fork_choice_control::block_processor: Validating block with slot: 3411
+2024-09-21T22:03:43.306461Z  INFO fork_choice_control::block_processor: Validating block with slot: 3412
+2024-09-21T22:03:43.314319Z  INFO fork_choice_control::block_processor: Validating block with slot: 3413
+2024-09-21T22:03:43.360592Z  INFO fork_choice_control::block_processor: Validating block with slot: 3415
+2024-09-21T22:03:43.366513Z  INFO fork_choice_control::block_processor: Validating block with slot: 3416
+2024-09-21T22:03:43.381345Z  INFO fork_choice_control::block_processor: Validating block with slot: 3417
+2024-09-21T22:03:43.403094Z  INFO fork_choice_control::block_processor: Validating block with slot: 3419
+2024-09-21T22:03:43.408856Z  INFO fork_choice_control::block_processor: Validating block with slot: 3420
+2024-09-21T22:03:43.418433Z  INFO fork_choice_control::block_processor: Validating block with slot: 3421
+2024-09-21T22:03:43.434952Z  INFO fork_choice_control::block_processor: Validating block with slot: 3422
+2024-09-21T22:03:43.443989Z  INFO fork_choice_control::block_processor: Validating block with slot: 3423
+2024-09-21T22:03:44.411891Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x29bf..bf7e addr=3.64.117.223:9100 error=Timeout received=15 expected=3
+2024-09-21T22:03:45.645643Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x4544..f41b addr=15.235.86.7:9000 error=Timeout received=12 expected=3
+2024-09-21T22:03:46.213336Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x5be0..2b18 addr=213.55.174.85:9000 error=Timeout received=12 expected=3
+2024-09-21T22:03:46.674209Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x6957..5efd addr=176.9.3.153:4000 error=Timeout received=13 expected=3
+2024-09-21T22:03:47.518567Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x41db..c6a5 addr=94.242.222.196:10001 error=Timeout received=13 expected=3
+2024-09-21T22:03:48.816261Z  INFO fork_choice_control::block_processor: Validating block with slot: 3361
+2024-09-21T22:03:48.822162Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x82adc7ccee5e8ee8c4e6679f1589d7829fa9c3b9bd0afaa14358c6ef7cb10f2f, slot: 3361
+2024-09-21T22:03:48.825714Z  INFO fork_choice_control::block_processor: Validating block with slot: 3362
+2024-09-21T22:03:48.825745Z  INFO fork_choice_control::block_processor: Validating block with slot: 3365
+2024-09-21T22:03:48.825786Z  INFO fork_choice_control::block_processor: Validating block with slot: 3363
+2024-09-21T22:03:48.825776Z  INFO fork_choice_control::block_processor: Validating block with slot: 3364
+2024-09-21T22:03:48.834523Z  INFO fork_choice_control::block_processor: Validating block with slot: 3366
+2024-09-21T22:03:48.834555Z  INFO fork_choice_control::block_processor: Validating block with slot: 3367
+2024-09-21T22:03:48.840647Z  INFO fork_choice_control::block_processor: Validating block with slot: 3369
+2024-09-21T22:03:48.840673Z  INFO fork_choice_control::block_processor: Validating block with slot: 3368
+2024-09-21T22:03:48.840724Z  INFO fork_choice_control::block_processor: Validating block with slot: 3370
+2024-09-21T22:03:48.843677Z  INFO fork_choice_control::block_processor: Validating block with slot: 3371
+2024-09-21T22:03:48.843751Z  INFO fork_choice_control::block_processor: Validating block with slot: 3372
+2024-09-21T22:03:48.854698Z  INFO fork_choice_control::block_processor: Validating block with slot: 3373
+2024-09-21T22:03:48.862613Z  INFO fork_choice_control::block_processor: Validating block with slot: 3374
+2024-09-21T22:03:48.862779Z  INFO fork_choice_control::block_processor: Validating block with slot: 3375
+2024-09-21T22:03:48.871332Z  INFO fork_choice_control::block_processor: Validating block with slot: 3376
+2024-09-21T22:03:48.871335Z  INFO fork_choice_control::block_processor: Validating block with slot: 3379
+2024-09-21T22:03:48.871339Z  INFO fork_choice_control::block_processor: Validating block with slot: 3378
+2024-09-21T22:03:48.871343Z  INFO fork_choice_control::block_processor: Validating block with slot: 3380
+2024-09-21T22:03:48.874798Z  INFO fork_choice_control::block_processor: Validating block with slot: 3377
+2024-09-21T22:03:48.880071Z  INFO fork_choice_control::block_processor: Validating block with slot: 3381
+2024-09-21T22:03:48.880137Z  INFO fork_choice_control::block_processor: Validating block with slot: 3382
+2024-09-21T22:03:48.885533Z  INFO fork_choice_control::block_processor: Validating block with slot: 3384
+2024-09-21T22:03:48.885540Z  INFO fork_choice_control::block_processor: Validating block with slot: 3383
+2024-09-21T22:03:48.885575Z  INFO fork_choice_control::block_processor: Validating block with slot: 3385
+2024-09-21T22:03:49.036421Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3361
+2024-09-21T22:03:49.036446Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3361
+2024-09-21T22:03:49.047135Z  INFO fork_choice_control::block_processor: Validating block with slot: 3362
+2024-09-21T22:03:49.049619Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x73e6ebfa4352d948b0449f225b5846c362379b8cc8316bff0adeac148ba19fb2, slot: 3362
+2024-09-21T22:03:49.060120Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3362
+2024-09-21T22:03:49.060146Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3362
+2024-09-21T22:03:49.071636Z  INFO fork_choice_control::block_processor: Validating block with slot: 3363
+2024-09-21T22:03:49.072605Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdb74a808734c997724e1b1d23222e98a6876dc66dce74babffc24bbe451c5789, slot: 3363
+2024-09-21T22:03:49.079153Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3363
+2024-09-21T22:03:49.079169Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3363
+2024-09-21T22:03:49.090988Z  INFO fork_choice_control::block_processor: Validating block with slot: 3364
+2024-09-21T22:03:49.092227Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8bf4c45780da1b557129f115ff9bbff58acad8bdd64e0d37da698ef6eedf23cb, slot: 3364
+2024-09-21T22:03:49.099526Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3364
+2024-09-21T22:03:49.099550Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3364
+2024-09-21T22:03:49.111278Z  INFO fork_choice_control::block_processor: Validating block with slot: 3365
+2024-09-21T22:03:49.112243Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x47b7c2e528844bbdef7bdd7e801ecba6564bf5a53b49ef3f96495b7ffd503de0, slot: 3365
+2024-09-21T22:03:49.118778Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3365
+2024-09-21T22:03:49.118800Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3365
+2024-09-21T22:03:49.130470Z  INFO fork_choice_control::block_processor: Validating block with slot: 3366
+2024-09-21T22:03:49.132701Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x14d2367a2222bd107428c9e10b65b18c5f3d271a122e328af9aabe346e46ddf0, slot: 3366
+2024-09-21T22:03:49.141891Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3366
+2024-09-21T22:03:49.141909Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3366
+2024-09-21T22:03:49.154011Z  INFO fork_choice_control::block_processor: Validating block with slot: 3367
+2024-09-21T22:03:49.155249Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb3d1310e39e349b8288143454de46349318217b388860b72ba16f3708fbf9b3d, slot: 3367
+2024-09-21T22:03:49.161485Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3367
+2024-09-21T22:03:49.161499Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3367
+2024-09-21T22:03:49.174151Z  INFO fork_choice_control::block_processor: Validating block with slot: 3368
+2024-09-21T22:03:49.175247Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x2ce503084bf2d287c493ceaffe1f425d68f213a297214f4595a713ca31b94247, slot: 3368
+2024-09-21T22:03:49.182024Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3368
+2024-09-21T22:03:49.182040Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3368
+2024-09-21T22:03:49.195249Z  INFO fork_choice_control::block_processor: Validating block with slot: 3369
+2024-09-21T22:03:49.196499Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4680513758084d61f47d4f8cd21081f2cf60798e447db9ba336430b6003df3ca, slot: 3369
+2024-09-21T22:03:49.203676Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3369
+2024-09-21T22:03:49.203697Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3369
+2024-09-21T22:03:49.216145Z  INFO fork_choice_control::block_processor: Validating block with slot: 3370
+2024-09-21T22:03:49.218524Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9b9b899258fbefe7c84856ed670d1bca389d34afbe27ebd3d6723676d88762e7, slot: 3370
+2024-09-21T22:03:49.227812Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3370
+2024-09-21T22:03:49.227826Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3370
+2024-09-21T22:03:49.240730Z  INFO fork_choice_control::block_processor: Validating block with slot: 3371
+2024-09-21T22:03:49.241970Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xaa63a838efd9723a843a459b5055748732dbe40b0f74b677b0ff11845d597e47, slot: 3371
+2024-09-21T22:03:49.248844Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3371
+2024-09-21T22:03:49.248867Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3371
+2024-09-21T22:03:49.261952Z  INFO fork_choice_control::block_processor: Validating block with slot: 3372
+2024-09-21T22:03:49.262920Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x022377d4fc99df3f8d2e2f8cd130dfdfd14bb0a1bc86d4b73670c3594f0e0a53, slot: 3372
+2024-09-21T22:03:49.269960Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3372
+2024-09-21T22:03:49.269978Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3372
+2024-09-21T22:03:49.283319Z  INFO fork_choice_control::block_processor: Validating block with slot: 3373
+2024-09-21T22:03:49.284728Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x44910b203751ff13a254ac832cae882d1e04b987e3b35e9800a7a043f71e92e4, slot: 3373
+2024-09-21T22:03:49.291362Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3373
+2024-09-21T22:03:49.291375Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3373
+2024-09-21T22:03:49.305484Z  INFO fork_choice_control::block_processor: Validating block with slot: 3374
+2024-09-21T22:03:49.307134Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc0bcf4cb314ae5badceca4641304331189f38b5383e33e9d680b82c9dc9696ee, slot: 3374
+2024-09-21T22:03:49.314425Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3374
+2024-09-21T22:03:49.314439Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3374
+2024-09-21T22:03:49.328019Z  INFO fork_choice_control::block_processor: Validating block with slot: 3375
+2024-09-21T22:03:49.329154Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6df51724f9f414e3ca0d38a266c51688c37803f0bffbfb99de010d53ea982326, slot: 3375
+2024-09-21T22:03:49.335946Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3375
+2024-09-21T22:03:49.335967Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3375
+2024-09-21T22:03:49.349912Z  INFO fork_choice_control::block_processor: Validating block with slot: 3376
+2024-09-21T22:03:49.351147Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6e36816000270e09c2b79681e5d81bb858149da49226494f2ef536567a9a76eb, slot: 3376
+2024-09-21T22:03:49.360763Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3376
+2024-09-21T22:03:49.360783Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3376
+2024-09-21T22:03:49.375227Z  INFO fork_choice_control::block_processor: Validating block with slot: 3377
+2024-09-21T22:03:49.377917Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xde3e4080e41d785c9741a29a255e40a5a48261aa191874ab98441dcc31e86166, slot: 3377
+2024-09-21T22:03:49.391385Z  INFO fork_choice_control::block_processor: Validating block with slot: 3386
+2024-09-21T22:03:49.391475Z  INFO fork_choice_control::block_processor: Validating block with slot: 3387
+2024-09-21T22:03:49.391546Z  INFO fork_choice_control::block_processor: Validating block with slot: 3388
+2024-09-21T22:03:49.391563Z  INFO fork_choice_control::block_processor: Validating block with slot: 3389
+2024-09-21T22:03:49.391606Z  INFO fork_choice_control::block_processor: Validating block with slot: 3390
+2024-09-21T22:03:49.391992Z  INFO fork_choice_control::block_processor: Validating block with slot: 3391
+2024-09-21T22:03:49.394150Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3377
+2024-09-21T22:03:49.394163Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3377
+2024-09-21T22:03:49.409225Z  INFO fork_choice_control::block_processor: Validating block with slot: 3378
+2024-09-21T22:03:49.410481Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9845dfb32b8457c7eeaedd1d79d5ad99c201f9bf8c1c9631a207f394e34d6e0a, slot: 3378
+2024-09-21T22:03:49.417699Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3378
+2024-09-21T22:03:49.417724Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3378
+2024-09-21T22:03:49.432453Z  INFO fork_choice_control::block_processor: Validating block with slot: 3379
+2024-09-21T22:03:49.433702Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe68f3a15a6749992cded62f946991bf4c47e1dd520aee935bccff61b907e4956, slot: 3379
+2024-09-21T22:03:49.440349Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3379
+2024-09-21T22:03:49.440367Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3379
+2024-09-21T22:03:49.455615Z  INFO fork_choice_control::block_processor: Validating block with slot: 3380
+2024-09-21T22:03:49.456582Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1a6255e57c26f3d07b21ccd3d18b7a559736e80526e2e18f31a8691babad6714, slot: 3380
+2024-09-21T22:03:49.462275Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3380
+2024-09-21T22:03:49.462287Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3380
+2024-09-21T22:03:49.477387Z  INFO fork_choice_control::block_processor: Validating block with slot: 3381
+2024-09-21T22:03:49.478476Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5bbcadb853f38154b9a9eec4a907bf7873fc1ee4a2dfb225817c757be0d9330e, slot: 3381
+2024-09-21T22:03:49.484882Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3381
+2024-09-21T22:03:49.484906Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3381
+2024-09-21T22:03:49.500309Z  INFO fork_choice_control::block_processor: Validating block with slot: 3382
+2024-09-21T22:03:49.501427Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3599574bd6472169602662240ec3814461b3a320872ca5c0acdc6d47b180a4ec, slot: 3382
+2024-09-21T22:03:49.507316Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3382
+2024-09-21T22:03:49.507330Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3382
+2024-09-21T22:03:49.522855Z  INFO fork_choice_control::block_processor: Validating block with slot: 3383
+2024-09-21T22:03:49.524249Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8e9bc7ce08dd14c771811d620153d6a9f065967923c5d6369457825b2f10a0a0, slot: 3383
+2024-09-21T22:03:49.530646Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3383
+2024-09-21T22:03:49.530660Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3383
+2024-09-21T22:03:49.597586Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 104, root: 0x95b1c9c671e5e996f02ff033e81d514a3c08d47c6d957c12ade1d4f0c5e332a0, head slot: 3383, head root: 0x8e9bc7ce08dd14c771811d620153d6a9f065967923c5d6369457825b2f10a0a0)
+2024-09-21T22:03:49.597595Z  INFO fork_choice_control::block_processor: Validating block with slot: 3384
+2024-09-21T22:03:49.599670Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0105e66f233aac339978190af807c86bcc6e198ab16463f8e6c0d2020161d4d0, slot: 3384
+2024-09-21T22:03:49.608601Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3384
+2024-09-21T22:03:49.608619Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3384
+2024-09-21T22:03:49.624697Z  INFO fork_choice_control::block_processor: Validating block with slot: 3385
+2024-09-21T22:03:49.625699Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6f2d0669403bb0fb244107e8d65f9b6f771e1da2c0a6a7d2d6e82736d2243ced, slot: 3385
+2024-09-21T22:03:49.633196Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3385
+2024-09-21T22:03:49.633218Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3385
+2024-09-21T22:03:49.649658Z  INFO fork_choice_control::block_processor: Validating block with slot: 3386
+2024-09-21T22:03:49.651075Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf8526adad36d197557753a7da76f8cca37645f34b843105951bdd0511bd100fd, slot: 3386
+2024-09-21T22:03:49.660539Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3386
+2024-09-21T22:03:49.660560Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3386
+2024-09-21T22:03:49.678900Z  INFO fork_choice_control::block_processor: Validating block with slot: 3387
+2024-09-21T22:03:49.679903Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa549969ab2b5474ba1882aa67177b26e5fc8e4820d100af0dc93010bb4bca04d, slot: 3387
+2024-09-21T22:03:49.687056Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3387
+2024-09-21T22:03:49.687079Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3387
+2024-09-21T22:03:49.703758Z  INFO fork_choice_control::block_processor: Validating block with slot: 3388
+2024-09-21T22:03:49.704861Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x986b2aee8b0659f6f68ba5d0e2fb7de8346d6c7acb344884267f6e1023080020, slot: 3388
+2024-09-21T22:03:49.713442Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3388
+2024-09-21T22:03:49.713465Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3388
+2024-09-21T22:03:49.731717Z  INFO fork_choice_control::block_processor: Validating block with slot: 3389
+2024-09-21T22:03:49.733300Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x7b9298e52b3ba3f70d08caf0fbae44d80b2b9b8b537bf80caff1900f1ca5a235, slot: 3389
+2024-09-21T22:03:49.740487Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3389
+2024-09-21T22:03:49.740501Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3389
+2024-09-21T22:03:49.757384Z  INFO fork_choice_control::block_processor: Validating block with slot: 3390
+2024-09-21T22:03:49.759168Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x2d00a12621053d90cef5e20d5f4d44302884fe27d08b3461f9f1787036913523, slot: 3390
+2024-09-21T22:03:49.766804Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3390
+2024-09-21T22:03:49.766825Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3390
+2024-09-21T22:03:49.784234Z  INFO fork_choice_control::block_processor: Validating block with slot: 3391
+2024-09-21T22:03:49.785326Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x94078940de6f1c6473d2803fccbc0114012efe8671b959253f90f22a66e6d951, slot: 3391
+2024-09-21T22:03:49.791290Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3391
+2024-09-21T22:03:49.791310Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3391
+2024-09-21T22:03:49.808703Z  INFO fork_choice_control::block_processor: Validating block with slot: 3392
+2024-09-21T22:03:49.809838Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x000e856aff1ed1b7fe681cd76aeac1b2d6841631c4ebb7a075b819fc1c9a44ce, slot: 3392
+2024-09-21T22:03:49.906991Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3392
+2024-09-21T22:03:49.907011Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3392
+2024-09-21T22:03:49.917850Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3392)
+2024-09-21T22:03:49.917991Z  INFO fork_choice_control::block_processor: Validating block with slot: 3393
+2024-09-21T22:03:49.919212Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x757de62fbdc58aa46b18e1d07a6edf9f858597fad9ee33c8cfbfe18704a2fd0f, slot: 3393
+2024-09-21T22:03:49.995365Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3393
+2024-09-21T22:03:49.995392Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3393
+2024-09-21T22:03:50.008648Z  INFO fork_choice_control::block_processor: Validating block with slot: 3394
+2024-09-21T22:03:50.010148Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfd311d9d1041541743b34deb4e3db9d03489d6ed04a816eafa01fbe2a67cecd2, slot: 3394
+2024-09-21T22:03:50.019577Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3394
+2024-09-21T22:03:50.019601Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3394
+2024-09-21T22:03:50.030759Z  INFO fork_choice_control::block_processor: Validating block with slot: 3395
+2024-09-21T22:03:50.031989Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb0993a17030241429bf86e37f6e9cdde7d79ada2b3bf31a7fee8c220b0bfd484, slot: 3395
+2024-09-21T22:03:50.039619Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3395
+2024-09-21T22:03:50.039642Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3395
+2024-09-21T22:03:50.051087Z  INFO fork_choice_control::block_processor: Validating block with slot: 3396
+2024-09-21T22:03:50.052197Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x165284a6fa9e577d434228402cdf24074b45e9cd878bed16f61927e1107363f3, slot: 3396
+2024-09-21T22:03:50.058871Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3396
+2024-09-21T22:03:50.058883Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3396
+2024-09-21T22:03:50.070786Z  INFO fork_choice_control::block_processor: Validating block with slot: 3397
+2024-09-21T22:03:50.071756Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x87e8440897844165cefbe8b4fadf7e28aed136851252f3c81a31cf5010b784c1, slot: 3397
+2024-09-21T22:03:50.078157Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3397
+2024-09-21T22:03:50.078169Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3397
+2024-09-21T22:03:50.090137Z  INFO fork_choice_control::block_processor: Validating block with slot: 3398
+2024-09-21T22:03:50.091146Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd979d586b0d88052dc209dbd45c7ab49996152626d7aff3a8e0078b70aba7f2f, slot: 3398
+2024-09-21T22:03:50.097396Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3398
+2024-09-21T22:03:50.097409Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3398
+2024-09-21T22:03:50.109154Z  INFO fork_choice_control::block_processor: Validating block with slot: 3399
+2024-09-21T22:03:50.110276Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb96f84647bc061177a9974a6d997475babf838625518cd5ddd44bc3db04dd18a, slot: 3399
+2024-09-21T22:03:50.117008Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3399
+2024-09-21T22:03:50.117028Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3399
+2024-09-21T22:03:50.129014Z  INFO fork_choice_control::block_processor: Validating block with slot: 3400
+2024-09-21T22:03:50.130001Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9112cefa955e1740b9ae247fc5619ea2352892cf3fdd4d919e80a28c5e84f042, slot: 3400
+2024-09-21T22:03:50.136464Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3400
+2024-09-21T22:03:50.136485Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3400
+2024-09-21T22:03:50.148561Z  INFO fork_choice_control::block_processor: Validating block with slot: 3401
+2024-09-21T22:03:50.149702Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5bed21b9b1d04e9b3c9a7a2ce76cdeb6fa1689609551e74f85f2de5f3ddb89c2, slot: 3401
+2024-09-21T22:03:50.157509Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3401
+2024-09-21T22:03:50.157530Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3401
+2024-09-21T22:03:50.170234Z  INFO fork_choice_control::block_processor: Validating block with slot: 3402
+2024-09-21T22:03:50.171672Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6d98cd6eed3b13d0d0ce6a266a1541eeff669b43bc7bca52b2fc96e366b3cc4c, slot: 3402
+2024-09-21T22:03:50.178405Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3402
+2024-09-21T22:03:50.178429Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3402
+2024-09-21T22:03:50.191163Z  INFO fork_choice_control::block_processor: Validating block with slot: 3403
+2024-09-21T22:03:50.192400Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfdc1aeeac5f2343750ee80eb812b7042378dc55058270721e5682a9905e62d36, slot: 3403
+2024-09-21T22:03:50.198686Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3403
+2024-09-21T22:03:50.198703Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3403
+2024-09-21T22:03:50.211157Z  INFO fork_choice_control::block_processor: Validating block with slot: 3404
+2024-09-21T22:03:50.212127Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4019adcd63a2777b33650c21baf1faa8a3429eee8a74a84d6cc949645fae94b0, slot: 3404
+2024-09-21T22:03:50.218320Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3404
+2024-09-21T22:03:50.218339Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3404
+2024-09-21T22:03:50.231061Z  INFO fork_choice_control::block_processor: Validating block with slot: 3405
+2024-09-21T22:03:50.233734Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4bf6d3e6f0a6c1fcafe02dabd492b06ffa3e2bed8dee28139e372eb925dd9606, slot: 3405
+2024-09-21T22:03:50.243845Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3405
+2024-09-21T22:03:50.243861Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3405
+2024-09-21T22:03:50.256966Z  INFO fork_choice_control::block_processor: Validating block with slot: 3406
+2024-09-21T22:03:50.258094Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5393b19785c3432fa9270c314e1e16b95859e33d7be3f8688b3fce7f4f04a21d, slot: 3406
+2024-09-21T22:03:50.264478Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3406
+2024-09-21T22:03:50.264492Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3406
+2024-09-21T22:03:50.277967Z  INFO fork_choice_control::block_processor: Validating block with slot: 3407
+2024-09-21T22:03:50.279066Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcc4f3073ec336780b48cb19050d275fe5d3bdd09150f0e9c357bf7c209026107, slot: 3407
+2024-09-21T22:03:50.286911Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3407
+2024-09-21T22:03:50.286952Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3407
+2024-09-21T22:03:50.308914Z  INFO fork_choice_control::block_processor: Validating block with slot: 3408
+2024-09-21T22:03:50.309918Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x88219b4f8a2b9aff3126e290f2e8d1f037fbe0c589cb782ec51cdb637f66ac80, slot: 3408
+2024-09-21T22:03:50.320185Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3408
+2024-09-21T22:03:50.320209Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3408
+2024-09-21T22:03:50.334277Z  INFO fork_choice_control::block_processor: Validating block with slot: 3409
+2024-09-21T22:03:50.335424Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf01dc798c880db06233abac0f608d3930a1d4bd1644fd7b7fb1c54d333425f12, slot: 3409
+2024-09-21T22:03:50.342089Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3409
+2024-09-21T22:03:50.342103Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3409
+2024-09-21T22:03:50.356016Z  INFO fork_choice_control::block_processor: Validating block with slot: 3410
+2024-09-21T22:03:50.356983Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb67c9dc1271d75e86cf33bb40218ee0f93743ae8964915d9a99c2f39ef6cb5f3, slot: 3410
+2024-09-21T22:03:50.362898Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3410
+2024-09-21T22:03:50.362912Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3410
+2024-09-21T22:03:50.376908Z  INFO fork_choice_control::block_processor: Validating block with slot: 3411
+2024-09-21T22:03:50.377903Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0579e7e858ade5a8622e327c1eeefcb13c621e51bacd0d62a3c4c50310b8f45c, slot: 3411
+2024-09-21T22:03:50.383982Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3411
+2024-09-21T22:03:50.384003Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3411
+2024-09-21T22:03:50.397993Z  INFO fork_choice_control::block_processor: Validating block with slot: 3412
+2024-09-21T22:03:50.399140Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x30170763105a4ef424e78c144b7e6a5168b727a3ea43ccd6e8e008cfbeddb2af, slot: 3412
+2024-09-21T22:03:50.405713Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3412
+2024-09-21T22:03:50.405731Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3412
+2024-09-21T22:03:50.420858Z  INFO fork_choice_control::block_processor: Validating block with slot: 3413
+2024-09-21T22:03:50.421847Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe89715c1dec9d9ff16733a082094c99756f9b589695a7a900d2de9fdddc35afa, slot: 3413
+2024-09-21T22:03:50.435624Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3413
+2024-09-21T22:03:50.435648Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3413
+2024-09-21T22:03:50.453240Z  INFO fork_choice_control::block_processor: Validating block with slot: 3415
+2024-09-21T22:03:50.456389Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa5aabcb764efd5fc6c734ff16a5ee22ffecc53996c7d93ada7e97d5ed3afdbf8, slot: 3415
+2024-09-21T22:03:50.469913Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3415
+2024-09-21T22:03:50.469933Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3415
+2024-09-21T22:03:50.491706Z  INFO fork_choice_control::block_processor: Validating block with slot: 3416
+2024-09-21T22:03:50.491732Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 105, root: 0x57385a0e4e8c95a455c694fe16c0f3ea89142d257fa4ca3bdf60dabb842443f2, head slot: 3415, head root: 0xa5aabcb764efd5fc6c734ff16a5ee22ffecc53996c7d93ada7e97d5ed3afdbf8)
+2024-09-21T22:03:50.492686Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x7e8dad22e0947b06f04e1743971400ec7cc6acd1633643c6b28b5745ca77841c, slot: 3416
+2024-09-21T22:03:50.498671Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3416
+2024-09-21T22:03:50.498685Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3416
+2024-09-21T22:03:50.515281Z  INFO fork_choice_control::block_processor: Validating block with slot: 3417
+2024-09-21T22:03:50.516309Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3f61315973b2e7b111ff8689f25ad6e65df8127b47a24cf6dd4f4c75b0d7250a, slot: 3417
+2024-09-21T22:03:50.522031Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3417
+2024-09-21T22:03:50.522045Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3417
+2024-09-21T22:03:50.537545Z  INFO fork_choice_control::block_processor: Validating block with slot: 3419
+2024-09-21T22:03:50.539244Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9549a86aa4dbbc5725e671113627c278006ff127a58001343a88cfe4e7448073, slot: 3419
+2024-09-21T22:03:50.548317Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3419
+2024-09-21T22:03:50.548336Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3419
+2024-09-21T22:03:50.563776Z  INFO fork_choice_control::block_processor: Validating block with slot: 3420
+2024-09-21T22:03:50.565426Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd00958e56326ded13fd251b58e7e1cb5e67eeee7d4337f45f9164ab45d15cf38, slot: 3420
+2024-09-21T22:03:50.572880Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3420
+2024-09-21T22:03:50.572898Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3420
+2024-09-21T22:03:50.588790Z  INFO fork_choice_control::block_processor: Validating block with slot: 3421
+2024-09-21T22:03:50.589761Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x645f191aae96532332d6e69bd67e3199c2da5a32e0c1d39b765d3f5c5eb41005, slot: 3421
+2024-09-21T22:03:50.595315Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3421
+2024-09-21T22:03:50.595327Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3421
+2024-09-21T22:03:50.611264Z  INFO fork_choice_control::block_processor: Validating block with slot: 3422
+2024-09-21T22:03:50.612496Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfb7ee0c084e880a32b28826155813ab73a7f0ec9f92bd04cfcdbf46f7f6e2846, slot: 3422
+2024-09-21T22:03:50.619632Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3422
+2024-09-21T22:03:50.619654Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3422
+2024-09-21T22:03:50.635875Z  INFO fork_choice_control::block_processor: Validating block with slot: 3423
+2024-09-21T22:03:50.637106Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb1b3373e7fe0686e6f12011616c7809bc716a03d2f54210055d3c90f44dc4070, slot: 3423
+2024-09-21T22:03:50.643378Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3423
+2024-09-21T22:03:50.643393Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3423
+2024-09-21T22:03:50.659794Z  INFO fork_choice_control::block_processor: Validating block with slot: 3424
+2024-09-21T22:03:50.660754Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4cb71c60ab34823e82d60f52b645b8dfcb4be5d2e23a927d7581bc0255e3b35a, slot: 3424
+2024-09-21T22:03:50.757060Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3424
+2024-09-21T22:03:50.757083Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3424
+2024-09-21T22:03:50.766765Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 3424)
+2024-09-21T22:03:50.766897Z  INFO fork_choice_control::block_processor: Validating block with slot: 3425
+2024-09-21T22:03:50.768475Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xce559e3e9706336547396e7d2e10884c3a122da62c2551a235e19faa34602f88, slot: 3425
+2024-09-21T22:03:50.842689Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3425
+2024-09-21T22:03:50.842708Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3425
+2024-09-21T22:03:50.852598Z  INFO fork_choice_control::block_processor: Validating block with slot: 3426
+2024-09-21T22:03:50.853966Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5a759fb8053a814d5352ffbca8cdcefd48a90b0233fbeaa3eb00a75645caf3e2, slot: 3426
+2024-09-21T22:03:50.861212Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3426
+2024-09-21T22:03:50.861224Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3426
+2024-09-21T22:03:50.871060Z  INFO fork_choice_control::block_processor: Validating block with slot: 3427
+2024-09-21T22:03:50.872590Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdf142ac2a75b15ae41efd8f50cab99837969116af41e9f5443f46d7d9522d9f4, slot: 3427
+2024-09-21T22:03:50.880670Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3427
+2024-09-21T22:03:50.880682Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3427
+2024-09-21T22:03:50.890758Z  INFO fork_choice_control::block_processor: Validating block with slot: 3428
+2024-09-21T22:03:50.891725Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x18528d9f2e0329573c388f7da72260dffd983ac4cf45148bcfee628c3469bf8e, slot: 3428
+2024-09-21T22:03:50.897878Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3428
+2024-09-21T22:03:50.897892Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3428
+2024-09-21T22:03:50.908105Z  INFO fork_choice_control::block_processor: Validating block with slot: 3429
+2024-09-21T22:03:50.909340Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa8d3d49aa6a96f6ab4a049230ea2ec14aa21b47d8b8c12f1fc88c8f6ea945ef8, slot: 3429
+2024-09-21T22:03:50.915873Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3429
+2024-09-21T22:03:50.915889Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3429
+2024-09-21T22:03:50.926439Z  INFO fork_choice_control::block_processor: Validating block with slot: 3430
+2024-09-21T22:03:50.927422Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x327d82f9ef4d9b1e139b4f94f862aa88123c29a637aa32061b53cfe307dbb895, slot: 3430
+2024-09-21T22:03:50.933643Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3430
+2024-09-21T22:03:50.933663Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3430
+2024-09-21T22:03:50.944181Z  INFO fork_choice_control::block_processor: Validating block with slot: 3431
+2024-09-21T22:03:50.945161Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xefb8011a787d3e6ad4e717d8562cbbee80a43e915fefe9bce847433e25f95a10, slot: 3431
+2024-09-21T22:03:50.951615Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3431
+2024-09-21T22:03:50.951635Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3431
+2024-09-21T22:03:50.962429Z  INFO fork_choice_control::block_processor: Validating block with slot: 3432
+2024-09-21T22:03:50.963838Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9e05c22d7ae8406e0bc5fa9a4344f7a0b9b46d15a949b233fb8e319c5b5837e9, slot: 3432
+2024-09-21T22:03:50.971095Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3432
+2024-09-21T22:03:50.971113Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3432
+2024-09-21T22:03:50.982087Z  INFO fork_choice_control::block_processor: Validating block with slot: 3433
+2024-09-21T22:03:50.983373Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x39e2ff2feef42f6747102fee181a9e480c54ae6ba66322583d32836f025b89f8, slot: 3433
+2024-09-21T22:03:50.990141Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3433
+2024-09-21T22:03:50.990154Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3433
+2024-09-21T22:03:51.001292Z  INFO fork_choice_control::block_processor: Validating block with slot: 3434
+2024-09-21T22:03:51.002388Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6847eb9d4121f30961cc8332df1991dfa43add32c9b38b0397bb51314ef6251a, slot: 3434
+2024-09-21T22:03:51.008241Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3434
+2024-09-21T22:03:51.008254Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3434
+2024-09-21T22:03:51.019524Z  INFO fork_choice_control::block_processor: Validating block with slot: 3435
+2024-09-21T22:03:51.020522Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x525afe355eafe1b32bc923d09802fbaa04b2abaaf5990831199f1b30229c76fd, slot: 3435
+2024-09-21T22:03:51.026640Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3435
+2024-09-21T22:03:51.026658Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3435
+2024-09-21T22:03:51.038282Z  INFO fork_choice_control::block_processor: Validating block with slot: 3436
+2024-09-21T22:03:51.039952Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xec7778762bea990dd1d6306f923393e7efd4b2fbe8795b62ed7227df42bd0735, slot: 3436
+2024-09-21T22:03:51.047250Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3436
+2024-09-21T22:03:51.047266Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3436
+2024-09-21T22:03:51.059561Z  INFO fork_choice_control::block_processor: Validating block with slot: 3437
+2024-09-21T22:03:51.060806Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3ee0b7711df2fc51f7773fb7ff9a009650e36de39f9b394644c7f3c8a7b6a82f, slot: 3437
+2024-09-21T22:03:51.068757Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3437
+2024-09-21T22:03:51.068778Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3437
+2024-09-21T22:03:51.080582Z  INFO fork_choice_control::block_processor: Validating block with slot: 3438
+2024-09-21T22:03:51.081683Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0e665d9c810c31e53a82b3f0f1a2e10910f22973e7715cc0f42f3aa07301262c, slot: 3438
+2024-09-21T22:03:51.088266Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3438
+2024-09-21T22:03:51.088290Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3438
+2024-09-21T22:03:51.100811Z  INFO fork_choice_control::block_processor: Validating block with slot: 3439
+2024-09-21T22:03:51.101799Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x97566f35efe4c7eee402dc7806e28409bc41e684912c2511c4508f0e1aa158aa, slot: 3439
+2024-09-21T22:03:51.108262Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3439
+2024-09-21T22:03:51.108281Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3439
+2024-09-21T22:03:51.120623Z  INFO fork_choice_control::block_processor: Validating block with slot: 3440
+2024-09-21T22:03:51.122290Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x45b84b64b2e7f41804e06018334809c4c4f4724686da76f0d30cbabe27028c51, slot: 3440
+2024-09-21T22:03:51.129470Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3440
+2024-09-21T22:03:51.129483Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3440
+2024-09-21T22:03:51.142143Z  INFO fork_choice_control::block_processor: Validating block with slot: 3441
+2024-09-21T22:03:51.143789Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfe50bc0637962d54d178f949228a64f837b32af532e6256a6fa39dee37e25654, slot: 3441
+2024-09-21T22:03:51.151324Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3441
+2024-09-21T22:03:51.151344Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3441
+2024-09-21T22:03:51.163972Z  INFO fork_choice_control::block_processor: Validating block with slot: 3442
+2024-09-21T22:03:51.165206Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x201ce742f3b02e03299bf71e2e9250ee40806fb0ac368d0a684fda7c040c204f, slot: 3442
+2024-09-21T22:03:51.171517Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3442
+2024-09-21T22:03:51.171538Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3442
+2024-09-21T22:03:51.184479Z  INFO fork_choice_control::block_processor: Validating block with slot: 3443
+2024-09-21T22:03:51.185443Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x91c2e72b087a9c3bda32d79449fa9c8aeb07f523231e13f1ce01377276b510fa, slot: 3443
+2024-09-21T22:03:51.191000Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3443
+2024-09-21T22:03:51.191012Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3443
+2024-09-21T22:03:51.204004Z  INFO fork_choice_control::block_processor: Validating block with slot: 3444
+2024-09-21T22:03:51.205521Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf56e40a5cf2fdd208d17faf4796a1497b710c314b954bc71c8b9a1df50af47d2, slot: 3444
+2024-09-21T22:03:51.212441Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3444
+2024-09-21T22:03:51.212453Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3444
+2024-09-21T22:03:51.225775Z  INFO fork_choice_control::block_processor: Validating block with slot: 3445
+2024-09-21T22:03:51.226755Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xedd1e9488f0959bb8078070480f69e284c1c6f4d7f2414be304eee2eaa72ae61, slot: 3445
+2024-09-21T22:03:51.232732Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3445
+2024-09-21T22:03:51.232751Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3445
+2024-09-21T22:03:51.245950Z  INFO fork_choice_control::block_processor: Validating block with slot: 3446
+2024-09-21T22:03:51.247191Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb3a739228b824ecdaa182df2ad93b40e21e3dd3ec060aeef10eb7a440b402acf, slot: 3446
+2024-09-21T22:03:51.254076Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3446
+2024-09-21T22:03:51.254096Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3446
+2024-09-21T22:03:51.268824Z  INFO fork_choice_control::block_processor: Validating block with slot: 3447
+2024-09-21T22:03:51.269936Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1d706e65745f82bd941c2e6e2151ecb87e888aea4f083727d185bb9c9b4dc888, slot: 3447
+2024-09-21T22:03:51.275840Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3447
+2024-09-21T22:03:51.275853Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3447
+2024-09-21T22:03:51.296109Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 106, root: 0x000e856aff1ed1b7fe681cd76aeac1b2d6841631c4ebb7a075b819fc1c9a44ce, head slot: 3447, head root: 0x1d706e65745f82bd941c2e6e2151ecb87e888aea4f083727d185bb9c9b4dc888)
+2024-09-21T22:03:51.296118Z  INFO fork_choice_control::block_processor: Validating block with slot: 3448
+2024-09-21T22:03:51.297402Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x489d3da50267142a8fa293cb0f52115304479cec7727df4d2f44bfed028156ce, slot: 3448
+2024-09-21T22:03:51.304653Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3448
+2024-09-21T22:03:51.304671Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3448
+2024-09-21T22:03:51.318971Z  INFO fork_choice_control::block_processor: Validating block with slot: 3449
+2024-09-21T22:03:51.320093Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x85ef3fe4d86ad62f47e8cb5c596518271b02370b6e8fcf1b53f49e5d0da9cbf4, slot: 3449
+2024-09-21T22:03:51.326578Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3449
+2024-09-21T22:03:51.326593Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3449
+2024-09-21T22:03:51.341069Z  INFO fork_choice_control::block_processor: Validating block with slot: 3450
+2024-09-21T22:03:51.343596Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x42e398e8a0f1aaaeffa4395a781aca63a085ef87b93dae0c59909d836305c35b, slot: 3450
+2024-09-21T22:03:51.353590Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3450
+2024-09-21T22:03:51.353608Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3450
+2024-09-21T22:03:51.368644Z  INFO fork_choice_control::block_processor: Validating block with slot: 3451
+2024-09-21T22:03:51.369769Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdea3d53d6e546052911b5d165842b2bc314fc43f6c47834e8150c43e2cc4c538, slot: 3451
+2024-09-21T22:03:51.376129Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3451
+2024-09-21T22:03:51.376144Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3451
+2024-09-21T22:03:51.391055Z  INFO fork_choice_control::block_processor: Validating block with slot: 3452
+2024-09-21T22:03:51.392456Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd88b954c6e08909354f93986df5b13cf30fd49fda4ceb8e2e0e89ef25b58d02f, slot: 3452
+2024-09-21T22:03:51.399950Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3452
+2024-09-21T22:03:51.399974Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3452
+2024-09-21T22:03:51.414946Z  INFO fork_choice_control::block_processor: Validating block with slot: 3453
+2024-09-21T22:03:51.417359Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9446a80824e340daa0d9edc787e4292073d13de8599e0c4f9b999cdfad7321a5, slot: 3453
+2024-09-21T22:03:51.427238Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3453
+2024-09-21T22:03:51.427259Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3453
+2024-09-21T22:03:51.429095Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 3392
+2024-09-21T22:03:51.442796Z  INFO fork_choice_control::block_processor: Validating block with slot: 3454
+2024-09-21T22:03:51.444200Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x63e79e5785e599edd6f1ee6570a89070cb9698279adae645ea49d1e846eaf2b7, slot: 3454
+2024-09-21T22:03:51.452029Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3454
+2024-09-21T22:03:51.452049Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3454
+2024-09-21T22:03:51.467812Z  INFO fork_choice_control::block_processor: Validating block with slot: 3455
+2024-09-21T22:03:51.469147Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x14677b12fb43cbd2523a8797782556dd21869257c31602ec6b323fb819b85ef4, slot: 3455
+2024-09-21T22:03:51.477700Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3455
+2024-09-21T22:03:51.477722Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3455
+2024-09-21T22:03:51.494315Z  INFO fork_choice_control::block_processor: Validating block with slot: 3457
+2024-09-21T22:03:51.496543Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd60e99c0cb434ea0aef7d2e32e3406316a6b79390b5d6b0b3b2b3217406c7988, slot: 3457
+2024-09-21T22:03:51.546095Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xaffb..babe addr=103.219.170.109:9000 error=Timeout received=10 expected=3
+2024-09-21T22:03:51.670955Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3457
+2024-09-21T22:03:51.670977Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3457
+2024-09-21T22:03:51.681663Z  INFO fork_choice_control::block_processor: Validating block with slot: 3458
+2024-09-21T22:03:51.684244Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc5046f0a600e9e97568f3dd3990591d8c977e7eea4bc3da0e48135fcb8d5d9bc, slot: 3458
+2024-09-21T22:03:51.695921Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3458
+2024-09-21T22:03:51.695943Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3458
+2024-09-21T22:03:51.707265Z  INFO fork_choice_control::block_processor: Validating block with slot: 3459
+2024-09-21T22:03:51.708676Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x83aeabafdd2d41e2bf5ee445906fb3a7b22e34f91556944dca53626fadf6a009, slot: 3459
+2024-09-21T22:03:51.717925Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3459
+2024-09-21T22:03:51.717948Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3459
+2024-09-21T22:03:51.729027Z  INFO fork_choice_control::block_processor: Validating block with slot: 3460
+2024-09-21T22:03:51.730549Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x993089414f0cfe440de80b234169c76babecdf9cb29f8a09c1f55b3efc311dba, slot: 3460
+2024-09-21T22:03:51.738290Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3460
+2024-09-21T22:03:51.738312Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3460
+2024-09-21T22:03:51.749702Z  INFO fork_choice_control::block_processor: Validating block with slot: 3461
+2024-09-21T22:03:51.750996Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x16e350a265f9102b15ae922cd175be23023950bae7e7b0619a491bf7cc37e578, slot: 3461
+2024-09-21T22:03:51.758785Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3461
+2024-09-21T22:03:51.758804Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3461
+2024-09-21T22:03:51.770549Z  INFO fork_choice_control::block_processor: Validating block with slot: 3462
+2024-09-21T22:03:51.771521Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x566f35fe47e4a92e8d4d6b748d608813fc8008fcb0428cc7418a40477868bafd, slot: 3462
+2024-09-21T22:03:51.777375Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3462
+2024-09-21T22:03:51.777388Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3462
+2024-09-21T22:03:51.789322Z  INFO fork_choice_control::block_processor: Validating block with slot: 3463
+2024-09-21T22:03:51.790311Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfb2e9ea0d5e461b77bbfca925253680584ab62cef0adea0565f224946f49bf86, slot: 3463
+2024-09-21T22:03:51.796609Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3463
+2024-09-21T22:03:51.796623Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3463
+2024-09-21T22:03:51.808469Z  INFO fork_choice_control::block_processor: Validating block with slot: 3464
+2024-09-21T22:03:51.809588Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6643142b9f08e3629130104391f529a03c11ce1871125bff1115765e17338d74, slot: 3464
+2024-09-21T22:03:51.815767Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3464
+2024-09-21T22:03:51.815785Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3464
+2024-09-21T22:03:51.827522Z  INFO fork_choice_control::block_processor: Validating block with slot: 3465
+2024-09-21T22:03:51.829050Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x63cbcba6de9f195d43760a5ba65456e672afb5710238bfce15d8092d40979eef, slot: 3465
+2024-09-21T22:03:51.836344Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3465
+2024-09-21T22:03:51.836361Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3465
+2024-09-21T22:03:51.848266Z  INFO fork_choice_control::block_processor: Validating block with slot: 3466
+2024-09-21T22:03:51.849398Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3125b25377ae8d7baf600c851a16a0d569f9f07a982ef848c64b0f7827ff7e94, slot: 3466
+2024-09-21T22:03:51.855211Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3466
+2024-09-21T22:03:51.855231Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3466
+2024-09-21T22:03:51.867458Z  INFO fork_choice_control::block_processor: Validating block with slot: 3467
+2024-09-21T22:03:51.868560Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x19f6d5ed6d7b2763590d184fbf541463a5dc45c9852fe47b7701aec46e68a0c6, slot: 3467
+2024-09-21T22:03:51.874446Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3467
+2024-09-21T22:03:51.874461Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3467
+2024-09-21T22:03:51.886868Z  INFO fork_choice_control::block_processor: Validating block with slot: 3468
+2024-09-21T22:03:51.887853Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe6840bb09b7bcd0ebb622726d7d999a7f6dd439425d36454e271e0441af436a8, slot: 3468
+2024-09-21T22:03:51.894329Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3468
+2024-09-21T22:03:51.894351Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3468
+2024-09-21T22:03:51.907209Z  INFO fork_choice_control::block_processor: Validating block with slot: 3469
+2024-09-21T22:03:51.908308Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4878ffdc0225191655ff6c27e6ee5984e12f2e4988a22e1ff5fb7ecdf3335985, slot: 3469
+2024-09-21T22:03:51.914200Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3469
+2024-09-21T22:03:51.914214Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3469
+2024-09-21T22:03:51.926912Z  INFO fork_choice_control::block_processor: Validating block with slot: 3470
+2024-09-21T22:03:51.928836Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb806c1976f7c4507a86a91469eafc206233ecf5d2d1efa24ad6838f62bf88b64, slot: 3470
+2024-09-21T22:03:51.937616Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3470
+2024-09-21T22:03:51.937637Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3470
+2024-09-21T22:03:51.950811Z  INFO fork_choice_control::block_processor: Validating block with slot: 3471
+2024-09-21T22:03:51.952725Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1eac2eb3528693fb418add4991b423cb0a7ec668e23712c99d1ae7d2ea0b421d, slot: 3471
+2024-09-21T22:03:51.961058Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3471
+2024-09-21T22:03:51.961071Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3471
+2024-09-21T22:03:51.974832Z  INFO fork_choice_control::block_processor: Validating block with slot: 3472
+2024-09-21T22:03:51.975801Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4ab8d23157d6b7f714b807b7554c8df047a66c401b815f94786d67ec67e1f23f, slot: 3472
+2024-09-21T22:03:51.981560Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3472
+2024-09-21T22:03:51.981580Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3472
+2024-09-21T22:03:51.995969Z  INFO fork_choice_control::block_processor: Validating block with slot: 3473
+2024-09-21T22:03:51.996958Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3566979647431210b35bbda50e5675fea91b13fd4130ed97ee333fda8ce81d11, slot: 3473
+2024-09-21T22:03:52.002954Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3473
+2024-09-21T22:03:52.002972Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3473
+2024-09-21T22:03:52.016628Z  INFO fork_choice_control::block_processor: Validating block with slot: 3474
+2024-09-21T22:03:52.017594Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x685ede6441ff1b7e89bdd95b6fb6c39583b3ebda7a284dd382e8950d277d10ea, slot: 3474
+2024-09-21T22:03:52.022963Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3474
+2024-09-21T22:03:52.022974Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3474
+2024-09-21T22:03:52.036857Z  INFO fork_choice_control::block_processor: Validating block with slot: 3475
+2024-09-21T22:03:52.038370Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8791851781e8d78b65c2b9d14f1230de0119c5d36b89bcc01c82ed7fb485e660, slot: 3475
+2024-09-21T22:03:52.045339Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3475
+2024-09-21T22:03:52.045352Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3475
+2024-09-21T22:03:52.059348Z  INFO fork_choice_control::block_processor: Validating block with slot: 3476
+2024-09-21T22:03:52.060329Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x59dae914aa5310644e77859e3260e022a7ec8ad78378d7c021c1883686eee696, slot: 3476
+2024-09-21T22:03:52.065979Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3476
+2024-09-21T22:03:52.066000Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3476
+2024-09-21T22:03:52.079980Z  INFO fork_choice_control::block_processor: Validating block with slot: 3477
+2024-09-21T22:03:52.081633Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd3862bc33bf09cf4a1ce8b7fbbb5b33703d3412a2ce71351f69e2eac973162a8, slot: 3477
+2024-09-21T22:03:52.101674Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3477
+2024-09-21T22:03:52.101697Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3477
+2024-09-21T22:03:52.119142Z  INFO fork_choice_control::block_processor: Validating block with slot: 3478
+2024-09-21T22:03:52.120308Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x61ed8255b50ffa8e82adc3a2b68bd920ea2f5e3956e3c02b40cec197595d9d4c, slot: 3478
+2024-09-21T22:03:52.129041Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3478
+2024-09-21T22:03:52.129063Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3478
+2024-09-21T22:03:52.143999Z  INFO fork_choice_control::block_processor: Validating block with slot: 3479
+2024-09-21T22:03:52.145112Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa4f88f1308ae7fde73a80c7f76c6c0aae28f26dd76ff4317e3138da75918b693, slot: 3479
+2024-09-21T22:03:52.152337Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3479
+2024-09-21T22:03:52.152358Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3479
+2024-09-21T22:03:52.217502Z  INFO fork_choice_control::block_processor: Validating block with slot: 3480
+2024-09-21T22:03:52.217545Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 107, root: 0x4cb71c60ab34823e82d60f52b645b8dfcb4be5d2e23a927d7581bc0255e3b35a, head slot: 3479, head root: 0xa4f88f1308ae7fde73a80c7f76c6c0aae28f26dd76ff4317e3138da75918b693)
+2024-09-21T22:03:52.218634Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf0cf54174dff591b4b95448b48ab216264f2b220201e9b9f0c47188df8894bec, slot: 3480
+2024-09-21T22:03:52.225067Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3480
+2024-09-21T22:03:52.225089Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3480
+2024-09-21T22:03:52.240249Z  INFO fork_choice_control::block_processor: Validating block with slot: 3481
+2024-09-21T22:03:52.241244Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8a97a87cbd68c31aaf344a8d912baf13fc2b27a7e1dccddd19337755ade83983, slot: 3481
+2024-09-21T22:03:52.247390Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3481
+2024-09-21T22:03:52.247404Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3481
+2024-09-21T22:03:52.262703Z  INFO fork_choice_control::block_processor: Validating block with slot: 3482
+2024-09-21T22:03:52.264574Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0f3e073f8d0bee1db6d027096f5330887bdb662c76d57f017fc7293c3ade204b, slot: 3482
+2024-09-21T22:03:52.275592Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3482
+2024-09-21T22:03:52.275614Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3482
+2024-09-21T22:03:52.291687Z  INFO fork_choice_control::block_processor: Validating block with slot: 3483
+2024-09-21T22:03:52.292807Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xaf60b39e572d6fb493c4a9774d6e94a5bd530c05f81d9d21c2bf694759cc7c5f, slot: 3483
+2024-09-21T22:03:52.299578Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3483
+2024-09-21T22:03:52.299606Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3483
+2024-09-21T22:03:52.315663Z  INFO fork_choice_control::block_processor: Validating block with slot: 3484
+2024-09-21T22:03:52.316653Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x92b899f49b0c62dee18ed154e711908ed276fe254c439ad1174f517d475a54f9, slot: 3484
+2024-09-21T22:03:52.322847Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3484
+2024-09-21T22:03:52.322862Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3484
+2024-09-21T22:03:52.339090Z  INFO fork_choice_control::block_processor: Validating block with slot: 3485
+2024-09-21T22:03:52.340112Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcf61cf507dcd52bce0d4214554b212815f41fb600e3b4b5ad6961cdf77e19ddd, slot: 3485
+2024-09-21T22:03:52.347128Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 3424
+2024-09-21T22:03:52.347166Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3485
+2024-09-21T22:03:52.347174Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3485
+2024-09-21T22:03:52.363891Z  INFO fork_choice_control::block_processor: Validating block with slot: 3486
+2024-09-21T22:03:52.366438Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa53289826dd22b8fe44b6466d02f265228eb07361c91fb3664edf6cfb5d6ecb1, slot: 3486
+2024-09-21T22:03:52.375008Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3486
+2024-09-21T22:03:52.375026Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3486
+2024-09-21T22:03:52.391800Z  INFO fork_choice_control::block_processor: Validating block with slot: 3487
+2024-09-21T22:03:52.392790Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfa95f58a41bf39979715bfede99dac1fec031f7be57fefc2906f32f083f67c11, slot: 3487
+2024-09-21T22:03:52.400266Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 3487
+2024-09-21T22:03:52.400288Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 3487
+2024-09-21T22:03:54.259595Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x412c..a8d6 addr=34.107.123.236:9004 error=Timeout received=15 expected=3
+2024-09-21T22:03:54.738174Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x412e..5488 addr=92.247.87.62:12000 error=Timeout received=15 expected=3
+2024-09-21T22:03:54.970897Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xae50..4c47 addr=79.137.88.115:30005 error=Timeout received=12 expected=3
+2024-09-21T22:03:55.558469Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0xae92..28b9 addr=73.132.199.171:9001 error=Timeout received=12 expected=3
+2024-09-21T22:03:57.555014Z  INFO runtime::runtime: saving current chain before exit…
+2024-09-21T22:03:57.722544Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 3424
+2024-09-21T22:03:57.901684Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 62)
