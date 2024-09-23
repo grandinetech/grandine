@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use database::Database;
-use deposit_tree::DepositTree;
+use deposit_tree::DepositDataTree;
 use eth1_api::{DepositEvent, Eth1Block};
 use itertools::Itertools as _;
 use ssz::{SszReadDefault, SszWrite as _};
@@ -17,7 +17,7 @@ pub struct Eth1Cache {
 }
 
 impl Eth1Cache {
-    pub fn new(database: Database, default_deposit_tree: Option<DepositTree>) -> Result<Self> {
+    pub fn new(database: Database, default_deposit_tree: Option<DepositDataTree>) -> Result<Self> {
         let default_deposit_tree = default_deposit_tree.unwrap_or_default();
 
         let deposit_tree = if let Some(tree) = get(&database, DEPOSIT_TREE_KEY)? {
@@ -75,7 +75,7 @@ impl Eth1Cache {
         })?
     }
 
-    pub fn get_deposit_tree(&self) -> Result<Option<DepositTree>> {
+    pub fn get_deposit_tree(&self) -> Result<Option<DepositDataTree>> {
         get(&self.database, DEPOSIT_TREE_KEY)
     }
 
@@ -99,7 +99,7 @@ impl Eth1Cache {
             .and_then(core::convert::identity)
     }
 
-    pub fn put_deposit_tree(&self, deposit_tree: &DepositTree) -> Result<()> {
+    pub fn put_deposit_tree(&self, deposit_tree: &DepositDataTree) -> Result<()> {
         put_deposit_tree(&self.database, deposit_tree)
     }
 }
@@ -117,7 +117,7 @@ fn get<V: SszReadDefault>(database: &Database, key: impl AsRef<[u8]>) -> Result<
     Ok(Some(value))
 }
 
-fn put_deposit_tree(database: &Database, deposit_tree: &DepositTree) -> Result<()> {
+fn put_deposit_tree(database: &Database, deposit_tree: &DepositDataTree) -> Result<()> {
     database.put(DEPOSIT_TREE_KEY, deposit_tree.to_ssz()?)
 }
 

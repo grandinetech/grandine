@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use bls::AggregateSignature;
-use deposit_tree::DepositTree;
+use deposit_tree::DepositDataTree;
 use helper_functions::{
     accessors, misc,
     signing::{RandaoEpoch, SignForSingleFork as _, SignForSingleForkAtSlot as _},
@@ -52,7 +52,7 @@ use types::{
 
 type BlockWithState<P> = (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>);
 
-pub fn min_genesis_state<P: Preset>(config: &Config) -> Result<(Arc<BeaconState<P>>, DepositTree)> {
+pub fn min_genesis_state<P: Preset>(config: &Config) -> Result<(Arc<BeaconState<P>>, DepositDataTree)> {
     let (genesis_state, deposit_tree) = interop::quick_start_beacon_state(
         config,
         config.min_genesis_time,

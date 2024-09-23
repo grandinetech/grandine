@@ -2,7 +2,7 @@ use core::num::NonZeroU64;
 
 use anyhow::Result;
 use bls::{SecretKey, SecretKeyBytes};
-use deposit_tree::DepositTree;
+use deposit_tree::DepositDataTree;
 use genesis::Incremental;
 use helper_functions::{misc, signing::SignForAllForks};
 use hex_literal::hex;
@@ -39,7 +39,7 @@ pub fn quick_start_beacon_state<P: Preset>(
     config: &Config,
     genesis_time: UnixSeconds,
     validator_count: NonZeroU64,
-) -> Result<(CombinedBeaconState<P>, DepositTree)> {
+) -> Result<(CombinedBeaconState<P>, DepositDataTree)> {
     let mut incremental = Incremental::new(config);
 
     incremental.set_eth1_timestamp(QUICK_START_ETH1_BLOCK_TIMESTAMP);
