@@ -11,12 +11,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - name: Install OpenSSL (Windows)
+    - name: Disable autocrlf (Windows)
       if: runner.os == 'Windows'
-      shell: powershell
-      run: |
-        echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-        vcpkg install openssl:x64-windows-static-md
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@v4
       with:
         submodules: true
@@ -25,13 +22,10 @@ jobs:
     - name: Check if code is formatted (Linux)
       if: runner.os == 'Linux'
       run: cargo fmt --check
-    - name: Run Clippy
-      run: |
-        if [ "$RUNNER_OS" == "Linux" ]; then
-          bash scripts/ci/clippy.bash --deny warnings
-        elif [ "$RUNNER_OS" == "Windows" ]; then
-          powershell.exe -ExecutionPolicy Bypass -File ./scripts/ci/clippy.ps1 --deny warnings
-        fi
+    - name: Run Clippy (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bash scripts/ci/clippy.bash --deny warnings
     - name: Run tests
       run: cargo test --release --no-fail-fast
     - name: Check consensus-spec-tests coverage (Linux)
