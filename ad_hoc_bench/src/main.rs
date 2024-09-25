@@ -428,8 +428,6 @@ fn run<P: Preset>(
 }
 
 #[cfg(not(target_os = "windows"))]
-use jemalloc_ctl;
-#[cfg(not(target_os = "windows"))]
 fn print_jemalloc_stats() -> Result<()> {
     jemalloc_ctl::epoch::advance().map_err(Error::msg)?;
 
