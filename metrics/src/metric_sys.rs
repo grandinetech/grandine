@@ -18,9 +18,9 @@ use windows::Win32::{
     },
 };
 
-pub(crate) struct ProcessCpuMetric {
-    pub(crate) cpu_process_seconds_total: u64,
-    pub(crate) memory_process_bytes: u64,
+pub struct ProcessCpuMetric {
+    pub cpu_process_seconds_total: u64,
+    pub memory_process_bytes: u64,
 }
 
 pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
@@ -36,9 +36,12 @@ pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
 
 #[cfg(target_os = "linux")]
 fn get_process_cpu_metric_linux() -> Result<ProcessCpuMetric> {
+    use anyhow::bail;
     use psutil::process::Process;
-    use std::result::Result::Ok;
+    use core::result::Result::Ok;
+    #[allow(unused_assignments)]
     let mut cpu_process_seconds_total = 0;
+    #[allow(unused_assignments)]
     let mut memory_process_bytes = 0;
     match Process::current() {
         Ok(process) => {
@@ -48,17 +51,17 @@ fn get_process_cpu_metric_linux() -> Result<ProcessCpuMetric> {
                         + cpu_times.children_system().as_secs()
                         + cpu_times.children_system().as_secs();
                 }
-                Err(error) => warn!("unable to get current process CPU usage: {error:?}"),
+                Err(error) => bail!("unable to get current process CPU usage: {error:?}"),
             }
 
             match process.memory_info() {
                 Ok(mem_info) => {
                     memory_process_bytes = mem_info.rss();
                 }
-                Err(error) => warn!("unable to get process memory usage: {error:?}"),
+                Err(error) => bail!("unable to get process memory usage: {error:?}"),
             }
         }
-        Err(error) => warn!("unable to get current process: {error:?}"),
+        Err(error) => bail!("unable to get current process: {error:?}"),
     }
     Ok(ProcessCpuMetric {
         cpu_process_seconds_total,
@@ -124,10 +127,10 @@ fn get_process_cpu_metric_win() -> Result<ProcessCpuMetric> {
     })
 }
 
-pub(crate) struct CpuMetric {
-    pub(crate) idle_seconds: u64,
-    pub(crate) system_seconds: u64,
-    pub(crate) user_seconds: u64,
+pub struct CpuMetric {
+    pub idle_seconds: u64,
+    pub system_seconds: u64,
+    pub user_seconds: u64,
 }
 
 pub fn get_cpu_metric() -> Result<CpuMetric> {
