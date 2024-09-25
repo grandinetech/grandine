@@ -4,24 +4,30 @@ on: [push]
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: true
         lfs: true
-    # There should be no need to install Rustup or a Rust toolchain explicitly.
-    # The `ubuntu-22.04` image already includes Rustup:
-    # <https://github.com/actions/runner-images/blob/ubuntu22/20240401.4/images/ubuntu/Ubuntu2204-Readme.md#rust-tools>
-    # Running `rustc` or Cargo should automatically install the toolchain specified in `rust-toolchain.toml`.
     - uses: Swatinem/rust-cache@v2
     - name: Check if code is formatted
       run: cargo fmt --check
     - name: Run Clippy
-      run: scripts/ci/clippy.bash --deny warnings
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          scripts/ci/clippy.bash --deny warnings
+        elif [ "$RUNNER_OS" == "Windows" ]; then
+          ./scripts/ci/clippy.bash --deny warnings
+        fi
     - name: Run tests
       run: cargo test --release --no-fail-fast
     - name: Check consensus-spec-tests coverage
+      if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb
