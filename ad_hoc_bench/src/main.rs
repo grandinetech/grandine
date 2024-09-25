@@ -2,8 +2,7 @@ use core::ops::RangeInclusive;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use allocator as _;
-use anyhow::{Error, Ok, Result};
-use bytesize::ByteSize;
+use anyhow::{Ok, Result};
 use clap::{Parser, ValueEnum};
 use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdrawal_devnet_4};
 use fork_choice_control::AdHocBenchController;
@@ -429,7 +428,7 @@ fn run<P: Preset>(
 
 #[cfg(not(target_os = "windows"))]
 fn print_jemalloc_stats() -> Result<()> {
-    jemalloc_ctl::epoch::advance().map_err(Error::msg)?;
+    jemalloc_ctl::epoch::advance().map_err(anyhow::Error::msg)?;
 
     info!(
         "allocated: {}, \
@@ -450,7 +449,7 @@ fn print_jemalloc_stats() -> Result<()> {
 }
 #[cfg(not(target_os = "windows"))]
 fn human_readable_size(result: jemalloc_ctl::Result<usize>) -> Result<String> {
-    let size = result.map_err(Error::msg)?;
+    let size = result.map_err(anyhow::Error::msg)?;
     let size = size.try_into()?;
-    Ok(ByteSize(size).to_string_as(true))
+    Ok(bytesize::ByteSize(size).to_string_as(true))
 }
