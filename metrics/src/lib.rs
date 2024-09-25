@@ -8,6 +8,6 @@ mod beaconchain;
 mod gui;
 mod helpers;
 mod messages;
+mod metric_sys;
 mod server;
 mod service;
-mod metric_sys;
