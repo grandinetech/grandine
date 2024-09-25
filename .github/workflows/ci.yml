@@ -22,19 +22,18 @@ jobs:
         submodules: true
         lfs: true
     - uses: Swatinem/rust-cache@v2
-    - name: Check if code is formatted
+    - name: Check if code is formatted (Linux)
       if: runner.os == 'Linux'
       run: cargo fmt --check
     - name: Run Clippy
-      shell: bash
       run: |
         if [ "$RUNNER_OS" == "Linux" ]; then
-          scripts/ci/clippy.bash --deny warnings
+          bash scripts/ci/clippy.bash --deny warnings
         elif [ "$RUNNER_OS" == "Windows" ]; then
-          ./scripts/ci/clippy.bash --deny warnings
+          powershell.exe -ExecutionPolicy Bypass -File ./scripts/ci/clippy.ps1 --deny warnings
         fi
     - name: Run tests
       run: cargo test --release --no-fail-fast
-    - name: Check consensus-spec-tests coverage
+    - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb
