@@ -37,8 +37,8 @@ pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
 #[cfg(target_os = "linux")]
 fn get_process_cpu_metric_linux() -> Result<ProcessCpuMetric> {
     use anyhow::bail;
-    use psutil::process::Process;
     use core::result::Result::Ok;
+    use psutil::process::Process;
     #[allow(unused_assignments)]
     let mut cpu_process_seconds_total = 0;
     #[allow(unused_assignments)]
