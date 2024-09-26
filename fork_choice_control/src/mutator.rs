@@ -1466,7 +1466,10 @@ where
     }
 
     fn handle_store_custody_columns(&mut self, custody_columns: HashSet<ColumnIndex>) {
-        info!("storing custody columns: {custody_columns:?} for further data availability check");
+        info!(
+            "storing custody columns: [{}] for further data availability check",
+            custody_columns.iter().join(", "),
+        );
 
         self.store_mut()
             .store_custody_columns(custody_columns.into());

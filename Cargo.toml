@@ -285,7 +285,7 @@ dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.3.0'
 derive_more = '0.99.17'
 dirs = '5.0.1'
-discv5 = { version = '0.4.1', features = ['libp2p'] }
+discv5 = { version = '0.7.0', features = ['libp2p'] }
 drain_filter_polyfill = '0.1.3'
 duplicate = '1.0.0'
 easy-ext = '1.0.1'
@@ -331,8 +331,8 @@ jwt-simple = { version = '0.12.6', default-features = false, features = ['pure-r
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', branch = 'integration-raw-2' }
 lazy_static = '1.4.0'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '2d01f3608697eed05357fb847e25ad33ab59d702' }
-libp2p = { version = '0.53', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
-libp2p-mplex = '0.41.0'
+libp2p = { version = '0.54', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
+libp2p-mplex = '0.42.0'
 log = '0.4.20'
 lru = '0.12.2'
 memoffset = '0.9.0'

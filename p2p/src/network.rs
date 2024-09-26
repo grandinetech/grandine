@@ -39,7 +39,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
-use ssz::{ContiguousList, SszHash as _};
+use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use typenum::Unsigned as _;

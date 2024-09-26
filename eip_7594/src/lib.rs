@@ -56,6 +56,17 @@ pub enum ExtendedSampleError {
     AllowedFailtureOutOfRange { allowed_failures: u64 },
 }
 
+#[derive(Debug, Error)]
+pub enum GetDataColumnSidecarsError {
+    #[error(
+        "Cells and proofs length {cells_length} does not match commitment length {commitments_length}"
+    )]
+    CellsCommitmentsLengthError {
+        cells_length: usize,
+        commitments_length: usize,
+    },
+}
+
 pub fn verify_kzg_proofs<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> Result<bool> {
     let DataColumnSidecar {
         index,
@@ -277,9 +288,12 @@ pub fn get_data_column_sidecars<P: Preset>(
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
     if let Some(post_deneb_beacon_block_body) = signed_block.message().body().post_deneb() {
-        let kzg_commitments_inclusion_proof =
-            kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
         let signed_block_header = signed_block.to_header();
+        let kzg_commitments = post_deneb_beacon_block_body.blob_kzg_commitments();
+
+        if kzg_commitments.is_empty() {
+            return Ok(vec![]);
+        }
 
         let kzg_settings = settings();
         let cells_and_proofs = blobs
@@ -291,6 +305,15 @@ pub fn get_data_column_sidecars<P: Preset>(
             .collect::<Result<Vec<_>>>()?;
 
         let blob_count = cells_and_proofs.len();
+        ensure!(
+            kzg_commitments.len() == blob_count,
+            GetDataColumnSidecarsError::CellsCommitmentsLengthError {
+                cells_length: blob_count,
+                commitments_length: kzg_commitments.len(),
+            }
+        );
+        let kzg_commitments_inclusion_proof =
+            kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
 
         for column_index in 0..NumberOfColumns::U64 {
             let column_cells: Vec<CKzgCell> = (0..blob_count)
@@ -300,30 +323,33 @@ pub fn get_data_column_sidecars<P: Preset>(
             let column_proofs: Vec<CKzgProof> = (0..blob_count)
                 .map(|row_index| cells_and_proofs[row_index].1[column_index as usize].clone())
                 .collect();
+            
+            // let mut cont_cells = Vec::new();
 
-            let cells = column_cells.iter().map(|cell| cell.to_bytes());
+            // for cell in cells {
+            //     let bytes = cell.into_iter();
+            //     let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
+            //     let v = Box::new(v);
 
-            let mut cont_cells = Vec::new();
-
-            for cell in cells {
-                let bytes = cell.into_iter();
-                let v = ByteVector::from(ContiguousVector::try_from_iter(bytes)?);
-                let v = Box::new(v);
-
-                cont_cells.push(v);
-            }
+            //     cont_cells.push(v);
+            // }
+            let cells = column_cells
+                .iter()
+                .map(|cell| try_convert_ckzg_cell_to_cell(cell))
+                .collect::<Result<Vec<Cell>>>()?;
 
             let proofs = column_proofs
                 .iter()
-                .map(|data| KzgProof::try_from(data.to_bytes().into_inner()).map_err(Into::into))
+                .map(|proof| KzgProof::try_from(proof.to_bytes().into_inner()).map_err(Into::into))
                 .collect::<Result<Vec<KzgProof>>>()?;
 
+            let column = ContiguousList::try_from_iter(cells.into_iter())?;
             let kzg_proofs = ContiguousList::try_from_iter(proofs.into_iter())?;
 
             sidecars.push(DataColumnSidecar {
                 index: column_index,
-                column: ContiguousList::try_from(cont_cells)?,
-                kzg_commitments: post_deneb_beacon_block_body.blob_kzg_commitments().clone(),
+                column,
+                kzg_commitments: kzg_commitments.clone(),
                 kzg_proofs,
                 signed_block_header,
                 kzg_commitments_inclusion_proof,
