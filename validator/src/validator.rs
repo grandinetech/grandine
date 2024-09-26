@@ -1491,7 +1491,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let control_flow = self
             .validate_and_store_block(
                 &beacon_block,
-                &slot_head.beacon_state,
+&slot_head.beacon_state,
                 public_key.to_bytes(),
                 slot_head.current_epoch(),
             )
@@ -1512,38 +1512,42 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let block = Arc::new(beacon_block.clone());
 
-        if self.chain_config.is_eip7594_fork(epoch) {
-            let data_column_sidecars = eip_7594::get_data_column_sidecars(
-                &block,
-                block_blobs.unwrap_or_default().into_iter(),
-            )?;
+        if let Some(blobs) = block_blobs {
+            info!("there are {} blobs in slot: {}", blobs.len(), slot_head.slot());
 
-            let messages = data_column_sidecars
-                .into_iter()
-                .map(|dcs| {
-                    let data_column_sidecar = Arc::new(dcs);
+            if self.chain_config.is_eip7594_fork(epoch) {
+                let data_column_sidecars = eip_7594::get_data_column_sidecars(
+                    &block,
+                    blobs.clone().into_iter(),
+                )?;
 
-                    self.controller.on_own_data_column_sidecar(
-                        wait_group.clone(),
-                        data_column_sidecar.clone_arc(),
-                    );
-                    data_column_sidecar
-                })
-                .collect::<Vec<_>>();
+                let messages = data_column_sidecars
+                    .into_iter()
+                    .map(|dcs| {
+                        let data_column_sidecar = Arc::new(dcs);
 
-            ValidatorToP2p::PublishDataColumnSidecars(messages).send(&self.p2p_tx);
-        } else {
-            for blob_sidecar in misc::construct_blob_sidecars(
-                &block,
-                block_blobs.unwrap_or_default().into_iter(),
-                block_proofs.unwrap_or_default().into_iter(),
-            )? {
-                let blob_sidecar = Arc::new(blob_sidecar);
+                        self.controller.on_own_data_column_sidecar(
+                            wait_group.clone(),
+                            data_column_sidecar.clone_arc(),
+                        );
+                        data_column_sidecar
+                    })
+                    .collect::<Vec<_>>();
 
-                self.controller
-                    .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+                ValidatorToP2p::PublishDataColumnSidecars(messages).send(&self.p2p_tx);
+            } else {
+                for blob_sidecar in misc::construct_blob_sidecars(
+                    &block,
+                    blobs.clone().into_iter(),
+                    block_proofs.unwrap_or_default().into_iter(),
+                )? {
+                    let blob_sidecar = Arc::new(blob_sidecar);
 
-                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                    self.controller
+                        .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+
+                    ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                }
             }
         }
 
