@@ -70,7 +70,10 @@ pub enum ApiToP2p<P: Preset> {
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),
-    RequestPeers(NodePeersQuery, #[serde(skip)] Sender<Vec<NodePeer>>),
+    RequestPeers(
+        #[serde(skip)] NodePeersQuery,
+        #[serde(skip)] Sender<Vec<NodePeer>>,
+    ),
 }
 
 impl<P: Preset> ApiToP2p<P> {

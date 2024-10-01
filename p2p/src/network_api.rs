@@ -7,9 +7,11 @@ use types::preset::Preset;
 
 use crate::Network;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct NodePeersQuery {
+    #[serde(rename(deserialize = "state"))]
     states: Option<Vec<PeerState>>,
+    #[serde(rename(deserialize = "direction"))]
     directions: Option<Vec<PeerDirection>>,
 }
 
