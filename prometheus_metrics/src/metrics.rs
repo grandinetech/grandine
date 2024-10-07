@@ -138,15 +138,17 @@ pub struct Metrics {
     pub process_slot_times: Histogram,
 
     // EF interop metrics
-    beacon_current_active_validators: IntGauge,
-    beacon_current_justified_epoch: IntGauge,
+    beacon_head_slot: IntGauge,
     beacon_finalized_epoch: IntGauge,
-    beacon_safe_head_slot: IntGauge,
-    beacon_slot: IntGauge,
-    beacon_processed_deposits_total: IntGauge,
+    beacon_current_justified_epoch: IntGauge,
+    beacon_previous_justified_epoch: IntGauge,
+    beacon_current_active_validators: IntGauge,
 
     pub beacon_reorgs_total: IntCounter,
 
+    beacon_processed_deposits_total: IntGauge,
+
+    // Extra EF interop metrics: not available in the docs yet
     beacon_participation_prev_epoch_active_gwei_total: IntGauge,
     beacon_participation_prev_epoch_target_attesting_gwei_total: IntGauge,
     validator_count: IntGauge,
@@ -584,41 +586,42 @@ impl Metrics {
             ))?,
 
             // EF interop metrics
-            beacon_current_active_validators: IntGauge::new(
-                "beacon_current_active_validators",
-                "Number of active validators",
-            )?,
-
-            beacon_current_justified_epoch: IntGauge::new(
-                "beacon_current_justified_epoch",
-                "Justified epoch at head",
+            beacon_head_slot: IntGauge::new(
+                "beacon_head_slot",
+                "Latest slot of the beacon chain",
             )?,
 
             beacon_finalized_epoch: IntGauge::new(
                 "beacon_finalized_epoch",
-                "Finalized epoch at head",
+                "Current finalized epoch",
             )?,
 
-            beacon_safe_head_slot: IntGauge::new(
-                "beacon_head_slot",
-                "Head slot",
+            beacon_current_justified_epoch: IntGauge::new(
+                "beacon_current_justified_epoch",
+                "Current justified epoch",
             )?,
 
-            beacon_slot: IntGauge::new(
-                "beacon_slot",
-                "Slot at the latest beacon head",
+            beacon_previous_justified_epoch: IntGauge::new(
+                "beacon_previous_justified_epoch",
+                "Current previously justified epoch",
             )?,
 
-            beacon_processed_deposits_total: IntGauge::new(
-                "beacon_processed_deposits_total",
-                "Number of processed Eth1 deposits at head",
+            beacon_current_active_validators: IntGauge::new(
+                "beacon_current_active_validators",
+                "Current total active validators",
             )?,
 
             beacon_reorgs_total: IntCounter::new(
                 "beacon_reorgs_total",
-                "Total number of reorgs",
+                "Total number of chain reorganizations",
             )?,
 
+            beacon_processed_deposits_total: IntGauge::new(
+                "beacon_processed_deposits_total",
+                "Total number of deposits processed",
+            )?,
+
+            // Extra EF interop metrics
             beacon_participation_prev_epoch_active_gwei_total: IntGauge::new(
                 "beacon_participation_prev_epoch_active_gwei_total",
                 "Total effective balance of previous epoch active validators",
@@ -831,13 +834,13 @@ impl Metrics {
         default_registry.register(Box::new(self.block_transition_times.clone()))?;
         default_registry.register(Box::new(self.epoch_processing_times.clone()))?;
         default_registry.register(Box::new(self.process_slot_times.clone()))?;
-        default_registry.register(Box::new(self.beacon_current_active_validators.clone()))?;
-        default_registry.register(Box::new(self.beacon_current_justified_epoch.clone()))?;
+        default_registry.register(Box::new(self.beacon_head_slot.clone()))?;
         default_registry.register(Box::new(self.beacon_finalized_epoch.clone()))?;
-        default_registry.register(Box::new(self.beacon_safe_head_slot.clone()))?;
-        default_registry.register(Box::new(self.beacon_slot.clone()))?;
-        default_registry.register(Box::new(self.beacon_processed_deposits_total.clone()))?;
+        default_registry.register(Box::new(self.beacon_current_justified_epoch.clone()))?;
+        default_registry.register(Box::new(self.beacon_previous_justified_epoch.clone()))?;
+        default_registry.register(Box::new(self.beacon_current_active_validators.clone()))?;
         default_registry.register(Box::new(self.beacon_reorgs_total.clone()))?;
+        default_registry.register(Box::new(self.beacon_processed_deposits_total.clone()))?;
         default_registry.register(Box::new(
             self.beacon_participation_prev_epoch_active_gwei_total
                 .clone(),
@@ -1021,28 +1024,28 @@ impl Metrics {
     }
 
     // EF interop metrics
-    pub fn set_active_validators(&self, validator_count: usize) {
+    pub fn set_beacon_head_slot(&self, slot: Slot) {
+        self.beacon_head_slot.set(slot as i64);
+    }
+
+    pub fn set_beacon_finalized_epoch(&self, epoch: Epoch) {
+        self.beacon_finalized_epoch.set(epoch as i64);
+    }
+
+    pub fn set_beacon_current_justified_epoch(&self, epoch: Epoch) {
+        self.beacon_current_justified_epoch.set(epoch as i64);
+    }
+
+    pub fn set_beacon_previous_justified_epoch(&self, epoch: Epoch) {
+        self.beacon_previous_justified_epoch.set(epoch as i64);
+    }
+
+    pub fn set_beacon_current_active_validators(&self, validator_count: usize) {
         self.beacon_current_active_validators
             .set(validator_count as i64);
     }
 
-    pub fn set_justified_epoch(&self, epoch: Epoch) {
-        self.beacon_current_justified_epoch.set(epoch as i64);
-    }
-
-    pub fn set_finalized_epoch(&self, epoch: Epoch) {
-        self.beacon_finalized_epoch.set(epoch as i64);
-    }
-
-    pub fn set_safe_head_slot(&self, slot: Slot) {
-        self.beacon_safe_head_slot.set(slot as i64);
-    }
-
-    pub fn set_slot(&self, slot: Slot) {
-        self.beacon_slot.set(slot as i64);
-    }
-
-    pub fn set_processed_deposits(&self, total_deposits: u64) {
+    pub fn set_beacon_processed_deposits_total(&self, total_deposits: u64) {
         self.beacon_processed_deposits_total
             .set(total_deposits as i64);
     }

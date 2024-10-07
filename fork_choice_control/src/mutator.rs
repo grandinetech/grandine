@@ -1636,8 +1636,12 @@ where
         P2pMessage::FinalizedCheckpoint(finalized_checkpoint).send(&self.p2p_tx);
 
         if let Some(metrics) = self.metrics.as_ref() {
-            metrics.set_justified_epoch(justified_checkpoint.epoch);
-            metrics.set_finalized_epoch(finalized_checkpoint.epoch);
+            let state = head.state(&self.store);
+            let previous_justified_checkpoint = state.previous_justified_checkpoint();
+
+            metrics.set_beacon_current_justified_epoch(justified_checkpoint.epoch);
+            metrics.set_beacon_finalized_epoch(finalized_checkpoint.epoch);
+            metrics.set_beacon_previous_justified_epoch(previous_justified_checkpoint.epoch);
         }
 
         ValidatorMessage::FinalizedEth1Data(
@@ -2311,15 +2315,15 @@ where
     }
 
     fn track_epoch_transition_metrics(head_state: &Arc<BeaconState<P>>, metrics: &Arc<Metrics>) {
-        metrics.set_processed_deposits(head_state.eth1_deposit_index());
+        metrics.set_beacon_processed_deposits_total(head_state.eth1_deposit_index());
         metrics.set_validator_count(head_state.validators().len_usize());
-        metrics.set_active_validators(
+        metrics.set_beacon_current_active_validators(
             accessors::get_active_validator_indices(head_state, RelativeEpoch::Current).count(),
         );
     }
 
     fn track_head_metrics(head: &ChainLink<P>, metrics: &Arc<Metrics>) {
-        metrics.set_slot(head.slot());
+        metrics.set_beacon_head_slot(head.slot());
     }
 
     fn track_collection_metrics(&self) {
