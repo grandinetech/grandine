@@ -6,6 +6,7 @@ use types::{
     capella::containers::ExecutionPayload as CapellaExecutionPayload,
     combined::{ExecutionPayload, ExecutionPayloadHeader},
     deneb::primitives::KzgCommitment,
+    electra::containers::ExecutionRequests,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::Uint256,
     preset::Preset,
@@ -19,6 +20,7 @@ use crate::{
         ExecutionPayloadAndBlobsBundle as DenebExecutionPayloadAndBlobsBundle,
         SignedBuilderBid as DenebSignedBuilderBid,
     },
+    electra::containers::SignedBuilderBid as ElectraSignedBuilderBid,
 };
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +35,7 @@ pub enum SignedBuilderBid<P: Preset> {
     Bellatrix(BellatrixSignedBuilderBid<P>),
     Capella(CapellaSignedBuilderBid<P>),
     Deneb(DenebSignedBuilderBid<P>),
+    Electra(ElectraSignedBuilderBid<P>),
 }
 
 impl<P: Preset> SignedBuilderBid<P> {
@@ -42,6 +45,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Bellatrix(response) => response.message.pubkey,
             Self::Capella(response) => response.message.pubkey,
             Self::Deneb(response) => response.message.pubkey,
+            Self::Electra(response) => response.message.pubkey,
         }
     }
 
@@ -51,6 +55,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Bellatrix(response) => response.signature,
             Self::Capella(response) => response.signature,
             Self::Deneb(response) => response.signature,
+            Self::Electra(response) => response.signature,
         }
     }
 
@@ -60,15 +65,27 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 
     #[must_use]
     pub fn execution_payload_header(self) -> ExecutionPayloadHeader<P> {
         match self {
-            Self::Bellatrix(response) => (*response.message.header).into(),
-            Self::Capella(response) => (*response.message.header).into(),
-            Self::Deneb(response) => (*response.message.header).into(),
+            Self::Bellatrix(response) => {
+                ExecutionPayloadHeader::Bellatrix(*response.message.header)
+            }
+            Self::Capella(response) => ExecutionPayloadHeader::Capella(*response.message.header),
+            Self::Deneb(response) => ExecutionPayloadHeader::Deneb(*response.message.header),
+            Self::Electra(response) => ExecutionPayloadHeader::Deneb(*response.message.header),
+        }
+    }
+
+    #[must_use]
+    pub const fn execution_requests(&self) -> Option<&ExecutionRequests<P>> {
+        match self {
+            Self::Bellatrix(_) | Self::Capella(_) | Self::Deneb(_) => None,
+            Self::Electra(response) => Some(&response.message.execution_requests),
         }
     }
 
@@ -79,6 +96,7 @@ impl<P: Preset> SignedBuilderBid<P> {
         match self {
             Self::Bellatrix(_) | Self::Capella(_) => None,
             Self::Deneb(response) => Some(&response.message.blob_kzg_commitments),
+            Self::Electra(response) => Some(&response.message.blob_kzg_commitments),
         }
     }
 
@@ -88,6 +106,7 @@ impl<P: Preset> SignedBuilderBid<P> {
             Self::Bellatrix(response) => response.message.value,
             Self::Capella(response) => response.message.value,
             Self::Deneb(response) => response.message.value,
+            Self::Electra(response) => response.message.value,
         }
     }
 }
@@ -104,6 +123,7 @@ pub enum ExecutionPayloadAndBlobsBundle<P: Preset> {
     Bellatrix(BellatrixExecutionPayload<P>),
     Capella(CapellaExecutionPayload<P>),
     Deneb(DenebExecutionPayloadAndBlobsBundle<P>),
+    Electra(DenebExecutionPayloadAndBlobsBundle<P>),
 }
 
 impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>
@@ -117,7 +137,8 @@ impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>
             ExecutionPayloadAndBlobsBundle::Capella(execution_payload) => {
                 Self::with_default(execution_payload.into())
             }
-            ExecutionPayloadAndBlobsBundle::Deneb(payload_with_blobs_bundle) => {
+            ExecutionPayloadAndBlobsBundle::Deneb(payload_with_blobs_bundle)
+            | ExecutionPayloadAndBlobsBundle::Electra(payload_with_blobs_bundle) => {
                 let DenebExecutionPayloadAndBlobsBundle {
                     execution_payload,
                     blobs_bundle,
@@ -135,6 +156,7 @@ impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>
                     Some(proofs),
                     Some(blobs),
                     None,
+                    None,
                 )
             }
         }
@@ -148,6 +170,7 @@ impl<P: Preset> ExecutionPayloadAndBlobsBundle<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
         }
     }
 }

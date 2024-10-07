@@ -1,19 +1,13 @@
 use hex_literal::hex;
 use typenum::{assert_type_eq, U1, U169, U2, U20, U22, U23, U37, U86, U87};
 
-use crate::{
-    phase0::primitives::{DomainType, H32},
-    unphased::consts::{ConcatGeneralizedIndices, GeneralizedIndexInContainer},
-};
+use crate::unphased::consts::{ConcatGeneralizedIndices, GeneralizedIndexInContainer};
 
 // Misc
 pub const UNSET_DEPOSIT_REQUESTS_START_INDEX: u64 = u64::MAX;
 pub const FULL_EXIT_REQUEST_AMOUNT: u64 = 0;
 
 pub const COMPOUNDING_WITHDRAWAL_PREFIX: &[u8] = &hex!("02");
-
-// Domains
-pub const DOMAIN_CONSOLIDATION: DomainType = H32(hex!("0B000000"));
 
 /// ```text
 /// 1┬2 Checkpoint.epoch

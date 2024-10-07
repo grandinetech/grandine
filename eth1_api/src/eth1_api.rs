@@ -204,7 +204,7 @@ impl Eth1Api {
     pub async fn new_payload<P: Preset>(
         &self,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
     ) -> Result<PayloadStatusV1> {
         match (payload, params) {
             (ExecutionPayload::Bellatrix(payload), None) => {
@@ -248,13 +248,14 @@ impl Eth1Api {
                 .await
             }
             (
-                ExecutionPayload::Electra(payload),
-                Some(ExecutionPayloadParams::Deneb {
+                ExecutionPayload::Deneb(payload),
+                Some(ExecutionPayloadParams::Electra {
                     versioned_hashes,
                     parent_beacon_block_root,
+                    execution_requests,
                 }),
             ) => {
-                let payload_v4 = ExecutionPayloadV4::from(payload);
+                let payload_v4 = ExecutionPayloadV4::from((payload, execution_requests));
                 let params = vec![
                     serde_json::to_value(payload_v4)?,
                     serde_json::to_value(versioned_hashes)?,

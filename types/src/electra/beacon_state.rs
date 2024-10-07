@@ -13,7 +13,7 @@ use crate::{
         InactivityScores, PendingBalanceDeposits, PendingConsolidations, PendingPartialWithdrawals,
         RandaoMixes, RecentRoots, Slashings, Validators,
     },
-    electra::containers::ExecutionPayloadHeader,
+    deneb::containers::ExecutionPayloadHeader,
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},

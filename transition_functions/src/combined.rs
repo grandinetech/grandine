@@ -973,7 +973,7 @@ mod spec_tests {
                     .execution_payload()
                     .to_header();
 
-                let blinded_block = message.into_blinded(header, None)?;
+                let blinded_block = message.into_blinded(header, None, None)?;
 
                 process_untrusted_blinded_block(
                     config,

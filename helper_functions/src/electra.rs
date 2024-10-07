@@ -21,7 +21,7 @@ use types::{
 use crate::{
     accessors::{beacon_committee, get_beacon_proposer_index, get_current_epoch},
     error::Error,
-    misc::{get_committee_indices, get_validator_max_effective_balance},
+    misc::{get_committee_indices, get_max_effective_balance},
     mutators::{balance, compute_exit_epoch_and_update_churn, decrease_balance, increase_balance},
     predicates::has_execution_withdrawal_credential,
     slot_report::SlotReport,
@@ -48,7 +48,7 @@ pub fn is_partially_withdrawable_validator<P: Preset>(
     validator: &Validator,
     balance: Gwei,
 ) -> bool {
-    let max_effective_balance = get_validator_max_effective_balance::<P>(validator);
+    let max_effective_balance = get_max_effective_balance::<P>(validator);
     let has_max_effective_balance = validator.effective_balance == max_effective_balance;
     let has_excess_balance = balance > max_effective_balance;
 

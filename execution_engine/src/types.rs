@@ -19,8 +19,7 @@ use types::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionPayload as ElectraExecutionPayload,
-        WithdrawalRequest,
+        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
@@ -399,9 +398,11 @@ pub struct ExecutionPayloadV4<P: Preset> {
         ContiguousList<ConsolidationRequestV1, P::MaxConsolidationRequestsPerPayload>,
 }
 
-impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
-    fn from(payload: ElectraExecutionPayload<P>) -> Self {
-        let ElectraExecutionPayload {
+impl<P: Preset> From<(DenebExecutionPayload<P>, ExecutionRequests<P>)> for ExecutionPayloadV4<P> {
+    fn from(
+        (payload, execution_requests): (DenebExecutionPayload<P>, ExecutionRequests<P>),
+    ) -> Self {
+        let DenebExecutionPayload {
             parent_hash,
             fee_recipient,
             state_root,
@@ -419,10 +420,13 @@ impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            deposit_requests,
-            withdrawal_requests,
-            consolidation_requests,
         } = payload;
+
+        let ExecutionRequests {
+            deposits: deposit_requests,
+            withdrawals: withdrawal_requests,
+            consolidations: consolidation_requests,
+        } = execution_requests;
 
         let withdrawals = withdrawals.map(Into::into);
         let deposit_requests = deposit_requests.map(Into::into);
@@ -454,7 +458,7 @@ impl<P: Preset> From<ElectraExecutionPayload<P>> for ExecutionPayloadV4<P> {
     }
 }
 
-impl<P: Preset> From<ExecutionPayloadV4<P>> for ElectraExecutionPayload<P> {
+impl<P: Preset> From<ExecutionPayloadV4<P>> for (DenebExecutionPayload<P>, ExecutionRequests<P>) {
     fn from(payload: ExecutionPayloadV4<P>) -> Self {
         let ExecutionPayloadV4 {
             parent_hash,
@@ -484,7 +488,7 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for ElectraExecutionPayload<P> {
         let withdrawal_requests = withdrawal_requests.map(Into::into);
         let consolidation_requests = consolidation_requests.map(Into::into);
 
-        Self {
+        let execution_payload = DenebExecutionPayload {
             parent_hash,
             fee_recipient,
             state_root,
@@ -502,10 +506,15 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for ElectraExecutionPayload<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-            deposit_requests,
-            withdrawal_requests,
-            consolidation_requests,
-        }
+        };
+
+        let execution_requests = ExecutionRequests {
+            deposits: deposit_requests,
+            withdrawals: withdrawal_requests,
+            consolidations: consolidation_requests,
+        };
+
+        (execution_payload, execution_requests)
     }
 }
 
@@ -769,6 +778,7 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
             Some(proofs),
             Some(blobs),
             Some(block_value),
+            None,
         )
     }
 }
@@ -792,7 +802,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
             ..
         } = response;
 
-        let execution_payload = ExecutionPayload::Electra(execution_payload.into());
+        let (execution_payload, execution_requests) = execution_payload.into();
 
         let BlobsBundleV1 {
             commitments,
@@ -801,11 +811,12 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
         } = blobs_bundle;
 
         Self::new(
-            execution_payload,
+            execution_payload.into(),
             Some(commitments),
             Some(proofs),
             Some(blobs),
             Some(block_value),
+            Some(execution_requests),
         )
     }
 }
@@ -1323,6 +1334,7 @@ mod tests {
             Some(kzg_proofs),
             Some(ContiguousList::default()),
             Some(Wei::MAX),
+            None,
         )
     }
 }

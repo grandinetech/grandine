@@ -8,7 +8,7 @@ use types::{
     nonstandard::Phase,
     phase0::primitives::{ExecutionAddress, ValidatorIndex, H256},
     preset::Preset,
-    traits::{BeaconBlock as _, PostDenebBeaconBlockBody},
+    traits::{BeaconBlock as _, PostDenebBeaconBlockBody, PostElectraBeaconBlockBody},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -94,9 +94,15 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
             .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
             .cloned();
 
+        let execution_requests = block
+            .body()
+            .post_electra()
+            .map(PostElectraBeaconBlockBody::execution_requests)
+            .cloned();
+
         let payload_header = body.execution_payload().to_header();
         let blinded_block = block
-            .into_blinded(payload_header, kzg_commitments)
+            .into_blinded(payload_header, kzg_commitments, execution_requests)
             .expect("phases should match because payload header was taken from block");
 
         Self::BlindedBeaconBlock {

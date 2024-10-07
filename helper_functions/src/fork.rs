@@ -21,9 +21,7 @@ use types::{
         containers::ExecutionPayloadHeader as DenebExecutionPayloadHeader,
     },
     electra::{
-        beacon_state::BeaconState as ElectraBeaconState,
-        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
-        containers::ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
+        beacon_state::BeaconState as ElectraBeaconState, consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
     },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
@@ -565,7 +563,7 @@ pub fn upgrade_to_electra<P: Preset>(
         excess_blob_gas,
     } = latest_execution_payload_header;
 
-    let latest_execution_payload_header = ElectraExecutionPayloadHeader {
+    let latest_execution_payload_header = DenebExecutionPayloadHeader {
         parent_hash,
         fee_recipient,
         state_root,
@@ -583,12 +581,6 @@ pub fn upgrade_to_electra<P: Preset>(
         withdrawals_root,
         blob_gas_used,
         excess_blob_gas,
-        // > [New in Electra:EIP6110]
-        deposit_requests_root: H256::default(),
-        // > [New in Electra:EIP7002]
-        withdrawal_requests_root: H256::default(),
-        // > [New in Electra:EIP7251]
-        consolidation_requests_root: H256::default(),
     };
 
     let earliest_exit_epoch = validators

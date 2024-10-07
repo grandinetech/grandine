@@ -16,7 +16,7 @@ use helper_functions::{
     },
     error::SignatureKind,
     misc::{
-        compute_epoch_at_slot, compute_timestamp_at_slot, get_validator_max_effective_balance,
+        compute_epoch_at_slot, compute_timestamp_at_slot, get_max_effective_balance,
         kzg_commitment_to_versioned_hash,
     },
     mutators::{
@@ -44,13 +44,14 @@ use types::{
     capella::containers::Withdrawal,
     combined::ExecutionPayloadParams,
     config::Config,
+    deneb::containers::ExecutionPayloadHeader,
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
         consts::{FULL_EXIT_REQUEST_AMOUNT, UNSET_DEPOSIT_REQUESTS_START_INDEX},
         containers::{
             Attestation, BeaconBlock, BeaconBlockBody, ConsolidationRequest, DepositRequest,
-            ExecutionPayloadHeader, PendingBalanceDeposit, PendingConsolidation,
-            PendingPartialWithdrawal, SignedBeaconBlock, WithdrawalRequest,
+            PendingBalanceDeposit, PendingConsolidation, PendingPartialWithdrawal,
+            SignedBeaconBlock, WithdrawalRequest,
         },
     },
     nonstandard::{smallvec, AttestationEpoch, SlashingKind},
@@ -64,8 +65,8 @@ use types::{
     },
     preset::Preset,
     traits::{
-        AttesterSlashing, BeaconState, PostElectraBeaconBlockBody, PostElectraBeaconState,
-        PostElectraExecutionPayload,
+        AttesterSlashing, BeaconState, PostCapellaExecutionPayload, PostElectraBeaconBlockBody,
+        PostElectraBeaconState,
     },
 };
 
@@ -171,17 +172,17 @@ pub fn custom_process_block<P: Preset>(
     process_operations(config, state, &block.body, &mut verifier, &mut slot_report)?;
 
     // > [New in Electra:EIP6110]
-    for deposit_request in &block.body.execution_payload.deposit_requests {
+    for deposit_request in &block.body.execution_requests.deposits {
         process_deposit_request(config, state, *deposit_request, &mut slot_report)?;
     }
 
     // > [New in Electra:EIP7002:EIP7251]
-    for withdrawal_request in &block.body.execution_payload.withdrawal_requests {
+    for withdrawal_request in &block.body.execution_requests.withdrawals {
         process_withdrawal_request(config, state, *withdrawal_request)?;
     }
 
     // > [New in Electra:EIP7251]
-    for consolidation_request in &block.body.execution_payload.consolidation_requests {
+    for consolidation_request in &block.body.execution_requests.consolidations {
         process_consolidation_request(config, state, *consolidation_request)?;
     }
 
@@ -224,7 +225,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
 
 fn process_withdrawals<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
-    execution_payload: &impl PostElectraExecutionPayload<P>,
+    execution_payload: &impl PostCapellaExecutionPayload<P>,
 ) -> Result<()>
 where
     P::MaxWithdrawalsPerPayload: NonZero,
@@ -378,7 +379,7 @@ pub fn get_expected_withdrawals<P: Preset>(
                 validator_index,
                 address,
                 amount: balance
-                    .checked_sub(get_validator_max_effective_balance::<P>(validator))
+                    .checked_sub(get_max_effective_balance::<P>(validator))
                     .expect(
                         "is_partially_withdrawable_validator should only \
                          return true if the validator has excess balance",
@@ -412,6 +413,7 @@ fn process_execution_payload<P: Preset>(
     execution_engine: impl ExecutionEngine<P>,
 ) -> Result<()> {
     let payload = &body.execution_payload;
+    let execution_requests = &body.execution_requests;
 
     // > Verify consistency of the parent hash with respect to the previous execution payload header
     let in_state = state.latest_execution_payload_header.block_hash;
@@ -446,10 +448,10 @@ fn process_execution_payload<P: Preset>(
     execution_engine.notify_new_payload(
         block_root,
         payload.clone().into(),
-        // TODO(feature/electra): ExecutionPayloadParams::Electra
-        Some(ExecutionPayloadParams::Deneb {
+        Some(ExecutionPayloadParams::Electra {
             versioned_hashes,
             parent_beacon_block_root: state.latest_block_header.parent_root,
+            execution_requests: execution_requests.clone(),
         }),
         None,
     )?;
@@ -1169,7 +1171,8 @@ mod spec_tests {
     use ssz::SszReadDefault;
     use test_generator::test_resources;
     use types::{
-        electra::containers::{Attestation, AttesterSlashing, ExecutionPayload},
+        deneb::containers::ExecutionPayload,
+        electra::containers::{Attestation, AttesterSlashing},
         phase0::containers::Deposit,
         preset::{Mainnet, Minimal},
     };

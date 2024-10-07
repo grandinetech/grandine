@@ -69,7 +69,7 @@ use types::{
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
         BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
-        ExecutionPayload as ElectraExecutionPayload,
+        ExecutionRequests,
     },
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
@@ -692,6 +692,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         beacon_block.proofs,
                         beacon_block.blobs,
                         Some(builder_mev),
+                        None,
                     ),
                     blinded_block_rewards,
                 )))
@@ -863,9 +864,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         deposits,
                         voluntary_exits,
                         sync_aggregate,
-                        execution_payload: ElectraExecutionPayload::default(),
+                        execution_payload: DenebExecutionPayload::default(),
                         bls_to_execution_changes,
                         blob_kzg_commitments: ContiguousList::default(),
+                        execution_requests: ExecutionRequests::default(),
                     },
                 })
             }
@@ -918,15 +920,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         beacon_block: BeaconBlock<P>,
         payload_header: ExecutionPayloadHeader<P>,
         blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
+        execution_requests: Option<ExecutionRequests<P>>,
     ) -> Option<(BlindedBeaconBlock<P>, Option<BlockRewards>)> {
-        let without_state_root =
-            match beacon_block.into_blinded(payload_header, blob_kzg_commitments) {
-                Ok(block) => block,
-                Err(error) => {
-                    warn!("constructed invalid blinded beacon block (error: {error:?})");
-                    return None;
-                }
-            };
+        let without_state_root = match beacon_block.into_blinded(
+            payload_header,
+            blob_kzg_commitments,
+            execution_requests,
+        ) {
+            Ok(block) => block,
+            Err(error) => {
+                warn!("constructed invalid blinded beacon block (error: {error:?})");
+                return None;
+            }
+        };
 
         let block_processor = self.producer_context.controller.block_processor();
         let pre_state = self.beacon_state.clone_arc();
@@ -1014,6 +1020,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             proofs,
             blobs,
             mev,
+            execution_requests,
         } = with_blobs_and_mev.unwrap_or_else(|| WithBlobsAndMev::with_default(None));
 
         let slot = self.beacon_state.slot();
@@ -1034,7 +1041,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let without_state_root_with_payload = block_without_state_root
             .with_execution_payload(execution_payload)?
-            .with_blob_kzg_commitments(commitments);
+            .with_blob_kzg_commitments(commitments)
+            .with_execution_requests(execution_requests);
 
         self.process_beacon_block(without_state_root_with_payload)
             .map(|(beacon_block, block_rewards)| {
@@ -1046,6 +1054,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         proofs,
                         blobs,
                         mev,
+                        // Execution requests are moved to block.
+                        None,
                     ),
                     block_rewards,
                 )
@@ -1065,12 +1075,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         match header_handle.await? {
             Ok(Some(response)) => {
                 let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
+                let execution_requests = response.execution_requests().cloned();
                 let builder_mev = response.mev();
 
                 self.blinded_block_from_beacon_block(
                     block_without_state_root,
                     response.execution_payload_header(),
                     blob_kzg_commitments,
+                    execution_requests,
                 )
                 .map(|(blinded_block, block_rewards)| (blinded_block, block_rewards, builder_mev))
                 .pipe(Ok)

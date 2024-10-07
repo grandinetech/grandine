@@ -827,7 +827,7 @@ pub fn get_active_balance<P: Preset>(
     validator_index: ValidatorIndex,
 ) -> Result<Gwei> {
     let max_effective_balance =
-        misc::get_validator_max_effective_balance::<P>(state.validators().get(validator_index)?);
+        misc::get_max_effective_balance::<P>(state.validators().get(validator_index)?);
 
     core::cmp::min(
         state.balances().get(validator_index).copied()?,

@@ -39,7 +39,7 @@ use types::{
     },
     electra::containers::{
         Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock,
-        BeaconBlockBody as ElectraBeaconBlockBody, ExecutionPayload as ElectraExecutionPayload,
+        BeaconBlockBody as ElectraBeaconBlockBody,
     },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
     phase0::{
@@ -377,22 +377,13 @@ pub fn execution_payload<P: Preset>(
             ..CapellaExecutionPayload::default()
         }
         .into(),
-        Phase::Deneb => DenebExecutionPayload {
+        Phase::Deneb | Phase::Electra => DenebExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
             block_hash,
             withdrawals,
             ..DenebExecutionPayload::default()
-        }
-        .into(),
-        Phase::Electra => ElectraExecutionPayload {
-            parent_hash,
-            prev_randao,
-            timestamp,
-            block_hash,
-            withdrawals,
-            ..ElectraExecutionPayload::default()
         }
         .into(),
     };

@@ -79,10 +79,8 @@ use crate::{
             Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
             BlindedBeaconBlock as ElectraBlindedBeaconBlock,
-            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, ConsolidationRequest,
-            DepositRequest, ExecutionPayload as ElectraExecutionPayload,
-            ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
-            IndexedAttestation as ElectraIndexedAttestation, WithdrawalRequest,
+            BlindedBeaconBlockBody as ElectraBlindedBeaconBlockBody, ExecutionRequests,
+            IndexedAttestation as ElectraIndexedAttestation,
         },
     },
     nonstandard::Phase,
@@ -1260,6 +1258,7 @@ pub trait PostElectraBeaconBlockBody<P: Preset>: PostDenebBeaconBlockBody<P> {
         &self,
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
     fn consolidation_requests_root(&self) -> H256;
+    fn execution_requests(&self) -> &ExecutionRequests<P>;
 }
 
 impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
@@ -1274,9 +1273,11 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
     }
 
     fn consolidation_requests_root(&self) -> H256 {
-        self.execution_payload
-            .consolidation_requests
-            .hash_tree_root()
+        self.execution_requests.consolidations.hash_tree_root()
+    }
+
+    fn execution_requests(&self) -> &ExecutionRequests<P> {
+        &self.execution_requests
     }
 }
 
@@ -1292,7 +1293,11 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<
     }
 
     fn consolidation_requests_root(&self) -> H256 {
-        self.execution_payload_header.consolidation_requests_root
+        self.execution_requests.consolidations.hash_tree_root()
+    }
+
+    fn execution_requests(&self) -> &ExecutionRequests<P> {
+        &self.execution_requests
     }
 }
 
@@ -1412,42 +1417,6 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayloadHeader<P> {
     }
 }
 
-impl<P: Preset> ExecutionPayload<P> for ElectraExecutionPayload<P> {
-    fn block_hash(&self) -> ExecutionBlockHash {
-        self.block_hash
-    }
-
-    fn parent_hash(&self) -> ExecutionBlockHash {
-        self.parent_hash
-    }
-
-    fn is_default_payload(&self) -> bool {
-        self.is_default()
-    }
-
-    fn to_header(&self) -> CombinedExecutionPayloadHeader<P> {
-        ElectraExecutionPayloadHeader::from(self).into()
-    }
-}
-
-impl<P: Preset> ExecutionPayload<P> for ElectraExecutionPayloadHeader<P> {
-    fn block_hash(&self) -> ExecutionBlockHash {
-        self.block_hash
-    }
-
-    fn parent_hash(&self) -> ExecutionBlockHash {
-        self.parent_hash
-    }
-
-    fn is_default_payload(&self) -> bool {
-        self.is_default()
-    }
-
-    fn to_header(&self) -> CombinedExecutionPayloadHeader<P> {
-        self.clone().into()
-    }
-}
-
 pub trait PostCapellaExecutionPayload<P: Preset>: ExecutionPayload<P> {
     fn withdrawals(&self) -> &ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>;
 }
@@ -1459,12 +1428,6 @@ impl<P: Preset> PostCapellaExecutionPayload<P> for CapellaExecutionPayload<P> {
 }
 
 impl<P: Preset> PostCapellaExecutionPayload<P> for DenebExecutionPayload<P> {
-    fn withdrawals(&self) -> &ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload> {
-        &self.withdrawals
-    }
-}
-
-impl<P: Preset> PostCapellaExecutionPayload<P> for ElectraExecutionPayload<P> {
     fn withdrawals(&self) -> &ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload> {
         &self.withdrawals
     }
@@ -1483,62 +1446,6 @@ impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for CapellaExecutionPayload
 impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for DenebExecutionPayloadHeader<P> {
     fn withdrawals_root(&self) -> H256 {
         self.withdrawals_root
-    }
-}
-
-impl<P: Preset> PostCapellaExecutionPayloadHeader<P> for ElectraExecutionPayloadHeader<P> {
-    fn withdrawals_root(&self) -> H256 {
-        self.withdrawals_root
-    }
-}
-
-pub trait PostElectraExecutionPayload<P: Preset>: PostCapellaExecutionPayload<P> {
-    fn deposit_requests(&self) -> &ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>;
-    fn withdrawal_requests(
-        &self,
-    ) -> &ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>;
-    fn consolidation_requests(
-        &self,
-    ) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>;
-}
-
-impl<P: Preset> PostElectraExecutionPayload<P> for ElectraExecutionPayload<P> {
-    fn deposit_requests(&self) -> &ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload> {
-        &self.deposit_requests
-    }
-
-    fn withdrawal_requests(
-        &self,
-    ) -> &ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload> {
-        &self.withdrawal_requests
-    }
-
-    fn consolidation_requests(
-        &self,
-    ) -> &ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload> {
-        &self.consolidation_requests
-    }
-}
-
-pub trait PostElectraExecutionPayloadHeader<P: Preset>:
-    PostCapellaExecutionPayloadHeader<P>
-{
-    fn deposit_requests_root(&self) -> H256;
-    fn withdrawal_requests_root(&self) -> H256;
-    fn consolidation_requests_root(&self) -> H256;
-}
-
-impl<P: Preset> PostElectraExecutionPayloadHeader<P> for ElectraExecutionPayloadHeader<P> {
-    fn deposit_requests_root(&self) -> H256 {
-        self.deposit_requests_root
-    }
-
-    fn withdrawal_requests_root(&self) -> H256 {
-        self.withdrawal_requests_root
-    }
-
-    fn consolidation_requests_root(&self) -> H256 {
-        self.consolidation_requests_root
     }
 }
 

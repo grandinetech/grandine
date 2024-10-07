@@ -65,9 +65,7 @@ use crate::{
         containers::{
             AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
             AttesterSlashing as ElectraAttesterSlashing, BeaconBlock as ElectraBeaconBlock,
-            BlindedBeaconBlock as ElectraBlindedBeaconBlock,
-            ExecutionPayload as ElectraExecutionPayload,
-            ExecutionPayloadHeader as ElectraExecutionPayloadHeader,
+            BlindedBeaconBlock as ElectraBlindedBeaconBlock, ExecutionRequests,
             LightClientBootstrap as ElectraLightClientBootstrap,
             LightClientFinalityUpdate as ElectraLightClientFinalityUpdate,
             LightClientOptimisticUpdate as ElectraLightClientOptimisticUpdate,
@@ -211,7 +209,7 @@ impl<P: Preset> BeaconState<P> {
             (Self::Deneb(state), ExecutionPayloadHeader::Deneb(header)) => {
                 state.latest_execution_payload_header = header;
             }
-            (Self::Electra(state), ExecutionPayloadHeader::Electra(header)) => {
+            (Self::Electra(state), ExecutionPayloadHeader::Deneb(header)) => {
                 state.latest_execution_payload_header = header;
             }
             (_, header) => {
@@ -446,7 +444,7 @@ impl<P: Preset> SignedBeaconBlock<P> {
             Self::Deneb(block) => Some(ExecutionPayload::Deneb(
                 block.message.body.execution_payload,
             )),
-            Self::Electra(block) => Some(ExecutionPayload::Electra(
+            Self::Electra(block) => Some(ExecutionPayload::Deneb(
                 block.message.body.execution_payload,
             )),
         }
@@ -602,7 +600,7 @@ impl<P: Preset> BeaconBlock<P> {
             (Self::Deneb(block), ExecutionPayload::Deneb(payload)) => {
                 block.body.execution_payload = payload;
             }
-            (Self::Electra(block), ExecutionPayload::Electra(payload)) => {
+            (Self::Electra(block), ExecutionPayload::Deneb(payload)) => {
                 block.body.execution_payload = payload;
             }
             (_, payload) => {
@@ -642,10 +640,32 @@ impl<P: Preset> BeaconBlock<P> {
         self
     }
 
+    #[must_use]
+    pub fn with_execution_requests(
+        mut self,
+        execution_requests: Option<ExecutionRequests<P>>,
+    ) -> Self {
+        let Some(execution_requests) = execution_requests else {
+            return self;
+        };
+
+        match &mut self {
+            Self::Electra(block) => block.body.execution_requests = execution_requests,
+            _ => {
+                // This match arm will silently match any new phases.
+                // Cause a compilation error if a new phase is added.
+                const_assert_eq!(Phase::CARDINALITY, 6);
+            }
+        }
+
+        self
+    }
+
     pub fn into_blinded(
         self,
         execution_payload_header: ExecutionPayloadHeader<P>,
         kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
+        execution_requests: Option<ExecutionRequests<P>>,
     ) -> Result<BlindedBeaconBlock<P>, BlockPhaseError> {
         match (self, execution_payload_header) {
             (Self::Bellatrix(block), ExecutionPayloadHeader::Bellatrix(header)) => {
@@ -657,8 +677,12 @@ impl<P: Preset> BeaconBlock<P> {
             (Self::Deneb(block), ExecutionPayloadHeader::Deneb(header)) => Ok(block
                 .with_execution_payload_header_and_kzg_commitments(header, kzg_commitments)
                 .into()),
-            (Self::Electra(block), ExecutionPayloadHeader::Electra(header)) => Ok(block
-                .with_execution_payload_header_and_kzg_commitments(header, kzg_commitments)
+            (Self::Electra(block), ExecutionPayloadHeader::Deneb(header)) => Ok(block
+                .with_execution_payload_header_and_kzg_commitments(
+                    header,
+                    kzg_commitments,
+                    execution_requests,
+                )
                 .into()),
             (block, header) => {
                 // This match arm will silently match any new phases.
@@ -681,7 +705,7 @@ impl<P: Preset> BeaconBlock<P> {
             }
             Self::Capella(block) => Some(ExecutionPayload::Capella(block.body.execution_payload)),
             Self::Deneb(block) => Some(ExecutionPayload::Deneb(block.body.execution_payload)),
-            Self::Electra(block) => Some(ExecutionPayload::Electra(block.body.execution_payload)),
+            Self::Electra(block) => Some(ExecutionPayload::Deneb(block.body.execution_payload)),
         }
     }
 
@@ -923,7 +947,7 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             (Self::Deneb(block), ExecutionPayload::Deneb(payload)) => {
                 Ok(block.with_execution_payload(payload).into())
             }
-            (Self::Electra(block), ExecutionPayload::Electra(payload)) => {
+            (Self::Electra(block), ExecutionPayload::Deneb(payload)) => {
                 Ok(block.with_execution_payload(payload).into())
             }
             (block, payload) => {
@@ -961,7 +985,6 @@ pub enum ExecutionPayload<P: Preset> {
     Bellatrix(BellatrixExecutionPayload<P>),
     Capella(CapellaExecutionPayload<P>),
     Deneb(DenebExecutionPayload<P>),
-    Electra(ElectraExecutionPayload<P>),
 }
 
 impl<P: Preset> SszHash for ExecutionPayload<P> {
@@ -972,7 +995,6 @@ impl<P: Preset> SszHash for ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.hash_tree_root(),
             Self::Capella(payload) => payload.hash_tree_root(),
             Self::Deneb(payload) => payload.hash_tree_root(),
-            Self::Electra(payload) => payload.hash_tree_root(),
         }
     }
 }
@@ -983,7 +1005,6 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
-            Self::Electra(_) => Phase::Electra,
         }
     }
 
@@ -992,7 +1013,6 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.block_number,
             Self::Capella(payload) => payload.block_number,
             Self::Deneb(payload) => payload.block_number,
-            Self::Electra(payload) => payload.block_number,
         }
     }
 
@@ -1001,7 +1021,6 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.block_hash,
             Self::Capella(payload) => payload.block_hash,
             Self::Deneb(payload) => payload.block_hash,
-            Self::Electra(payload) => payload.block_hash,
         }
     }
 }
@@ -1012,7 +1031,6 @@ pub enum ExecutionPayloadHeader<P: Preset> {
     Bellatrix(BellatrixExecutionPayloadHeader<P>),
     Capella(CapellaExecutionPayloadHeader<P>),
     Deneb(DenebExecutionPayloadHeader<P>),
-    Electra(ElectraExecutionPayloadHeader<P>),
 }
 
 impl<P: Preset> ExecutionPayloadHeader<P> {
@@ -1021,7 +1039,6 @@ impl<P: Preset> ExecutionPayloadHeader<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
-            Self::Electra(_) => Phase::Electra,
         }
     }
 }
@@ -1032,10 +1049,15 @@ impl<P: Preset> ExecutionPayloadHeader<P> {
 //                      - <https://github.com/ethereum/consensus-specs/releases/tag/v1.4.0-alpha.0>
 //                      - <https://github.com/ethereum/consensus-specs/pull/3359>
 #[derive(Serialize)]
-pub enum ExecutionPayloadParams {
+pub enum ExecutionPayloadParams<P: Preset> {
     Deneb {
         versioned_hashes: Vec<VersionedHash>,
         parent_beacon_block_root: H256,
+    },
+    Electra {
+        versioned_hashes: Vec<VersionedHash>,
+        parent_beacon_block_root: H256,
+        execution_requests: ExecutionRequests<P>,
     },
 }
 

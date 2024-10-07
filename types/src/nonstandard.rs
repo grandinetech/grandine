@@ -25,6 +25,7 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     eip7594::{DataColumnIdentifier, DataColumnSidecar},
+    electra::containers::ExecutionRequests,
     phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
@@ -272,12 +273,13 @@ pub struct WithBlobsAndMev<T, P: Preset> {
     pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobsPerBlock>>,
     pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobsPerBlock>>,
     pub mev: Option<Wei>,
+    pub execution_requests: Option<ExecutionRequests<P>>,
 }
 
 impl<T, P: Preset> WithBlobsAndMev<T, P> {
     #[must_use]
     pub const fn with_default(value: T) -> Self {
-        Self::new(value, None, None, None, None)
+        Self::new(value, None, None, None, None, None)
     }
 
     #[must_use]
@@ -287,6 +289,7 @@ impl<T, P: Preset> WithBlobsAndMev<T, P> {
             commitments,
             proofs,
             blobs,
+            execution_requests,
             ..
         } = self;
 
@@ -296,6 +299,7 @@ impl<T, P: Preset> WithBlobsAndMev<T, P> {
             proofs,
             blobs,
             mev: Some(mev),
+            execution_requests,
         }
     }
 
@@ -312,6 +316,7 @@ impl<T, P: Preset> WithBlobsAndMev<T, P> {
             proofs,
             blobs,
             mev,
+            execution_requests,
         } = self;
 
         let value = function(value);
@@ -322,6 +327,7 @@ impl<T, P: Preset> WithBlobsAndMev<T, P> {
             proofs,
             blobs,
             mev,
+            execution_requests,
         }
     }
 }

@@ -1,11 +1,12 @@
-use ssz::{ContiguousList, SszHash as _};
-use std_ext::ArcExt as _;
+use ssz::ContiguousList;
 
 use crate::{
-    deneb::primitives::KzgCommitment,
+    deneb::{
+        containers::{ExecutionPayload, ExecutionPayloadHeader},
+        primitives::KzgCommitment,
+    },
     electra::containers::{
-        BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody, ExecutionPayload,
-        ExecutionPayloadHeader,
+        BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody, ExecutionRequests,
     },
     phase0::primitives::H256,
     preset::Preset,
@@ -16,6 +17,7 @@ impl<P: Preset> BeaconBlock<P> {
         self,
         execution_payload_header: ExecutionPayloadHeader<P>,
         kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
+        execution_requests: Option<ExecutionRequests<P>>,
     ) -> BlindedBeaconBlock<P> {
         let Self {
             slot,
@@ -38,6 +40,7 @@ impl<P: Preset> BeaconBlock<P> {
             execution_payload: _,
             bls_to_execution_changes,
             blob_kzg_commitments,
+            execution_requests: beacon_block_execution_requests,
         } = body;
 
         BlindedBeaconBlock {
@@ -58,6 +61,7 @@ impl<P: Preset> BeaconBlock<P> {
                 execution_payload_header,
                 bls_to_execution_changes,
                 blob_kzg_commitments: kzg_commitments.unwrap_or(blob_kzg_commitments),
+                execution_requests: execution_requests.unwrap_or(beacon_block_execution_requests),
             },
         }
     }
@@ -86,6 +90,7 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             execution_payload_header: _,
             bls_to_execution_changes,
             blob_kzg_commitments,
+            execution_requests,
         } = body;
 
         let body = BeaconBlockBody {
@@ -101,6 +106,7 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             execution_payload,
             bls_to_execution_changes,
             blob_kzg_commitments,
+            execution_requests,
         };
 
         BeaconBlock {
@@ -116,62 +122,5 @@ impl<P: Preset> BlindedBeaconBlock<P> {
     pub const fn with_state_root(mut self, state_root: H256) -> Self {
         self.state_root = state_root;
         self
-    }
-}
-
-impl<P: Preset> From<&ExecutionPayload<P>> for ExecutionPayloadHeader<P> {
-    fn from(payload: &ExecutionPayload<P>) -> Self {
-        let ExecutionPayload {
-            parent_hash,
-            fee_recipient,
-            state_root,
-            receipts_root,
-            logs_bloom,
-            prev_randao,
-            block_number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            ref extra_data,
-            base_fee_per_gas,
-            block_hash,
-            ref transactions,
-            ref withdrawals,
-            blob_gas_used,
-            excess_blob_gas,
-            ref deposit_requests,
-            ref withdrawal_requests,
-            ref consolidation_requests,
-        } = *payload;
-
-        let extra_data = extra_data.clone_arc();
-        let transactions_root = transactions.hash_tree_root();
-        let withdrawals_root = withdrawals.hash_tree_root();
-        let deposit_requests_root = deposit_requests.hash_tree_root();
-        let withdrawal_requests_root = withdrawal_requests.hash_tree_root();
-        let consolidation_requests_root = consolidation_requests.hash_tree_root();
-
-        Self {
-            parent_hash,
-            fee_recipient,
-            state_root,
-            receipts_root,
-            logs_bloom,
-            prev_randao,
-            block_number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            extra_data,
-            base_fee_per_gas,
-            block_hash,
-            transactions_root,
-            withdrawals_root,
-            blob_gas_used,
-            excess_blob_gas,
-            deposit_requests_root,
-            withdrawal_requests_root,
-            consolidation_requests_root,
-        }
     }
 }

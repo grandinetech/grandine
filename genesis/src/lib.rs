@@ -187,7 +187,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
             if is_post_electra {
                 validator.effective_balance = balance
                     .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
-                    .min(misc::get_validator_max_effective_balance::<P>(validator));
+                    .min(misc::get_max_effective_balance::<P>(validator));
 
                 if validator.effective_balance >= P::MIN_ACTIVATION_BALANCE {
                     validator.activation_eligibility_epoch = GENESIS_EPOCH;
@@ -425,12 +425,9 @@ mod spec_tests {
             Phase::Capella => case
                 .try_ssz_default("execution_payload_header")
                 .map(ExecutionPayloadHeader::Capella),
-            Phase::Deneb => case
+            Phase::Deneb | Phase::Electra => case
                 .try_ssz_default("execution_payload_header")
                 .map(ExecutionPayloadHeader::Deneb),
-            Phase::Electra => case
-                .try_ssz_default("execution_payload_header")
-                .map(ExecutionPayloadHeader::Electra),
         };
 
         assert_eq!(

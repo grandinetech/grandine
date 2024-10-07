@@ -5,6 +5,7 @@ use crate::{
     bellatrix::containers::BuilderBid as BellatrixBuilderBid,
     capella::containers::BuilderBid as CapellaBuilderBid, consts::DOMAIN_APPLICATION_BUILDER,
     deneb::containers::BuilderBid as DenebBuilderBid,
+    electra::containers::BuilderBid as ElectraBuilderBid,
     unphased::containers::ValidatorRegistrationV1,
 };
 
@@ -22,6 +23,12 @@ impl<P: Preset> SignForAllForks for CapellaBuilderBid<P> {
 
 /// <https://github.com/ethereum/builder-specs/blob/d246d57ba2a0c2378c1de4a2bdaff7cd438e99ee/specs/builder.md#signing>
 impl<P: Preset> SignForAllForks for DenebBuilderBid<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_APPLICATION_BUILDER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Builder;
+}
+
+/// <https://github.com/ethereum/builder-specs/blob/d246d57ba2a0c2378c1de4a2bdaff7cd438e99ee/specs/builder.md#signing>
+impl<P: Preset> SignForAllForks for ElectraBuilderBid<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_APPLICATION_BUILDER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Builder;
 }

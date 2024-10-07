@@ -23,12 +23,8 @@ use types::{
     },
     config::Config,
     deneb::containers::BeaconBlock as DenebBeaconBlock,
-    electra::{
-        consts::DOMAIN_CONSOLIDATION,
-        containers::{
-            AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
-            ConsolidationRequest,
-        },
+    electra::containers::{
+        AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
     },
     phase0::{
         consts::{
@@ -351,12 +347,6 @@ impl<P: Preset> SignForSingleFork<P> for BlindedBeaconBlock<P> {
     fn epoch(&self) -> Epoch {
         misc::compute_epoch_at_slot::<P>(self.slot())
     }
-}
-
-// <https://github.com/ethereum/consensus-specs/blob/v1.5.0-alpha.1/specs/electra/beacon-chain.md#new-process_consolidation>
-impl<P: Preset> SignForAllForksWithGenesis<P> for ConsolidationRequest {
-    const DOMAIN_TYPE: DomainType = DOMAIN_CONSOLIDATION;
-    const SIGNATURE_KIND: SignatureKind = SignatureKind::Consolidation;
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>

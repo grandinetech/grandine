@@ -1,8 +1,11 @@
+use core::{cell::LazyCell, ops::Mul as _};
+
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use helper_functions::{
     accessors::{
         get_activation_exit_churn_limit, get_active_balance, get_current_epoch, get_next_epoch,
+        total_active_balance,
     },
     electra::{initiate_validator_exit, is_eligible_for_activation_queue},
     misc::{compute_activation_exit_epoch, vec_of_default},
@@ -14,23 +17,26 @@ use helper_functions::{
 use prometheus_metrics::METRICS;
 use ssz::{PersistentList, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     capella::containers::HistoricalSummary,
     config::Config,
-    electra::beacon_state::BeaconState,
-    phase0::consts::FAR_FUTURE_EPOCH,
+    electra::beacon_state::BeaconState as ElectraBeaconState,
+    phase0::{consts::FAR_FUTURE_EPOCH, primitives::Gwei},
     preset::Preset,
-    traits::{BeaconState as _, PostElectraBeaconState},
+    traits::{BeaconState, PostElectraBeaconState},
 };
 
 use super::epoch_intermediates;
 use crate::{
-    altair::{self, EpochDeltasForTransition, EpochReport},
+    altair::{
+        self, EpochDeltasForTransition, EpochReport, ValidatorSummary as AltairValidatorSummary,
+    },
     bellatrix, unphased,
-    unphased::ValidatorSummary,
+    unphased::{SlashingPenalties, ValidatorSummary},
 };
 
-pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset>) -> Result<()> {
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.epoch_processing_times.start_timer());
@@ -82,7 +88,10 @@ pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> R
     Ok(())
 }
 
-pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> Result<EpochReport> {
+pub fn epoch_report<P: Preset>(
+    config: &Config,
+    state: &mut ElectraBeaconState<P>,
+) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
     altair::process_justification_and_finalization(state, statistics);
@@ -112,7 +121,7 @@ pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> R
     unphased::process_rewards_and_penalties(state, epoch_deltas.iter().copied());
     process_registry_updates(config, state, summaries.as_mut_slice())?;
 
-    let slashing_penalties = bellatrix::process_slashings(state, summaries.iter().copied());
+    let slashing_penalties = process_slashings(state, summaries.iter().copied());
     let post_balances = state.balances.into_iter().copied().collect();
 
     // Do the rest of epoch processing to leave the state valid for further transitions.
@@ -138,7 +147,7 @@ pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> R
 
 fn process_registry_updates<P: Preset>(
     config: &Config,
-    state: &mut BeaconState<P>,
+    state: &mut ElectraBeaconState<P>,
     summaries: &mut [impl ValidatorSummary],
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
@@ -347,7 +356,7 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectra
     });
 }
 
-fn process_historical_summaries_update<P: Preset>(state: &mut BeaconState<P>) -> Result<()> {
+fn process_historical_summaries_update<P: Preset>(state: &mut ElectraBeaconState<P>) -> Result<()> {
     let next_epoch = get_next_epoch(state);
 
     // > Set historical block root accumulator.
@@ -361,6 +370,66 @@ fn process_historical_summaries_update<P: Preset>(state: &mut BeaconState<P>) ->
     }
 
     Ok(())
+}
+
+fn process_slashings<P: Preset, S: SlashingPenalties>(
+    state: &mut impl BeaconState<P>,
+    summaries: impl IntoIterator<Item = AltairValidatorSummary>,
+) -> S {
+    let current_epoch = get_current_epoch(state);
+    let total_active_balance = total_active_balance(state);
+
+    let (balances, slashings) = state.balances_mut_with_slashings();
+
+    // Calculating this lazily saves 30-40 μs in typical networks.
+    let adjusted_total_slashing_balance = LazyCell::new(|| {
+        slashings
+            .into_iter()
+            .sum::<Gwei>()
+            .mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
+            .min(total_active_balance)
+    });
+
+    let mut summaries = (0..).zip(summaries);
+    let mut slashing_penalties = S::default();
+
+    // > Factored out from penalty numerator to avoid uint64 overflow
+    let increment = P::EFFECTIVE_BALANCE_INCREMENT;
+
+    let penalty_per_effective_balance_increment =
+        *adjusted_total_slashing_balance / (total_active_balance / increment);
+
+    balances.update(|balance| {
+        let (validator_index, summary) = summaries
+            .next()
+            .expect("list of validators and list of balances should have the same length");
+
+        let AltairValidatorSummary {
+            effective_balance,
+            slashed,
+            withdrawable_epoch,
+            ..
+        } = summary;
+
+        if !slashed {
+            return;
+        }
+
+        if current_epoch + P::EpochsPerSlashingsVector::U64 / 2 != withdrawable_epoch {
+            return;
+        }
+
+        let effective_balance_increments = effective_balance / increment;
+
+        // > [Modified in Electra:EIP7251]
+        let penalty = penalty_per_effective_balance_increment * effective_balance_increments;
+
+        decrease_balance(balance, penalty);
+
+        slashing_penalties.add(validator_index, penalty);
+    });
+
+    slashing_penalties
 }
 
 #[cfg(test)]
@@ -612,7 +681,7 @@ mod spec_tests {
         run_case::<P>(case, |state| {
             let (_, summaries, _) = altair::statistics(state);
 
-            bellatrix::process_slashings::<_, ()>(state, summaries);
+            process_slashings::<_, ()>(state, summaries);
 
             Ok(())
         });
@@ -678,7 +747,7 @@ mod spec_tests {
 
     fn run_case<P: Preset>(
         case: Case,
-        sub_transition: impl FnOnce(&mut BeaconState<P>) -> Result<()>,
+        sub_transition: impl FnOnce(&mut ElectraBeaconState<P>) -> Result<()>,
     ) {
         let mut state = case.ssz_default("pre");
         let post_option = case.try_ssz_default("post");

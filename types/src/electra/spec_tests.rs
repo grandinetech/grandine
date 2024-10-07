@@ -17,7 +17,9 @@ mod tested_types {
         capella::containers::{
             BlsToExecutionChange, HistoricalSummary, SignedBlsToExecutionChange, Withdrawal,
         },
-        deneb::containers::{BlobIdentifier, BlobSidecar},
+        deneb::containers::{
+            BlobIdentifier, BlobSidecar, ExecutionPayload, ExecutionPayloadHeader,
+        },
         electra::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
@@ -178,6 +180,12 @@ tests_for_type! {
     ExecutionPayloadHeader<_>,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/ExecutionPayloadHeader/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/ExecutionPayloadHeader/*/*",
+}
+
+tests_for_type! {
+    ExecutionRequests<_>,
+    "consensus-spec-tests/tests/mainnet/electra/ssz_static/ExecutionRequests/*/*",
+    "consensus-spec-tests/tests/minimal/electra/ssz_static/ExecutionRequests/*/*",
 }
 
 tests_for_type! {

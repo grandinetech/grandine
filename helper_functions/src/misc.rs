@@ -440,7 +440,10 @@ pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
         body.execution_payload().hash_tree_root(),
     );
 
-    proof[depth - 2] = ZERO_HASHES[2];
+    proof[depth - 2] = hashing::hash_256_256(
+        hashing::hash_256_256(body.execution_requests().hash_tree_root(), ZERO_HASHES[0]),
+        ZERO_HASHES[1],
+    );
 
     proof[depth - 1] = hashing::hash_256_256(
         hashing::hash_256_256(
@@ -526,7 +529,7 @@ pub fn get_committee_indices<P: Preset>(
 
 // > Get max effective balance for ``validator``.
 #[must_use]
-pub fn get_validator_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
+pub fn get_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
     if predicates::has_compounding_withdrawal_credential(validator) {
         P::MAX_EFFECTIVE_BALANCE_ELECTRA
     } else {

@@ -1,28 +1,22 @@
-use std::sync::Arc;
-
 use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use serde::{Deserialize, Serialize};
-use ssz::{BitList, BitVector, ByteList, ByteVector, ContiguousList, ContiguousVector, Ssz};
+use ssz::{BitList, BitVector, ContiguousList, ContiguousVector, Ssz};
 use typenum::Log2;
 
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
-    bellatrix::primitives::{Gas, Transaction},
-    capella::{
-        consts::ExecutionPayloadIndex,
-        containers::{SignedBlsToExecutionChange, Withdrawal},
+    capella::{consts::ExecutionPayloadIndex, containers::SignedBlsToExecutionChange},
+    deneb::{
+        containers::{ExecutionPayload, ExecutionPayloadHeader},
+        primitives::KzgCommitment,
     },
-    deneb::primitives::KzgCommitment,
     electra::consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
     phase0::{
         containers::{
             AttestationData, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
             SignedVoluntaryExit,
         },
-        primitives::{
-            Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, Uint256,
-            UnixSeconds, ValidatorIndex, H256,
-        },
+        primitives::{Epoch, ExecutionAddress, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -80,6 +74,7 @@ pub struct BeaconBlockBody<P: Preset> {
     pub bls_to_execution_changes:
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub execution_requests: ExecutionRequests<P>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Ssz)]
@@ -110,6 +105,7 @@ pub struct BlindedBeaconBlockBody<P: Preset> {
     pub bls_to_execution_changes:
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub execution_requests: ExecutionRequests<P>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
@@ -135,71 +131,10 @@ pub struct WithdrawalRequest {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-pub struct ExecutionPayload<P: Preset> {
-    pub parent_hash: ExecutionBlockHash,
-    pub fee_recipient: ExecutionAddress,
-    pub state_root: H256,
-    pub receipts_root: H256,
-    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
-    pub prev_randao: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub block_number: ExecutionBlockNumber,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub gas_limit: Gas,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub gas_used: Gas,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub timestamp: UnixSeconds,
-    // TODO(Grandine Team): Try removing the `Arc` when we have data for benchmarking Bellatrix.
-    //                      The cost of cloning `ByteList<MaxExtraDataBytes>` may be negligible.
-    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
-    pub base_fee_per_gas: Uint256,
-    pub block_hash: ExecutionBlockHash,
-    // TODO(Grandine Team): Consider removing the `Arc`. It can be removed with no loss of performance
-    //                      at the cost of making `ExecutionPayloadV1` more complicated.
-    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
-    pub withdrawals: ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub blob_gas_used: Gas,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub excess_blob_gas: Gas,
-    pub deposit_requests: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
-    pub withdrawal_requests: ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    pub consolidation_requests:
-        ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
-}
-
-#[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
-#[serde(deny_unknown_fields)]
-pub struct ExecutionPayloadHeader<P: Preset> {
-    pub parent_hash: ExecutionBlockHash,
-    pub fee_recipient: ExecutionAddress,
-    pub state_root: H256,
-    pub receipts_root: H256,
-    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
-    pub prev_randao: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub block_number: ExecutionBlockNumber,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub gas_limit: Gas,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub gas_used: Gas,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub timestamp: UnixSeconds,
-    // TODO(Grandine Team): Try removing the `Arc` when we have data for benchmarking Bellatrix.
-    //                      The cost of cloning `ByteList<MaxExtraDataBytes>` may be negligible.
-    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
-    pub base_fee_per_gas: Uint256,
-    pub block_hash: ExecutionBlockHash,
-    pub transactions_root: H256,
-    pub withdrawals_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub blob_gas_used: Gas,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub excess_blob_gas: Gas,
-    pub deposit_requests_root: H256,
-    pub withdrawal_requests_root: H256,
-    pub consolidation_requests_root: H256,
+pub struct ExecutionRequests<P: Preset> {
+    pub deposits: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
+    pub withdrawals: ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    pub consolidations: ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

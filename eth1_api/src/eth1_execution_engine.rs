@@ -54,7 +54,7 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
         &self,
         beacon_block_root: H256,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()> {
         ExecutionServiceMessage::NotifyNewPayload {

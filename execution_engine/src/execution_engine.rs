@@ -38,7 +38,7 @@ pub trait ExecutionEngine<P: Preset> {
         &self,
         block_root: H256,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()>;
 
@@ -74,7 +74,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
         &self,
         beacon_block_root: H256,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()> {
         (*self).notify_new_payload(beacon_block_root, payload, params, sender)
@@ -113,7 +113,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
         &self,
         beacon_block_root: H256,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()> {
         self.as_ref()
@@ -157,7 +157,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
         &self,
         beacon_block_root: H256,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()> {
         self.lock()
@@ -196,7 +196,7 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
         &self,
         _beacon_block_root: H256,
         _payload: ExecutionPayload<P>,
-        _params: Option<ExecutionPayloadParams>,
+        _params: Option<ExecutionPayloadParams<P>>,
         _sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()> {
         Ok(())
@@ -234,7 +234,7 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine {
         &self,
         _beacon_block_root: H256,
         _payload: ExecutionPayload<P>,
-        _params: Option<ExecutionPayloadParams>,
+        _params: Option<ExecutionPayloadParams<P>>,
         _sender: Option<Sender<Result<PayloadStatusV1>>>,
     ) -> Result<()> {
         ensure!(self.execution_valid, Error);

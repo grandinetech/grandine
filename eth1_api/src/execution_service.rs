@@ -165,7 +165,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         &self,
         beacon_block_root: H256,
         payload: ExecutionPayload<P>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
     ) -> Result<PayloadStatusV1> {
         let block_number = payload.block_number();
         let block_hash = payload.block_hash();

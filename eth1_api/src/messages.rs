@@ -21,7 +21,7 @@ pub enum ExecutionServiceMessage<P: Preset> {
     NotifyNewPayload {
         beacon_block_root: H256,
         payload: Box<ExecutionPayload<P>>,
-        params: Option<ExecutionPayloadParams>,
+        params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     },
 }
