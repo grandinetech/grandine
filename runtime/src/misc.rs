@@ -1,8 +1,11 @@
 use core::num::NonZeroU64;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
+use anyhow::{ensure, Result};
 use bytesize::ByteSize;
+use database::Database;
 use directories::Directories;
+use fs_err::PathExt as _;
 use log::info;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use prometheus_metrics::Metrics;
@@ -25,6 +28,55 @@ pub struct StorageConfig {
 }
 
 impl StorageConfig {
+    pub fn eth1_database(&self) -> Result<Database> {
+        Database::persistent(
+            "eth1",
+            self.directories
+                .store_directory
+                .clone()
+                .unwrap_or_default()
+                .join("eth1_cache"),
+            self.eth1_db_size,
+            false,
+        )
+    }
+
+    pub fn beacon_fork_choice_database(
+        &self,
+        custom_path: Option<PathBuf>,
+        read_only: bool,
+    ) -> Result<Database> {
+        let path = custom_path.unwrap_or_else(|| {
+            self.directories
+                .store_directory
+                .clone()
+                .unwrap_or_default()
+                .join("beacon_fork_choice")
+        });
+
+        if read_only {
+            ensure!(
+                path.fs_err_try_exists()?,
+                "beacon_fork_choice database path does not exist: {path:?}",
+            );
+        }
+
+        Database::persistent("beacon_fork_choice", path, self.db_size, read_only)
+    }
+
+    pub fn sync_database(&self) -> Result<Database> {
+        Database::persistent(
+            "sync",
+            self.directories
+                .store_directory
+                .clone()
+                .unwrap_or_default()
+                .join("sync"),
+            self.db_size,
+            false,
+        )
+    }
+
     #[must_use]
     pub fn with_increased_db_sizes(self, modifier: u64) -> Self {
         let Self {

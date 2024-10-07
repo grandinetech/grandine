@@ -9,7 +9,7 @@ use anyhow::Result;
 use bytesize::ByteSize;
 use im::OrdMap;
 use itertools::Either;
-use libmdbx::{DatabaseFlags, Environment, Geometry, WriteFlags};
+use libmdbx::{DatabaseFlags, Environment, Geometry, ObjectLength, Stat, WriteFlags};
 use log::info;
 use snap::raw::{Decoder, Encoder};
 use std_ext::ArcExt as _;
@@ -23,13 +23,20 @@ const MAX_NAMED_DATABASES: usize = 10;
 pub struct Database(DatabaseKind);
 
 impl Database {
-    pub fn persistent(name: &str, directory: impl AsRef<Path>, max_size: ByteSize) -> Result<Self> {
+    pub fn persistent(
+        name: &str,
+        directory: impl AsRef<Path>,
+        max_size: ByteSize,
+        read_only: bool,
+    ) -> Result<Self> {
         // If a database with the legacy name exists, keep using it.
         // Otherwise, create a new database with the specified name.
         // This check will not force existing users to resync.
         let legacy_name = directory.as_ref().to_str().ok_or(Error)?;
 
-        fs_err::create_dir_all(&directory)?;
+        if !read_only {
+            fs_err::create_dir_all(&directory)?;
+        }
 
         // TODO(Grandine Team): The call to `set_max_dbs` and `MAX_NAMED_DATABASES` should be
         //                      unnecessary if the default database is used.
@@ -48,7 +55,10 @@ impl Database {
 
         let database_name = if existing_db.is_err() {
             info!("database: {legacy_name} with name {name}");
-            transaction.create_db(Some(name), DatabaseFlags::default())?;
+            if !read_only {
+                transaction.create_db(Some(name), DatabaseFlags::default())?;
+            }
+
             name
         } else {
             info!("legacy database: {legacy_name}");
@@ -192,6 +202,54 @@ impl Database {
                 .map(|compressed| decompress(compressed)),
         }
         .transpose()
+    }
+
+    pub fn db_stats(&self) -> Result<Option<Stat>> {
+        match self.kind() {
+            DatabaseKind::Persistent {
+                database_name,
+                environment,
+            } => {
+                let transaction = environment.begin_ro_txn()?;
+                let database = transaction.open_db(Some(database_name))?;
+
+                Some(transaction.db_stat(&database)?)
+            }
+            DatabaseKind::InMemory { map: _ } => None,
+        }
+        .pipe(Ok)
+    }
+
+    pub fn iterate_all_keys_with_lengths(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<(Cow<[u8]>, usize)>>> {
+        match self.kind() {
+            DatabaseKind::Persistent {
+                database_name,
+                environment,
+            } => {
+                let transaction = environment.begin_ro_txn()?;
+                let database = transaction.open_db(Some(database_name))?;
+
+                let mut cursor = transaction.cursor(&database)?;
+
+                core::iter::from_fn(move || cursor.next().transpose())
+                    .map(|result| {
+                        let (key, ObjectLength(length)) = result?;
+                        Ok((key, length))
+                    })
+                    .pipe(Either::Left)
+            }
+            DatabaseKind::InMemory { map } => {
+                let map = map.lock().expect("in-memory database mutex is poisoned");
+
+                map.clone()
+                    .into_iter()
+                    .map(|(key, value)| Ok((Cow::Owned(key.to_vec()), value.len())))
+                    .pipe(Either::Right)
+            }
+        }
+        .pipe(Ok)
     }
 
     pub fn iterator_ascending(
@@ -574,6 +632,34 @@ mod tests {
         Ok(())
     }
 
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn test_all_keys_iterator_with_lengths(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+        let values = database
+            .iterate_all_keys_with_lengths()?
+            .map(|result| {
+                let (key, length) = result?;
+                let key_string = core::str::from_utf8(key.as_ref())?;
+                Ok((key_string.to_owned(), length))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let compressed_len = compress(b"A")?.len();
+        assert_eq!(compressed_len, 3);
+
+        let expected = [
+            ("A".to_owned(), compressed_len),
+            ("B".to_owned(), compressed_len),
+            ("C".to_owned(), compressed_len),
+            ("E".to_owned(), compressed_len),
+        ];
+
+        assert_eq!(values, expected);
+
+        Ok(())
+    }
+
     // This covers a bug we introduced and fixed while implementing in-memory mode.
     #[test_case(build_persistent_database)]
     #[test_case(build_in_memory_database)]
@@ -667,7 +753,7 @@ mod tests {
     }
 
     fn build_persistent_database() -> Result<Database> {
-        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(1))?;
+        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(1), false)?;
         populate_database(&database)?;
         Ok(database)
     }

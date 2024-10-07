@@ -6,6 +6,14 @@ use types::phase0::primitives::Slot;
 #[derive(Clone, Subcommand)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub enum GrandineCommand {
+    /// Show `beacon_fork_choice` database element sizes
+    /// (example: grandine db-stats)
+    DbStats {
+        /// Custom database path
+        #[clap(short, long)]
+        path: Option<PathBuf>,
+    },
+
     /// Export blocks and state to ssz files within slot range for debugging
     /// (example: grandine export --from 0 --to 5)
     Export {

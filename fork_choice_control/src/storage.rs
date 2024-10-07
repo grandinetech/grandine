@@ -769,14 +769,27 @@ type StateStorage<'storage, P> = (
     UnfinalizedBlocks<'storage, P>,
 );
 
+pub trait PrefixableKey {
+    const PREFIX: &'static str;
+
+    #[must_use]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
+}
+
 #[derive(Ssz)]
 // A `bound_for_read` attribute like this must be added when deriving `SszRead` for any type that
 // contains a block or state. The name of the `C` type parameter is hardcoded in `ssz_derive`.
 #[ssz(bound_for_read = "BeaconState<P>: SszRead<C>", derive_hash = false)]
-struct StateCheckpoint<P: Preset> {
+pub struct StateCheckpoint<P: Preset> {
     block_root: H256,
     head_slot: Slot,
     state: Arc<BeaconState<P>>,
+}
+
+impl<P: Preset> PrefixableKey for StateCheckpoint<P> {
+    const PREFIX: &'static str = Self::KEY;
 }
 
 impl<P: Preset> StateCheckpoint<P> {
@@ -792,8 +805,12 @@ impl<P: Preset> StateCheckpoint<P> {
     derive_hash = false,
     transparent
 )]
-struct BlockCheckpoint<P: Preset> {
+pub struct BlockCheckpoint<P: Preset> {
     block: Arc<SignedBeaconBlock<P>>,
+}
+
+impl<P: Preset> PrefixableKey for BlockCheckpoint<P> {
+    const PREFIX: &'static str = Self::KEY;
 }
 
 impl<P: Preset> BlockCheckpoint<P> {
@@ -822,32 +839,23 @@ impl TryFrom<Cow<'_, [u8]>> for BlockRootBySlot {
     }
 }
 
-impl BlockRootBySlot {
+impl PrefixableKey for BlockRootBySlot {
     const PREFIX: &'static str = "r";
-
-    fn has_prefix(bytes: &[u8]) -> bool {
-        bytes.starts_with(Self::PREFIX.as_bytes())
-    }
 }
 
 #[derive(Display)]
 #[display("{}{_0:x}", Self::PREFIX)]
 pub struct FinalizedBlockByRoot(pub H256);
 
-impl FinalizedBlockByRoot {
+impl PrefixableKey for FinalizedBlockByRoot {
     const PREFIX: &'static str = "b";
-
-    #[cfg(test)]
-    fn has_prefix(bytes: &[u8]) -> bool {
-        bytes.starts_with(Self::PREFIX.as_bytes())
-    }
 }
 
 #[derive(Display)]
 #[display("{}{_0:x}", Self::PREFIX)]
 pub struct UnfinalizedBlockByRoot(pub H256);
 
-impl UnfinalizedBlockByRoot {
+impl PrefixableKey for UnfinalizedBlockByRoot {
     const PREFIX: &'static str = "b_nf";
 }
 
@@ -855,7 +863,7 @@ impl UnfinalizedBlockByRoot {
 #[display("{}{_0:x}", Self::PREFIX)]
 pub struct StateByBlockRoot(pub H256);
 
-impl StateByBlockRoot {
+impl PrefixableKey for StateByBlockRoot {
     const PREFIX: &'static str = "s";
 }
 
@@ -863,7 +871,7 @@ impl StateByBlockRoot {
 #[display("{}{_0:x}", Self::PREFIX)]
 pub struct SlotByStateRoot(pub H256);
 
-impl SlotByStateRoot {
+impl PrefixableKey for SlotByStateRoot {
     const PREFIX: &'static str = "t";
 }
 
@@ -871,7 +879,7 @@ impl SlotByStateRoot {
 #[display("{}{_0:x}{_1}", Self::PREFIX)]
 pub struct BlobSidecarByBlobId(pub H256, pub BlobIndex);
 
-impl BlobSidecarByBlobId {
+impl PrefixableKey for BlobSidecarByBlobId {
     const PREFIX: &'static str = "o";
 
     #[cfg(test)]
@@ -884,12 +892,8 @@ impl BlobSidecarByBlobId {
 #[display("{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
 pub struct SlotBlobId(pub Slot, pub H256, pub BlobIndex);
 
-impl SlotBlobId {
+impl PrefixableKey for SlotBlobId {
     const PREFIX: &'static str = "i";
-
-    fn has_prefix(bytes: &[u8]) -> bool {
-        bytes.starts_with(Self::PREFIX.as_bytes())
-    }
 }
 
 #[derive(Debug, Error)]
@@ -930,7 +934,7 @@ mod tests {
     #[test]
     #[allow(clippy::similar_names)]
     fn test_prune_old_blob_sidecars() -> Result<()> {
-        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10))?;
+        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10), false)?;
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),

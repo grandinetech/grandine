@@ -39,7 +39,8 @@ impl ProposerConfigs {
         default_fee_recipient: ExecutionAddress,
         default_graffiti: H256,
     ) -> Result<Self> {
-        let database = Database::persistent("proposer-configs", validator_directory, DB_MAX_SIZE)?;
+        let database =
+            Database::persistent("proposer-configs", validator_directory, DB_MAX_SIZE, false)?;
 
         Ok(Self {
             database,

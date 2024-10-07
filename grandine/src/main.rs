@@ -56,6 +56,7 @@ use types::preset::Minimal;
 mod commands;
 mod config_dir;
 mod consts;
+mod db_stats;
 mod grandine_args;
 mod grandine_config;
 mod predefined_network;
@@ -182,11 +183,7 @@ impl Context {
             validator_enabled,
         } = self;
 
-        let StorageConfig {
-            in_memory,
-            eth1_db_size,
-            ..
-        } = storage_config;
+        let StorageConfig { in_memory, .. } = storage_config;
 
         // Load keys early so we can validate `eth1_rpc_urls`.
         signer.load_keys_from_web3signer().await;
@@ -224,16 +221,7 @@ impl Context {
         let eth1_database = if in_memory {
             Database::in_memory()
         } else {
-            Database::persistent(
-                "eth1",
-                storage_config
-                    .directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join("eth1_cache"),
-                eth1_db_size,
-            )?
+            storage_config.eth1_database()?
         };
 
         let eth1_chain = Eth1Chain::new(
@@ -266,7 +254,7 @@ impl Context {
         if let Some(command) = command {
             return handle_command(
                 chain_config,
-                storage_config,
+                &storage_config,
                 command,
                 &anchor_checkpoint_provider,
                 slashing_protection_history_limit,
@@ -653,38 +641,26 @@ fn ensure_ports_not_in_use(
 
 fn handle_command<P: Preset>(
     chain_config: Arc<ChainConfig>,
-    storage_config: StorageConfig,
+    storage_config: &StorageConfig,
     command: GrandineCommand,
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
     slashing_protection_history_limit: u64,
 ) -> Result<()> {
-    let StorageConfig {
-        db_size,
-        directories,
-        archival_epoch_interval,
-        ..
-    } = storage_config;
+    Feature::InhibitApplicationRestart.enable();
 
     match command {
+        GrandineCommand::DbStats { path } => db_stats::print::<P>(storage_config, path)?,
         GrandineCommand::Export {
             from,
             to,
             output_dir,
         } => {
-            let storage_database = Database::persistent(
-                "beacon_fork_choice",
-                directories
-                    .store_directory
-                    .clone()
-                    .unwrap_or_default()
-                    .join("beacon_fork_choice"),
-                db_size,
-            )?;
+            let storage_database = storage_config.beacon_fork_choice_database(None, true)?;
 
             let storage = Storage::new(
                 chain_config,
                 storage_database,
-                archival_epoch_interval,
+                storage_config.archival_epoch_interval,
                 false,
             );
 
@@ -716,12 +692,14 @@ fn handle_command<P: Preset>(
                 .genesis_validators_root();
 
             let mut slashing_protector = SlashingProtector::persistent(
-                directories
+                storage_config
+                    .directories
                     .store_directory
                     .clone()
                     .unwrap_or_default()
                     .as_path(),
-                directories
+                storage_config
+                    .directories
                     .validator_dir
                     .clone()
                     .unwrap_or_default()
