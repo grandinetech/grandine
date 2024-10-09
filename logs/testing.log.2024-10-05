@@ -1,0 +1,338 @@
+2024-10-05T17:48:05.499246Z  INFO logging: Tracing initialized successfully.
+2024-10-05T17:48:05.499276Z  INFO grandine: Grandine firing up...
+2024-10-05T17:48:05.501837Z  INFO grandine: starting beacon node
+2024-10-05T17:48:05.501843Z  INFO grandine::grandine_config: network: sepolia
+2024-10-05T17:48:05.501857Z  INFO grandine::grandine_config: data directory: "/Users/mercynaps/.grandine/sepolia"
+2024-10-05T17:48:05.501860Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-10-05T17:48:05.501862Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-10-05T17:48:05.501926Z  INFO grandine::grandine_config: Eth1 RPC URLs: [Url { scheme: "https", cannot_be_a_base: false, username: "", password: None, host: Some(Domain("sepolia.infura.io")), port: None, path: "/v3/ade936980bd740a58b7e654354ed064b", query: None, fragment: None }]
+2024-10-05T17:48:05.501954Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d6566363166653800000000000000000000]
+2024-10-05T17:48:05.501958Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-10-05T17:48:05.501959Z  INFO grandine::grandine_config: validator API disabled
+2024-10-05T17:48:05.501961Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-10-05T17:48:05.501974Z  INFO grandine::grandine_config: slasher enabled: false
+2024-10-05T17:48:05.501977Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-ef61fe8/aarch64-macos
+2024-10-05T17:48:05.501979Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-10-05T17:48:05.501980Z  INFO grandine::grandine_config: back sync enabled: false
+2024-10-05T17:48:05.510583Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/eth1_cache with name eth1
+2024-10-05T17:48:05.511414Z  INFO eth1::eth1_chain: started new Eth1 deposit download task (deposit contract 0x7f02c3e3c98b133055b8b348b2ac625669ed295d)
+2024-10-05T17:48:05.511509Z  INFO eth1::eth1_chain: started Eth1 deposit download task
+2024-10-05T17:48:05.513763Z  INFO grandine::predefined_network: loading genesis state from file: /Users/mercynaps/.grandine/sepolia/beacon/genesis_state.ssz…
+2024-10-05T17:48:05.527019Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-10-05T17:48:05.531141Z  INFO fork_choice_control::storage: loaded state at slot 0
+2024-10-05T17:48:05.543867Z  INFO fork_choice_store::state_cache_processor: Creating new StateCacheProcessor with lock timeout of 1.5s
+2024-10-05T17:48:05.546283Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/sync with name sync
+2024-10-05T17:48:05.548795Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/validator with name proposer-configs
+2024-10-05T17:48:05.553302Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-10-05T17:48:05.556048Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAm9mbBtFBMS3DyTdeV5SDa4RCkwV2EprVWDJAcM48q8GhX
+2024-10-05T17:48:08.601197Z  INFO eth1::download_manager: will download Eth1 deposits from block 6550543 to block 6813916
+2024-10-05T17:48:08.601208Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6550543 to block 6551542
+2024-10-05T17:48:10.577946Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6551543 to block 6552542
+2024-10-05T17:48:10.948182Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6552543 to block 6553542
+2024-10-05T17:48:11.311506Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6553543 to block 6554542
+2024-10-05T17:48:15.569119Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-10-05T17:48:16.896818Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6554543 to block 6555542
+2024-10-05T17:48:17.581370Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6555543 to block 6556542
+2024-10-05T17:48:17.954677Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6556543 to block 6557542
+2024-10-05T17:48:19.114943Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6557543 to block 6558542
+2024-10-05T17:48:19.466019Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6558543 to block 6559542
+2024-10-05T17:48:20.603349Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6559543 to block 6560542
+2024-10-05T17:48:20.969423Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6560543 to block 6561542
+2024-10-05T17:48:22.674930Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6561543 to block 6562542
+2024-10-05T17:48:23.670186Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6562543 to block 6563542
+2024-10-05T17:48:24.025480Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6563543 to block 6564542
+2024-10-05T17:48:24.400454Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6564543 to block 6565542
+2024-10-05T17:48:26.933524Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6565543 to block 6566542
+2024-10-05T17:48:27.836209Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6566543 to block 6567542
+2024-10-05T17:48:28.186887Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6567543 to block 6568542
+2024-10-05T17:48:28.556833Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6568543 to block 6569542
+2024-10-05T17:48:28.982032Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6569543 to block 6570542
+2024-10-05T17:48:29.351933Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6570543 to block 6571542
+2024-10-05T17:48:29.711532Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6571543 to block 6572542
+2024-10-05T17:48:30.075903Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6572543 to block 6573542
+2024-10-05T17:48:30.620024Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6573543 to block 6574542
+2024-10-05T17:48:30.996099Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6574543 to block 6575542
+2024-10-05T17:48:31.874814Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6575543 to block 6576542
+2024-10-05T17:48:32.759885Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6576543 to block 6577542
+2024-10-05T17:48:33.115918Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6577543 to block 6578542
+2024-10-05T17:48:33.936909Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6578543 to block 6579542
+2024-10-05T17:48:34.311075Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6579543 to block 6580542
+2024-10-05T17:48:35.636662Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6580543 to block 6581542
+2024-10-05T17:48:35.991834Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6581543 to block 6582542
+2024-10-05T17:48:36.836326Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6582543 to block 6583542
+2024-10-05T17:48:37.190827Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6583543 to block 6584542
+2024-10-05T17:48:37.552268Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6584543 to block 6585542
+2024-10-05T17:48:37.916166Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6585543 to block 6586542
+2024-10-05T17:48:38.755595Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6586543 to block 6587542
+2024-10-05T17:48:39.116266Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6587543 to block 6588542
+2024-10-05T17:48:39.476147Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6588543 to block 6589542
+2024-10-05T17:48:39.835988Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6589543 to block 6590542
+2024-10-05T17:48:40.195632Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6590543 to block 6591542
+2024-10-05T17:48:40.657378Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6591543 to block 6592542
+2024-10-05T17:48:41.005178Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6592543 to block 6593542
+2024-10-05T17:48:41.836170Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6593543 to block 6594542
+2024-10-05T17:48:42.471978Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6594543 to block 6595542
+2024-10-05T17:48:43.315705Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6595543 to block 6596542
+2024-10-05T17:48:44.151640Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6596543 to block 6597542
+2024-10-05T17:48:44.516165Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6597543 to block 6598542
+2024-10-05T17:48:45.365948Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6598543 to block 6599542
+2024-10-05T17:48:45.775188Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6599543 to block 6600542
+2024-10-05T17:48:46.137360Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6600543 to block 6601542
+2024-10-05T17:48:48.275830Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6601543 to block 6602542
+2024-10-05T17:48:48.639431Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6602543 to block 6603542
+2024-10-05T17:48:48.996163Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6603543 to block 6604542
+2024-10-05T17:48:49.777697Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6604543 to block 6605542
+2024-10-05T17:48:50.602811Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6605543 to block 6606542
+2024-10-05T17:48:51.430832Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6606543 to block 6607542
+2024-10-05T17:48:51.796239Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6607543 to block 6608542
+2024-10-05T17:48:52.155611Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6608543 to block 6609542
+2024-10-05T17:48:52.509015Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6609543 to block 6610542
+2024-10-05T17:48:52.867059Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6610543 to block 6611542
+2024-10-05T17:48:53.711816Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6611543 to block 6612542
+2024-10-05T17:48:54.075754Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6612543 to block 6613542
+2024-10-05T17:48:54.435585Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6613543 to block 6614542
+2024-10-05T17:48:54.795358Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6614543 to block 6615542
+2024-10-05T17:48:55.156176Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6615543 to block 6616542
+2024-10-05T17:48:55.957975Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6616543 to block 6617542
+2024-10-05T17:48:56.315571Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6617543 to block 6618542
+2024-10-05T17:48:56.670605Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6618543 to block 6619542
+2024-10-05T17:48:57.141626Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6619543 to block 6620542
+2024-10-05T17:48:57.515651Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6620543 to block 6621542
+2024-10-05T17:48:58.355599Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6621543 to block 6622542
+2024-10-05T17:48:58.724229Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6622543 to block 6623542
+2024-10-05T17:48:59.099850Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6623543 to block 6624542
+2024-10-05T17:48:59.471395Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6624543 to block 6625542
+2024-10-05T17:49:00.277145Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6625543 to block 6626542
+2024-10-05T17:49:00.635725Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6626543 to block 6627542
+2024-10-05T17:49:00.995200Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6627543 to block 6628542
+2024-10-05T17:49:01.440891Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6628543 to block 6629542
+2024-10-05T17:49:01.834552Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6629543 to block 6630542
+2024-10-05T17:49:02.675591Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6630543 to block 6631542
+2024-10-05T17:49:03.035415Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6631543 to block 6632542
+2024-10-05T17:49:03.581361Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6632543 to block 6633542
+2024-10-05T17:49:03.955048Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6633543 to block 6634542
+2024-10-05T17:49:04.315252Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6634543 to block 6635542
+2024-10-05T17:49:04.674967Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6635543 to block 6636542
+2024-10-05T17:49:05.035512Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6636543 to block 6637542
+2024-10-05T17:49:05.395468Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6637543 to block 6638542
+2024-10-05T17:49:05.736304Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6638543 to block 6639542
+2024-10-05T17:49:06.115637Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6639543 to block 6640542
+2024-10-05T17:49:06.474472Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6640543 to block 6641542
+2024-10-05T17:49:06.831414Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6641543 to block 6642542
+2024-10-05T17:49:07.644022Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6642543 to block 6643542
+2024-10-05T17:49:08.003980Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6643543 to block 6644542
+2024-10-05T17:49:09.315312Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6644543 to block 6645542
+2024-10-05T17:49:10.463100Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6645543 to block 6646542
+2024-10-05T17:49:12.153127Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6646543 to block 6647542
+2024-10-05T17:49:12.499883Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6647543 to block 6648542
+2024-10-05T17:49:14.068726Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6648543 to block 6649542
+2024-10-05T17:49:14.545251Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6649543 to block 6650542
+2024-10-05T17:49:14.915385Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6650543 to block 6651542
+2024-10-05T17:49:15.265587Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6651543 to block 6652542
+2024-10-05T17:49:15.635243Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6652543 to block 6653542
+2024-10-05T17:49:16.550575Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6653543 to block 6654542
+2024-10-05T17:49:17.010108Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6654543 to block 6655542
+2024-10-05T17:49:17.394785Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6655543 to block 6656542
+2024-10-05T17:49:17.755108Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6656543 to block 6657542
+2024-10-05T17:49:18.154822Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6657543 to block 6658542
+2024-10-05T17:49:18.514804Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6658543 to block 6659542
+2024-10-05T17:49:18.875142Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6659543 to block 6660542
+2024-10-05T17:49:19.770650Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6660543 to block 6661542
+2024-10-05T17:49:20.693558Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6661543 to block 6662542
+2024-10-05T17:49:21.075042Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6662543 to block 6663542
+2024-10-05T17:49:21.510908Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6663543 to block 6664542
+2024-10-05T17:49:21.872093Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6664543 to block 6665542
+2024-10-05T17:49:22.337637Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6665543 to block 6666542
+2024-10-05T17:49:23.152460Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6666543 to block 6667542
+2024-10-05T17:49:23.506067Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6667543 to block 6668542
+2024-10-05T17:49:23.874783Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6668543 to block 6669542
+2024-10-05T17:49:24.234566Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6669543 to block 6670542
+2024-10-05T17:49:24.594855Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6670543 to block 6671542
+2024-10-05T17:49:27.315085Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6671543 to block 6672542
+2024-10-05T17:49:28.875038Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6672543 to block 6673542
+2024-10-05T17:49:29.710594Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6673543 to block 6674542
+2024-10-05T17:49:30.070387Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6674543 to block 6675542
+2024-10-05T17:49:30.434292Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6675543 to block 6676542
+2024-10-05T17:49:30.831368Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6676543 to block 6677542
+2024-10-05T17:49:31.239223Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6677543 to block 6678542
+2024-10-05T17:49:32.515163Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6678543 to block 6679542
+2024-10-05T17:49:32.876057Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6679543 to block 6680542
+2024-10-05T17:49:33.234563Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6680543 to block 6681542
+2024-10-05T17:49:33.602014Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6681543 to block 6682542
+2024-10-05T17:49:33.936175Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6682543 to block 6683542
+2024-10-05T17:49:34.283435Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6683543 to block 6684542
+2024-10-05T17:49:35.114463Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6684543 to block 6685542
+2024-10-05T17:49:35.474198Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6685543 to block 6686542
+2024-10-05T17:49:35.834368Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6686543 to block 6687542
+2024-10-05T17:49:36.233965Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6687543 to block 6688542
+2024-10-05T17:49:36.597077Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6688543 to block 6689542
+2024-10-05T17:49:36.962343Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6689543 to block 6690542
+2024-10-05T17:49:37.794138Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6690543 to block 6691542
+2024-10-05T17:49:38.154726Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6691543 to block 6692542
+2024-10-05T17:49:38.514283Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6692543 to block 6693542
+2024-10-05T17:49:38.918999Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6693543 to block 6694542
+2024-10-05T17:49:39.313962Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6694543 to block 6695542
+2024-10-05T17:49:39.674582Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6695543 to block 6696542
+2024-10-05T17:49:40.033572Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6696543 to block 6697542
+2024-10-05T17:49:40.394305Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6697543 to block 6698542
+2024-10-05T17:49:40.762097Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6698543 to block 6699542
+2024-10-05T17:49:41.615140Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6699543 to block 6700542
+2024-10-05T17:49:42.433484Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6700543 to block 6701542
+2024-10-05T17:49:42.802046Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6701543 to block 6702542
+2024-10-05T17:49:43.195334Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6702543 to block 6703542
+2024-10-05T17:49:43.543344Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6703543 to block 6704542
+2024-10-05T17:49:43.913831Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6704543 to block 6705542
+2024-10-05T17:49:44.259793Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6705543 to block 6706542
+2024-10-05T17:49:44.606971Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6706543 to block 6707542
+2024-10-05T17:49:44.994148Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6707543 to block 6708542
+2024-10-05T17:49:45.362658Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6708543 to block 6709542
+2024-10-05T17:49:45.725237Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6709543 to block 6710542
+2024-10-05T17:49:46.114030Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6710543 to block 6711542
+2024-10-05T17:49:46.495466Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6711543 to block 6712542
+2024-10-05T17:49:46.874061Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6712543 to block 6713542
+2024-10-05T17:49:47.233522Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6713543 to block 6714542
+2024-10-05T17:49:48.494411Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6714543 to block 6715542
+2024-10-05T17:49:48.874009Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6715543 to block 6716542
+2024-10-05T17:49:49.233899Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6716543 to block 6717542
+2024-10-05T17:49:49.593718Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6717543 to block 6718542
+2024-10-05T17:49:49.953150Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6718543 to block 6719542
+2024-10-05T17:49:50.313451Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6719543 to block 6720542
+2024-10-05T17:49:50.803055Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6720543 to block 6721542
+2024-10-05T17:49:51.193378Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6721543 to block 6722542
+2024-10-05T17:49:51.553951Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6722543 to block 6723542
+2024-10-05T17:49:52.393710Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6723543 to block 6724542
+2024-10-05T17:49:52.746077Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6724543 to block 6725542
+2024-10-05T17:49:53.113633Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6725543 to block 6726542
+2024-10-05T17:49:53.470648Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6726543 to block 6727542
+2024-10-05T17:49:53.833167Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6727543 to block 6728542
+2024-10-05T17:49:54.175163Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6728543 to block 6729542
+2024-10-05T17:49:54.524127Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6729543 to block 6730542
+2024-10-05T17:49:54.883408Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6730543 to block 6731542
+2024-10-05T17:49:55.242892Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6731543 to block 6732542
+2024-10-05T17:49:56.064894Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6732543 to block 6733542
+2024-10-05T17:49:56.428485Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6733543 to block 6734542
+2024-10-05T17:49:56.793543Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6734543 to block 6735542
+2024-10-05T17:49:57.593615Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6735543 to block 6736542
+2024-10-05T17:49:57.953876Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6736543 to block 6737542
+2024-10-05T17:49:58.313489Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6737543 to block 6738542
+2024-10-05T17:49:59.398233Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6738543 to block 6739542
+2024-10-05T17:49:59.763192Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6739543 to block 6740542
+2024-10-05T17:50:00.152918Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6740543 to block 6741542
+2024-10-05T17:50:01.138014Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6741543 to block 6742542
+2024-10-05T17:50:01.503540Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6742543 to block 6743542
+2024-10-05T17:50:01.873707Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6743543 to block 6744542
+2024-10-05T17:50:02.232861Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6744543 to block 6745542
+2024-10-05T17:50:02.576369Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6745543 to block 6746542
+2024-10-05T17:50:03.494194Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6746543 to block 6747542
+2024-10-05T17:50:03.835314Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6747543 to block 6748542
+2024-10-05T17:50:04.192916Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6748543 to block 6749542
+2024-10-05T17:50:04.544596Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6749543 to block 6750542
+2024-10-05T17:50:05.393128Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6750543 to block 6751542
+2024-10-05T17:50:05.753010Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6751543 to block 6752542
+2024-10-05T17:50:06.152101Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6752543 to block 6753542
+2024-10-05T17:50:06.988725Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6753543 to block 6754542
+2024-10-05T17:50:07.353310Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6754543 to block 6755542
+2024-10-05T17:50:07.707901Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6755543 to block 6756542
+2024-10-05T17:50:08.073082Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6756543 to block 6757542
+2024-10-05T17:50:08.433761Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6757543 to block 6758542
+2024-10-05T17:50:08.793350Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6758543 to block 6759542
+2024-10-05T17:50:09.152883Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6759543 to block 6760542
+2024-10-05T17:50:09.512631Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6760543 to block 6761542
+2024-10-05T17:50:10.352774Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6761543 to block 6762542
+2024-10-05T17:50:10.712981Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6762543 to block 6763542
+2024-10-05T17:50:11.073034Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6763543 to block 6764542
+2024-10-05T17:50:11.993276Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6764543 to block 6765542
+2024-10-05T17:50:12.342131Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6765543 to block 6766542
+2024-10-05T17:50:12.735184Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6766543 to block 6767542
+2024-10-05T17:50:13.113094Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6767543 to block 6768542
+2024-10-05T17:50:13.840486Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6768543 to block 6769542
+2024-10-05T17:50:15.158107Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6769543 to block 6770542
+2024-10-05T17:50:15.511818Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6770543 to block 6771542
+2024-10-05T17:50:15.872405Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6771543 to block 6772542
+2024-10-05T17:50:16.232426Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6772543 to block 6773542
+2024-10-05T17:50:16.790895Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6773543 to block 6774542
+2024-10-05T17:50:17.192362Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6774543 to block 6775542
+2024-10-05T17:50:18.375505Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6775543 to block 6776542
+2024-10-05T17:50:18.748778Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6776543 to block 6777542
+2024-10-05T17:50:19.094878Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6777543 to block 6778542
+2024-10-05T17:50:19.472837Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6778543 to block 6779542
+2024-10-05T17:50:19.828552Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6779543 to block 6780542
+2024-10-05T17:50:20.183630Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6780543 to block 6781542
+2024-10-05T17:50:21.763279Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6781543 to block 6782542
+2024-10-05T17:50:22.123471Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6782543 to block 6783542
+2024-10-05T17:50:23.032203Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6783543 to block 6784542
+2024-10-05T17:50:23.392279Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6784543 to block 6785542
+2024-10-05T17:50:23.768372Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6785543 to block 6786542
+2024-10-05T17:50:24.632058Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6786543 to block 6787542
+2024-10-05T17:50:24.995157Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6787543 to block 6788542
+2024-10-05T17:50:25.352581Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6788543 to block 6789542
+2024-10-05T17:50:25.712106Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6789543 to block 6790542
+2024-10-05T17:50:26.993291Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6790543 to block 6791542
+2024-10-05T17:50:27.352128Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6791543 to block 6792542
+2024-10-05T17:50:28.192536Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6792543 to block 6793542
+2024-10-05T17:50:28.552163Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6793543 to block 6794542
+2024-10-05T17:50:28.990940Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6794543 to block 6795542
+2024-10-05T17:50:29.352935Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6795543 to block 6796542
+2024-10-05T17:50:29.712540Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6796543 to block 6797542
+2024-10-05T17:50:30.526959Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6797543 to block 6798542
+2024-10-05T17:50:31.447230Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6798543 to block 6799542
+2024-10-05T17:50:31.859274Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6799543 to block 6800542
+2024-10-05T17:50:34.111372Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6800543 to block 6801542
+2024-10-05T17:50:36.679074Z  INFO runtime::runtime: saving current chain before exit…
+2024-10-05T17:50:36.690661Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 0
+2024-10-05T17:50:36.693445Z  INFO fork_choice_control::storage: saving state in slot 0
+2024-10-05T17:50:36.697147Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 0)
+2024-10-05T17:55:02.931502Z  INFO logging: Tracing initialized successfully.
+2024-10-05T17:55:02.931557Z  INFO grandine: Grandine firing up...
+2024-10-05T17:55:02.948736Z  INFO grandine: starting beacon node
+2024-10-05T17:55:02.948748Z  INFO grandine::grandine_config: network: sepolia
+2024-10-05T17:55:02.948920Z  INFO grandine::grandine_config: data directory: "/Users/mercynaps/.grandine/sepolia"
+2024-10-05T17:55:02.948928Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-10-05T17:55:02.948930Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-10-05T17:55:02.949447Z  INFO grandine::grandine_config: Eth1 RPC URLs: [Url { scheme: "https", cannot_be_a_base: false, username: "", password: None, host: Some(Domain("sepolia.infura.io")), port: None, path: "/v3/ade936980bd740a58b7e654354ed064b", query: None, fragment: None }]
+2024-10-05T17:55:02.949613Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d6566363166653800000000000000000000]
+2024-10-05T17:55:02.949622Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-10-05T17:55:02.949627Z  INFO grandine::grandine_config: validator API disabled
+2024-10-05T17:55:02.949629Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-10-05T17:55:02.949734Z  INFO grandine::grandine_config: slasher enabled: false
+2024-10-05T17:55:02.949742Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-ef61fe8/aarch64-macos
+2024-10-05T17:55:02.949746Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-10-05T17:55:02.949748Z  INFO grandine::grandine_config: back sync enabled: false
+2024-10-05T17:55:02.966575Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/eth1_cache with name eth1
+2024-10-05T17:55:02.968879Z  INFO eth1::eth1_chain: started new Eth1 deposit download task (deposit contract 0x7f02c3e3c98b133055b8b348b2ac625669ed295d)
+2024-10-05T17:55:02.968924Z  INFO eth1::eth1_chain: started Eth1 deposit download task
+2024-10-05T17:55:02.970871Z  INFO grandine::predefined_network: loading genesis state from file: /Users/mercynaps/.grandine/sepolia/beacon/genesis_state.ssz…
+2024-10-05T17:55:02.986854Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-10-05T17:55:02.992030Z  INFO fork_choice_control::storage: loaded state at slot 0
+2024-10-05T17:55:03.006714Z  INFO fork_choice_store::state_cache_processor: Creating new StateCacheProcessor with lock timeout of 1.5s
+2024-10-05T17:55:03.008808Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/sync with name sync
+2024-10-05T17:55:03.011573Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/validator with name proposer-configs
+2024-10-05T17:55:03.019247Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-10-05T17:55:03.028392Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAm9mbBtFBMS3DyTdeV5SDa4RCkwV2EprVWDJAcM48q8GhX
+2024-10-05T17:55:09.375133Z  INFO eth1::download_manager: will download Eth1 deposits from block 6800543 to block 6813947
+2024-10-05T17:55:09.375154Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6800543 to block 6801542
+2024-10-05T17:55:09.744648Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6801543 to block 6802542
+2024-10-05T17:55:10.097448Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6802543 to block 6803542
+2024-10-05T17:55:10.464138Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6803543 to block 6804542
+2024-10-05T17:55:10.883375Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6804543 to block 6805542
+2024-10-05T17:55:11.264993Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6805543 to block 6806542
+2024-10-05T17:55:11.623982Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6806543 to block 6807542
+2024-10-05T17:55:13.042131Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-10-05T17:55:14.145174Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6807543 to block 6808542
+2024-10-05T17:55:14.504887Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6808543 to block 6809542
+2024-10-05T17:55:14.980415Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6809543 to block 6810542
+2024-10-05T17:55:15.687799Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6810543 to block 6811542
+2024-10-05T17:55:16.820776Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6811543 to block 6812542
+2024-10-05T17:55:17.946371Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6812543 to block 6813542
+2024-10-05T17:55:19.088157Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6813543 to block 6813947
+2024-10-05T17:55:22.908526Z  INFO eth1::eth1_chain: started Eth1 deposit download task
+2024-10-05T17:55:23.303609Z  INFO eth1::download_manager: will download Eth1 deposits from block 6813948 to block 6813948
+2024-10-05T17:55:23.303632Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6813948 to block 6813948
+2024-10-05T17:55:28.865070Z  INFO eth1::eth1_chain: started Eth1 deposit download task
+2024-10-05T17:55:29.267911Z  INFO eth1::download_manager: will download Eth1 deposits from block 6813949 to block 6813949
+2024-10-05T17:55:29.267929Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6813949 to block 6813949
+2024-10-05T17:55:31.061710Z  INFO eth1::eth1_chain: started Eth1 block download task
+2024-10-05T17:55:38.279460Z  INFO runtime::runtime: saving current chain before exit…
+2024-10-05T17:55:38.297201Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 0
+2024-10-05T17:55:38.298966Z  INFO fork_choice_control::storage: saving state in slot 0
+2024-10-05T17:55:38.302404Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 0)

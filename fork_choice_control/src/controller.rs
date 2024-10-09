@@ -14,6 +14,8 @@ use std::{
     thread::{Builder, JoinHandle},
     time::Instant,
 };
+use std::collections::{VecDeque, HashMap};
+use std::sync::Mutex;
 
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
@@ -124,7 +126,13 @@ where
         let thread_pool = ThreadPool::new()?;
         let (mutator_tx, mutator_rx) = std::sync::mpsc::channel();
 
-        let block_processor = Arc::new(BlockProcessor::new(chain_config, state_cache.clone_arc()));
+        
+        let block_processor = Arc::new(BlockProcessor::new(
+            chain_config,
+            state_cache.clone_arc(),
+            Mutex::new(HashMap::new()), 
+            
+        ));
 
         let mut mutator = Mutator::new(
             store_snapshot.clone_arc(),

@@ -5024,6 +5024,8 @@ name = "logging"
 version = "0.0.0"
 dependencies = [
  "derive_more",
+ "lazy_static",
+ "parking_lot 0.12.3",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

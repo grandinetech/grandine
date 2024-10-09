@@ -1,0 +1,1307 @@
+2024-10-09T02:54:14.334913Z  INFO logging: Tracing initialized successfully.
+2024-10-09T02:54:14.334944Z  INFO grandine: Grandine firing up...
+2024-10-09T02:54:14.337894Z  INFO grandine: starting beacon node
+2024-10-09T02:54:14.337901Z  INFO grandine::grandine_config: network: sepolia
+2024-10-09T02:54:14.337918Z  INFO grandine::grandine_config: data directory: "/Users/mercynaps/.grandine/sepolia"
+2024-10-09T02:54:14.337922Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-10-09T02:54:14.337924Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-10-09T02:54:14.338531Z  INFO grandine::grandine_config: Eth1 RPC URLs: [Url { scheme: "https", cannot_be_a_base: false, username: "", password: None, host: Some(Domain("sepolia.infura.io")), port: None, path: "/v3/ade936980bd740a58b7e654354ed064b", query: None, fragment: None }]
+2024-10-09T02:54:14.338559Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d6566363166653800000000000000000000]
+2024-10-09T02:54:14.338563Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-10-09T02:54:14.338565Z  INFO grandine::grandine_config: validator API disabled
+2024-10-09T02:54:14.338566Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-10-09T02:54:14.338579Z  INFO grandine::grandine_config: slasher enabled: false
+2024-10-09T02:54:14.342455Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-ef61fe8/aarch64-macos
+2024-10-09T02:54:14.342467Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-10-09T02:54:14.342469Z  INFO grandine::grandine_config: back sync enabled: false
+2024-10-09T02:54:14.375203Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/eth1_cache with name eth1
+2024-10-09T02:54:14.375801Z  INFO eth1::eth1_chain: started new Eth1 deposit download task (deposit contract 0x7f02c3e3c98b133055b8b348b2ac625669ed295d)
+2024-10-09T02:54:14.375861Z  INFO eth1::eth1_chain: started Eth1 deposit download task
+2024-10-09T02:54:14.381121Z  INFO grandine::predefined_network: loading genesis state from file: /Users/mercynaps/.grandine/sepolia/beacon/genesis_state.ssz…
+2024-10-09T02:54:14.409427Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-10-09T02:54:14.416771Z  INFO fork_choice_control::storage: loaded state at slot 0
+2024-10-09T02:54:14.429821Z  INFO fork_choice_store::state_cache_processor: Creating new StateCacheProcessor with lock timeout of 1.5s
+2024-10-09T02:54:14.437296Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/beacon/sync with name sync
+2024-10-09T02:54:14.439264Z  INFO database: database: /Users/mercynaps/.grandine/sepolia/validator with name proposer-configs
+2024-10-09T02:54:14.460488Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-10-09T02:54:14.470007Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAm9mbBtFBMS3DyTdeV5SDa4RCkwV2EprVWDJAcM48q8GhX
+2024-10-09T02:54:16.462415Z  INFO eth1::download_manager: will download Eth1 deposits from block 6813950 to block 6834759
+2024-10-09T02:54:16.462421Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6813950 to block 6814949
+2024-10-09T02:54:16.863966Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6814950 to block 6815949
+2024-10-09T02:54:17.237200Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6815950 to block 6816949
+2024-10-09T02:54:17.623196Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6816950 to block 6817949
+2024-10-09T02:54:17.993319Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6817950 to block 6818949
+2024-10-09T02:54:18.589353Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6818950 to block 6819949
+2024-10-09T02:54:18.989998Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6819950 to block 6820949
+2024-10-09T02:54:19.391044Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6820950 to block 6821949
+2024-10-09T02:54:19.790718Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6821950 to block 6822949
+2024-10-09T02:54:20.182527Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6822950 to block 6823949
+2024-10-09T02:54:20.738954Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6823950 to block 6824949
+2024-10-09T02:54:21.143055Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6824950 to block 6825949
+2024-10-09T02:54:21.507772Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6825950 to block 6826949
+2024-10-09T02:54:22.000595Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6826950 to block 6827949
+2024-10-09T02:54:22.390313Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6827950 to block 6828949
+2024-10-09T02:54:22.798745Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6828950 to block 6829949
+2024-10-09T02:54:23.198229Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6829950 to block 6830949
+2024-10-09T02:54:23.585962Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6830950 to block 6831949
+2024-10-09T02:54:24.116887Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6831950 to block 6832949
+2024-10-09T02:54:24.479972Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-10-09T02:54:24.494761Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6832950 to block 6833949
+2024-10-09T02:54:24.903278Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6833950 to block 6834759
+2024-10-09T02:54:28.765100Z  INFO eth1::eth1_chain: started Eth1 deposit download task
+2024-10-09T02:54:29.182555Z  INFO eth1::download_manager: will download Eth1 deposits from block 6834760 to block 6834760
+2024-10-09T02:54:29.182586Z  INFO eth1::download_manager: downloading Eth1 deposits from block 6834760 to block 6834760
+2024-10-09T02:54:30.302593Z  INFO eth1::eth1_chain: started Eth1 block download task
+2024-10-09T02:59:50.633041Z  INFO runtime::runtime: saving current chain before exit…
+2024-10-09T02:59:50.655243Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 0
+2024-10-09T02:59:50.656424Z  INFO fork_choice_control::storage: saving state in slot 0
+2024-10-09T02:59:50.661347Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 0)
+2024-10-09T03:31:22.110091Z  INFO logging: Tracing initialized successfully.
+2024-10-09T03:31:22.110279Z  INFO grandine: Grandine firing up...
+2024-10-09T03:31:22.146056Z  INFO grandine: starting beacon node
+2024-10-09T03:31:22.146145Z  INFO grandine::grandine_config: network: mainnet
+2024-10-09T03:31:22.146185Z  INFO grandine::grandine_config: data directory: "/Users/mercynaps/.grandine/mainnet"
+2024-10-09T03:31:22.146203Z  INFO grandine::grandine_config: Eth2 database upper limit: 256.0 GiB
+2024-10-09T03:31:22.146216Z  INFO grandine::grandine_config: Eth1 database upper limit: 16.0 GiB
+2024-10-09T03:31:22.146397Z  INFO grandine::grandine_config: Eth1 RPC URLs: []
+2024-10-09T03:31:22.146565Z  INFO grandine::grandine_config: graffiti: [0x4772616e64696e652f302e342e312d6566363166653800000000000000000000]
+2024-10-09T03:31:22.146582Z  INFO grandine::grandine_config: HTTP API address: 127.0.0.1:5052
+2024-10-09T03:31:22.146607Z  INFO grandine::grandine_config: validator API disabled
+2024-10-09T03:31:22.146618Z  INFO grandine::grandine_config: archival interval: 32 epochs
+2024-10-09T03:31:22.146642Z  INFO grandine::grandine_config: slasher enabled: false
+2024-10-09T03:31:22.146666Z  INFO grandine::grandine_config: client version: Grandine/0.4.1-ef61fe8/aarch64-macos
+2024-10-09T03:31:22.146719Z  INFO grandine::grandine_config: suggested fee recipient: 0xe7cf…1f1b
+2024-10-09T03:31:22.146733Z  INFO grandine::grandine_config: back sync enabled: false
+2024-10-09T03:31:22.159549Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/beacon/eth1_cache with name eth1
+2024-10-09T03:31:23.778686Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/beacon/beacon_fork_choice with name beacon_fork_choice
+2024-10-09T03:31:23.911035Z  INFO fork_choice_control::storage: loaded state at slot 8224
+2024-10-09T03:31:26.229241Z  INFO fork_choice_store::state_cache_processor: Creating new StateCacheProcessor with lock timeout of 1.5s
+2024-10-09T03:31:26.363036Z  INFO fork_choice_control::block_processor: Validating block with slot: 8225
+2024-10-09T03:31:26.364939Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x7d18357f0386991582eaa0e1fe52b346c8482b82665aa3157696e4a58e2803f3, slot: 8225
+2024-10-09T03:31:26.513860Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8225
+2024-10-09T03:31:26.514138Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=149.0ms, max=149.0ms, avg=149.0ms, median=149.0ms
+2024-10-09T03:31:26.514176Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8225
+2024-10-09T03:31:26.525445Z TRACE fork_choice_control::block_processor: validate_block timing: min=162.4ms, max=162.4ms, avg=162.4ms, median=162.4ms
+2024-10-09T03:31:26.525583Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.526158Z  INFO fork_choice_control::block_processor: Validating block with slot: 8226
+2024-10-09T03:31:26.528670Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf268c166646b9faf5dbc947343eb343861387c835337bbdf39e3ee8c97e85d30, slot: 8226
+2024-10-09T03:31:26.534031Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8226
+2024-10-09T03:31:26.534124Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=5.4ms, max=149.0ms, avg=77.2ms, median=149.0ms
+2024-10-09T03:31:26.534145Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8226
+2024-10-09T03:31:26.545351Z TRACE fork_choice_control::block_processor: validate_block timing: min=19.2ms, max=162.4ms, avg=90.8ms, median=162.4ms
+2024-10-09T03:31:26.545469Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.545743Z  INFO fork_choice_control::block_processor: Validating block with slot: 8227
+2024-10-09T03:31:26.546889Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf1af8a41491ecba4cf5b9d135dd53c204543d24861a25d97686e218a28aea8a6, slot: 8227
+2024-10-09T03:31:26.550098Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8227
+2024-10-09T03:31:26.550149Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=3.2ms, max=149.0ms, avg=52.5ms, median=5.4ms
+2024-10-09T03:31:26.550158Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8227
+2024-10-09T03:31:26.562093Z TRACE fork_choice_control::block_processor: validate_block timing: min=16.3ms, max=162.4ms, avg=66.0ms, median=19.2ms
+2024-10-09T03:31:26.562214Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.562443Z  INFO fork_choice_control::block_processor: Validating block with slot: 8228
+2024-10-09T03:31:26.563710Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x2dabb452174dc066b964288c202839335e45dcb598e90ef36b5ef799aa003837, slot: 8228
+2024-10-09T03:31:26.567795Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8228
+2024-10-09T03:31:26.567848Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=3.2ms, max=149.0ms, avg=40.4ms, median=5.4ms
+2024-10-09T03:31:26.567858Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8228
+2024-10-09T03:31:26.580130Z TRACE fork_choice_control::block_processor: validate_block timing: min=16.3ms, max=162.4ms, avg=53.9ms, median=19.2ms
+2024-10-09T03:31:26.580256Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.580502Z  INFO fork_choice_control::block_processor: Validating block with slot: 8229
+2024-10-09T03:31:26.581568Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xca3cc25bf0a48c43a489dfca43d3ec04c2ce8bd093e77d31ca571c81b7c7e852, slot: 8229
+2024-10-09T03:31:26.584345Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8229
+2024-10-09T03:31:26.584395Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.8ms, max=149.0ms, avg=32.9ms, median=4.1ms
+2024-10-09T03:31:26.584404Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8229
+2024-10-09T03:31:26.596406Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=46.3ms, median=17.6ms
+2024-10-09T03:31:26.596513Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.596742Z  INFO fork_choice_control::block_processor: Validating block with slot: 8230
+2024-10-09T03:31:26.597909Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9219a1b98d4b1e41da3c3d044befcf5dd1be0ddc088854c82742283067f9d822, slot: 8230
+2024-10-09T03:31:26.601007Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8230
+2024-10-09T03:31:26.601061Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.8ms, max=149.0ms, avg=28.0ms, median=4.1ms
+2024-10-09T03:31:26.601071Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8230
+2024-10-09T03:31:26.613559Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=41.3ms, median=17.6ms
+2024-10-09T03:31:26.613665Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.613887Z  INFO fork_choice_control::block_processor: Validating block with slot: 8231
+2024-10-09T03:31:26.615364Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcafa30dfdce6731669c329f825a37693f47682aed4e76bf77a47e4be1bb44db1, slot: 8231
+2024-10-09T03:31:26.618529Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8231
+2024-10-09T03:31:26.618591Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.8ms, max=149.0ms, avg=24.4ms, median=3.2ms
+2024-10-09T03:31:26.618601Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8231
+2024-10-09T03:31:26.632709Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=38.1ms, median=17.6ms
+2024-10-09T03:31:26.632815Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.633355Z  INFO fork_choice_control::block_processor: Validating block with slot: 8232
+2024-10-09T03:31:26.634634Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8dd52862e761f9ad1d09f0918a5022add39334ad1d8698a8e16b8fed734925f6, slot: 8232
+2024-10-09T03:31:26.637312Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8232
+2024-10-09T03:31:26.637357Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.7ms, max=149.0ms, avg=21.7ms, median=3.2ms
+2024-10-09T03:31:26.637368Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8232
+2024-10-09T03:31:26.650945Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=35.6ms, median=17.6ms
+2024-10-09T03:31:26.651056Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.651504Z  INFO fork_choice_control::block_processor: Validating block with slot: 8233
+2024-10-09T03:31:26.652484Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcd9fefa1cddfd4d3a2e4e805f4c308a140d9ac67f89447da91d581004e9547cb, slot: 8233
+2024-10-09T03:31:26.655021Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8233
+2024-10-09T03:31:26.655060Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.6ms, max=149.0ms, avg=19.6ms, median=3.2ms
+2024-10-09T03:31:26.655069Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8233
+2024-10-09T03:31:26.669895Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=33.6ms, median=17.6ms
+2024-10-09T03:31:26.670101Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.670716Z  INFO fork_choice_control::block_processor: Validating block with slot: 8234
+2024-10-09T03:31:26.671802Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9fa6b8e41ee4d1e564ec65e8d3607ef56c71e518830174cc3afe5b494589b295, slot: 8234
+2024-10-09T03:31:26.674391Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8234
+2024-10-09T03:31:26.674442Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.6ms, max=149.0ms, avg=17.9ms, median=3.2ms
+2024-10-09T03:31:26.674451Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8234
+2024-10-09T03:31:26.687666Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=32.0ms, median=17.6ms
+2024-10-09T03:31:26.687767Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.688178Z  INFO fork_choice_control::block_processor: Validating block with slot: 8235
+2024-10-09T03:31:26.690713Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xec34b3e6d849e311a62cf013f33c1691fc4c887d864dd03965b4cbc69d9b6a5f, slot: 8235
+2024-10-09T03:31:26.696636Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8235
+2024-10-09T03:31:26.696806Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.6ms, max=149.0ms, avg=16.8ms, median=3.2ms
+2024-10-09T03:31:26.696882Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8235
+2024-10-09T03:31:26.712818Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=31.3ms, median=17.6ms
+2024-10-09T03:31:26.712948Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.713667Z  INFO fork_choice_control::block_processor: Validating block with slot: 8236
+2024-10-09T03:31:26.717268Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0e6c25d9bc2105b68f4004b226f79d488bf4eb783425485e338dcbaa5a3e8eeb, slot: 8236
+2024-10-09T03:31:26.724021Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8236
+2024-10-09T03:31:26.724070Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.6ms, max=149.0ms, avg=16.0ms, median=3.2ms
+2024-10-09T03:31:26.724083Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8236
+2024-10-09T03:31:26.738494Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=30.8ms, median=18.3ms
+2024-10-09T03:31:26.738598Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.739278Z  INFO fork_choice_control::block_processor: Validating block with slot: 8237
+2024-10-09T03:31:26.740366Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xafd00ce8e0356fa4cedb23eecd0c547221a6339d0639b28b9dccfd651ec68203, slot: 8237
+2024-10-09T03:31:26.743093Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8237
+2024-10-09T03:31:26.743157Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.6ms, max=149.0ms, avg=15.0ms, median=3.2ms
+2024-10-09T03:31:26.743190Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8237
+2024-10-09T03:31:26.757155Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=29.8ms, median=17.8ms
+2024-10-09T03:31:26.757275Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.758160Z  INFO fork_choice_control::block_processor: Validating block with slot: 8238
+2024-10-09T03:31:26.759098Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd53bcc5e6c142d6c3a4a3bb5368e1cdaf568b968df0b481cad8d12bba367a681, slot: 8238
+2024-10-09T03:31:26.761524Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8238
+2024-10-09T03:31:26.761550Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=14.1ms, median=3.2ms
+2024-10-09T03:31:26.761559Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8238
+2024-10-09T03:31:26.776084Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.9ms, median=17.9ms
+2024-10-09T03:31:26.776188Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.776728Z  INFO fork_choice_control::block_processor: Validating block with slot: 8239
+2024-10-09T03:31:26.777664Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x09efe744d9ad5a2c56f2b82da31bf86b4ee7115c408b116651fbaa7318d2c903, slot: 8239
+2024-10-09T03:31:26.780073Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8239
+2024-10-09T03:31:26.780098Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=13.3ms, median=3.1ms
+2024-10-09T03:31:26.780107Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8239
+2024-10-09T03:31:26.794606Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.2ms, median=17.8ms
+2024-10-09T03:31:26.794711Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.795434Z  INFO fork_choice_control::block_processor: Validating block with slot: 8240
+2024-10-09T03:31:26.796389Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe5cf43ff92b3506c674295771597959293d7b6156f38064b2f8d5c627501c607, slot: 8240
+2024-10-09T03:31:26.799031Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8240
+2024-10-09T03:31:26.799095Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=12.6ms, median=3.1ms
+2024-10-09T03:31:26.799107Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8240
+2024-10-09T03:31:26.813286Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.5ms, median=17.8ms
+2024-10-09T03:31:26.813387Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.814069Z  INFO fork_choice_control::block_processor: Validating block with slot: 8242
+2024-10-09T03:31:26.815901Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x448cc3be55c379b8ca71b4dd6bdc669068b6c0d42a3849fd6245a5255df14f3b, slot: 8242
+2024-10-09T03:31:26.837858Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8242
+2024-10-09T03:31:26.837914Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=13.2ms, median=3.1ms
+2024-10-09T03:31:26.837924Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8242
+2024-10-09T03:31:26.853736Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.2ms, median=17.8ms
+2024-10-09T03:31:26.853843Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.854346Z  INFO fork_choice_control::block_processor: Validating block with slot: 8243
+2024-10-09T03:31:26.855652Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x82b1cbc6ada9a43ee1dd8de3f5d52f1b0a2bb0448f85fe2984afa6b456db00b4, slot: 8243
+2024-10-09T03:31:26.858838Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8243
+2024-10-09T03:31:26.858895Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=12.6ms, median=3.2ms
+2024-10-09T03:31:26.858906Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8243
+2024-10-09T03:31:26.876618Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.9ms, median=17.9ms
+2024-10-09T03:31:26.876727Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.877266Z  INFO fork_choice_control::block_processor: Validating block with slot: 8244
+2024-10-09T03:31:26.878254Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8b7035bb28e48231ebd8d9184affc4004b7e41ae9bd1c0cba3241c519f7bc204, slot: 8244
+2024-10-09T03:31:26.881482Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8244
+2024-10-09T03:31:26.881561Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=12.1ms, median=3.2ms
+2024-10-09T03:31:26.881572Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8244
+2024-10-09T03:31:26.896767Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.5ms, median=17.9ms
+2024-10-09T03:31:26.896886Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.897503Z  INFO fork_choice_control::block_processor: Validating block with slot: 8245
+2024-10-09T03:31:26.898614Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x538ef6ad1d8a189e356c1ed01c136234af572e40795edfd6ae1c7355315f1cf7, slot: 8245
+2024-10-09T03:31:26.901736Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8245
+2024-10-09T03:31:26.901807Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.7ms, median=3.2ms
+2024-10-09T03:31:26.901817Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8245
+2024-10-09T03:31:26.920096Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.2ms, median=18.3ms
+2024-10-09T03:31:26.920222Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.920632Z  INFO fork_choice_control::block_processor: Validating block with slot: 8246
+2024-10-09T03:31:26.921803Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x0ee0b3e27dd0f41e23a7da3eaeb3d6af81c1e847182261a52b767aa9bf1aa6c3, slot: 8246
+2024-10-09T03:31:26.924604Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8246
+2024-10-09T03:31:26.924648Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.3ms, median=3.2ms
+2024-10-09T03:31:26.924721Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8246
+2024-10-09T03:31:26.946317Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.1ms, median=18.3ms
+2024-10-09T03:31:26.946598Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8224)
+2024-10-09T03:31:26.947561Z  INFO fork_choice_control::block_processor: Validating block with slot: 8247
+2024-10-09T03:31:26.949868Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8ea3935931b48d2b55058547d3653af8b18a389202f40bb416744dcb53d0970c, slot: 8247
+2024-10-09T03:31:26.953273Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8247
+2024-10-09T03:31:26.953324Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.9ms, median=3.2ms
+2024-10-09T03:31:26.953334Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8247
+2024-10-09T03:31:26.970287Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.9ms, median=18.8ms
+2024-10-09T03:31:26.970925Z  INFO fork_choice_control::block_processor: Validating block with slot: 8248
+2024-10-09T03:31:26.972636Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf728d0472c49d48188f7cfb80fb593cfea2f6a612716ac70fdfb0da4e8ca429c, slot: 8248
+2024-10-09T03:31:26.976718Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8248
+2024-10-09T03:31:26.976792Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.6ms, median=3.2ms
+2024-10-09T03:31:26.976803Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8248
+2024-10-09T03:31:26.996199Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.8ms, median=18.8ms
+2024-10-09T03:31:26.997255Z  INFO fork_choice_control::block_processor: Validating block with slot: 8249
+2024-10-09T03:31:27.003509Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4eee309c84b618f213c8dbaf4e1153ed8574b17006c05d2659e7016595efb6b9, slot: 8249
+2024-10-09T03:31:27.009673Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8249
+2024-10-09T03:31:27.009744Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.4ms, median=3.2ms
+2024-10-09T03:31:27.009756Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8249
+2024-10-09T03:31:27.031792Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.2ms, median=19.2ms
+2024-10-09T03:31:27.032493Z  INFO fork_choice_control::block_processor: Validating block with slot: 8250
+2024-10-09T03:31:27.034285Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8cc6a59f923175e89508076bf4707723277e18ce9c7dc2a7130e83bcc887042f, slot: 8250
+2024-10-09T03:31:27.039239Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8250
+2024-10-09T03:31:27.039313Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.2ms, median=3.2ms
+2024-10-09T03:31:27.039323Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8250
+2024-10-09T03:31:27.065873Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.4ms, median=19.2ms
+2024-10-09T03:31:27.066677Z  INFO fork_choice_control::block_processor: Validating block with slot: 8251
+2024-10-09T03:31:27.067750Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x877bc895535f4a9a8ad3afd6e5901dc9c88a1f0f6034e135744b44498dbb5436, slot: 8251
+2024-10-09T03:31:27.071250Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8251
+2024-10-09T03:31:27.071366Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.0ms, median=3.2ms
+2024-10-09T03:31:27.071377Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8251
+2024-10-09T03:31:27.093357Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.4ms, median=19.5ms
+2024-10-09T03:31:27.094169Z  INFO fork_choice_control::block_processor: Validating block with slot: 8252
+2024-10-09T03:31:27.095467Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x65bd258c13243e64fc669fa7eaa993a3195561f396b26ae93967ef12a9d2bdeb, slot: 8252
+2024-10-09T03:31:27.098764Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8252
+2024-10-09T03:31:27.098832Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.7ms, median=3.2ms
+2024-10-09T03:31:27.098844Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8252
+2024-10-09T03:31:27.118666Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.3ms, median=19.5ms
+2024-10-09T03:31:27.119302Z  INFO fork_choice_control::block_processor: Validating block with slot: 8253
+2024-10-09T03:31:27.120569Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6e091ef69a75c6adede614ec2e23093c5d179686d958d12a56b9eea0fc718d26, slot: 8253
+2024-10-09T03:31:27.123382Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8253
+2024-10-09T03:31:27.123425Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.5ms, median=3.2ms
+2024-10-09T03:31:27.123435Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8253
+2024-10-09T03:31:27.142154Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.1ms, median=22.2ms
+2024-10-09T03:31:27.142751Z  INFO fork_choice_control::block_processor: Validating block with slot: 8254
+2024-10-09T03:31:27.144557Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6f38d84700c3bd787b8bf8ef44443f3d036cad084b0e530b8875c85b85618c5b, slot: 8254
+2024-10-09T03:31:27.148463Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8254
+2024-10-09T03:31:27.148529Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.3ms, median=3.2ms
+2024-10-09T03:31:27.148543Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8254
+2024-10-09T03:31:27.166945Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.0ms, median=22.2ms
+2024-10-09T03:31:27.167660Z  INFO fork_choice_control::block_processor: Validating block with slot: 8255
+2024-10-09T03:31:27.169718Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x42ddf52a0c40ebce71797025f47991219c140decd3036cc5f9e31993e5aa796a, slot: 8255
+2024-10-09T03:31:27.173531Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8255
+2024-10-09T03:31:27.173599Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.1ms, median=3.3ms
+2024-10-09T03:31:27.173615Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8255
+2024-10-09T03:31:27.196373Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.1ms, median=22.5ms
+2024-10-09T03:31:27.197002Z  INFO fork_choice_control::block_processor: Validating block with slot: 8256
+2024-10-09T03:31:27.198153Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x80c69434df5ee50098c7c6dfe936843f774fff027a73db486dbdd6bdc42319ff, slot: 8256
+2024-10-09T03:31:27.248468Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8256
+2024-10-09T03:31:27.248537Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.4ms, median=3.3ms
+2024-10-09T03:31:27.248548Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8256
+2024-10-09T03:31:27.259391Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.2ms, median=22.5ms
+2024-10-09T03:31:27.259503Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8256)
+2024-10-09T03:31:27.260312Z  INFO fork_choice_control::block_processor: Validating block with slot: 8257
+2024-10-09T03:31:27.262654Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5e04a65c586e2371aeb4312bad60d4842cf68aafa898656a37d8ca35aeedf13f, slot: 8257
+2024-10-09T03:31:27.336682Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8257
+2024-10-09T03:31:27.336738Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=12.4ms, median=3.3ms
+2024-10-09T03:31:27.336748Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8257
+2024-10-09T03:31:27.347654Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=30.0ms, median=22.7ms
+2024-10-09T03:31:27.348518Z  INFO fork_choice_control::block_processor: Validating block with slot: 8258
+2024-10-09T03:31:27.350430Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6626618f1c89561f0b2124d2f962ea378f8d82cdd32e64b47a284dd0a6adfdda, slot: 8258
+2024-10-09T03:31:27.354570Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8258
+2024-10-09T03:31:27.354626Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=12.2ms, median=3.3ms
+2024-10-09T03:31:27.354636Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8258
+2024-10-09T03:31:27.366575Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=29.7ms, median=22.5ms
+2024-10-09T03:31:27.367255Z  INFO fork_choice_control::block_processor: Validating block with slot: 8259
+2024-10-09T03:31:27.368372Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcdcda52409410e6408a204fe7dc7d089f366548bdeaf75f2d2cf567b5b132ffb, slot: 8259
+2024-10-09T03:31:27.371181Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8259
+2024-10-09T03:31:27.371224Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.9ms, median=3.3ms
+2024-10-09T03:31:27.371235Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8259
+2024-10-09T03:31:27.383541Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=29.3ms, median=22.5ms
+2024-10-09T03:31:27.384121Z  INFO fork_choice_control::block_processor: Validating block with slot: 8260
+2024-10-09T03:31:27.385217Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6c51f84f91e5fab670baa57037390ea6d331cc1fba12273126da57018af7cc76, slot: 8260
+2024-10-09T03:31:27.388058Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8260
+2024-10-09T03:31:27.388111Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.6ms, median=3.3ms
+2024-10-09T03:31:27.388123Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8260
+2024-10-09T03:31:27.400299Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.9ms, median=22.2ms
+2024-10-09T03:31:27.400971Z  INFO fork_choice_control::block_processor: Validating block with slot: 8261
+2024-10-09T03:31:27.403044Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x690850ed2f4bf28b3974769a9cdcb53c3eacde9c09081b0065ecaf2b854297f1, slot: 8261
+2024-10-09T03:31:27.407627Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8261
+2024-10-09T03:31:27.407663Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.4ms, median=3.3ms
+2024-10-09T03:31:27.407672Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8261
+2024-10-09T03:31:27.425023Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.8ms, median=22.5ms
+2024-10-09T03:31:27.425635Z  INFO fork_choice_control::block_processor: Validating block with slot: 8262
+2024-10-09T03:31:27.427274Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x249bd553bde775c08d9f606f3e4ab775d480c6d31b36c0274408bdab743757ce, slot: 8262
+2024-10-09T03:31:27.430374Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8262
+2024-10-09T03:31:27.430434Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.2ms, median=3.3ms
+2024-10-09T03:31:27.430445Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8262
+2024-10-09T03:31:27.448016Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.6ms, median=22.3ms
+2024-10-09T03:31:27.448625Z  INFO fork_choice_control::block_processor: Validating block with slot: 8263
+2024-10-09T03:31:27.449988Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x86e102ec5321cc22f2659df079a623b14ae89a9f3823c1a9262e9111ff76ef22, slot: 8263
+2024-10-09T03:31:27.453680Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8263
+2024-10-09T03:31:27.453749Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=11.0ms, median=3.3ms
+2024-10-09T03:31:27.453760Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8263
+2024-10-09T03:31:27.469067Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.4ms, median=22.3ms
+2024-10-09T03:31:27.469813Z  INFO fork_choice_control::block_processor: Validating block with slot: 8264
+2024-10-09T03:31:27.470884Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9be5105233049aa607c21fea6b3346d4067451728bb519a6c4bd5ff7529910e6, slot: 8264
+2024-10-09T03:31:27.473777Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8264
+2024-10-09T03:31:27.473812Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.8ms, median=3.3ms
+2024-10-09T03:31:27.473822Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8264
+2024-10-09T03:31:27.488282Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=28.1ms, median=22.2ms
+2024-10-09T03:31:27.488938Z  INFO fork_choice_control::block_processor: Validating block with slot: 8265
+2024-10-09T03:31:27.490336Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x417dfc0c603efd965bf9a93dd45080b0745422fd3715b6d07997a5e6386a9fe4, slot: 8265
+2024-10-09T03:31:27.493687Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8265
+2024-10-09T03:31:27.493743Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.6ms, median=3.3ms
+2024-10-09T03:31:27.493755Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8265
+2024-10-09T03:31:27.507350Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.9ms, median=22.2ms
+2024-10-09T03:31:27.507957Z  INFO fork_choice_control::block_processor: Validating block with slot: 8266
+2024-10-09T03:31:27.509191Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x79a4ef7f10cbb60cdb26b1f43f7f9603be9d2a927b5221d07f0e33a2c2cf7f0d, slot: 8266
+2024-10-09T03:31:27.512103Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8266
+2024-10-09T03:31:27.512136Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.4ms, median=3.3ms
+2024-10-09T03:31:27.512146Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8266
+2024-10-09T03:31:27.526366Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.7ms, median=20.4ms
+2024-10-09T03:31:27.527292Z  INFO fork_choice_control::block_processor: Validating block with slot: 8267
+2024-10-09T03:31:27.528709Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf4e0ac4f81b2e2e5301041026762b711612989acb1c74e51bb33c7d879e9cb98, slot: 8267
+2024-10-09T03:31:27.532044Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8267
+2024-10-09T03:31:27.532111Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.3ms, median=3.3ms
+2024-10-09T03:31:27.532122Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8267
+2024-10-09T03:31:27.545915Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.4ms, median=20.4ms
+2024-10-09T03:31:27.546497Z  INFO fork_choice_control::block_processor: Validating block with slot: 8268
+2024-10-09T03:31:27.547972Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa1cb2e23bb032a478d82f522d34d8a22b1b7844b689d319e09c3c7ecd9071557, slot: 8268
+2024-10-09T03:31:27.551425Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8268
+2024-10-09T03:31:27.551485Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.1ms, median=3.3ms
+2024-10-09T03:31:27.551496Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8268
+2024-10-09T03:31:27.565101Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.2ms, median=19.5ms
+2024-10-09T03:31:27.565758Z  INFO fork_choice_control::block_processor: Validating block with slot: 8269
+2024-10-09T03:31:27.567093Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf8faae6e1c9d2f7774dd41f7e51a4e121b0c8e3f993c7297196aec6b32904cc9, slot: 8269
+2024-10-09T03:31:27.570328Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8269
+2024-10-09T03:31:27.570391Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=10.0ms, median=3.3ms
+2024-10-09T03:31:27.570405Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8269
+2024-10-09T03:31:27.584896Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=27.0ms, median=19.5ms
+2024-10-09T03:31:27.585481Z  INFO fork_choice_control::block_processor: Validating block with slot: 8270
+2024-10-09T03:31:27.586579Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x4af506c64848ba5eeefd20c2b721e74a1ceb6432d3da9953b4fd1b69cd241418, slot: 8270
+2024-10-09T03:31:27.589202Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8270
+2024-10-09T03:31:27.589254Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.8ms, median=3.3ms
+2024-10-09T03:31:27.589264Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8270
+2024-10-09T03:31:27.603299Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.8ms, median=19.2ms
+2024-10-09T03:31:27.603892Z  INFO fork_choice_control::block_processor: Validating block with slot: 8271
+2024-10-09T03:31:27.604956Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc6b50880a5ff8047553106571cbb1a7f7596494f22579073c5d080cd48e4979a, slot: 8271
+2024-10-09T03:31:27.607584Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8271
+2024-10-09T03:31:27.607616Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.6ms, median=3.3ms
+2024-10-09T03:31:27.607625Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8271
+2024-10-09T03:31:27.621870Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.6ms, median=19.2ms
+2024-10-09T03:31:27.622580Z  INFO fork_choice_control::block_processor: Validating block with slot: 8272
+2024-10-09T03:31:27.624868Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1c7fb353618e1927d9f41224948d9e4e57de7d8a7d24f04c8bbf9acfe9c2b5cb, slot: 8272
+2024-10-09T03:31:27.629457Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8272
+2024-10-09T03:31:27.629499Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.5ms, median=3.3ms
+2024-10-09T03:31:27.629508Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8272
+2024-10-09T03:31:27.643773Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.5ms, median=19.2ms
+2024-10-09T03:31:27.644079Z  INFO fork_choice_control::block_processor: Validating block with slot: 8273
+2024-10-09T03:31:27.645337Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8765d36e9a5aa03d4537cb0bfa8bafac4c11bc125484f92c2157bcee03b993b2, slot: 8273
+2024-10-09T03:31:27.648499Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8273
+2024-10-09T03:31:27.648583Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.4ms, median=3.3ms
+2024-10-09T03:31:27.648592Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8273
+2024-10-09T03:31:27.663302Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.4ms, median=19.2ms
+2024-10-09T03:31:27.663785Z  INFO fork_choice_control::block_processor: Validating block with slot: 8274
+2024-10-09T03:31:27.665071Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa49942aa0c467a627f17b42a27da7a00cc4b0d01fb1e2f607cee6d1c3908c67a, slot: 8274
+2024-10-09T03:31:27.668055Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8274
+2024-10-09T03:31:27.668106Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.3ms, median=3.3ms
+2024-10-09T03:31:27.668117Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8274
+2024-10-09T03:31:27.683254Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.2ms, median=19.2ms
+2024-10-09T03:31:27.684280Z  INFO fork_choice_control::block_processor: Validating block with slot: 8275
+2024-10-09T03:31:27.685222Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb1db4cc8c4dc34b48202083f8492d4bc85689509ac90153f540caa71c76fdd51, slot: 8275
+2024-10-09T03:31:27.687733Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8275
+2024-10-09T03:31:27.687776Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.1ms, median=3.3ms
+2024-10-09T03:31:27.687786Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8275
+2024-10-09T03:31:27.703242Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=26.1ms, median=19.2ms
+2024-10-09T03:31:27.703833Z  INFO fork_choice_control::block_processor: Validating block with slot: 8276
+2024-10-09T03:31:27.704905Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x78f00f21b82bb7b8308635f53d39dbc4ac0748c1cf9224deffbfa8d8911731ef, slot: 8276
+2024-10-09T03:31:27.707603Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8276
+2024-10-09T03:31:27.707640Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.0ms, median=3.2ms
+2024-10-09T03:31:27.707650Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8276
+2024-10-09T03:31:27.722922Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=25.9ms, median=19.2ms
+2024-10-09T03:31:27.723369Z  INFO fork_choice_control::block_processor: Validating block with slot: 8277
+2024-10-09T03:31:27.724307Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe35e52f7d82be12f286eb68de2f23514219aa40a0887b18e5d8de37a9bd3cc47, slot: 8277
+2024-10-09T03:31:27.726726Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8277
+2024-10-09T03:31:27.726765Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.9ms, median=3.2ms
+2024-10-09T03:31:27.726776Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8277
+2024-10-09T03:31:27.742023Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=25.8ms, median=19.2ms
+2024-10-09T03:31:27.742647Z  INFO fork_choice_control::block_processor: Validating block with slot: 8278
+2024-10-09T03:31:27.743974Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfb381b7ffbc50dffec9ec49147485bd6d3a8ae4bc1952ae47eea507f13684b5c, slot: 8278
+2024-10-09T03:31:27.747157Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8278
+2024-10-09T03:31:27.747199Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.8ms, median=3.2ms
+2024-10-09T03:31:27.747210Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8278
+2024-10-09T03:31:27.763067Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=25.7ms, median=19.2ms
+2024-10-09T03:31:27.763688Z  INFO fork_choice_control::block_processor: Validating block with slot: 8279
+2024-10-09T03:31:27.766084Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa367e679bdfc2f31ad026d95462f1a762c4c807417b71b96e9d8c60212c3a918, slot: 8279
+2024-10-09T03:31:27.770995Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8279
+2024-10-09T03:31:27.771044Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.7ms, median=3.2ms
+2024-10-09T03:31:27.771053Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8279
+2024-10-09T03:31:27.787522Z TRACE fork_choice_control::block_processor: validate_block timing: min=15.8ms, max=162.4ms, avg=25.7ms, median=19.2ms
+2024-10-09T03:31:27.788142Z  INFO fork_choice_control::block_processor: Validating block with slot: 8280
+2024-10-09T03:31:27.789591Z TRACE fork_choice_control::block_processor: validate_block timing: min=1.4ms, max=162.4ms, avg=25.2ms, median=19.2ms
+2024-10-09T03:31:27.790234Z  INFO fork_choice_control::block_processor: Validating block with slot: 8281
+2024-10-09T03:31:27.791620Z TRACE fork_choice_control::block_processor: validate_block timing: min=1.4ms, max=162.4ms, avg=24.8ms, median=19.2ms
+2024-10-09T03:31:27.791971Z  INFO fork_choice_control::block_processor: Validating block with slot: 8282
+2024-10-09T03:31:27.792919Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=24.4ms, median=19.1ms
+2024-10-09T03:31:27.793353Z  INFO fork_choice_control::block_processor: Validating block with slot: 8283
+2024-10-09T03:31:27.794432Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=24.0ms, median=19.1ms
+2024-10-09T03:31:27.794768Z  INFO fork_choice_control::block_processor: Validating block with slot: 8284
+2024-10-09T03:31:27.795726Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=23.6ms, median=19.0ms
+2024-10-09T03:31:27.796060Z  INFO fork_choice_control::block_processor: Validating block with slot: 8285
+2024-10-09T03:31:27.797133Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=23.2ms, median=19.0ms
+2024-10-09T03:31:27.797455Z  INFO fork_choice_control::block_processor: Validating block with slot: 8286
+2024-10-09T03:31:27.799021Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=22.9ms, median=18.9ms
+2024-10-09T03:31:27.799533Z  INFO fork_choice_control::block_processor: Validating block with slot: 8287
+2024-10-09T03:31:27.802931Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=22.5ms, median=18.9ms
+2024-10-09T03:31:27.803261Z  INFO fork_choice_control::block_processor: Validating block with slot: 8288
+2024-10-09T03:31:27.804497Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=22.2ms, median=18.8ms
+2024-10-09T03:31:27.807133Z  INFO fork_choice_control::block_processor: Validating block with slot: 8289
+2024-10-09T03:31:27.808369Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=21.9ms, median=18.8ms
+2024-10-09T03:31:27.808562Z  INFO fork_choice_control::block_processor: Validating block with slot: 8290
+2024-10-09T03:31:27.810483Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=21.6ms, median=18.6ms
+2024-10-09T03:31:27.810806Z  INFO fork_choice_control::block_processor: Validating block with slot: 8291
+2024-10-09T03:31:27.812301Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=21.3ms, median=18.6ms
+2024-10-09T03:31:27.812665Z  INFO fork_choice_control::block_processor: Validating block with slot: 8292
+2024-10-09T03:31:27.813967Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=21.0ms, median=18.6ms
+2024-10-09T03:31:27.814447Z  INFO fork_choice_control::block_processor: Validating block with slot: 8293
+2024-10-09T03:31:27.816368Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=20.7ms, median=18.6ms
+2024-10-09T03:31:27.816703Z  INFO fork_choice_control::block_processor: Validating block with slot: 8294
+2024-10-09T03:31:27.817795Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=20.4ms, median=18.6ms
+2024-10-09T03:31:27.818027Z  INFO fork_choice_control::block_processor: Validating block with slot: 8295
+2024-10-09T03:31:27.819107Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=20.1ms, median=18.6ms
+2024-10-09T03:31:27.819336Z  INFO fork_choice_control::block_processor: Validating block with slot: 8296
+2024-10-09T03:31:27.820823Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.9ms, median=18.4ms
+2024-10-09T03:31:27.821130Z  INFO fork_choice_control::block_processor: Validating block with slot: 8297
+2024-10-09T03:31:27.822233Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.6ms, median=18.4ms
+2024-10-09T03:31:27.822543Z  INFO fork_choice_control::block_processor: Validating block with slot: 8298
+2024-10-09T03:31:27.823629Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.3ms, median=18.4ms
+2024-10-09T03:31:27.823944Z  INFO fork_choice_control::block_processor: Validating block with slot: 8299
+2024-10-09T03:31:27.825029Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.1ms, median=18.4ms
+2024-10-09T03:31:27.825269Z  INFO fork_choice_control::block_processor: Validating block with slot: 8300
+2024-10-09T03:31:27.826943Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.9ms, median=18.3ms
+2024-10-09T03:31:27.827251Z  INFO fork_choice_control::block_processor: Validating block with slot: 8301
+2024-10-09T03:31:27.830270Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.7ms, median=18.3ms
+2024-10-09T03:31:27.830527Z  INFO fork_choice_control::block_processor: Validating block with slot: 8302
+2024-10-09T03:31:27.832550Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.4ms, median=18.3ms
+2024-10-09T03:31:27.833353Z  INFO fork_choice_control::block_processor: Validating block with slot: 8303
+2024-10-09T03:31:27.834983Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.2ms, median=18.3ms
+2024-10-09T03:31:27.835286Z  INFO fork_choice_control::block_processor: Validating block with slot: 8304
+2024-10-09T03:31:27.838316Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.0ms, median=18.0ms
+2024-10-09T03:31:27.839094Z  INFO fork_choice_control::block_processor: Validating block with slot: 8305
+2024-10-09T03:31:27.840251Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.8ms, median=18.0ms
+2024-10-09T03:31:27.840294Z  INFO fork_choice_control::block_processor: Validating block with slot: 8306
+2024-10-09T03:31:27.841697Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.6ms, median=17.9ms
+2024-10-09T03:31:27.844544Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/beacon/sync with name sync
+2024-10-09T03:31:27.848020Z  INFO database: database: /Users/mercynaps/.grandine/mainnet/validator with name proposer-configs
+2024-10-09T03:31:27.874160Z  INFO discv5::service: Discv5 Service started mode=Ip4
+2024-10-09T03:31:27.886515Z  INFO libp2p_swarm: local_peer_id=16Uiu2HAm1MjWUF4J3qsovL8Wzccfuzy28tTQ8dmA2sazksHeR3bs
+2024-10-09T03:31:27.972528Z  INFO fork_choice_control::block_processor: Validating block with slot: 8280
+2024-10-09T03:31:27.975911Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1324de906b06eb0d79e6b85722be1013e6ccdf225163f92b8a6235863dac913d, slot: 8280
+2024-10-09T03:31:27.985810Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8280
+2024-10-09T03:31:27.986078Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.7ms, median=3.2ms
+2024-10-09T03:31:27.986151Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8280
+2024-10-09T03:31:28.006252Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.8ms, median=18.0ms
+2024-10-09T03:31:28.006497Z  INFO fork_choice_control::block_processor: Validating block with slot: 8281
+2024-10-09T03:31:28.008251Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x73da5c9df1892a0b2d4f4ee4e40da99988e08f4d5c20a94f2202233871f11b13, slot: 8281
+2024-10-09T03:31:28.011825Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8281
+2024-10-09T03:31:28.011886Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.6ms, median=3.3ms
+2024-10-09T03:31:28.011898Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8281
+2024-10-09T03:31:28.058194Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.2ms, median=18.0ms
+2024-10-09T03:31:28.058838Z  INFO fork_choice_control::block_processor: Validating block with slot: 8282
+2024-10-09T03:31:28.059929Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x679bba8f42ca299c2b2681e9868e022a01d98bb588412140db9a827eca5aa262, slot: 8282
+2024-10-09T03:31:28.062830Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8282
+2024-10-09T03:31:28.062904Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.5ms, median=3.2ms
+2024-10-09T03:31:28.062915Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8282
+2024-10-09T03:31:28.081503Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.3ms, median=18.3ms
+2024-10-09T03:31:28.081829Z  INFO fork_choice_control::block_processor: Validating block with slot: 8283
+2024-10-09T03:31:28.083138Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x54bfee6d0bfff60e334a1fb95e262ec8ee44000cd287a23fb5fa6ad3867fdb09, slot: 8283
+2024-10-09T03:31:28.086169Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8283
+2024-10-09T03:31:28.086219Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.4ms, median=3.2ms
+2024-10-09T03:31:28.086228Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8283
+2024-10-09T03:31:28.105507Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.3ms, median=18.3ms
+2024-10-09T03:31:28.105728Z  INFO fork_choice_control::block_processor: Validating block with slot: 8284
+2024-10-09T03:31:28.106712Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xbba96eca26ac18386a849937ab1a67dcf90d57de8bfb9d24ef192cf5ebfcd8db, slot: 8284
+2024-10-09T03:31:28.109154Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8284
+2024-10-09T03:31:28.109189Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.3ms, median=3.2ms
+2024-10-09T03:31:28.109198Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8284
+2024-10-09T03:31:28.127010Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.4ms, median=18.3ms
+2024-10-09T03:31:28.127306Z  INFO fork_choice_control::block_processor: Validating block with slot: 8285
+2024-10-09T03:31:28.128625Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc53e2ed9a56a7a4fd63281442e03ef5fcfab7bf01a0dcf03960a7412cdb0a1ac, slot: 8285
+2024-10-09T03:31:28.131653Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8285
+2024-10-09T03:31:28.131733Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.3ms, median=3.2ms
+2024-10-09T03:31:28.131743Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8285
+2024-10-09T03:31:28.150432Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.4ms, median=18.3ms
+2024-10-09T03:31:28.150625Z  INFO fork_choice_control::block_processor: Validating block with slot: 8286
+2024-10-09T03:31:28.152162Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x78e6307bbc7a3ba740c8ae1cbea6433681bb0493332e732bbb87b26c8e6bf96b, slot: 8286
+2024-10-09T03:31:28.155732Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8286
+2024-10-09T03:31:28.155780Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.2ms, median=3.2ms
+2024-10-09T03:31:28.155789Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8286
+2024-10-09T03:31:28.175126Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.5ms, median=18.4ms
+2024-10-09T03:31:28.175462Z  INFO fork_choice_control::block_processor: Validating block with slot: 8287
+2024-10-09T03:31:28.179827Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5e9f9c41099b29608087ece01274903d1d8b019c8d98a8b911ef51a5d4ae3cc8, slot: 8287
+2024-10-09T03:31:28.188342Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8287
+2024-10-09T03:31:28.188404Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.2ms, median=3.2ms
+2024-10-09T03:31:28.188414Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8287
+2024-10-09T03:31:28.207881Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.6ms, median=18.4ms
+2024-10-09T03:31:28.208097Z  INFO fork_choice_control::block_processor: Validating block with slot: 8288
+2024-10-09T03:31:28.209376Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa653dccffd8a63f5f6a67fe53d54647a12cd4e2d9818100b0a26e186e2506e81, slot: 8288
+2024-10-09T03:31:28.260063Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8288
+2024-10-09T03:31:28.260128Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.9ms, median=3.2ms
+2024-10-09T03:31:28.260139Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8288
+2024-10-09T03:31:28.272066Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.1ms, median=18.4ms
+2024-10-09T03:31:28.272214Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8288)
+2024-10-09T03:31:28.272317Z  INFO fork_choice_control::block_processor: Validating block with slot: 8289
+2024-10-09T03:31:28.273546Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xcd239edd47c6c1d1dba6519aa6cc605c765e27f72200a6ac0a484186e4952c4f, slot: 8289
+2024-10-09T03:31:28.346134Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8289
+2024-10-09T03:31:28.346202Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.9ms, median=3.3ms
+2024-10-09T03:31:28.346212Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8289
+2024-10-09T03:31:28.358682Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.9ms, median=18.4ms
+2024-10-09T03:31:28.358915Z  INFO fork_choice_control::block_processor: Validating block with slot: 8290
+2024-10-09T03:31:28.361017Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb18a32df79102a1bc7efb30433cb391b37e9085f79d9bfb0ea6abe8631d25a08, slot: 8290
+2024-10-09T03:31:28.365663Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8290
+2024-10-09T03:31:28.365750Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.8ms, median=3.3ms
+2024-10-09T03:31:28.365760Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8290
+2024-10-09T03:31:28.377902Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.9ms, median=18.6ms
+2024-10-09T03:31:28.378239Z  INFO fork_choice_control::block_processor: Validating block with slot: 8291
+2024-10-09T03:31:28.379987Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd05940f827d8da370df5954f73df707c05bed6050c2c0a3e0ec0e3d91c3a66c0, slot: 8291
+2024-10-09T03:31:28.383800Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8291
+2024-10-09T03:31:28.383867Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.7ms, median=3.3ms
+2024-10-09T03:31:28.383877Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8291
+2024-10-09T03:31:28.395488Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.395722Z  INFO fork_choice_control::block_processor: Validating block with slot: 8292
+2024-10-09T03:31:28.396958Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6b68d6c929e6d6ab1b327309a3aace8ce903c6e9196b9075154423b00315f31b, slot: 8292
+2024-10-09T03:31:28.400083Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8292
+2024-10-09T03:31:28.400159Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.6ms, median=3.3ms
+2024-10-09T03:31:28.400169Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8292
+2024-10-09T03:31:28.412222Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.412451Z  INFO fork_choice_control::block_processor: Validating block with slot: 8293
+2024-10-09T03:31:28.414407Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x969f480d825fa4953fa7dc6c2cb5ecddc19148727013e3d438765e0150a2e577, slot: 8293
+2024-10-09T03:31:28.418762Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8293
+2024-10-09T03:31:28.418826Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.5ms, median=3.3ms
+2024-10-09T03:31:28.418837Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8293
+2024-10-09T03:31:28.432029Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.434255Z  INFO fork_choice_control::block_processor: Validating block with slot: 8294
+2024-10-09T03:31:28.435371Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa7fc671c08c74f6823be58c15c823eb4f0e92cde6a514c5b51e578bdf558233f, slot: 8294
+2024-10-09T03:31:28.438152Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8294
+2024-10-09T03:31:28.438209Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.4ms, median=3.3ms
+2024-10-09T03:31:28.438220Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8294
+2024-10-09T03:31:28.452268Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.452515Z  INFO fork_choice_control::block_processor: Validating block with slot: 8295
+2024-10-09T03:31:28.453622Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa3931c6ea9572c3ba56681024b748be6b36bd9886fa9285eece72ac59fa8d41c, slot: 8295
+2024-10-09T03:31:28.456794Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8295
+2024-10-09T03:31:28.456845Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.3ms, median=3.3ms
+2024-10-09T03:31:28.456854Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8295
+2024-10-09T03:31:28.470657Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.471460Z  INFO fork_choice_control::block_processor: Validating block with slot: 8296
+2024-10-09T03:31:28.473013Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xe57feccb3c51dbfc2afed6bb0ec071eb2079c86e12715dd09e853542f1bd3006, slot: 8296
+2024-10-09T03:31:28.476630Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8296
+2024-10-09T03:31:28.476685Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.2ms, median=3.3ms
+2024-10-09T03:31:28.476696Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8296
+2024-10-09T03:31:28.491295Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.491610Z  INFO fork_choice_control::block_processor: Validating block with slot: 8297
+2024-10-09T03:31:28.492831Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf320c02d8be41904ad74fc87055b48ff209568a407e0495c1f4574525007e7af, slot: 8297
+2024-10-09T03:31:28.495788Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8297
+2024-10-09T03:31:28.495836Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.2ms, median=3.3ms
+2024-10-09T03:31:28.495850Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8297
+2024-10-09T03:31:28.510315Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.8ms, median=18.4ms
+2024-10-09T03:31:28.512167Z  INFO fork_choice_control::block_processor: Validating block with slot: 8298
+2024-10-09T03:31:28.513400Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x004200ab1ae32747e69f7a5bce378cb235021ac347d950e87ec1de1fc974d7e8, slot: 8298
+2024-10-09T03:31:28.516275Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8298
+2024-10-09T03:31:28.516338Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.1ms, median=3.2ms
+2024-10-09T03:31:28.516348Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8298
+2024-10-09T03:31:28.530687Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=19.7ms, median=18.4ms
+2024-10-09T03:31:28.530968Z  INFO fork_choice_control::block_processor: Validating block with slot: 8299
+2024-10-09T03:31:28.532294Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd0d9a10007b29c2c567af72f0e86b200f1ee674426c537be3761c8cf5df3832b, slot: 8299
+2024-10-09T03:31:28.535224Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8299
+2024-10-09T03:31:28.535283Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=9.0ms, median=3.2ms
+2024-10-09T03:31:28.535293Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8299
+2024-10-09T03:31:28.549618Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.1ms, median=18.4ms
+2024-10-09T03:31:28.549852Z  INFO fork_choice_control::block_processor: Validating block with slot: 8300
+2024-10-09T03:31:28.551546Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf4a24393766fe8fc32cdb14463c69cfe18fdfbd343a482d1d46a0bfeb81c2b3a, slot: 8300
+2024-10-09T03:31:28.555296Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8300
+2024-10-09T03:31:28.555358Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.9ms, median=3.2ms
+2024-10-09T03:31:28.555368Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8300
+2024-10-09T03:31:28.569886Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=18.0ms, median=18.4ms
+2024-10-09T03:31:28.570141Z  INFO fork_choice_control::block_processor: Validating block with slot: 8301
+2024-10-09T03:31:28.573146Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc5e1975d1e34e21a747bad8879b18ebef20d45a87443343cf847fda446cbe18d, slot: 8301
+2024-10-09T03:31:28.579425Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8301
+2024-10-09T03:31:28.579493Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.9ms, median=3.3ms
+2024-10-09T03:31:28.579503Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8301
+2024-10-09T03:31:28.594573Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.9ms, median=18.6ms
+2024-10-09T03:31:28.594815Z  INFO fork_choice_control::block_processor: Validating block with slot: 8302
+2024-10-09T03:31:28.595773Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xbbd058af9fe0eadeb5f439ad53bf309110974228046dbbd6b8f95bc2e0851410, slot: 8302
+2024-10-09T03:31:28.598360Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8302
+2024-10-09T03:31:28.598433Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.8ms, median=3.2ms
+2024-10-09T03:31:28.598443Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8302
+2024-10-09T03:31:28.613563Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.7ms, median=18.6ms
+2024-10-09T03:31:28.614055Z  INFO fork_choice_control::block_processor: Validating block with slot: 8303
+2024-10-09T03:31:28.615217Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x52c2b02d30e65fce010ed77eb2c42fb8fd5f93ece6d98f37df4c4ae1c3aa9c54, slot: 8303
+2024-10-09T03:31:28.618020Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8303
+2024-10-09T03:31:28.618080Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.7ms, median=3.2ms
+2024-10-09T03:31:28.618089Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8303
+2024-10-09T03:31:28.633428Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.6ms, median=18.6ms
+2024-10-09T03:31:28.633664Z  INFO fork_choice_control::block_processor: Validating block with slot: 8304
+2024-10-09T03:31:28.634862Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf4f992655913857554ec95c6eb37e479b8a32984148210cf7904711e262ad516, slot: 8304
+2024-10-09T03:31:28.637707Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8304
+2024-10-09T03:31:28.637750Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.7ms, median=3.2ms
+2024-10-09T03:31:28.637759Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8304
+2024-10-09T03:31:28.656419Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.5ms, median=18.6ms
+2024-10-09T03:31:28.657201Z  INFO fork_choice_control::block_processor: Validating block with slot: 8305
+2024-10-09T03:31:28.659151Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xc492e43f5360f9bc44cd913fac9be0acb48f4acc3e94ec1cbf05258e39010903, slot: 8305
+2024-10-09T03:31:28.661818Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8305
+2024-10-09T03:31:28.661885Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.6ms, median=3.2ms
+2024-10-09T03:31:28.661895Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8305
+2024-10-09T03:31:28.683763Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.4ms, median=18.6ms
+2024-10-09T03:31:28.684003Z  INFO fork_choice_control::block_processor: Validating block with slot: 8306
+2024-10-09T03:31:28.685407Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf67b70dbf06de70ea695aa1def9bd39618862818b80ec41e3341d24cc700eb94, slot: 8306
+2024-10-09T03:31:28.688575Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8306
+2024-10-09T03:31:28.688644Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=149.0ms, avg=8.5ms, median=3.2ms
+2024-10-09T03:31:28.688653Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8306
+2024-10-09T03:31:28.705441Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.2ms, median=18.7ms
+2024-10-09T03:31:37.928205Z  INFO http_api::task: HTTP server listening on 127.0.0.1:5052
+2024-10-09T03:32:03.040427Z  WARN discv5::service: FINDNODE request failed with partial results node_id=0x77dd..aca2 addr=71.8.172.65:12000 error=Timeout received=15 expected=3
+2024-10-09T03:32:16.242066Z  INFO fork_choice_control::block_processor: Validating block with slot: 8225
+2024-10-09T03:32:16.245886Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=17.0ms, median=18.7ms
+2024-10-09T03:32:16.256997Z  INFO fork_choice_control::block_processor: Validating block with slot: 8226
+2024-10-09T03:32:16.261244Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=16.7ms, median=18.7ms
+2024-10-09T03:32:16.269694Z  INFO fork_choice_control::block_processor: Validating block with slot: 8227
+2024-10-09T03:32:16.271626Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=16.3ms, median=18.6ms
+2024-10-09T03:32:16.281840Z  INFO fork_choice_control::block_processor: Validating block with slot: 8228
+2024-10-09T03:32:16.281795Z  INFO fork_choice_control::block_processor: Validating block with slot: 8229
+2024-10-09T03:32:16.283670Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=16.0ms, median=18.6ms
+2024-10-09T03:32:16.284194Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=15.7ms, median=18.6ms
+2024-10-09T03:32:16.288666Z  INFO fork_choice_control::block_processor: Validating block with slot: 8230
+2024-10-09T03:32:16.289954Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=15.4ms, median=18.6ms
+2024-10-09T03:32:16.304087Z  INFO fork_choice_control::block_processor: Validating block with slot: 8231
+2024-10-09T03:32:16.306261Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=15.2ms, median=18.6ms
+2024-10-09T03:32:16.311040Z  INFO fork_choice_control::block_processor: Validating block with slot: 8232
+2024-10-09T03:32:16.311092Z  INFO fork_choice_control::block_processor: Validating block with slot: 8233
+2024-10-09T03:32:16.312998Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=14.9ms, median=18.6ms
+2024-10-09T03:32:16.314108Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=14.5ms, median=18.6ms
+2024-10-09T03:32:16.316620Z  INFO fork_choice_control::block_processor: Validating block with slot: 8234
+2024-10-09T03:32:16.317887Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=14.2ms, median=18.6ms
+2024-10-09T03:32:16.344086Z  INFO fork_choice_control::block_processor: Validating block with slot: 8235
+2024-10-09T03:32:16.347059Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=13.9ms, median=18.4ms
+2024-10-09T03:32:16.395089Z  INFO fork_choice_control::block_processor: Validating block with slot: 8236
+2024-10-09T03:32:16.397458Z  INFO fork_choice_control::block_processor: Validating block with slot: 8237
+2024-10-09T03:32:16.398776Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=13.6ms, median=18.4ms
+2024-10-09T03:32:16.399067Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=13.3ms, median=18.4ms
+2024-10-09T03:32:16.477730Z  INFO fork_choice_control::block_processor: Validating block with slot: 8242
+2024-10-09T03:32:16.477729Z  INFO fork_choice_control::block_processor: Validating block with slot: 8238
+2024-10-09T03:32:16.477795Z  INFO fork_choice_control::block_processor: Validating block with slot: 8239
+2024-10-09T03:32:16.477869Z  INFO fork_choice_control::block_processor: Validating block with slot: 8240
+2024-10-09T03:32:16.478836Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=13.0ms, median=18.3ms
+2024-10-09T03:32:16.479196Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=12.7ms, median=18.1ms
+2024-10-09T03:32:16.479437Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=12.4ms, median=18.0ms
+2024-10-09T03:32:16.479511Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=12.0ms, median=18.0ms
+2024-10-09T03:32:16.483476Z  INFO fork_choice_control::block_processor: Validating block with slot: 8243
+2024-10-09T03:32:16.484732Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=11.7ms, median=17.9ms
+2024-10-09T03:32:16.500976Z  INFO fork_choice_control::block_processor: Validating block with slot: 8245
+2024-10-09T03:32:16.500980Z  INFO fork_choice_control::block_processor: Validating block with slot: 8244
+2024-10-09T03:32:16.502054Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=11.4ms, median=17.8ms
+2024-10-09T03:32:16.502168Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=11.2ms, median=17.3ms
+2024-10-09T03:32:16.514680Z  INFO fork_choice_control::block_processor: Validating block with slot: 8246
+2024-10-09T03:32:16.515987Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=10.9ms, median=16.4ms
+2024-10-09T03:32:16.523009Z  INFO fork_choice_control::block_processor: Validating block with slot: 8247
+2024-10-09T03:32:16.524659Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=10.6ms, median=16.2ms
+2024-10-09T03:32:16.530834Z  INFO fork_choice_control::block_processor: Validating block with slot: 8248
+2024-10-09T03:32:16.532846Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=10.1ms, median=16.1ms
+2024-10-09T03:32:16.568898Z  INFO fork_choice_control::block_processor: Validating block with slot: 8249
+2024-10-09T03:32:16.568960Z  INFO fork_choice_control::block_processor: Validating block with slot: 8250
+2024-10-09T03:32:16.568969Z  INFO fork_choice_control::block_processor: Validating block with slot: 8251
+2024-10-09T03:32:16.570344Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=9.3ms, median=4.2ms
+2024-10-09T03:32:16.571383Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=9.2ms, median=4.0ms
+2024-10-09T03:32:16.571807Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=9.0ms, median=3.9ms
+2024-10-09T03:32:16.573042Z  INFO fork_choice_control::block_processor: Validating block with slot: 8252
+2024-10-09T03:32:16.573048Z  INFO fork_choice_control::block_processor: Validating block with slot: 8253
+2024-10-09T03:32:16.574256Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=8.8ms, median=3.4ms
+2024-10-09T03:32:16.574395Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=8.6ms, median=3.3ms
+2024-10-09T03:32:16.575499Z  INFO fork_choice_control::block_processor: Validating block with slot: 8254
+2024-10-09T03:32:16.577610Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=8.4ms, median=3.0ms
+2024-10-09T03:32:16.596547Z  INFO fork_choice_control::block_processor: Validating block with slot: 8255
+2024-10-09T03:32:16.596551Z  INFO fork_choice_control::block_processor: Validating block with slot: 8256
+2024-10-09T03:32:16.598211Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=8.2ms, median=2.9ms
+2024-10-09T03:32:16.598527Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=8.0ms, median=2.9ms
+2024-10-09T03:32:16.622843Z  INFO fork_choice_control::block_processor: Validating block with slot: 8257
+2024-10-09T03:32:16.622852Z  INFO fork_choice_control::block_processor: Validating block with slot: 8258
+2024-10-09T03:32:16.623037Z  INFO fork_choice_control::block_processor: Validating block with slot: 8259
+2024-10-09T03:32:16.624785Z  INFO fork_choice_control::block_processor: Validating block with slot: 8260
+2024-10-09T03:32:16.624841Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=7.8ms, median=2.8ms
+2024-10-09T03:32:16.624930Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=7.7ms, median=2.8ms
+2024-10-09T03:32:16.625429Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=7.5ms, median=2.7ms
+2024-10-09T03:32:16.625840Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=7.3ms, median=2.6ms
+2024-10-09T03:32:16.635863Z  INFO fork_choice_control::block_processor: Validating block with slot: 8262
+2024-10-09T03:32:16.635861Z  INFO fork_choice_control::block_processor: Validating block with slot: 8261
+2024-10-09T03:32:16.637142Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=7.1ms, median=2.5ms
+2024-10-09T03:32:16.638033Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=7.0ms, median=2.3ms
+2024-10-09T03:32:16.641558Z  INFO fork_choice_control::block_processor: Validating block with slot: 8263
+2024-10-09T03:32:16.642816Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=6.8ms, median=2.2ms
+2024-10-09T03:32:16.651675Z  INFO fork_choice_control::block_processor: Validating block with slot: 8265
+2024-10-09T03:32:16.651677Z  INFO fork_choice_control::block_processor: Validating block with slot: 8264
+2024-10-09T03:32:16.652824Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=6.6ms, median=2.1ms
+2024-10-09T03:32:16.653074Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=6.5ms, median=2.0ms
+2024-10-09T03:32:16.658487Z  INFO fork_choice_control::block_processor: Validating block with slot: 8266
+2024-10-09T03:32:16.659858Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=6.3ms, median=2.0ms
+2024-10-09T03:32:16.697400Z  INFO fork_choice_control::block_processor: Validating block with slot: 8267
+2024-10-09T03:32:16.699034Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=6.1ms, median=1.9ms
+2024-10-09T03:32:16.702750Z  INFO fork_choice_control::block_processor: Validating block with slot: 8269
+2024-10-09T03:32:16.702752Z  INFO fork_choice_control::block_processor: Validating block with slot: 8268
+2024-10-09T03:32:16.704325Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=6.0ms, median=1.9ms
+2024-10-09T03:32:16.704394Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.8ms, median=1.9ms
+2024-10-09T03:32:16.712659Z  INFO fork_choice_control::block_processor: Validating block with slot: 8270
+2024-10-09T03:32:16.713779Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.7ms, median=1.9ms
+2024-10-09T03:32:16.719674Z  INFO fork_choice_control::block_processor: Validating block with slot: 8271
+2024-10-09T03:32:16.719680Z  INFO fork_choice_control::block_processor: Validating block with slot: 8272
+2024-10-09T03:32:16.720876Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.5ms, median=1.9ms
+2024-10-09T03:32:16.721937Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.5ms, median=1.9ms
+2024-10-09T03:32:16.735414Z  INFO fork_choice_control::block_processor: Validating block with slot: 8273
+2024-10-09T03:32:16.736882Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.4ms, median=1.9ms
+2024-10-09T03:32:16.737844Z  INFO fork_choice_control::block_processor: Validating block with slot: 8274
+2024-10-09T03:32:16.739198Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.4ms, median=1.9ms
+2024-10-09T03:32:16.746194Z  INFO fork_choice_control::block_processor: Validating block with slot: 8275
+2024-10-09T03:32:16.746195Z  INFO fork_choice_control::block_processor: Validating block with slot: 8276
+2024-10-09T03:32:16.747287Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.4ms, median=1.9ms
+2024-10-09T03:32:16.747423Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.3ms, median=1.9ms
+2024-10-09T03:32:16.751022Z  INFO fork_choice_control::block_processor: Validating block with slot: 8277
+2024-10-09T03:32:16.752080Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.3ms, median=1.9ms
+2024-10-09T03:32:16.756937Z  INFO fork_choice_control::block_processor: Validating block with slot: 8278
+2024-10-09T03:32:16.758432Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.3ms, median=1.9ms
+2024-10-09T03:32:16.765318Z  INFO fork_choice_control::block_processor: Validating block with slot: 8279
+2024-10-09T03:32:16.767898Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.2ms, median=1.9ms
+2024-10-09T03:32:16.772994Z  INFO fork_choice_control::block_processor: Validating block with slot: 8280
+2024-10-09T03:32:16.773003Z  INFO fork_choice_control::block_processor: Validating block with slot: 8281
+2024-10-09T03:32:16.774470Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.2ms, median=1.9ms
+2024-10-09T03:32:16.774534Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.2ms, median=1.9ms
+2024-10-09T03:32:16.787451Z  INFO fork_choice_control::block_processor: Validating block with slot: 8282
+2024-10-09T03:32:16.787453Z  INFO fork_choice_control::block_processor: Validating block with slot: 8283
+2024-10-09T03:32:16.788527Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.1ms, median=1.9ms
+2024-10-09T03:32:16.788724Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.1ms, median=1.9ms
+2024-10-09T03:32:16.791907Z  INFO fork_choice_control::block_processor: Validating block with slot: 8284
+2024-10-09T03:32:16.792975Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.1ms, median=1.9ms
+2024-10-09T03:32:16.798999Z  INFO fork_choice_control::block_processor: Validating block with slot: 8286
+2024-10-09T03:32:16.799002Z  INFO fork_choice_control::block_processor: Validating block with slot: 8285
+2024-10-09T03:32:16.800235Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.0ms, median=1.9ms
+2024-10-09T03:32:16.800669Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.0ms, median=1.9ms
+2024-10-09T03:32:16.834156Z  INFO fork_choice_control::block_processor: Validating block with slot: 8288
+2024-10-09T03:32:16.834160Z  INFO fork_choice_control::block_processor: Validating block with slot: 8287
+2024-10-09T03:32:16.835420Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.0ms, median=1.9ms
+2024-10-09T03:32:16.837708Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=5.0ms, median=1.9ms
+2024-10-09T03:32:21.715942Z  INFO fork_choice_control::block_processor: Validating block with slot: 8291
+2024-10-09T03:32:21.715937Z  INFO fork_choice_control::block_processor: Validating block with slot: 8289
+2024-10-09T03:32:21.715962Z  INFO fork_choice_control::block_processor: Validating block with slot: 8292
+2024-10-09T03:32:21.716007Z  INFO fork_choice_control::block_processor: Validating block with slot: 8290
+2024-10-09T03:32:21.716923Z  INFO fork_choice_control::block_processor: Validating block with slot: 8293
+2024-10-09T03:32:21.717152Z  INFO fork_choice_control::block_processor: Validating block with slot: 8294
+2024-10-09T03:32:21.717237Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.9ms, median=1.9ms
+2024-10-09T03:32:21.717264Z  INFO fork_choice_control::block_processor: Validating block with slot: 8296
+2024-10-09T03:32:21.717282Z  INFO fork_choice_control::block_processor: Validating block with slot: 8295
+2024-10-09T03:32:21.717295Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.9ms, median=1.9ms
+2024-10-09T03:32:21.717803Z  INFO fork_choice_control::block_processor: Validating block with slot: 8297
+2024-10-09T03:32:21.718378Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.9ms, median=1.9ms
+2024-10-09T03:32:21.718442Z  INFO fork_choice_control::block_processor: Validating block with slot: 8299
+2024-10-09T03:32:21.718518Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.8ms, median=1.9ms
+2024-10-09T03:32:21.718531Z  INFO fork_choice_control::block_processor: Validating block with slot: 8300
+2024-10-09T03:32:21.718810Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.8ms, median=1.9ms
+2024-10-09T03:32:21.718822Z  INFO fork_choice_control::block_processor: Validating block with slot: 8301
+2024-10-09T03:32:21.719683Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.8ms, median=1.9ms
+2024-10-09T03:32:21.719803Z  INFO fork_choice_control::block_processor: Validating block with slot: 8302
+2024-10-09T03:32:21.720096Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.8ms, median=1.9ms
+2024-10-09T03:32:21.720111Z  INFO fork_choice_control::block_processor: Validating block with slot: 8303
+2024-10-09T03:32:21.720196Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.7ms, median=1.8ms
+2024-10-09T03:32:21.720272Z  INFO fork_choice_control::block_processor: Validating block with slot: 8298
+2024-10-09T03:32:21.720434Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.7ms, median=1.9ms
+2024-10-09T03:32:21.720608Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.7ms, median=1.9ms
+2024-10-09T03:32:21.721172Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.5ms, median=1.9ms
+2024-10-09T03:32:21.721216Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.2ms, median=1.9ms
+2024-10-09T03:32:21.721376Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=4.1ms, median=1.9ms
+2024-10-09T03:32:21.721720Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=3.9ms, median=1.9ms
+2024-10-09T03:32:21.721764Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=3.8ms, median=1.9ms
+2024-10-09T03:32:21.723435Z  INFO fork_choice_control::block_processor: Validating block with slot: 8304
+2024-10-09T03:32:21.724611Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=3.7ms, median=1.8ms
+2024-10-09T03:32:21.725348Z  INFO fork_choice_control::block_processor: Validating block with slot: 8305
+2024-10-09T03:32:21.726801Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=3.5ms, median=1.8ms
+2024-10-09T03:32:21.730168Z  INFO fork_choice_control::block_processor: Validating block with slot: 8306
+2024-10-09T03:32:21.730209Z  INFO fork_choice_control::block_processor: Validating block with slot: 8308
+2024-10-09T03:32:21.731411Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=3.3ms, median=1.7ms
+2024-10-09T03:32:21.732204Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xec7d2d8af48f2970fdd3efff4123444200c55a922b7fee362a83797c30538465, slot: 8308
+2024-10-09T03:32:21.734533Z  INFO fork_choice_control::block_processor: Validating block with slot: 8309
+2024-10-09T03:32:21.734541Z  INFO fork_choice_control::block_processor: Validating block with slot: 8310
+2024-10-09T03:32:21.735528Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=3.0ms, median=1.7ms
+2024-10-09T03:32:21.735790Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.5ms, median=1.7ms
+2024-10-09T03:32:21.743675Z  INFO fork_choice_control::block_processor: Validating block with slot: 8311
+2024-10-09T03:32:21.743727Z  INFO fork_choice_control::block_processor: Validating block with slot: 8312
+2024-10-09T03:32:21.745068Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.4ms, median=1.6ms
+2024-10-09T03:32:21.747387Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.3ms, median=1.6ms
+2024-10-09T03:32:21.752960Z  INFO fork_choice_control::block_processor: Validating block with slot: 8315
+2024-10-09T03:32:21.752965Z  INFO fork_choice_control::block_processor: Validating block with slot: 8313
+2024-10-09T03:32:21.752994Z  INFO fork_choice_control::block_processor: Validating block with slot: 8316
+2024-10-09T03:32:21.753033Z  INFO fork_choice_control::block_processor: Validating block with slot: 8317
+2024-10-09T03:32:21.753158Z  INFO fork_choice_control::block_processor: Validating block with slot: 8314
+2024-10-09T03:32:21.753950Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.3ms, median=1.6ms
+2024-10-09T03:32:21.753968Z  INFO fork_choice_control::block_processor: Validating block with slot: 8318
+2024-10-09T03:32:21.754074Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.1ms, median=1.6ms
+2024-10-09T03:32:21.755068Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.1ms, median=1.6ms
+2024-10-09T03:32:21.755264Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=2.0ms, median=1.6ms
+2024-10-09T03:32:21.755591Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.9ms, median=1.6ms
+2024-10-09T03:32:21.756115Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.8ms, median=1.6ms
+2024-10-09T03:32:21.757295Z  INFO fork_choice_control::block_processor: Validating block with slot: 8319
+2024-10-09T03:32:21.760364Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.7ms, median=1.6ms
+2024-10-09T03:32:21.779286Z  INFO fork_choice_control::block_processor: Validating block with slot: 8320
+2024-10-09T03:32:21.779290Z  INFO fork_choice_control::block_processor: Validating block with slot: 8321
+2024-10-09T03:32:21.779304Z  INFO fork_choice_control::block_processor: Validating block with slot: 8323
+2024-10-09T03:32:21.779337Z  INFO fork_choice_control::block_processor: Validating block with slot: 8322
+2024-10-09T03:32:21.779357Z  INFO fork_choice_control::block_processor: Validating block with slot: 8324
+2024-10-09T03:32:21.779638Z  INFO fork_choice_control::block_processor: Validating block with slot: 8325
+2024-10-09T03:32:21.780300Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.6ms, median=1.6ms
+2024-10-09T03:32:21.780319Z  INFO fork_choice_control::block_processor: Validating block with slot: 8326
+2024-10-09T03:32:21.780684Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.5ms, median=1.5ms
+2024-10-09T03:32:21.780695Z  INFO fork_choice_control::block_processor: Validating block with slot: 8327
+2024-10-09T03:32:21.781282Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.4ms, median=1.5ms
+2024-10-09T03:32:21.781659Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.3ms, median=1.5ms
+2024-10-09T03:32:21.781831Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.2ms, median=1.5ms
+2024-10-09T03:32:21.781936Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.1ms, median=1.5ms
+2024-10-09T03:32:21.783474Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=1.0ms, median=1.5ms
+2024-10-09T03:32:21.783918Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.799866Z  INFO fork_choice_control::block_processor: Validating block with slot: 8328
+2024-10-09T03:32:21.800067Z  INFO fork_choice_control::block_processor: Validating block with slot: 8329
+2024-10-09T03:32:21.800371Z  INFO fork_choice_control::block_processor: Validating block with slot: 8330
+2024-10-09T03:32:21.800837Z  INFO fork_choice_control::block_processor: Validating block with slot: 8332
+2024-10-09T03:32:21.800843Z  INFO fork_choice_control::block_processor: Validating block with slot: 8333
+2024-10-09T03:32:21.801478Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.801508Z  INFO fork_choice_control::block_processor: Validating block with slot: 8334
+2024-10-09T03:32:21.805496Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.8ms, median=1.5ms
+2024-10-09T03:32:21.805605Z  INFO fork_choice_control::block_processor: Validating block with slot: 8336
+2024-10-09T03:32:21.805930Z  INFO fork_choice_control::block_processor: Validating block with slot: 8337
+2024-10-09T03:32:21.808910Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.810232Z  INFO fork_choice_control::block_processor: Validating block with slot: 8335
+2024-10-09T03:32:21.810532Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.811291Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.811351Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.811714Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.811760Z  INFO fork_choice_control::block_processor: Validating block with slot: 8338
+2024-10-09T03:32:21.814209Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.815012Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.815253Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=162.4ms, avg=0.9ms, median=1.5ms
+2024-10-09T03:32:21.886796Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8308
+2024-10-09T03:32:21.886882Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=10.3ms, median=3.2ms
+2024-10-09T03:32:21.886893Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8308
+2024-10-09T03:32:21.903018Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.7ms, median=1.5ms
+2024-10-09T03:32:21.903982Z  INFO fork_choice_control::block_processor: Validating block with slot: 8309
+2024-10-09T03:32:21.905152Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x555e981082b9466293a52edc720c2e579fbca11dda1eafbfc0ddf452ddc9b0b5, slot: 8309
+2024-10-09T03:32:21.926392Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8309
+2024-10-09T03:32:21.926469Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=10.4ms, median=3.2ms
+2024-10-09T03:32:21.926479Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8309
+2024-10-09T03:32:21.942280Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.9ms, median=1.5ms
+2024-10-09T03:32:21.942554Z  INFO fork_choice_control::block_processor: Validating block with slot: 8310
+2024-10-09T03:32:21.943842Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xeec7b9083c7d02ebad9e397cc25dbb68057818a778e5bba9ed36515d45d0ace9, slot: 8310
+2024-10-09T03:32:21.968503Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8310
+2024-10-09T03:32:21.968572Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=10.6ms, median=3.2ms
+2024-10-09T03:32:21.968582Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8310
+2024-10-09T03:32:21.984603Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.0ms, median=1.5ms
+2024-10-09T03:32:21.984950Z  INFO fork_choice_control::block_processor: Validating block with slot: 8311
+2024-10-09T03:32:21.988522Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb3b20932e2117c3b42002e3baab92726ea558cfbfc3d19c84f156ef19665568b, slot: 8311
+2024-10-09T03:32:22.014942Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8311
+2024-10-09T03:32:22.015017Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=10.8ms, median=3.2ms
+2024-10-09T03:32:22.015026Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8311
+2024-10-09T03:32:22.032134Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.2ms, median=1.5ms
+2024-10-09T03:32:22.039210Z  INFO fork_choice_control::block_processor: Validating block with slot: 8312
+2024-10-09T03:32:22.039213Z  INFO fork_choice_control::mutator: new finalized checkpoint (epoch: 258, root: 0x80c69434df5ee50098c7c6dfe936843f774fff027a73db486dbdd6bdc42319ff, head slot: 8311, head root: 0xb3b20932e2117c3b42002e3baab92726ea558cfbfc3d19c84f156ef19665568b)
+2024-10-09T03:32:22.040327Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x9eadf4aac7b0cd080437ec4e8ce9cebaae4f5067771bda5458ec0b5286d6d2f8, slot: 8312
+2024-10-09T03:32:22.060390Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8312
+2024-10-09T03:32:22.060474Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=10.9ms, median=3.3ms
+2024-10-09T03:32:22.060485Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8312
+2024-10-09T03:32:22.077628Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.4ms, median=1.6ms
+2024-10-09T03:32:22.078022Z  INFO fork_choice_control::block_processor: Validating block with slot: 8313
+2024-10-09T03:32:22.079140Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa63b9d044144708571f8b46889031e787fa8122dd5c1748eaebd2f3a29b30846, slot: 8313
+2024-10-09T03:32:22.098301Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8313
+2024-10-09T03:32:22.098368Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.0ms, median=3.3ms
+2024-10-09T03:32:22.098377Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8313
+2024-10-09T03:32:22.116117Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.5ms, median=1.6ms
+2024-10-09T03:32:22.116351Z  INFO fork_choice_control::block_processor: Validating block with slot: 8314
+2024-10-09T03:32:22.117739Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5990d330b076f2fd64298821f68323932f0795fd7898bcb38700118dcef84b74, slot: 8314
+2024-10-09T03:32:22.139064Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8314
+2024-10-09T03:32:22.139136Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.1ms, median=3.3ms
+2024-10-09T03:32:22.139146Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8314
+2024-10-09T03:32:22.156815Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.7ms, median=1.6ms
+2024-10-09T03:32:22.157097Z  INFO fork_choice_control::block_processor: Validating block with slot: 8315
+2024-10-09T03:32:22.158098Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x194bab910ae7cf1ee1ff4af542eb76503e6d579505bf14cc1e8e15e118b27caf, slot: 8315
+2024-10-09T03:32:22.180022Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8315
+2024-10-09T03:32:22.180092Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.2ms, median=3.3ms
+2024-10-09T03:32:22.180101Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8315
+2024-10-09T03:32:22.188997Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 8256
+2024-10-09T03:32:22.198250Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.8ms, median=1.6ms
+2024-10-09T03:32:22.198539Z  INFO fork_choice_control::block_processor: Validating block with slot: 8316
+2024-10-09T03:32:22.199800Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xb4fa838b27b544d0902d58705e39a254e0767c529358a64ba0fefb32dbde1080, slot: 8316
+2024-10-09T03:32:22.220924Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8316
+2024-10-09T03:32:22.221000Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.3ms, median=3.3ms
+2024-10-09T03:32:22.221011Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8316
+2024-10-09T03:32:22.239409Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.0ms, median=1.6ms
+2024-10-09T03:32:22.239689Z  INFO fork_choice_control::block_processor: Validating block with slot: 8317
+2024-10-09T03:32:22.241064Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xfc04b6eb46070b04195dba6193e4c053ede5677815f173ef4ed210b7496839f0, slot: 8317
+2024-10-09T03:32:22.263008Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8317
+2024-10-09T03:32:22.263078Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.5ms, median=3.3ms
+2024-10-09T03:32:22.263092Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8317
+2024-10-09T03:32:22.281028Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.2ms, median=1.6ms
+2024-10-09T03:32:22.281376Z  INFO fork_choice_control::block_processor: Validating block with slot: 8318
+2024-10-09T03:32:22.282638Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6447052d054cfeb75b6141f456c55261027b6a70c872d8c8e638457d49697424, slot: 8318
+2024-10-09T03:32:22.303504Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8318
+2024-10-09T03:32:22.303569Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.6ms, median=3.4ms
+2024-10-09T03:32:22.303578Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8318
+2024-10-09T03:32:22.321994Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.3ms, median=1.6ms
+2024-10-09T03:32:22.322294Z  INFO fork_choice_control::block_processor: Validating block with slot: 8319
+2024-10-09T03:32:22.325237Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6d4acb61c969d5061e9008e57744ca5cdf901049c3a16d48cb909316bc677736, slot: 8319
+2024-10-09T03:32:22.357069Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8319
+2024-10-09T03:32:22.357135Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=11.8ms, median=3.4ms
+2024-10-09T03:32:22.357146Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8319
+2024-10-09T03:32:22.376333Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.5ms, median=1.6ms
+2024-10-09T03:32:22.376780Z  INFO fork_choice_control::block_processor: Validating block with slot: 8320
+2024-10-09T03:32:22.378511Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xd9547cb2c36d39c070f098eb3fa2f08c7dbc0fe3d2f58877445106a790b8a09f, slot: 8320
+2024-10-09T03:32:22.488983Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8320
+2024-10-09T03:32:22.489067Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.8ms, median=3.4ms
+2024-10-09T03:32:22.489078Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8320
+2024-10-09T03:32:22.500866Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.1ms, median=1.6ms
+2024-10-09T03:32:22.501023Z  INFO fork_choice_control::mutator: unloading old beacon states (head slot: 8320)
+2024-10-09T03:32:22.501232Z  INFO fork_choice_control::block_processor: Validating block with slot: 8321
+2024-10-09T03:32:22.502220Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x171e824e00e80025e433fb60e4cf7a3a6f09dfba4a06dd67e960275f9c02991b, slot: 8321
+2024-10-09T03:32:22.584427Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8321
+2024-10-09T03:32:22.584492Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=13.6ms, median=3.4ms
+2024-10-09T03:32:22.584502Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8321
+2024-10-09T03:32:22.596214Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.4ms, median=1.7ms
+2024-10-09T03:32:22.596511Z  INFO fork_choice_control::block_processor: Validating block with slot: 8322
+2024-10-09T03:32:22.598478Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x436b80612b6ba17cd2d9e9bbbb3f286cc125eee202b83124b034a34d2c402a36, slot: 8322
+2024-10-09T03:32:22.617092Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8322
+2024-10-09T03:32:22.617163Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=13.6ms, median=3.5ms
+2024-10-09T03:32:22.617172Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8322
+2024-10-09T03:32:22.629362Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.6ms, median=1.7ms
+2024-10-09T03:32:22.629631Z  INFO fork_choice_control::block_processor: Validating block with slot: 8323
+2024-10-09T03:32:22.630617Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x2024f55ba6b0be96356c0b24ca89b99fb7b38d8ea91fe495553e8015f3921d9c, slot: 8323
+2024-10-09T03:32:22.647151Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8323
+2024-10-09T03:32:22.647227Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=13.6ms, median=3.5ms
+2024-10-09T03:32:22.647237Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8323
+2024-10-09T03:32:22.659284Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.6ms, median=1.7ms
+2024-10-09T03:32:22.659544Z  INFO fork_choice_control::block_processor: Validating block with slot: 8324
+2024-10-09T03:32:22.662086Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x3a6e5021919d5bac077d520cf4f54687e9a4d12b9c4c8a30aa97fd02a693e357, slot: 8324
+2024-10-09T03:32:22.687637Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8324
+2024-10-09T03:32:22.687709Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=13.8ms, median=3.5ms
+2024-10-09T03:32:22.687719Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8324
+2024-10-09T03:32:22.701111Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.8ms, median=1.8ms
+2024-10-09T03:32:22.701361Z  INFO fork_choice_control::block_processor: Validating block with slot: 8325
+2024-10-09T03:32:22.704040Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdf1ef993bf009d521db87a423b0704d49d7449101fdc842bc98eab8a777e98b4, slot: 8325
+2024-10-09T03:32:22.732378Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8325
+2024-10-09T03:32:22.732462Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=13.9ms, median=3.5ms
+2024-10-09T03:32:22.732473Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8325
+2024-10-09T03:32:22.747718Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.0ms, median=1.9ms
+2024-10-09T03:32:22.748091Z  INFO fork_choice_control::block_processor: Validating block with slot: 8326
+2024-10-09T03:32:22.749069Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xf879b4795ebb05586d4d4f33a5413cebbabf508cdd9fdd0301eea367d27ce50c, slot: 8326
+2024-10-09T03:32:22.765809Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8326
+2024-10-09T03:32:22.765884Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=13.9ms, median=3.6ms
+2024-10-09T03:32:22.765894Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8326
+2024-10-09T03:32:22.779390Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.1ms, median=1.9ms
+2024-10-09T03:32:22.779677Z  INFO fork_choice_control::block_processor: Validating block with slot: 8327
+2024-10-09T03:32:22.780955Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1fd3e3bf006f16b5c20f53cb9783d94aa7ba09b1fef72b33cd78e4ca48c0a2e2, slot: 8327
+2024-10-09T03:32:22.801124Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8327
+2024-10-09T03:32:22.801202Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.5ms, median=3.6ms
+2024-10-09T03:32:22.801213Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8327
+2024-10-09T03:32:22.821110Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.2ms, median=1.9ms
+2024-10-09T03:32:22.823118Z  INFO fork_choice_control::block_processor: Validating block with slot: 8328
+2024-10-09T03:32:22.824125Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa5c7316e1cdedabf6b68958382f70761f9ce0138c5d2d5096b4457b9fc4fa796, slot: 8328
+2024-10-09T03:32:22.849729Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8328
+2024-10-09T03:32:22.849813Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.6ms, median=3.6ms
+2024-10-09T03:32:22.849824Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8328
+2024-10-09T03:32:22.874977Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.4ms, median=1.9ms
+2024-10-09T03:32:22.875239Z  INFO fork_choice_control::block_processor: Validating block with slot: 8329
+2024-10-09T03:32:22.877139Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x477dfd0201e8aa4f2d19e3487ed5bd5bd9aae4e6b99ec2d356512eb0380b12ed, slot: 8329
+2024-10-09T03:32:22.896695Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8329
+2024-10-09T03:32:22.896777Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.6ms, median=3.6ms
+2024-10-09T03:32:22.896787Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8329
+2024-10-09T03:32:22.910297Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=1.9ms
+2024-10-09T03:32:22.910708Z  INFO fork_choice_control::block_processor: Validating block with slot: 8330
+2024-10-09T03:32:22.911809Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x5daacb17305e0f55ae79a06caa135a2f121a0e2c66b5e5035c540e79572d5abc, slot: 8330
+2024-10-09T03:32:22.924262Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8330
+2024-10-09T03:32:22.924324Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.6ms, median=3.6ms
+2024-10-09T03:32:22.924334Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8330
+2024-10-09T03:32:22.937957Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=1.9ms
+2024-10-09T03:32:22.938242Z  INFO fork_choice_control::block_processor: Validating block with slot: 8332
+2024-10-09T03:32:22.940198Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x8e5b636cd62705afe05fcbbec09f58ac71753b28b3538d369803c31a8ecfd9ce, slot: 8332
+2024-10-09T03:32:22.965766Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8332
+2024-10-09T03:32:22.965828Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.7ms, median=3.6ms
+2024-10-09T03:32:22.965837Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8332
+2024-10-09T03:32:22.980067Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.7ms, median=1.9ms
+2024-10-09T03:32:22.980344Z  INFO fork_choice_control::block_processor: Validating block with slot: 8333
+2024-10-09T03:32:22.981583Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x33cc748c41bca67bf5fa71364da531da2632b724ce7b7ef6016175ed9b7a947d, slot: 8333
+2024-10-09T03:32:22.995770Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8333
+2024-10-09T03:32:22.995842Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.7ms, median=3.6ms
+2024-10-09T03:32:22.995855Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8333
+2024-10-09T03:32:23.011726Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.8ms, median=2.0ms
+2024-10-09T03:32:23.012122Z  INFO fork_choice_control::block_processor: Validating block with slot: 8334
+2024-10-09T03:32:23.013703Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xa7cb87338ba28e7311b8feb589ea87e96c834a50b41a7961ffb698c6e8e050b8, slot: 8334
+2024-10-09T03:32:23.029466Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8334
+2024-10-09T03:32:23.029539Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.7ms, median=3.7ms
+2024-10-09T03:32:23.029550Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8334
+2024-10-09T03:32:23.044556Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=2.2ms
+2024-10-09T03:32:23.044839Z  INFO fork_choice_control::block_processor: Validating block with slot: 8335
+2024-10-09T03:32:23.046059Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x1e9bcf0e5a711e0a0b6f4024b844036a7a89575579cbdb590fb52570633d4e9a, slot: 8335
+2024-10-09T03:32:23.059083Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8335
+2024-10-09T03:32:23.059154Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.7ms, median=3.8ms
+2024-10-09T03:32:23.059165Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8335
+2024-10-09T03:32:23.073825Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.0ms, median=2.2ms
+2024-10-09T03:32:23.074062Z  INFO fork_choice_control::block_processor: Validating block with slot: 8336
+2024-10-09T03:32:23.075040Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0xdd68ed82872a63c0e1669d0b6ef8950dfe8a1fed5943bba6124eedec56206314, slot: 8336
+2024-10-09T03:32:23.088137Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8336
+2024-10-09T03:32:23.088203Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.6ms, median=3.8ms
+2024-10-09T03:32:23.088213Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8336
+2024-10-09T03:32:23.103105Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=2.3ms
+2024-10-09T03:32:23.103371Z  INFO fork_choice_control::block_processor: Validating block with slot: 8337
+2024-10-09T03:32:23.104346Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x580fd05bd5d619f0cf2bd8a67ca76e91985193ea1a24ca47f5c34f1a0d5eeb2a, slot: 8337
+2024-10-09T03:32:23.117689Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8337
+2024-10-09T03:32:23.117753Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.6ms, median=3.9ms
+2024-10-09T03:32:23.117763Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8337
+2024-10-09T03:32:23.132904Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.2ms, median=2.3ms
+2024-10-09T03:32:23.133151Z  INFO fork_choice_control::block_processor: Validating block with slot: 8338
+2024-10-09T03:32:23.136139Z  INFO fork_choice_control::block_processor: Performing state transition for block with root: 0x6ce7e72ba53f27e70c755fb8aab4696c5ec7f9e6192c5bd6d1a15f7cafd86590, slot: 8338
+2024-10-09T03:32:23.167163Z  INFO fork_choice_control::block_processor: State transition completed for block with slot: 8338
+2024-10-09T03:32:23.167233Z TRACE fork_choice_control::block_processor: perform_state_transition timing: min=2.4ms, max=154.6ms, avg=12.7ms, median=3.9ms
+2024-10-09T03:32:23.167243Z  INFO fork_choice_control::block_processor: Block validation completed for slot: 8338
+2024-10-09T03:32:23.183756Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.4ms, median=2.5ms
+2024-10-09T03:32:23.285259Z  INFO fork_choice_control::block_processor: Validating block with slot: 8723
+2024-10-09T03:32:23.289438Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.4ms, median=2.6ms
+2024-10-09T03:32:23.365903Z  INFO fork_choice_control::block_processor: Validating block with slot: 8724
+2024-10-09T03:32:23.366002Z  INFO fork_choice_control::block_processor: Validating block with slot: 8725
+2024-10-09T03:32:23.366060Z  INFO fork_choice_control::block_processor: Validating block with slot: 8726
+2024-10-09T03:32:23.366138Z  INFO fork_choice_control::block_processor: Validating block with slot: 8727
+2024-10-09T03:32:23.366772Z  INFO fork_choice_control::block_processor: Validating block with slot: 8728
+2024-10-09T03:32:23.367587Z  INFO fork_choice_control::block_processor: Validating block with slot: 8729
+2024-10-09T03:32:23.367596Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.3ms, median=2.6ms
+2024-10-09T03:32:23.368962Z  INFO fork_choice_control::block_processor: Validating block with slot: 8730
+2024-10-09T03:32:23.369727Z  INFO fork_choice_control::block_processor: Validating block with slot: 8731
+2024-10-09T03:32:23.369956Z  INFO fork_choice_control::block_processor: Validating block with slot: 8732
+2024-10-09T03:32:23.370498Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.3ms, median=2.6ms
+2024-10-09T03:32:23.370529Z  INFO fork_choice_control::block_processor: Validating block with slot: 8733
+2024-10-09T03:32:23.371021Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.3ms, median=2.6ms
+2024-10-09T03:32:23.371145Z  INFO fork_choice_control::block_processor: Validating block with slot: 8734
+2024-10-09T03:32:23.371744Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.3ms, median=2.6ms
+2024-10-09T03:32:23.371791Z  INFO fork_choice_control::block_processor: Validating block with slot: 8735
+2024-10-09T03:32:23.371910Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.3ms, median=2.6ms
+2024-10-09T03:32:23.371923Z  INFO fork_choice_control::block_processor: Validating block with slot: 8736
+2024-10-09T03:32:23.372887Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.2ms, median=2.6ms
+2024-10-09T03:32:23.372897Z  INFO fork_choice_control::block_processor: Validating block with slot: 8737
+2024-10-09T03:32:23.374250Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.2ms, median=2.9ms
+2024-10-09T03:32:23.374344Z  INFO fork_choice_control::block_processor: Validating block with slot: 8738
+2024-10-09T03:32:23.374357Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.2ms, median=3.0ms
+2024-10-09T03:32:23.374370Z  INFO fork_choice_control::block_processor: Validating block with slot: 8739
+2024-10-09T03:32:23.374575Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.2ms, median=3.1ms
+2024-10-09T03:32:23.374698Z  INFO fork_choice_control::block_processor: Validating block with slot: 8740
+2024-10-09T03:32:23.375470Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.2ms, median=3.1ms
+2024-10-09T03:32:23.375482Z  INFO fork_choice_control::block_processor: Validating block with slot: 8741
+2024-10-09T03:32:23.375938Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.1ms
+2024-10-09T03:32:23.376083Z  INFO fork_choice_control::block_processor: Validating block with slot: 8742
+2024-10-09T03:32:23.376449Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.1ms
+2024-10-09T03:32:23.376459Z  INFO fork_choice_control::block_processor: Validating block with slot: 8743
+2024-10-09T03:32:23.376733Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.2ms
+2024-10-09T03:32:23.376796Z  INFO fork_choice_control::block_processor: Validating block with slot: 8744
+2024-10-09T03:32:23.377558Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.2ms
+2024-10-09T03:32:23.377575Z  INFO fork_choice_control::block_processor: Validating block with slot: 8745
+2024-10-09T03:32:23.377707Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.2ms
+2024-10-09T03:32:23.377721Z  INFO fork_choice_control::block_processor: Validating block with slot: 8746
+2024-10-09T03:32:23.378879Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.2ms
+2024-10-09T03:32:23.378898Z  INFO fork_choice_control::block_processor: Validating block with slot: 8747
+2024-10-09T03:32:23.379651Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.1ms, median=3.2ms
+2024-10-09T03:32:23.379670Z  INFO fork_choice_control::block_processor: Validating block with slot: 8748
+2024-10-09T03:32:23.379861Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.0ms, median=3.2ms
+2024-10-09T03:32:23.379873Z  INFO fork_choice_control::block_processor: Validating block with slot: 8749
+2024-10-09T03:32:23.380446Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.0ms, median=3.3ms
+2024-10-09T03:32:23.380495Z  INFO fork_choice_control::block_processor: Validating block with slot: 8750
+2024-10-09T03:32:23.380639Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.0ms, median=3.3ms
+2024-10-09T03:32:23.380652Z  INFO fork_choice_control::block_processor: Validating block with slot: 8751
+2024-10-09T03:32:23.382715Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.0ms, median=3.3ms
+2024-10-09T03:32:23.382810Z  INFO fork_choice_control::block_processor: Validating block with slot: 8753
+2024-10-09T03:32:23.383943Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=6.0ms, median=3.3ms
+2024-10-09T03:32:23.383956Z  INFO fork_choice_control::block_processor: Validating block with slot: 8754
+2024-10-09T03:32:23.384410Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.3ms
+2024-10-09T03:32:23.384661Z  INFO fork_choice_control::block_processor: Validating block with slot: 8755
+2024-10-09T03:32:23.384728Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.6ms
+2024-10-09T03:32:23.385556Z  INFO fork_choice_control::block_processor: Validating block with slot: 8756
+2024-10-09T03:32:23.386149Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.7ms
+2024-10-09T03:32:23.386231Z  INFO fork_choice_control::block_processor: Validating block with slot: 8757
+2024-10-09T03:32:23.386592Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.7ms
+2024-10-09T03:32:23.386643Z  INFO fork_choice_control::block_processor: Validating block with slot: 8758
+2024-10-09T03:32:23.387331Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.7ms
+2024-10-09T03:32:23.387348Z  INFO fork_choice_control::block_processor: Validating block with slot: 8759
+2024-10-09T03:32:23.387546Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.7ms
+2024-10-09T03:32:23.387559Z  INFO fork_choice_control::block_processor: Validating block with slot: 8760
+2024-10-09T03:32:23.388079Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.9ms, median=3.7ms
+2024-10-09T03:32:23.388149Z  INFO fork_choice_control::block_processor: Validating block with slot: 8761
+2024-10-09T03:32:23.388273Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.8ms, median=3.7ms
+2024-10-09T03:32:23.388311Z  INFO fork_choice_control::block_processor: Validating block with slot: 8762
+2024-10-09T03:32:23.388446Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.8ms, median=3.7ms
+2024-10-09T03:32:23.388456Z  INFO fork_choice_control::block_processor: Validating block with slot: 8763
+2024-10-09T03:32:23.389837Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.8ms, median=3.7ms
+2024-10-09T03:32:23.389884Z  INFO fork_choice_control::block_processor: Validating block with slot: 8764
+2024-10-09T03:32:23.390101Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.8ms, median=3.7ms
+2024-10-09T03:32:23.390114Z  INFO fork_choice_control::block_processor: Validating block with slot: 8765
+2024-10-09T03:32:23.390727Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.8ms, median=3.7ms
+2024-10-09T03:32:23.390780Z  INFO fork_choice_control::block_processor: Validating block with slot: 8766
+2024-10-09T03:32:23.391628Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.7ms, median=3.7ms
+2024-10-09T03:32:23.392010Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.7ms, median=3.7ms
+2024-10-09T03:32:23.392116Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.7ms, median=3.7ms
+2024-10-09T03:32:23.392198Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.7ms, median=3.7ms
+2024-10-09T03:32:23.392244Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.7ms, median=3.7ms
+2024-10-09T03:32:23.393994Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=3.7ms
+2024-10-09T03:32:23.395002Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=3.8ms
+2024-10-09T03:32:23.398555Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=4.0ms
+2024-10-09T03:32:23.416829Z  INFO fork_choice_control::block_processor: Validating block with slot: 8767
+2024-10-09T03:32:23.416876Z  INFO fork_choice_control::block_processor: Validating block with slot: 8769
+2024-10-09T03:32:23.416906Z  INFO fork_choice_control::block_processor: Validating block with slot: 8771
+2024-10-09T03:32:23.416924Z  INFO fork_choice_control::block_processor: Validating block with slot: 8772
+2024-10-09T03:32:23.416938Z  INFO fork_choice_control::block_processor: Validating block with slot: 8773
+2024-10-09T03:32:23.418168Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=4.0ms
+2024-10-09T03:32:23.418189Z  INFO fork_choice_control::block_processor: Validating block with slot: 8774
+2024-10-09T03:32:23.419601Z  INFO fork_choice_control::block_processor: Validating block with slot: 8775
+2024-10-09T03:32:23.419703Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=4.0ms
+2024-10-09T03:32:23.419717Z  INFO fork_choice_control::block_processor: Validating block with slot: 8776
+2024-10-09T03:32:23.420635Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=4.0ms
+2024-10-09T03:32:23.420647Z  INFO fork_choice_control::block_processor: Validating block with slot: 8777
+2024-10-09T03:32:23.420819Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=4.0ms
+2024-10-09T03:32:23.420829Z  INFO fork_choice_control::block_processor: Validating block with slot: 8778
+2024-10-09T03:32:23.421482Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.6ms, median=4.0ms
+2024-10-09T03:32:23.422355Z  INFO fork_choice_control::block_processor: Validating block with slot: 8779
+2024-10-09T03:32:23.422897Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.0ms
+2024-10-09T03:32:23.423010Z  INFO fork_choice_control::block_processor: Validating block with slot: 8780
+2024-10-09T03:32:23.423137Z  INFO fork_choice_control::block_processor: Validating block with slot: 8768
+2024-10-09T03:32:23.423713Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.1ms
+2024-10-09T03:32:23.423790Z  INFO fork_choice_control::block_processor: Validating block with slot: 8770
+2024-10-09T03:32:23.423800Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.1ms
+2024-10-09T03:32:23.423844Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.1ms
+2024-10-09T03:32:23.424327Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.1ms
+2024-10-09T03:32:23.424417Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.1ms
+2024-10-09T03:32:23.425040Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.1ms
+2024-10-09T03:32:23.425163Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.2ms
+2024-10-09T03:32:23.426094Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.3ms
+2024-10-09T03:32:23.430952Z  INFO fork_choice_control::block_processor: Validating block with slot: 8782
+2024-10-09T03:32:23.430980Z  INFO fork_choice_control::block_processor: Validating block with slot: 8781
+2024-10-09T03:32:23.431018Z  INFO fork_choice_control::block_processor: Validating block with slot: 8783
+2024-10-09T03:32:23.431024Z  INFO fork_choice_control::block_processor: Validating block with slot: 8784
+2024-10-09T03:32:23.431182Z  INFO fork_choice_control::block_processor: Validating block with slot: 8785
+2024-10-09T03:32:23.431397Z  INFO fork_choice_control::block_processor: Validating block with slot: 8786
+2024-10-09T03:32:23.432099Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.5ms, median=4.3ms
+2024-10-09T03:32:23.432636Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.4ms, median=4.3ms
+2024-10-09T03:32:23.433038Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.4ms, median=4.2ms
+2024-10-09T03:32:23.433794Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.4ms, median=4.2ms
+2024-10-09T03:32:23.434666Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.4ms, median=4.2ms
+2024-10-09T03:32:23.434744Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.4ms, median=4.1ms
+2024-10-09T03:32:24.841042Z  INFO fork_choice_control::block_processor: Validating block with slot: 8982
+2024-10-09T03:32:24.841045Z  INFO fork_choice_control::block_processor: Validating block with slot: 8980
+2024-10-09T03:32:24.841063Z  INFO fork_choice_control::block_processor: Validating block with slot: 8979
+2024-10-09T03:32:24.841113Z  INFO fork_choice_control::block_processor: Validating block with slot: 8984
+2024-10-09T03:32:24.841155Z  INFO fork_choice_control::block_processor: Validating block with slot: 8985
+2024-10-09T03:32:24.841239Z  INFO fork_choice_control::block_processor: Validating block with slot: 8986
+2024-10-09T03:32:24.841234Z  INFO fork_choice_control::block_processor: Validating block with slot: 8983
+2024-10-09T03:32:24.842320Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.3ms, median=4.1ms
+2024-10-09T03:32:24.842341Z  INFO fork_choice_control::block_processor: Validating block with slot: 8987
+2024-10-09T03:32:24.842505Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.3ms, median=4.0ms
+2024-10-09T03:32:24.843176Z  INFO fork_choice_control::block_processor: Validating block with slot: 8988
+2024-10-09T03:32:24.843509Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.3ms, median=4.0ms
+2024-10-09T03:32:24.843531Z  INFO fork_choice_control::block_processor: Validating block with slot: 8989
+2024-10-09T03:32:24.843594Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.2ms, median=4.0ms
+2024-10-09T03:32:24.843608Z  INFO fork_choice_control::block_processor: Validating block with slot: 8990
+2024-10-09T03:32:24.843660Z  INFO fork_choice_control::block_processor: Validating block with slot: 8981
+2024-10-09T03:32:24.843887Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.2ms, median=3.8ms
+2024-10-09T03:32:24.843934Z  INFO fork_choice_control::block_processor: Validating block with slot: 8991
+2024-10-09T03:32:24.844566Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.2ms, median=3.8ms
+2024-10-09T03:32:24.844616Z  INFO fork_choice_control::block_processor: Validating block with slot: 8992
+2024-10-09T03:32:24.844707Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=5.2ms, median=3.8ms
+2024-10-09T03:32:24.844722Z  INFO fork_choice_control::block_processor: Validating block with slot: 8993
+2024-10-09T03:32:24.846032Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.6ms, median=3.8ms
+2024-10-09T03:32:24.846137Z  INFO fork_choice_control::block_processor: Validating block with slot: 8994
+2024-10-09T03:32:24.846517Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.5ms, median=3.8ms
+2024-10-09T03:32:24.846538Z  INFO fork_choice_control::block_processor: Validating block with slot: 8995
+2024-10-09T03:32:24.846921Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.4ms, median=3.7ms
+2024-10-09T03:32:24.846989Z  INFO fork_choice_control::block_processor: Validating block with slot: 8996
+2024-10-09T03:32:24.847655Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.2ms, median=3.7ms
+2024-10-09T03:32:24.847668Z  INFO fork_choice_control::block_processor: Validating block with slot: 8997
+2024-10-09T03:32:24.847769Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.1ms, median=3.7ms
+2024-10-09T03:32:24.847782Z  INFO fork_choice_control::block_processor: Validating block with slot: 8998
+2024-10-09T03:32:24.848479Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=4.0ms, median=3.7ms
+2024-10-09T03:32:24.848552Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.8ms, median=3.7ms
+2024-10-09T03:32:24.848563Z  INFO fork_choice_control::block_processor: Validating block with slot: 8999
+2024-10-09T03:32:24.848600Z  INFO fork_choice_control::block_processor: Validating block with slot: 9000
+2024-10-09T03:32:24.849035Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.7ms, median=3.6ms
+2024-10-09T03:32:24.849045Z  INFO fork_choice_control::block_processor: Validating block with slot: 9001
+2024-10-09T03:32:24.850086Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.6ms, median=3.5ms
+2024-10-09T03:32:24.850124Z  INFO fork_choice_control::block_processor: Validating block with slot: 9002
+2024-10-09T03:32:24.850860Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.5ms, median=3.5ms
+2024-10-09T03:32:24.850875Z  INFO fork_choice_control::block_processor: Validating block with slot: 9003
+2024-10-09T03:32:24.851520Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.3ms, median=3.5ms
+2024-10-09T03:32:24.851551Z  INFO fork_choice_control::block_processor: Validating block with slot: 9004
+2024-10-09T03:32:24.853075Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=3.2ms, median=3.5ms
+2024-10-09T03:32:24.853104Z  INFO fork_choice_control::block_processor: Validating block with slot: 9005
+2024-10-09T03:32:24.853645Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.8ms, median=3.5ms
+2024-10-09T03:32:24.853662Z  INFO fork_choice_control::block_processor: Validating block with slot: 9006
+2024-10-09T03:32:24.853705Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.5ms, median=3.5ms
+2024-10-09T03:32:24.853719Z  INFO fork_choice_control::block_processor: Validating block with slot: 9007
+2024-10-09T03:32:24.854094Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.4ms, median=3.4ms
+2024-10-09T03:32:24.854107Z  INFO fork_choice_control::block_processor: Validating block with slot: 9008
+2024-10-09T03:32:24.854205Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.3ms, median=3.3ms
+2024-10-09T03:32:24.854219Z  INFO fork_choice_control::block_processor: Validating block with slot: 9009
+2024-10-09T03:32:24.854776Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.2ms, median=3.3ms
+2024-10-09T03:32:24.854788Z  INFO fork_choice_control::block_processor: Validating block with slot: 9010
+2024-10-09T03:32:24.855894Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.1ms, median=3.3ms
+2024-10-09T03:32:24.855920Z  INFO fork_choice_control::block_processor: Validating block with slot: 9011
+2024-10-09T03:32:24.856063Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=2.0ms, median=3.2ms
+2024-10-09T03:32:24.856075Z  INFO fork_choice_control::block_processor: Validating block with slot: 9012
+2024-10-09T03:32:24.856576Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.8ms, median=2.9ms
+2024-10-09T03:32:24.856591Z  INFO fork_choice_control::block_processor: Validating block with slot: 9013
+2024-10-09T03:32:24.856992Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.7ms, median=2.8ms
+2024-10-09T03:32:24.857008Z  INFO fork_choice_control::block_processor: Validating block with slot: 9014
+2024-10-09T03:32:24.857568Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.6ms, median=2.8ms
+2024-10-09T03:32:24.857580Z  INFO fork_choice_control::block_processor: Validating block with slot: 9015
+2024-10-09T03:32:24.858557Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.5ms, median=2.6ms
+2024-10-09T03:32:24.858569Z  INFO fork_choice_control::block_processor: Validating block with slot: 9016
+2024-10-09T03:32:24.858758Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.4ms, median=2.6ms
+2024-10-09T03:32:24.858769Z  INFO fork_choice_control::block_processor: Validating block with slot: 9017
+2024-10-09T03:32:24.859097Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.3ms, median=2.6ms
+2024-10-09T03:32:24.859109Z  INFO fork_choice_control::block_processor: Validating block with slot: 9018
+2024-10-09T03:32:24.859888Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.2ms, median=2.5ms
+2024-10-09T03:32:24.859898Z  INFO fork_choice_control::block_processor: Validating block with slot: 9019
+2024-10-09T03:32:24.862178Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.1ms, median=2.4ms
+2024-10-09T03:32:24.862298Z  INFO fork_choice_control::block_processor: Validating block with slot: 9020
+2024-10-09T03:32:24.862598Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.1ms, median=2.4ms
+2024-10-09T03:32:24.862637Z  INFO fork_choice_control::block_processor: Validating block with slot: 9021
+2024-10-09T03:32:24.862898Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=1.0ms, median=2.4ms
+2024-10-09T03:32:24.862974Z  INFO fork_choice_control::block_processor: Validating block with slot: 9022
+2024-10-09T03:32:24.863459Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.863577Z  INFO fork_choice_control::block_processor: Validating block with slot: 9023
+2024-10-09T03:32:24.863915Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.863955Z  INFO fork_choice_control::block_processor: Validating block with slot: 9024
+2024-10-09T03:32:24.864091Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.864114Z  INFO fork_choice_control::block_processor: Validating block with slot: 9025
+2024-10-09T03:32:24.864544Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.864558Z  INFO fork_choice_control::block_processor: Validating block with slot: 9026
+2024-10-09T03:32:24.866032Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.866055Z  INFO fork_choice_control::block_processor: Validating block with slot: 9027
+2024-10-09T03:32:24.866333Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.866346Z  INFO fork_choice_control::block_processor: Validating block with slot: 9028
+2024-10-09T03:32:24.866944Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.867001Z  INFO fork_choice_control::block_processor: Validating block with slot: 9029
+2024-10-09T03:32:24.869013Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.869187Z  INFO fork_choice_control::block_processor: Validating block with slot: 9030
+2024-10-09T03:32:24.869830Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.869906Z  INFO fork_choice_control::block_processor: Validating block with slot: 9031
+2024-10-09T03:32:24.870146Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.870164Z  INFO fork_choice_control::block_processor: Validating block with slot: 9032
+2024-10-09T03:32:24.871015Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.3ms
+2024-10-09T03:32:24.871035Z  INFO fork_choice_control::block_processor: Validating block with slot: 9033
+2024-10-09T03:32:24.871197Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.3ms
+2024-10-09T03:32:24.871260Z  INFO fork_choice_control::block_processor: Validating block with slot: 9034
+2024-10-09T03:32:24.871312Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.3ms
+2024-10-09T03:32:24.871332Z  INFO fork_choice_control::block_processor: Validating block with slot: 9035
+2024-10-09T03:32:24.871545Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.871579Z  INFO fork_choice_control::block_processor: Validating block with slot: 9036
+2024-10-09T03:32:24.871957Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.3ms
+2024-10-09T03:32:24.872144Z  INFO fork_choice_control::block_processor: Validating block with slot: 9037
+2024-10-09T03:32:24.872337Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.3ms
+2024-10-09T03:32:24.872350Z  INFO fork_choice_control::block_processor: Validating block with slot: 9038
+2024-10-09T03:32:24.872779Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.872818Z  INFO fork_choice_control::block_processor: Validating block with slot: 9039
+2024-10-09T03:32:24.875155Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.875199Z  INFO fork_choice_control::block_processor: Validating block with slot: 9040
+2024-10-09T03:32:24.875445Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.875495Z  INFO fork_choice_control::block_processor: Validating block with slot: 9041
+2024-10-09T03:32:24.876085Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.876318Z  INFO fork_choice_control::block_processor: Validating block with slot: 9042
+2024-10-09T03:32:24.876491Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.3ms
+2024-10-09T03:32:24.877029Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.877442Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.877726Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.877963Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.878179Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.878459Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:24.878556Z TRACE fork_choice_control::block_processor: validate_block timing: min=0.9ms, max=172.8ms, avg=0.8ms, median=2.4ms
+2024-10-09T03:32:26.092643Z  INFO runtime::runtime: saving current chain before exit…
+2024-10-09T03:32:26.271203Z  INFO fork_choice_control::storage: saving checkpoint block & state in slot 8256
+2024-10-09T03:32:26.443025Z  INFO fork_choice_control::mutator: chain saved (finalized blocks: 1, unfinalized blocks: 80)

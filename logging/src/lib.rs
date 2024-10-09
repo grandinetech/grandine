@@ -1,12 +1,16 @@
+
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use derive_more::Display;
-use tracing::info;
+use std::sync::Arc;
+
+use tracing::{info, trace};
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
 pub static PEER_LOG_METRICS: PeerLogMetrics = PeerLogMetrics::new(0);
+
 
 #[derive(Display, Debug)]
 #[display(fmt = "peers: {connected_peer_count:?}/{target_peer_count:?}")]
@@ -45,9 +49,10 @@ pub fn setup_tracing() -> impl Drop {
     let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
 
     let env_filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("info"))
-        .expect("Failed to create EnvFilter");
-
+        .unwrap_or_else(|_| {
+            EnvFilter::new("info,fork_choice_control::block_processor=trace")
+        })
+        .add_directive("fork_choice_control::block_processor=trace".parse().unwrap());
     let subscriber = tracing_subscriber::registry()
         .with(env_filter)
         .with(stdout_layer)
@@ -57,5 +62,8 @@ pub fn setup_tracing() -> impl Drop {
         .expect("Failed to initialize tracing subscriber");
 
     info!("Tracing initialized successfully.");
+    trace!("Trace-level logging is enabled for block_processor.");
     file_guard
+
+    
 }

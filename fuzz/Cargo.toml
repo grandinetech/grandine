@@ -1,0 +1,28 @@
+[package]
+name = "ad_hoc_bench-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.ad_hoc_bench]
+path = ".."
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_validate_merge_block"
+path = "fuzz_targets/fuzz_validate_merge_block.rs"
+test = false
+doc = false
+bench = false
