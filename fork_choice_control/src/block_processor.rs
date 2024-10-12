@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 
 use std::collections::{VecDeque, HashMap};
+use std::fmt;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use anyhow::Result;
@@ -35,41 +36,98 @@ use types::{
     traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 
-#[derive(Default)]
+
 pub struct TimingMetrics {
     pub times: VecDeque<Duration>,
-    pub min: Duration,
-    pub max: Duration,
     pub total: Duration,
-    pub count: usize,
+    pub max_size: usize,
+}
+
+impl Default for TimingMetrics {
+    fn default() -> Self {
+        Self::new(100) // Default max_size of 100
+    }
 }
 
 impl TimingMetrics {
-    fn update(&mut self, duration: Duration) {
-        self.times.push_back(duration);
-        if self.times.len() > 100 {
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            times: VecDeque::with_capacity(max_size),
+            total: Duration::default(),
+            max_size,
+        }
+    }
+
+    pub fn update(&mut self, duration: Duration) {
+        if self.times.len() >= self.max_size {
             if let Some(old) = self.times.pop_front() {
                 self.total -= old;
             }
         }
+        self.times.push_back(duration);
         self.total += duration;
-        self.count += 1;
-        self.min = if self.count == 1 { duration } else { self.min.min(duration) };
-        self.max = self.max.max(duration);
     }
 
-    fn average(&self) -> Duration {
-        if self.count > 0 {
-            self.total / self.count as u32
-        } else {
-            Duration::default()
+    pub fn min(&self) -> Option<Duration> {
+        self.times.iter().min().copied()
+    }
+
+    pub fn max(&self) -> Option<Duration> {
+        self.times.iter().max().copied()
+    }
+
+    pub fn average(&self) -> Option<Duration> {
+        (!self.times.is_empty()).then(|| self.total / self.times.len() as u32)
+    }
+
+    pub fn median(&self) -> Option<Duration> {
+        let len = self.times.len();
+        if len == 0 {
+            return None;
         }
+        let mut sorted: Vec<_> = self.times.iter().collect();
+        sorted.sort();
+        let mid_idx = len / 2;
+        Some((*sorted[mid_idx] + *sorted[len - 1 - mid_idx]) / 2)
     }
 
-    fn median(&self) -> Duration {
-        let mut sorted = self.times.clone().into_iter().collect::<Vec<_>>();
-        sorted.sort();
-        sorted.get(sorted.len() / 2).cloned().unwrap_or_default()
+    pub fn count(&self) -> usize {
+        self.times.len()
+    }
+
+    pub fn last(&self) -> Option<Duration> {
+        self.times.back().copied()
+    }
+
+    pub fn total(&self) -> Duration {
+        self.total
+    }
+
+    pub fn times(&self) -> &VecDeque<Duration> {
+        &self.times
+    }
+
+    fn to_milliseconds(duration: Duration) -> f64 {
+        duration.as_secs_f64() * 1000.0
+    }
+}
+
+impl fmt::Display for TimingMetrics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.times.is_empty() {
+            write!(f, "Timing metrics are empty.")
+        } else {
+            let min_ms = self.min().map(Self::to_milliseconds).unwrap_or(0.0);
+            let max_ms = self.max().map(Self::to_milliseconds).unwrap_or(0.0);
+            let avg_ms = self.average().map(Self::to_milliseconds).unwrap_or(0.0);
+            let median_ms = self.median().map(Self::to_milliseconds).unwrap_or(0.0);
+            
+            write!(
+                f,
+                "Min: {:.1}ms, Max: {:.1}ms, Avg: {:.1}ms, Median: {:.1}ms",
+                min_ms, max_ms, avg_ms, median_ms
+            )
+        }
     }
 }
 
@@ -83,22 +141,9 @@ pub struct BlockProcessor<P: Preset> {
 impl<P: Preset> BlockProcessor<P> {
     fn update_metrics(&self, name: &str, duration: Duration) {
         let mut metrics = self.metrics.lock().unwrap();
-        metrics.entry(name.to_string()).or_default().update(duration);
-        let entry = metrics.get(name).unwrap();
-    
-        let min_ms = entry.min.as_secs_f64() * 1000.0;
-        let max_ms = entry.max.as_secs_f64() * 1000.0;
-        let avg_ms = entry.average().as_secs_f64() * 1000.0;
-        let median_ms = entry.median().as_secs_f64() * 1000.0;
-    
-        trace!(
-            "{} timing: min={:.1}ms, max={:.1}ms, avg={:.1}ms, median={:.1}ms",
-            name,
-            min_ms,
-            max_ms,
-            avg_ms,
-            median_ms
-        );
+        let entry = metrics.entry(name.to_string()).or_insert_with(|| TimingMetrics::new(100));
+        entry.update(duration);
+        trace!("{} timing: {}", name, entry);
     }
     pub fn process_untrusted_block_with_report(
         &self,
