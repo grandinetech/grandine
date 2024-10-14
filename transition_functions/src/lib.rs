@@ -51,7 +51,6 @@ pub mod unphased {
     pub(crate) use block_processing::{
         process_block_header, process_block_header_for_gossip, process_eth1_data, process_randao,
         process_voluntary_exit, validate_attestation_with_verifier, validate_deposits,
-        validate_deposits_without_verifying_merkle_branch,
         validate_proposer_slashing_with_verifier, CombinedDeposit,
     };
     pub(crate) use epoch_intermediates::ValidatorSummary;

@@ -197,11 +197,14 @@ pub struct LightClientUpdate<P: Preset> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
-pub struct PendingBalanceDeposit {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub index: ValidatorIndex,
+pub struct PendingDeposit {
+    pub pubkey: PublicKeyBytes,
+    pub withdrawal_credentials: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub amount: Gwei,
+    pub signature: SignatureBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

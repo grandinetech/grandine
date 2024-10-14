@@ -167,14 +167,19 @@ impl<'config, P: Preset> Incremental<'config, P> {
             combined::process_deposit_data(self.config, &mut self.beacon_state, data)?
         {
             if let Some(state) = self.beacon_state.post_electra_mut() {
-                let pending_deposits = state.pending_balance_deposits().clone();
+                let pending_deposits = state.pending_deposits().clone();
 
                 for deposit in &pending_deposits {
-                    let balance = state.balances_mut().get_mut(deposit.index)?;
+                    let validator_index = accessors::index_of_public_key(state, deposit.pubkey)
+                        .expect(
+                            "public keys in state.pending_deposits are taken from state.validators",
+                        );
+
+                    let balance = state.balances_mut().get_mut(validator_index)?;
                     increase_balance(balance, deposit.amount);
                 }
 
-                *state.pending_balance_deposits_mut() = PersistentList::default();
+                *state.pending_deposits_mut() = PersistentList::default();
             }
 
             let balance = *self.beacon_state.balances().get(validator_index)?;

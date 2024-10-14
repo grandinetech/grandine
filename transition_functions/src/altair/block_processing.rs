@@ -351,6 +351,7 @@ pub fn process_deposit_data<P: Preset>(
             validator_index,
             withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
+            signatures: vec![signature],
         };
 
         apply_deposits(state, 1, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -372,6 +373,7 @@ pub fn process_deposit_data<P: Preset>(
             pubkey,
             withdrawal_credentials,
             amounts: smallvec![amount],
+            signatures: vec![signature],
         };
 
         apply_deposits(state, 1, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -400,6 +402,7 @@ pub fn apply_deposits<P: Preset>(
                 pubkey,
                 withdrawal_credentials,
                 amounts,
+                ..
             } => {
                 let public_key_bytes = pubkey.to_bytes();
                 let first_amount = amounts[0];

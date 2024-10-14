@@ -255,9 +255,9 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    PendingBalanceDeposit,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/PendingBalanceDeposit/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/PendingBalanceDeposit/*/*",
+    PendingDeposit,
+    "consensus-spec-tests/tests/mainnet/electra/ssz_static/PendingDeposit/*/*",
+    "consensus-spec-tests/tests/minimal/electra/ssz_static/PendingDeposit/*/*",
 }
 
 tests_for_type! {

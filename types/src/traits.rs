@@ -51,7 +51,7 @@ use crate::{
     },
     collections::{
         Balances, EpochParticipation, Eth1DataVotes, HistoricalRoots, InactivityScores,
-        PendingBalanceDeposits, PendingConsolidations, PendingPartialWithdrawals, RandaoMixes,
+        PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, RandaoMixes,
         RecentRoots, Slashings, Validators,
     },
     combined::{
@@ -599,7 +599,7 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     fn earliest_exit_epoch(&self) -> Epoch;
     fn consolidation_balance_to_consume(&self) -> Gwei;
     fn earliest_consolidation_epoch(&self) -> Epoch;
-    fn pending_balance_deposits(&self) -> &PendingBalanceDeposits<P>;
+    fn pending_deposits(&self) -> &PendingDeposits<P>;
     fn pending_partial_withdrawals(&self) -> &PendingPartialWithdrawals<P>;
     fn pending_consolidations(&self) -> &PendingConsolidations<P>;
 
@@ -609,7 +609,7 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     fn earliest_exit_epoch_mut(&mut self) -> &mut Epoch;
     fn consolidation_balance_to_consume_mut(&mut self) -> &mut Gwei;
     fn earliest_consolidation_epoch_mut(&mut self) -> &mut Epoch;
-    fn pending_balance_deposits_mut(&mut self) -> &mut PendingBalanceDeposits<P>;
+    fn pending_deposits_mut(&mut self) -> &mut PendingDeposits<P>;
     fn pending_partial_withdrawals_mut(&mut self) -> &mut PendingPartialWithdrawals<P>;
     fn pending_consolidations_mut(&mut self) -> &mut PendingConsolidations<P>;
 }
@@ -649,7 +649,7 @@ impl<parameters> PostElectraBeaconState<P> for implementor {
 
     #[duplicate_item(
         field              return_type;
-        [pending_balance_deposits]    [PendingBalanceDeposits<P>];
+        [pending_deposits]            [PendingDeposits<P>];
         [pending_partial_withdrawals] [PendingPartialWithdrawals<P>];
         [pending_consolidations]      [PendingConsolidations<P>];
     )]
@@ -665,7 +665,7 @@ impl<parameters> PostElectraBeaconState<P> for implementor {
         [earliest_exit_epoch]              [earliest_exit_epoch_mut]              [Epoch];
         [consolidation_balance_to_consume] [consolidation_balance_to_consume_mut] [Gwei];
         [earliest_consolidation_epoch]     [earliest_consolidation_epoch_mut]     [Epoch];
-        [pending_balance_deposits]         [pending_balance_deposits_mut]         [PendingBalanceDeposits<P>];
+        [pending_deposits]                 [pending_deposits_mut]                 [PendingDeposits<P>];
         [pending_partial_withdrawals]      [pending_partial_withdrawals_mut]      [PendingPartialWithdrawals<P>];
         [pending_consolidations]           [pending_consolidations_mut]           [PendingConsolidations<P>];
     )]

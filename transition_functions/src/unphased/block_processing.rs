@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use bls::CachedPublicKey;
+use bls::{CachedPublicKey, SignatureBytes};
 use helper_functions::{
     accessors::{
         attestation_epoch, get_beacon_proposer_index, get_current_epoch, get_randao_mix,
@@ -45,11 +45,13 @@ pub enum CombinedDeposit {
         pubkey: CachedPublicKey,
         withdrawal_credentials: H256,
         amounts: GweiVec,
+        signatures: Vec<SignatureBytes>,
     },
     TopUp {
         validator_index: ValidatorIndex,
         withdrawal_credentials: Vec<H256>,
         amounts: GweiVec,
+        signatures: Vec<SignatureBytes>,
     },
 }
 
@@ -374,23 +376,6 @@ pub fn validate_deposits<P: Preset>(
     state: &impl BeaconState<P>,
     deposits: impl IntoIterator<Item = Deposit>,
 ) -> Result<impl Iterator<Item = CombinedDeposit>> {
-    validate_deposits_internal(config, state, deposits, true)
-}
-
-pub fn validate_deposits_without_verifying_merkle_branch<P: Preset>(
-    config: &Config,
-    state: &impl BeaconState<P>,
-    deposits: impl IntoIterator<Item = Deposit>,
-) -> Result<impl Iterator<Item = CombinedDeposit>> {
-    validate_deposits_internal(config, state, deposits, false)
-}
-
-fn validate_deposits_internal<P: Preset>(
-    config: &Config,
-    state: &impl BeaconState<P>,
-    deposits: impl IntoIterator<Item = Deposit>,
-    verify_merkle_branch: bool,
-) -> Result<impl Iterator<Item = CombinedDeposit>> {
     let deposits_by_pubkey = (0..)
         .zip(deposits)
         .into_group_map_by(|(_, deposit)| deposit.data.pubkey)
@@ -436,29 +421,33 @@ fn validate_deposits_internal<P: Preset>(
     let mut combined_deposits = deposits_by_pubkey
         .into_par_iter()
         .map(|(existing_validator_index, cached_public_key, deposits)| {
-            if verify_merkle_branch {
-                for (position, deposit) in deposits.iter().copied() {
-                    // > Verify the Merkle branch
-                    verify_deposit_merkle_branch(
-                        state,
-                        state.eth1_deposit_index() + position,
-                        deposit,
-                    )?;
-                }
+            for (position, deposit) in deposits.iter().copied() {
+                // > Verify the Merkle branch
+                verify_deposit_merkle_branch(
+                    state,
+                    state.eth1_deposit_index() + position,
+                    deposit,
+                )?;
             }
 
             let (first_position, _) = deposits[0];
 
             if let Some(validator_index) = existing_validator_index {
-                let (amounts, withdrawal_credentials) = deposits
+                let ((amounts, withdrawal_credentials), signatures) = deposits
                     .into_iter()
-                    .map(|(_, deposit)| (deposit.data.amount, deposit.data.withdrawal_credentials))
+                    .map(|(_, deposit)| {
+                        (
+                            (deposit.data.amount, deposit.data.withdrawal_credentials),
+                            deposit.data.signature,
+                        )
+                    })
                     .unzip();
 
                 let combined_deposit = CombinedDeposit::TopUp {
                     validator_index,
                     withdrawal_credentials,
                     amounts,
+                    signatures,
                 };
 
                 return Ok(Some((first_position, combined_deposit)));
@@ -483,19 +472,23 @@ fn validate_deposits_internal<P: Preset>(
 
             Ok(first_valid.map(|(position, deposit)| {
                 let DepositData {
+                    pubkey,
                     withdrawal_credentials,
                     amount: first_amount,
-                    ..
+                    signature: first_signature,
                 } = deposit.data;
 
-                let amounts = core::iter::once(first_amount)
-                    .chain(deposits.map(|(_, deposit)| deposit.data.amount))
+                let (amounts, signatures) = core::iter::once((first_amount, first_signature))
+                    .chain(
+                        deposits.map(|(_, deposit)| (deposit.data.amount, deposit.data.signature)),
+                    )
                     .collect();
 
                 let combined_deposit = CombinedDeposit::NewValidator {
-                    pubkey: cached_public_key,
+                    pubkey: pubkey.into(),
                     withdrawal_credentials,
                     amounts,
+                    signatures,
                 };
 
                 (position, combined_deposit)

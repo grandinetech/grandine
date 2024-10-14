@@ -2,6 +2,7 @@ use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
 use anyhow::Result;
+use bls::SignatureBytes;
 use itertools::Itertools as _;
 use ssz::PersistentList;
 use std_ext::ArcExt as _;
@@ -21,15 +22,17 @@ use types::{
         containers::ExecutionPayloadHeader as DenebExecutionPayloadHeader,
     },
     electra::{
-        beacon_state::BeaconState as ElectraBeaconState, consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
+        beacon_state::BeaconState as ElectraBeaconState,
+        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
-        consts::FAR_FUTURE_EPOCH,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{Fork, PendingAttestation},
         primitives::H256,
     },
     preset::Preset,
+    traits::{BeaconState as _, PostElectraBeaconState as _},
 };
 
 use crate::{accessors, misc, mutators, phase0, predicates};
@@ -639,7 +642,7 @@ pub fn upgrade_to_electra<P: Preset>(
         earliest_exit_epoch,
         consolidation_balance_to_consume: 0,
         earliest_consolidation_epoch: misc::compute_activation_exit_epoch::<P>(epoch),
-        pending_balance_deposits: PersistentList::default(),
+        pending_deposits: PersistentList::default(),
         pending_partial_withdrawals: PersistentList::default(),
         pending_consolidations: PersistentList::default(),
         // Cache
@@ -661,7 +664,26 @@ pub fn upgrade_to_electra<P: Preset>(
         .map(|(_, index)| index);
 
     for index in pre_activation {
-        mutators::queue_entire_balance_and_reset_validator(&mut post, index)?;
+        let balance = mutators::balance(&mut post, index)?;
+        let validator_balance = *balance;
+
+        *balance = 0;
+
+        let validator = post.validators_mut().get_mut(index)?;
+
+        validator.effective_balance = 0;
+        validator.activation_eligibility_epoch = FAR_FUTURE_EPOCH;
+
+        let withdrawal_credentials = validator.withdrawal_credentials;
+        let pubkey = validator.pubkey.to_bytes();
+
+        post.pending_deposits_mut().push(PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount: validator_balance,
+            signature: SignatureBytes::empty(),
+            slot: GENESIS_SLOT,
+        })?;
     }
 
     for index in post
@@ -682,7 +704,7 @@ pub fn upgrade_to_electra<P: Preset>(
 mod spec_tests {
     use spec_test_utils::Case;
     use test_generator::test_resources;
-    use types::preset::{Mainnet, Minimal};
+    use types::preset::{Mainnet, Minimal, Preset};
 
     use super::*;
 

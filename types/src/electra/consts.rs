@@ -56,7 +56,7 @@ pub type FinalizedRootIndex = ConcatGeneralizedIndices<
 ///  │              └─95 BeaconState.earliest_exit_epoch
 ///  └─3──6─12┬24┬48┬─96 BeaconState.consolidation_balance_to_consume
 ///           │  │  └─97 BeaconState.earliest_consolidation_epoch
-///           │  └49┬─98 BeaconState.pending_balance_deposits
+///           │  └49┬─98 BeaconState.pending_deposits
 ///           │     └─99 BeaconState.pending_partial_withdrawals
 ///           └──────100 BeaconState.pending_consolidations
 /// ```

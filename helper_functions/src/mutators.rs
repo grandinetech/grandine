@@ -1,11 +1,12 @@
 use core::cmp::Ordering;
 
 use anyhow::Result;
+use bls::SignatureBytes;
 use types::{
     config::Config,
-    electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingBalanceDeposit},
+    electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},
     phase0::{
-        consts::FAR_FUTURE_EPOCH,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         primitives::{Epoch, Gwei, ValidatorIndex},
     },
     preset::Preset,
@@ -19,7 +20,6 @@ use crate::{
     },
     error::Error,
     misc::compute_activation_exit_epoch,
-    predicates::has_eth1_withdrawal_credential,
 };
 
 pub fn balance<P: Preset>(
@@ -105,12 +105,10 @@ pub fn switch_to_compounding_validator<P: Preset>(
 ) -> Result<()> {
     let validator = state.validators_mut().get_mut(index)?;
 
-    if has_eth1_withdrawal_credential(validator) {
-        validator.withdrawal_credentials[..COMPOUNDING_WITHDRAWAL_PREFIX.len()]
-            .copy_from_slice(COMPOUNDING_WITHDRAWAL_PREFIX);
+    validator.withdrawal_credentials[..COMPOUNDING_WITHDRAWAL_PREFIX.len()]
+        .copy_from_slice(COMPOUNDING_WITHDRAWAL_PREFIX);
 
-        queue_excess_active_balance(state, index)?;
-    }
+    queue_excess_active_balance(state, index)?;
 
     Ok(())
 }
@@ -126,36 +124,19 @@ pub fn queue_excess_active_balance<P: Preset>(
 
         *state.balances_mut().get_mut(index)? = P::MIN_ACTIVATION_BALANCE;
 
-        state
-            .pending_balance_deposits_mut()
-            .push(PendingBalanceDeposit {
-                index,
-                amount: excess_balance,
-            })?;
-    }
+        let validator = state.validators().get(index)?;
 
-    Ok(())
-}
+        let pubkey = validator.pubkey.to_bytes();
+        let withdrawal_credentials = validator.withdrawal_credentials;
 
-pub fn queue_entire_balance_and_reset_validator<P: Preset>(
-    state: &mut impl PostElectraBeaconState<P>,
-    index: ValidatorIndex,
-) -> Result<()> {
-    let validator_balance = *balance(state, index)?;
-
-    *balance(state, index)? = 0;
-
-    let validator = state.validators_mut().get_mut(index)?;
-
-    validator.effective_balance = 0;
-    validator.activation_eligibility_epoch = FAR_FUTURE_EPOCH;
-
-    state
-        .pending_balance_deposits_mut()
-        .push(PendingBalanceDeposit {
-            index,
-            amount: validator_balance,
+        state.pending_deposits_mut().push(PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount: excess_balance,
+            signature: SignatureBytes::empty(),
+            slot: GENESIS_SLOT,
         })?;
+    }
 
     Ok(())
 }

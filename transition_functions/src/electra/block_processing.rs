@@ -1,7 +1,9 @@
 use core::ops::{Add as _, Index as _, Rem as _};
 
 use anyhow::{ensure, Result};
+use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
+use bls::CachedPublicKey;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
@@ -26,7 +28,7 @@ use helper_functions::{
     predicates::{
         has_compounding_withdrawal_credential, has_eth1_withdrawal_credential,
         has_execution_withdrawal_credential, is_active_validator,
-        is_compounding_withdrawal_credential, validate_constructed_indexed_attestation,
+        validate_constructed_indexed_attestation,
     },
     signing::{SignForAllForks, SignForSingleFork as _},
     slot_report::{NullSlotReport, SlotReport},
@@ -50,18 +52,18 @@ use types::{
         consts::{FULL_EXIT_REQUEST_AMOUNT, UNSET_DEPOSIT_REQUESTS_START_INDEX},
         containers::{
             Attestation, BeaconBlock, BeaconBlockBody, ConsolidationRequest, DepositRequest,
-            PendingBalanceDeposit, PendingConsolidation, PendingPartialWithdrawal,
-            SignedBeaconBlock, WithdrawalRequest,
+            PendingConsolidation, PendingDeposit, PendingPartialWithdrawal, SignedBeaconBlock,
+            WithdrawalRequest,
         },
     },
     nonstandard::{smallvec, AttestationEpoch, SlashingKind},
     phase0::{
-        consts::FAR_FUTURE_EPOCH,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{
-            AttestationData, Deposit, DepositData, DepositMessage, ProposerSlashing,
-            SignedVoluntaryExit, Validator,
+            AttestationData, DepositData, DepositMessage, ProposerSlashing, SignedVoluntaryExit,
+            Validator,
         },
-        primitives::{DepositIndex, ExecutionAddress, ValidatorIndex, H256},
+        primitives::{DepositIndex, ExecutionAddress, Gwei, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::{
@@ -173,7 +175,7 @@ pub fn custom_process_block<P: Preset>(
 
     // > [New in Electra:EIP6110]
     for deposit_request in &block.body.execution_requests.deposits {
-        process_deposit_request(config, state, *deposit_request, &mut slot_report)?;
+        process_deposit_request(state, *deposit_request)?;
     }
 
     // > [New in Electra:EIP7002:EIP7251]
@@ -311,6 +313,7 @@ pub fn get_expected_withdrawals<P: Preset>(
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut validator_index = state.next_withdrawal_validator_index();
     let mut withdrawals = vec![];
+    let mut partial_withdrawals_count = 0;
 
     // > [New in Electra:EIP7251] Consume pending partial withdrawals
     for withdrawal in &state.pending_partial_withdrawals().clone() {
@@ -347,9 +350,9 @@ pub fn get_expected_withdrawals<P: Preset>(
 
             withdrawal_index += 1;
         }
-    }
 
-    let partial_withdrawals_count = withdrawals.len();
+        partial_withdrawals_count += 1;
+    }
 
     // > Sweep for remaining
     for _ in 0..bound {
@@ -776,6 +779,7 @@ pub fn process_deposit_data<P: Preset>(
             validator_index,
             withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
+            signatures: vec![signature],
         };
 
         apply_deposits(state, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -797,6 +801,7 @@ pub fn process_deposit_data<P: Preset>(
             pubkey,
             withdrawal_credentials,
             amounts: smallvec![amount],
+            signatures: vec![signature],
         };
 
         apply_deposits(state, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -805,6 +810,51 @@ pub fn process_deposit_data<P: Preset>(
     }
 
     Ok(None)
+}
+
+pub fn add_validator_to_registry<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+    pubkey: CachedPublicKey,
+    withdrawal_credentials: H256,
+    amount: Gwei,
+) -> Result<()> {
+    let public_key_bytes = pubkey.to_bytes();
+    let validator_index = state.validators().len_u64();
+
+    let mut validator = Validator {
+        pubkey,
+        withdrawal_credentials,
+        effective_balance: 0,
+        slashed: false,
+        activation_eligibility_epoch: FAR_FUTURE_EPOCH,
+        activation_epoch: FAR_FUTURE_EPOCH,
+        exit_epoch: FAR_FUTURE_EPOCH,
+        withdrawable_epoch: FAR_FUTURE_EPOCH,
+    };
+
+    let max_effective_balance = get_max_effective_balance::<P>(&validator);
+
+    validator.effective_balance = amount
+        .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
+        .min(max_effective_balance);
+
+    state.validators_mut().push(validator)?;
+    state.balances_mut().push(amount)?;
+    state.previous_epoch_participation_mut().push(0)?;
+    state.current_epoch_participation_mut().push(0)?;
+    state.inactivity_scores_mut().push(0)?;
+
+    state
+        .cache_mut()
+        .validator_indices
+        .get_mut()
+        .expect(
+            "state.cache.validator_indices is initialized by \
+                index_of_public_key, which is called before apply_deposits",
+        )
+        .insert(public_key_bytes, validator_index);
+
+    Ok(())
 }
 
 fn apply_deposits<P: Preset>(
@@ -819,45 +869,21 @@ fn apply_deposits<P: Preset>(
                 pubkey,
                 withdrawal_credentials,
                 amounts,
+                signatures,
             } => {
                 let public_key_bytes = pubkey.to_bytes();
-
-                let validator = Validator {
-                    pubkey,
-                    withdrawal_credentials,
-                    effective_balance: 0,
-                    slashed: false,
-                    activation_eligibility_epoch: FAR_FUTURE_EPOCH,
-                    activation_epoch: FAR_FUTURE_EPOCH,
-                    exit_epoch: FAR_FUTURE_EPOCH,
-                    withdrawable_epoch: FAR_FUTURE_EPOCH,
-                };
-
                 let validator_index = state.validators().len_u64();
 
-                state.validators_mut().push(validator)?;
-                state.balances_mut().push(0)?;
-                state.previous_epoch_participation_mut().push(0)?;
-                state.current_epoch_participation_mut().push(0)?;
-                state.inactivity_scores_mut().push(0)?;
+                add_validator_to_registry(state, pubkey, withdrawal_credentials, 0)?;
 
-                state
-                    .cache_mut()
-                    .validator_indices
-                    .get_mut()
-                    .expect(
-                        "state.cache.validator_indices is initialized by \
-                         index_of_public_key, which is called before apply_deposits",
-                    )
-                    .insert(public_key_bytes, validator_index);
-
-                for amount in amounts {
-                    state
-                        .pending_balance_deposits_mut()
-                        .push(PendingBalanceDeposit {
-                            index: validator_index,
-                            amount,
-                        })?;
+                for (amount, signature) in amounts.into_iter().zip(signatures) {
+                    state.pending_deposits_mut().push(PendingDeposit {
+                        pubkey: public_key_bytes,
+                        withdrawal_credentials,
+                        amount,
+                        signature,
+                        slot: GENESIS_SLOT,
+                    })?;
 
                     // TODO(feature/electra):
                     slot_report.add_deposit(validator_index, amount);
@@ -868,26 +894,24 @@ fn apply_deposits<P: Preset>(
                 validator_index,
                 withdrawal_credentials,
                 amounts,
+                signatures,
             } => {
-                for amount in amounts {
-                    state
-                        .pending_balance_deposits_mut()
-                        .push(PendingBalanceDeposit {
-                            index: validator_index,
-                            amount,
-                        })?;
+                let pubkey = accessors::public_key(state, validator_index)?.to_bytes();
+
+                for ((amount, signature), withdrawal_credentials) in amounts
+                    .into_iter()
+                    .zip(signatures)
+                    .zip(withdrawal_credentials)
+                {
+                    state.pending_deposits_mut().push(PendingDeposit {
+                        pubkey,
+                        withdrawal_credentials,
+                        amount,
+                        signature,
+                        slot: GENESIS_SLOT,
+                    })?;
 
                     slot_report.add_deposit(validator_index, amount);
-                }
-
-                let validator = state.validators().get(validator_index)?;
-
-                if has_eth1_withdrawal_credential(validator)
-                    && withdrawal_credentials
-                        .into_iter()
-                        .any(is_compounding_withdrawal_credential)
-                {
-                    switch_to_compounding_validator(state, validator_index)?;
                 }
             }
         }
@@ -1029,10 +1053,8 @@ fn process_withdrawal_request<P: Preset>(
 }
 
 fn process_deposit_request<P: Preset>(
-    config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     deposit_request: DepositRequest,
-    mut slot_report: impl SlotReport,
 ) -> Result<()> {
     let DepositRequest {
         pubkey,
@@ -1042,28 +1064,20 @@ fn process_deposit_request<P: Preset>(
         index,
     } = deposit_request;
 
+    let slot = state.slot();
+
     // > Set deposit request start index
     if state.deposit_requests_start_index() == UNSET_DEPOSIT_REQUESTS_START_INDEX {
         *state.deposit_requests_start_index_mut() = index;
     }
 
-    let deposit = Deposit {
-        data: DepositData {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-        },
-        ..Deposit::default()
-    };
-
-    let combined_deposits = unphased::validate_deposits_without_verifying_merkle_branch(
-        config,
-        state,
-        core::iter::once(deposit),
-    )?;
-
-    apply_deposits(state, combined_deposits, &mut slot_report)?;
+    state.pending_deposits_mut().push(PendingDeposit {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+        slot,
+    })?;
 
     Ok(())
 }
@@ -1079,6 +1093,19 @@ pub fn process_consolidation_request<P: Preset>(
         source_pubkey,
         target_pubkey,
     } = consolidation_request;
+
+    if is_valid_switch_to_compounding_request(state, consolidation_request)? {
+        let Some(source_index) = index_of_public_key(state, source_pubkey) else {
+            return Ok(());
+        };
+
+        return switch_to_compounding_validator(state, source_index);
+    }
+
+    // > Verify that source != target, so a consolidation cannot be used as an exit.
+    if source_pubkey == target_pubkey {
+        return Ok(());
+    }
 
     // > If the pending consolidations queue is full, consolidation requests are ignored
     if state.pending_consolidations().len_usize() == P::PendingConsolidationsLimit::USIZE {
@@ -1101,16 +1128,9 @@ pub fn process_consolidation_request<P: Preset>(
     let source_validator = state.validators().get(source_index)?;
     let target_validator = state.validators().get(target_index)?;
 
-    // > Verify that source != target, so a consolidation cannot be used as an exit.
-    if source_index == target_index {
-        return Ok(());
-    }
-
     // > Verify source withdrawal credentials
     let has_correct_credential = has_execution_withdrawal_credential(source_validator);
-    let prefix_len = H256::len_bytes() - ExecutionAddress::len_bytes();
-    let computed_source_address =
-        ExecutionAddress::from_slice(&source_validator.withdrawal_credentials[prefix_len..]);
+    let computed_source_address = compute_source_address(source_validator);
 
     if !(has_correct_credential && computed_source_address == source_address) {
         return Ok(());
@@ -1157,7 +1177,66 @@ pub fn process_consolidation_request<P: Preset>(
             target_index,
         })?;
 
+    // > Churn any target excess active balance of target and raise its max
+    let target_validator = state.validators().get(target_index)?;
+
+    if has_eth1_withdrawal_credential(target_validator) {
+        return switch_to_compounding_validator(state, target_index);
+    }
+
     Ok(())
+}
+
+fn is_valid_switch_to_compounding_request<P: Preset>(
+    state: &impl PostElectraBeaconState<P>,
+    consolidation_request: ConsolidationRequest,
+) -> Result<bool> {
+    let ConsolidationRequest {
+        source_address,
+        source_pubkey,
+        target_pubkey,
+    } = consolidation_request;
+
+    // > Switch to compounding requires source and target be equal
+    if source_pubkey != target_pubkey {
+        return Ok(false);
+    }
+
+    // > Verify pubkey exists
+    let Some(source_index) = index_of_public_key(state, source_pubkey) else {
+        return Ok(false);
+    };
+
+    let source_validator = state.validators().get(source_index)?;
+
+    // > Verify request has been authorized
+    if compute_source_address(source_validator) != source_address {
+        return Ok(false);
+    }
+
+    // > Verify source withdrawal credentials
+    if !has_eth1_withdrawal_credential(source_validator) {
+        return Ok(false);
+    }
+
+    // > Verify the source is active
+    let current_epoch = get_current_epoch(state);
+
+    if !is_active_validator(source_validator, current_epoch) {
+        return Ok(false);
+    }
+
+    // > Verify exit for source has not been initiated
+    if source_validator.exit_epoch != FAR_FUTURE_EPOCH {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+fn compute_source_address(validator: &Validator) -> ExecutionAddress {
+    let prefix_len = H256::len_bytes() - ExecutionAddress::len_bytes();
+    ExecutionAddress::from_slice(&validator.withdrawal_credentials[prefix_len..])
 }
 
 #[cfg(test)]
@@ -1376,7 +1455,7 @@ mod spec_tests {
 
     processing_tests! {
         process_deposit_request,
-        |config, state, deposit_request, _| process_deposit_request(config, state, deposit_request, NullSlotReport),
+        |_, state, deposit_request, _| process_deposit_request(state, deposit_request),
         "deposit_request",
         "consensus-spec-tests/tests/mainnet/electra/operations/deposit_request/*/*",
         "consensus-spec-tests/tests/minimal/electra/operations/deposit_request/*/*",

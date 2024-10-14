@@ -10,7 +10,7 @@ use crate::{
     capella::primitives::WithdrawalIndex,
     collections::{
         Balances, EpochParticipation, Eth1DataVotes, HistoricalRoots, HistoricalSummaries,
-        InactivityScores, PendingBalanceDeposits, PendingConsolidations, PendingPartialWithdrawals,
+        InactivityScores, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals,
         RandaoMixes, RecentRoots, Slashings, Validators,
     },
     deneb::containers::ExecutionPayloadHeader,
@@ -101,7 +101,7 @@ pub struct BeaconState<P: Preset> {
     pub consolidation_balance_to_consume: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub earliest_consolidation_epoch: Epoch,
-    pub pending_balance_deposits: PendingBalanceDeposits<P>,
+    pub pending_deposits: PendingDeposits<P>,
     pub pending_partial_withdrawals: PendingPartialWithdrawals<P>,
     pub pending_consolidations: PendingConsolidations<P>,
 

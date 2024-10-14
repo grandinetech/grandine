@@ -36,7 +36,7 @@ use crate::{
     eip7594::Cell,
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
-        ConsolidationRequest, DepositRequest, PendingBalanceDeposit, PendingConsolidation,
+        ConsolidationRequest, DepositRequest, PendingConsolidation, PendingDeposit,
         PendingPartialWithdrawal, WithdrawalRequest,
     },
     phase0::{
@@ -169,11 +169,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
-    type PendingBalanceDepositsLimit: MerkleElements<PendingBalanceDeposit>
-        + Eq
-        + Debug
-        + Send
-        + Sync;
+    type PendingDepositsLimit: MerkleElements<PendingDeposit> + Eq + Debug + Send + Sync;
     type PendingConsolidationsLimit: MerkleElements<PendingConsolidation> + Eq + Debug + Send + Sync;
     type PendingPartialWithdrawalsLimit: MerkleElements<PendingPartialWithdrawal>
         + Eq
@@ -234,6 +230,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     // Electra
     const MAX_EFFECTIVE_BALANCE_ELECTRA: Gwei = 2_048_000_000_000;
     const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 8;
+    const MAX_PENDING_DEPOSITS_PER_EPOCH: u64 = 16;
     const MIN_ACTIVATION_BALANCE: Gwei = 32_000_000_000;
     const MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
     const WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
@@ -297,7 +294,7 @@ impl Preset for Mainnet {
     type MaxConsolidationRequestsPerPayload = U1;
     type MaxDepositRequestsPerPayload = U8192;
     type MaxWithdrawalRequestsPerPayload = U16;
-    type PendingBalanceDepositsLimit = U134217728;
+    type PendingDepositsLimit = U134217728;
     type PendingConsolidationsLimit = U262144;
     type PendingPartialWithdrawalsLimit = U134217728;
 
@@ -363,7 +360,7 @@ impl Preset for Minimal {
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
         type MaxConsolidationRequestsPerPayload;
-        type PendingBalanceDepositsLimit;
+        type PendingDepositsLimit;
     }
 
     // Phase 0
@@ -410,7 +407,7 @@ impl Preset for Minimal {
     const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 16;
 
     // Electra
-    const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 1;
+    const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 2;
 }
 
 /// [Medalla preset](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/medalla/config.yaml).
@@ -463,7 +460,7 @@ impl Preset for Medalla {
         type MaxConsolidationRequestsPerPayload;
         type MaxDepositRequestsPerPayload;
         type MaxWithdrawalRequestsPerPayload;
-        type PendingBalanceDepositsLimit;
+        type PendingDepositsLimit;
         type PendingConsolidationsLimit;
         type PendingPartialWithdrawalsLimit;
 
@@ -880,7 +877,7 @@ pub struct ElectraPreset {
     #[serde(with = "serde_utils::string_or_native")]
     min_slashing_penalty_quotient_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
-    pending_balance_deposits_limit: u64,
+    pending_deposits_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pending_consolidations_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
@@ -903,7 +900,7 @@ impl ElectraPreset {
             max_withdrawal_requests_per_payload: P::MaxWithdrawalRequestsPerPayload::U64,
             min_activation_balance: P::MIN_ACTIVATION_BALANCE,
             min_slashing_penalty_quotient_electra: P::MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,
-            pending_balance_deposits_limit: P::PendingBalanceDepositsLimit::U64,
+            pending_deposits_limit: P::PendingDepositsLimit::U64,
             pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
             pending_partial_withdrawals_limit: P::PendingPartialWithdrawalsLimit::U64,
             whistleblower_reward_quotient_electra: P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,

@@ -4,15 +4,17 @@ use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use helper_functions::{
     accessors::{
-        get_activation_exit_churn_limit, get_active_balance, get_current_epoch, get_next_epoch,
+        self, get_activation_exit_churn_limit, get_current_epoch, get_next_epoch,
         total_active_balance,
     },
     electra::{initiate_validator_exit, is_eligible_for_activation_queue},
-    misc::{compute_activation_exit_epoch, vec_of_default},
-    mutators::{balance, decrease_balance, increase_balance, switch_to_compounding_validator},
-    predicates::{
-        has_compounding_withdrawal_credential, is_active_validator, is_eligible_for_activation,
+    misc::{
+        compute_activation_exit_epoch, compute_start_slot_at_epoch, get_max_effective_balance,
+        vec_of_default,
     },
+    mutators::{balance, decrease_balance, increase_balance},
+    predicates::{is_active_validator, is_eligible_for_activation},
+    signing::SignForAllForks as _,
 };
 use prometheus_metrics::METRICS;
 use ssz::{PersistentList, SszHash as _};
@@ -21,13 +23,17 @@ use typenum::Unsigned as _;
 use types::{
     capella::containers::HistoricalSummary,
     config::Config,
-    electra::beacon_state::BeaconState as ElectraBeaconState,
-    phase0::{consts::FAR_FUTURE_EPOCH, primitives::Gwei},
+    electra::{beacon_state::BeaconState as ElectraBeaconState, containers::PendingDeposit},
+    phase0::{
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
+        containers::DepositMessage,
+        primitives::Gwei,
+    },
     preset::Preset,
     traits::{BeaconState, PostElectraBeaconState},
 };
 
-use super::epoch_intermediates;
+use super::{block_processing, epoch_intermediates};
 use crate::{
     altair::{
         self, EpochDeltasForTransition, EpochReport, ValidatorSummary as AltairValidatorSummary,
@@ -71,7 +77,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
     process_registry_updates(config, state, summaries.as_mut_slice())?;
     bellatrix::process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
-    process_pending_balance_deposits(config, state)?;
+    process_pending_deposits(config, state)?;
     process_pending_consolidations(state)?;
     process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
@@ -212,7 +218,7 @@ fn process_registry_updates<P: Preset>(
     Ok(())
 }
 
-fn process_pending_balance_deposits<P: Preset>(
+fn process_pending_deposits<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
@@ -221,58 +227,124 @@ fn process_pending_balance_deposits<P: Preset>(
         state.deposit_balance_to_consume() + get_activation_exit_churn_limit(config, state);
 
     let mut processed_amount = 0;
-    let mut next_deposit_index = 0;
+    let mut next_deposit_index: u64 = 0;
     let mut deposits_to_postpone = vec![];
+    let mut is_churn_limit_reached = false;
+    let finalized_slot = compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
 
-    for deposit in &state.pending_balance_deposits().clone() {
-        let validator = state.validators().get(deposit.index)?;
+    for deposit in &state.pending_deposits().clone() {
+        // > Do not process deposit requests if Eth1 bridge deposits are not yet applied.
+        if deposit.slot > GENESIS_SLOT
+            && state.eth1_deposit_index() < state.deposit_requests_start_index()
+        {
+            break;
+        }
 
-        // > Validator is exiting, postpone the deposit until after withdrawable epoch
-        if validator.exit_epoch < FAR_FUTURE_EPOCH {
-            if next_epoch <= validator.withdrawable_epoch {
-                deposits_to_postpone.push(*deposit);
-            } else {
-                // > Deposited balance will never become active. Increase balance but do not consume churn
-                increase_balance(balance(state, deposit.index)?, deposit.amount);
-            }
+        // > Check if deposit has been finalized, otherwise, stop processing.
+        if deposit.slot > finalized_slot {
+            break;
+        }
+
+        // > Check if number of processed deposits has not reached the limit, otherwise, stop processing.
+        if next_deposit_index >= P::MAX_PENDING_DEPOSITS_PER_EPOCH {
+            break;
+        }
+
+        let mut is_validator_exited = false;
+        let mut is_validator_withdrawn = false;
+
+        if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
+            let validator = state.validators().get(validator_index)?;
+
+            is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH;
+            is_validator_withdrawn = validator.withdrawable_epoch < next_epoch;
+        }
+
+        if is_validator_withdrawn {
+            // > Deposited balance will never become active. Increase balance but do not consume churn
+            apply_pending_deposit(config, state, deposit)?;
+        } else if is_validator_exited {
+            // > Validator is exiting, postpone the deposit until after withdrawable epoch
+            deposits_to_postpone.push(*deposit);
         } else {
-            // > Validator is not exiting, attempt to process deposit
-            // > Deposit does not fit in the churn, no more deposit processing in this epoch.
-            if processed_amount + deposit.amount > available_for_processing {
+            // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
+            is_churn_limit_reached = processed_amount + deposit.amount > available_for_processing;
+
+            if is_churn_limit_reached {
                 break;
             }
 
-            // > Deposit fits in the churn, process it. Increase balance and consume churn.
-            increase_balance(balance(state, deposit.index)?, deposit.amount);
+            // > Consume churn and apply deposit.
             processed_amount += deposit.amount;
+            apply_pending_deposit(config, state, deposit)?;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.
         next_deposit_index += 1;
     }
 
-    *state.pending_balance_deposits_mut() = PersistentList::try_from_iter(
+    *state.pending_deposits_mut() = PersistentList::try_from_iter(
         state
-            .pending_balance_deposits()
+            .pending_deposits()
             .into_iter()
             .copied()
-            .skip(next_deposit_index),
-    )?;
-
-    if state.pending_balance_deposits().len_usize() == 0 {
-        *state.deposit_balance_to_consume_mut() = 0;
-    } else {
-        *state.deposit_balance_to_consume_mut() = available_for_processing - processed_amount;
-    }
-
-    *state.pending_balance_deposits_mut() = PersistentList::try_from_iter(
-        state
-            .pending_balance_deposits()
-            .into_iter()
-            .copied()
+            .skip(next_deposit_index.try_into()?)
             .chain(deposits_to_postpone.into_iter()),
     )?;
+
+    if is_churn_limit_reached {
+        *state.deposit_balance_to_consume_mut() = available_for_processing - processed_amount;
+    } else {
+        *state.deposit_balance_to_consume_mut() = 0;
+    }
+
     Ok(())
+}
+
+fn apply_pending_deposit<P: Preset>(
+    config: &Config,
+    state: &mut impl PostElectraBeaconState<P>,
+    deposit: &PendingDeposit,
+) -> Result<()> {
+    let PendingDeposit {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        ..
+    } = deposit;
+
+    if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
+        increase_balance(balance(state, validator_index)?, *amount);
+    } else if is_valid_deposit_signature(config, deposit) {
+        block_processing::add_validator_to_registry::<P>(
+            state,
+            (*pubkey).into(),
+            *withdrawal_credentials,
+            *amount,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit) -> bool {
+    let PendingDeposit {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+        ..
+    } = *deposit;
+
+    let deposit_message = DepositMessage {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+    };
+
+    deposit_message
+        .verify(config, signature, &pubkey.into())
+        .is_ok()
 }
 
 fn process_pending_consolidations<P: Preset>(
@@ -293,17 +365,24 @@ fn process_pending_consolidations<P: Preset>(
             break;
         }
 
-        switch_to_compounding_validator(state, pending_consolidation.target_index)?;
+        // > Calculate the consolidated balance
+        let max_effective_balance = get_max_effective_balance::<P>(source_validator);
 
-        let active_balance = get_active_balance(state, pending_consolidation.source_index)?;
+        let source_effective_balance = core::cmp::min(
+            state
+                .balances()
+                .get(pending_consolidation.source_index)
+                .copied()?,
+            max_effective_balance,
+        );
 
         decrease_balance(
             balance(state, pending_consolidation.source_index)?,
-            active_balance,
+            source_effective_balance,
         );
         increase_balance(
             balance(state, pending_consolidation.target_index)?,
-            active_balance,
+            source_effective_balance,
         );
 
         next_pending_consolidation += 1;
@@ -335,11 +414,7 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectra
 
     // > Update effective balances with hysteresis
     validators.update(|validator| {
-        let effective_balance_limit = if has_compounding_withdrawal_credential(validator) {
-            P::MAX_EFFECTIVE_BALANCE_ELECTRA
-        } else {
-            P::MIN_ACTIVATION_BALANCE
-        };
+        let max_effective_balance = get_max_effective_balance::<P>(validator);
 
         let balance = balances
             .next()
@@ -351,7 +426,7 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectra
         if below || above {
             validator.effective_balance = balance
                 .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
-                .min(effective_balance_limit);
+                .min(max_effective_balance);
         }
     });
 }
@@ -599,17 +674,17 @@ mod spec_tests {
     }
 
     #[test_resources(
-        "consensus-spec-tests/tests/mainnet/electra/epoch_processing/pending_balance_deposits/*/*"
+        "consensus-spec-tests/tests/mainnet/electra/epoch_processing/pending_deposits/*/*"
     )]
-    fn mainnet_pending_balance_deposits(case: Case) {
-        run_pending_balance_deposits_case::<Mainnet>(case);
+    fn mainnet_pending_deposits(case: Case) {
+        run_pending_deposits_case::<Mainnet>(case);
     }
 
     #[test_resources(
-        "consensus-spec-tests/tests/minimal/electra/epoch_processing/pending_balance_deposits/*/*"
+        "consensus-spec-tests/tests/minimal/electra/epoch_processing/pending_deposits/*/*"
     )]
-    fn minimal_pending_balance_deposits(case: Case) {
-        run_pending_balance_deposits_case::<Minimal>(case);
+    fn minimal_pending_deposits(case: Case) {
+        run_pending_deposits_case::<Minimal>(case);
     }
 
     #[test_resources(
@@ -735,9 +810,9 @@ mod spec_tests {
         run_case::<P>(case, altair::process_sync_committee_updates);
     }
 
-    fn run_pending_balance_deposits_case<P: Preset>(case: Case) {
+    fn run_pending_deposits_case<P: Preset>(case: Case) {
         run_case::<P>(case, |state| {
-            process_pending_balance_deposits(&P::default_config(), state)
+            process_pending_deposits(&P::default_config(), state)
         });
     }
 
