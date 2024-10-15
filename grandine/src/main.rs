@@ -235,7 +235,7 @@ impl Context {
 
         eth1_chain.spawn_unfinalized_blocks_tracker_task()?;
 
-        let anchor_checkpoint_provider = anchor_checkpoint_provider::<P>(
+        let anchor_checkpoint_provider = genesis_checkpoint_provider::<P>(
             &chain_config,
             genesis_state_file,
             predefined_network,
@@ -245,7 +245,6 @@ impl Context {
                 .store_directory
                 .clone()
                 .unwrap_or_default(),
-            checkpoint_sync_url.clone(),
             genesis_state_download_url,
             &eth1_chain,
         )
@@ -733,13 +732,12 @@ fn handle_command<P: Preset>(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn anchor_checkpoint_provider<P: Preset>(
+async fn genesis_checkpoint_provider<P: Preset>(
     chain_config: &ChainConfig,
     genesis_state_file: Option<PathBuf>,
     predefined_network: Option<PredefinedNetwork>,
     client: &Client,
     store_directory: PathBuf,
-    checkpoint_sync_url: Option<Url>,
     genesis_state_download_url: Option<Url>,
     eth1_chain: &Eth1Chain,
 ) -> Result<AnchorCheckpointProvider<P>> {
@@ -751,10 +749,9 @@ async fn anchor_checkpoint_provider<P: Preset>(
 
     if let Some(predefined_network) = predefined_network {
         return predefined_network
-            .anchor_checkpoint_provider::<P>(
+            .genesis_checkpoint_provider::<P>(
                 client,
                 store_directory.as_path(),
-                checkpoint_sync_url,
                 genesis_state_download_url,
             )
             .await;
