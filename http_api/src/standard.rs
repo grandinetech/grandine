@@ -21,7 +21,7 @@ use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBl
 use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
-use eth1_api::ApiController;
+use eth1_api::{ApiController, Eth1Api};
 use eth2_libp2p::PeerId;
 use fork_choice_control::{ForkChoiceContext, ForkTip, Wait};
 use futures::{
@@ -351,9 +351,6 @@ struct NodeVersionResponse<'version> {
     version: Option<&'version str>,
 }
 
-// TODO(Grandine Team): `NodeSyncingResponse` should have an `el_offline` field.
-//                      It was added in Eth Beacon Node API version 2.4.0.
-//                      See <https://ethereum.github.io/beacon-APIs/#/Node/getSyncingStatus>.
 #[derive(Serialize)]
 pub struct NodeSyncingResponse {
     #[serde(with = "serde_utils::string_or_native")]
@@ -362,6 +359,7 @@ pub struct NodeSyncingResponse {
     sync_distance: Slot,
     is_syncing: bool,
     is_optimistic: bool,
+    el_offline: bool,
 }
 
 #[derive(Serialize)]
@@ -1716,6 +1714,7 @@ pub async fn node_version(State(network_config): State<Arc<NetworkConfig>>) -> R
 /// `GET /eth/v1/node/syncing`
 pub async fn node_syncing_status<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(eth1_api): State<Arc<Eth1Api>>,
     State(is_synced): State<Arc<SyncedStatus>>,
     State(is_back_synced): State<Arc<BackSyncedStatus>>,
 ) -> EthResponse<NodeSyncingResponse> {
@@ -1723,6 +1722,7 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
     let head_slot = snapshot.head_slot();
     let is_synced = is_synced.get();
     let is_back_synced = is_back_synced.get();
+    let el_offline = eth1_api.el_offline().await;
 
     EthResponse::json(NodeSyncingResponse {
         head_slot,
@@ -1731,6 +1731,7 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
             .unwrap_or_else(|| controller.slot() - head_slot),
         is_syncing: !(is_synced && is_back_synced),
         is_optimistic: snapshot.is_optimistic(),
+        el_offline,
     })
 }
 

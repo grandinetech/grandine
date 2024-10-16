@@ -1,5 +1,5 @@
 use core::{ops::RangeInclusive, time::Duration};
-use std::{collections::BTreeMap, sync::Arc, vec::IntoIter};
+use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::{bail, ensure, Result};
 use either::Either;
@@ -36,8 +36,11 @@ use web3::{
 };
 
 use crate::{
-    auth::Auth, deposit_event::DepositEvent, eth1_block::Eth1Block, Eth1ApiToMetrics,
-    Eth1ConnectionData,
+    auth::Auth,
+    deposit_event::DepositEvent,
+    endpoints::{Endpoint, EndpointStatus, Endpoints},
+    eth1_block::Eth1Block,
+    Eth1ApiToMetrics, Eth1ConnectionData,
 };
 
 const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
@@ -49,8 +52,7 @@ pub struct Eth1Api {
     config: Arc<Config>,
     client: Client,
     auth: Arc<Auth>,
-    original: Vec<Url>,
-    endpoints: Mutex<IntoIter<Url>>,
+    endpoints: Mutex<Endpoints>,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     metrics: Option<Arc<Metrics>>,
 }
@@ -69,8 +71,7 @@ impl Eth1Api {
             config,
             client,
             auth,
-            original: eth1_rpc_urls.clone(),
-            endpoints: Mutex::new(eth1_rpc_urls.into_iter()),
+            endpoints: Mutex::new(Endpoints::new(eth1_rpc_urls)),
             eth1_api_to_metrics_tx,
             metrics,
         }
@@ -450,13 +451,18 @@ impl Eth1Api {
         .await
     }
 
+    pub async fn el_offline(&self) -> bool {
+        self.endpoints.lock().await.el_offline()
+    }
+
     async fn request_with_fallback<R, O, F>(&self, request_from_api: R) -> Result<O>
     where
         R: Fn((Eth<Http>, Option<HeaderMap>)) -> Result<CallFuture<O, F>> + Sync + Send,
         O: DeserializeOwned + Send,
         F: Future<Output = Result<Value, Web3Error>> + Send,
     {
-        while let Some(url) = self.current_endpoint().await {
+        while let Some(endpoint) = self.current_endpoint().await {
+            let url = endpoint.url();
             let http = Http::with_client(self.client.clone(), url.clone());
             let api = Web3::new(http).eth();
             let headers = self.auth.headers()?;
@@ -464,10 +470,12 @@ impl Eth1Api {
 
             match query {
                 Ok(result) => {
+                    self.set_endpoint_status(EndpointStatus::Online).await;
+
                     if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
                         Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData {
                             sync_eth1_connected: true,
-                            sync_eth1_fallback_connected: self.original.first() != Some(&url),
+                            sync_eth1_fallback_connected: endpoint.is_fallback(),
                         })
                         .send(metrics_tx);
                     }
@@ -480,9 +488,10 @@ impl Eth1Api {
                     }
 
                     match self.peek_next_endpoint().await {
-                        Some(next_eth) => warn!(
+                        Some(next_endpoint) => warn!(
                             "Eth1 RPC endpoint {url} returned an error: {error}; \
-                             switching to {next_eth}",
+                             switching to {}",
+                            next_endpoint.url(),
                         ),
                         None => warn!(
                             "last available Eth1 RPC endpoint {url} returned an error: {error}",
@@ -494,6 +503,7 @@ impl Eth1Api {
                             .send(metrics_tx);
                     }
 
+                    self.set_endpoint_status(EndpointStatus::Offline).await;
                     self.next_endpoint().await;
                 }
             }
@@ -508,25 +518,32 @@ impl Eth1Api {
         // Checking this in `Eth1Api::new` would be unnecessarily strict.
         // Syncing a predefined network without proposing blocks does not require an Eth1 RPC
         // (except during the Merge transition).
-        ensure!(!self.original.is_empty(), Error::NoEndpointsProvided);
+        ensure!(
+            self.endpoints.lock().await.is_empty(),
+            Error::NoEndpointsProvided
+        );
 
         bail!(Error::EndpointsExhausted)
     }
 
-    async fn current_endpoint(&self) -> Option<Url> {
-        self.endpoints.lock().await.as_slice().first().cloned()
+    async fn current_endpoint(&self) -> Option<Endpoint> {
+        (*self.endpoints.lock().await).current().cloned()
     }
 
-    async fn next_endpoint(&self) -> Option<Url> {
-        self.endpoints.lock().await.next()
+    async fn set_endpoint_status(&self, status: EndpointStatus) {
+        (*self.endpoints.lock().await).set_status(status)
     }
 
-    async fn peek_next_endpoint(&self) -> Option<Url> {
-        self.endpoints.lock().await.as_slice().get(1).cloned()
+    async fn next_endpoint(&self) {
+        self.endpoints.lock().await.advance();
+    }
+
+    async fn peek_next_endpoint(&self) -> Option<Endpoint> {
+        self.endpoints.lock().await.peek_next().cloned()
     }
 
     async fn reset_endpoints(&self) {
-        *self.endpoints.lock().await = self.original.clone().into_iter();
+        self.endpoints.lock().await.reset();
     }
 }
 

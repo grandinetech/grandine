@@ -211,8 +211,11 @@ pub async fn run_after_genesis<P: Preset>(
         unfinalized_blocks,
     )?;
 
-    let execution_service =
-        ExecutionService::new(eth1_api, controller.clone_arc(), execution_service_rx);
+    let execution_service = ExecutionService::new(
+        eth1_api.clone_arc(),
+        controller.clone_arc(),
+        execution_service_rx,
+    );
 
     let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
 
@@ -582,6 +585,7 @@ pub async fn run_after_genesis<P: Preset>(
         block_producer,
         controller: controller.clone_arc(),
         anchor_checkpoint_provider,
+        eth1_api,
         validator_keys,
         validator_config,
         network_config: Arc::new(network_config),

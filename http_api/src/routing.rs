@@ -7,7 +7,7 @@ use axum::{
 };
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
-use eth1_api::ApiController;
+use eth1_api::{ApiController, Eth1Api};
 use features::Feature;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
@@ -68,6 +68,7 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub block_producer: Arc<BlockProducer<P, W>>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
+    pub eth1_api: Arc<Eth1Api>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub metrics: Option<Arc<Metrics>>,
@@ -108,6 +109,12 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for ApiController<P, W> {
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for AnchorCheckpointProvider<P> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.anchor_checkpoint_provider.clone()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<Eth1Api> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.eth1_api.clone_arc()
     }
 }
 

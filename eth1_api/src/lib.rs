@@ -11,6 +11,7 @@ pub use crate::{
 
 mod auth;
 mod deposit_event;
+mod endpoints;
 mod eth1_api;
 mod eth1_block;
 mod eth1_execution_engine;

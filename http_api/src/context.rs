@@ -198,8 +198,11 @@ impl<P: Preset> Context<P> {
             controller.on_requested_block(block, None);
         }
 
-        let execution_service =
-            ExecutionService::new(eth1_api, controller.clone_arc(), execution_service_rx);
+        let execution_service = ExecutionService::new(
+            eth1_api.clone_arc(),
+            controller.clone_arc(),
+            execution_service_rx,
+        );
 
         let signer = Arc::new(Signer::new(
             validator_keys,
@@ -342,6 +345,7 @@ impl<P: Preset> Context<P> {
             block_producer,
             controller,
             anchor_checkpoint_provider,
+            eth1_api,
             validator_keys,
             validator_config,
             network_config,

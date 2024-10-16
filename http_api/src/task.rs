@@ -5,7 +5,7 @@ use anyhow::{Error as AnyhowError, Result};
 use axum::Router;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
-use eth1_api::ApiController;
+use eth1_api::{ApiController, Eth1Api};
 use fork_choice_control::{ApiMessage, Wait};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -53,6 +53,7 @@ pub struct HttpApi<P: Preset, W: Wait> {
     pub block_producer: Arc<BlockProducer<P, W>>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
+    pub eth1_api: Arc<Eth1Api>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub network_config: Arc<NetworkConfig>,
@@ -84,6 +85,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             block_producer,
             controller,
             anchor_checkpoint_provider,
+            eth1_api,
             validator_keys,
             validator_config,
             network_config,
@@ -123,6 +125,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             block_producer,
             controller,
             anchor_checkpoint_provider,
+            eth1_api,
             validator_keys,
             validator_config,
             metrics: metrics.clone(),
