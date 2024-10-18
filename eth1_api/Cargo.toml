@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bls = { workspace = true }
+bytes = { workspace = true }
 derive_more = { workspace = true }
 either = { workspace = true }
 enum-iterator = { workspace = true }
@@ -20,6 +21,7 @@ fs-err = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
+hex_fmt = { workspace = true }
 jwt-simple = { workspace = true }
 log = { workspace = true }
 memoffset = { workspace = true }

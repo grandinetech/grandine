@@ -2,27 +2,30 @@ use core::{ops::RangeInclusive, time::Duration};
 use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::{bail, ensure, Result};
+use bytes::Bytes;
 use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
 use execution_engine::{
     EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
     EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
-    PayloadStatusV1,
+    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
+use hex_fmt::HexFmt;
 use log::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{header::HeaderMap, Client, Url};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
+use ssz::SszWrite as _;
 use static_assertions::const_assert_eq;
 use std_ext::CopyExt;
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
+    electra::containers::ExecutionRequests,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::Preset,
@@ -257,13 +260,25 @@ impl Eth1Api {
                     execution_requests,
                 }),
             ) => {
+                let ExecutionRequests {
+                    deposits,
+                    withdrawals,
+                    consolidations,
+                } = execution_requests;
+
                 let payload_v3 = ExecutionPayloadV3::from(payload);
+
                 let params = vec![
                     serde_json::to_value(payload_v3)?,
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
-                    serde_json::to_value(execution_requests)?,
+                    serde_json::to_value(vec![
+                        format_args!("0x{}", HexFmt(Bytes::from(deposits.to_ssz()?))),
+                        format_args!("0x{}", HexFmt(Bytes::from(withdrawals.to_ssz()?))),
+                        format_args!("0x{}", HexFmt(Bytes::from(consolidations.to_ssz()?))),
+                    ])?,
                 ];
+
                 self.execute(
                     "engine_newPayloadV4",
                     params,
