@@ -9,7 +9,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bls = { workspace = true }
-bytes = { workspace = true }
 derive_more = { workspace = true }
 either = { workspace = true }
 enum-iterator = { workspace = true }

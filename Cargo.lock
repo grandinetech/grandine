@@ -2322,7 +2322,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "bls",
- "bytes",
  "derive_more 1.0.0",
  "either",
  "enum-iterator",

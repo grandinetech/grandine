@@ -2,7 +2,6 @@ use core::{ops::RangeInclusive, time::Duration};
 use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::{bail, ensure, Result};
-use bytes::Bytes;
 use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
@@ -273,9 +272,9 @@ impl Eth1Api {
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
                     serde_json::to_value(vec![
-                        format_args!("0x{}", HexFmt(Bytes::from(deposits.to_ssz()?))),
-                        format_args!("0x{}", HexFmt(Bytes::from(withdrawals.to_ssz()?))),
-                        format_args!("0x{}", HexFmt(Bytes::from(consolidations.to_ssz()?))),
+                        format_args!("0x{}", HexFmt(deposits.to_ssz()?)),
+                        format_args!("0x{}", HexFmt(withdrawals.to_ssz()?)),
+                        format_args!("0x{}", HexFmt(consolidations.to_ssz()?)),
                     ])?,
                 ];
 
