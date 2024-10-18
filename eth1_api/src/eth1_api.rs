@@ -271,7 +271,7 @@ impl Eth1Api {
                     serde_json::to_value(payload_v3)?,
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
-                    serde_json::to_value(vec![
+                    serde_json::to_value([
                         format_args!("0x{}", HexFmt(deposits.to_ssz()?)),
                         format_args!("0x{}", HexFmt(withdrawals.to_ssz()?)),
                         format_args!("0x{}", HexFmt(consolidations.to_ssz()?)),
