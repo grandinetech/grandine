@@ -11,20 +11,21 @@ use execution_engine::{
     ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
-use hex_fmt::HexFmt;
 use log::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{header::HeaderMap, Client, Url};
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use ssz::SszWrite as _;
+use ssz::ContiguousList;
 use static_assertions::const_assert_eq;
 use std_ext::CopyExt;
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
-    electra::containers::ExecutionRequests,
+    electra::containers::{
+        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
+    },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::Preset,
@@ -259,23 +260,14 @@ impl Eth1Api {
                     execution_requests,
                 }),
             ) => {
-                let ExecutionRequests {
-                    deposits,
-                    withdrawals,
-                    consolidations,
-                } = execution_requests;
-
                 let payload_v3 = ExecutionPayloadV3::from(payload);
+                let raw_execution_requests = RawExecutionRequests::from(execution_requests);
 
                 let params = vec![
                     serde_json::to_value(payload_v3)?,
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
-                    serde_json::to_value([
-                        format_args!("0x{}", HexFmt(deposits.to_ssz()?)),
-                        format_args!("0x{}", HexFmt(withdrawals.to_ssz()?)),
-                        format_args!("0x{}", HexFmt(consolidations.to_ssz()?)),
-                    ])?,
+                    serde_json::to_value(raw_execution_requests)?,
                 ];
 
                 self.execute(
@@ -568,6 +560,40 @@ impl Eth1Api {
 struct RawForkChoiceUpdatedResponse {
     payload_status: PayloadStatusV1,
     payload_id: Option<H64>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct RawExecutionRequests<P: Preset>(
+    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
+    ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
+    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
+    ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
+    ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+);
+
+impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
+    fn from(execution_requests: ExecutionRequests<P>) -> Self {
+        let ExecutionRequests {
+            deposits,
+            withdrawals,
+            consolidations,
+        } = execution_requests;
+
+        Self(deposits, withdrawals, consolidations)
+    }
+}
+
+impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
+    fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
+        let RawExecutionRequests(deposits, withdrawals, consolidations) = raw_execution_requests;
+
+        Self {
+            deposits,
+            withdrawals,
+            consolidations,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
