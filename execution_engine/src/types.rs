@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use bls::{PublicKeyBytes, SignatureBytes};
 use ethereum_types::H64;
 use serde::{Deserialize, Serialize};
 use ssz::{ByteList, ByteVector, ContiguousList};
@@ -18,9 +17,7 @@ use types::{
         containers::ExecutionPayload as DenebExecutionPayload,
         primitives::{Blob, KzgCommitment, KzgProof},
     },
-    electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
-    },
+    electra::containers::ExecutionRequests,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, UnixSeconds,
@@ -358,139 +355,6 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
             withdrawals,
             blob_gas_used,
             excess_blob_gas,
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(bound = "", rename_all = "camelCase")]
-pub struct DepositRequestV1 {
-    pub pubkey: PublicKeyBytes,
-    pub withdrawal_credentials: H256,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub amount: Gwei,
-    pub signature: SignatureBytes,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub index: u64,
-}
-
-impl From<DepositRequest> for DepositRequestV1 {
-    fn from(deposit_request: DepositRequest) -> Self {
-        let DepositRequest {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            index,
-        } = deposit_request;
-
-        Self {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            index,
-        }
-    }
-}
-
-impl From<DepositRequestV1> for DepositRequest {
-    fn from(deposit_request: DepositRequestV1) -> Self {
-        let DepositRequestV1 {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            index,
-        } = deposit_request;
-
-        Self {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            index,
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(bound = "", rename_all = "camelCase")]
-pub struct WithdrawalRequestV1 {
-    pub source_address: ExecutionAddress,
-    pub validator_pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub amount: Gwei,
-}
-
-impl From<WithdrawalRequest> for WithdrawalRequestV1 {
-    fn from(withdrawal_request: WithdrawalRequest) -> Self {
-        let WithdrawalRequest {
-            source_address,
-            validator_pubkey,
-            amount,
-        } = withdrawal_request;
-
-        Self {
-            source_address,
-            validator_pubkey,
-            amount,
-        }
-    }
-}
-
-impl From<WithdrawalRequestV1> for WithdrawalRequest {
-    fn from(withdrawal_request: WithdrawalRequestV1) -> Self {
-        let WithdrawalRequestV1 {
-            source_address,
-            validator_pubkey,
-            amount,
-        } = withdrawal_request;
-
-        Self {
-            source_address,
-            validator_pubkey,
-            amount,
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(bound = "", rename_all = "camelCase")]
-pub struct ConsolidationRequestV1 {
-    pub source_address: ExecutionAddress,
-    pub source_pubkey: PublicKeyBytes,
-    pub target_pubkey: PublicKeyBytes,
-}
-
-impl From<ConsolidationRequest> for ConsolidationRequestV1 {
-    fn from(consolidation_request: ConsolidationRequest) -> Self {
-        let ConsolidationRequest {
-            source_address,
-            source_pubkey,
-            target_pubkey,
-        } = consolidation_request;
-
-        Self {
-            source_address,
-            source_pubkey,
-            target_pubkey,
-        }
-    }
-}
-
-impl From<ConsolidationRequestV1> for ConsolidationRequest {
-    fn from(consolidation_request: ConsolidationRequestV1) -> Self {
-        let ConsolidationRequestV1 {
-            source_address,
-            source_pubkey,
-            target_pubkey,
-        } = consolidation_request;
-
-        Self {
-            source_address,
-            source_pubkey,
-            target_pubkey,
         }
     }
 }

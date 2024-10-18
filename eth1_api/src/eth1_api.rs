@@ -8,7 +8,8 @@ use ethereum_types::H64;
 use execution_engine::{
     EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
     EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
+    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
+    PayloadStatusV1,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
 use log::warn;
@@ -201,6 +202,7 @@ impl Eth1Api {
     /// [`engine_newPayloadV1`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#engine_newpayloadv1
     /// [`engine_newPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_newpayloadv2
     /// [`engine_newPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_newpayloadv3
+    /// [`engine_newPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_newpayloadv4
     pub async fn new_payload<P: Preset>(
         &self,
         payload: ExecutionPayload<P>,
