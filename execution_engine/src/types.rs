@@ -17,7 +17,9 @@ use types::{
         containers::ExecutionPayload as DenebExecutionPayload,
         primitives::{Blob, KzgCommitment, KzgProof},
     },
-    electra::containers::ExecutionRequests,
+    electra::containers::{
+        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
+    },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, UnixSeconds,
@@ -499,7 +501,7 @@ pub struct EngineGetPayloadV4Response<P: Preset> {
     pub block_value: Wei,
     pub blobs_bundle: BlobsBundleV1<P>,
     pub should_override_builder: bool,
-    pub execution_requests: ExecutionRequests<P>,
+    pub execution_requests: RawExecutionRequests<P>,
 }
 
 impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<ExecutionPayload<P>, P> {
@@ -526,7 +528,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
             Some(proofs),
             Some(blobs),
             Some(block_value),
-            Some(execution_requests),
+            Some(execution_requests.into()),
         )
     }
 }
@@ -687,6 +689,41 @@ impl From<PayloadStatus> for PayloadStatusV1 {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(test, derive(Default))]
+pub struct RawExecutionRequests<P: Preset>(
+    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
+    ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
+    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
+    ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
+    ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+);
+
+impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
+    fn from(execution_requests: ExecutionRequests<P>) -> Self {
+        let ExecutionRequests {
+            deposits,
+            withdrawals,
+            consolidations,
+        } = execution_requests;
+
+        Self(deposits, withdrawals, consolidations)
+    }
+}
+
+impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
+    fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
+        let RawExecutionRequests(deposits, withdrawals, consolidations) = raw_execution_requests;
+
+        Self {
+            deposits,
+            withdrawals,
+            consolidations,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -764,6 +801,13 @@ mod tests {
 
         assert_eq!(actual_payload, expected_payload);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_default_raw_execution_requests_serialization() -> Result<()> {
+        let serialized = serde_json::to_value(RawExecutionRequests::<Mainnet>::default())?;
+        assert_eq!(serialized, json!(vec!["0x", "0x", "0x"]));
         Ok(())
     }
 

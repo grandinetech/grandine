@@ -9,23 +9,20 @@ use execution_engine::{
     EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
     EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
     ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
+    RawExecutionRequests,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
 use log::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{header::HeaderMap, Client, Url};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
-use ssz::ContiguousList;
 use static_assertions::const_assert_eq;
 use std_ext::CopyExt;
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
-    electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
-    },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::Preset,
@@ -562,40 +559,6 @@ struct RawForkChoiceUpdatedResponse {
     payload_id: Option<H64>,
 }
 
-#[derive(Deserialize, Serialize)]
-struct RawExecutionRequests<P: Preset>(
-    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
-    ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
-    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
-    ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
-    ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
-);
-
-impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
-    fn from(execution_requests: ExecutionRequests<P>) -> Self {
-        let ExecutionRequests {
-            deposits,
-            withdrawals,
-            consolidations,
-        } = execution_requests;
-
-        Self(deposits, withdrawals, consolidations)
-    }
-}
-
-impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
-    fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
-        let RawExecutionRequests(deposits, withdrawals, consolidations) = raw_execution_requests;
-
-        Self {
-            deposits,
-            withdrawals,
-            consolidations,
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 enum Error {
     #[error("all Eth1 RPC endpoints exhausted")]
@@ -617,7 +580,7 @@ mod tests {
     use serde_json::json;
     use types::{
         bellatrix::containers::ExecutionPayload as BellatrixExecutionPayload,
-        phase0::primitives::H256, preset::Mainnet,
+        electra::containers::ExecutionRequests, phase0::primitives::H256, preset::Mainnet,
     };
 
     use super::*;
@@ -749,6 +712,91 @@ mod tests {
         let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
 
         assert_eq!(payload.value.phase(), Phase::Capella);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_electra_payload_deserialization_with_default_execution_requests() -> Result<()> {
+        let body = json!({
+          "jsonrpc": "2.0",
+          "id": 0,
+          "result": {
+            "executionPayload": {
+              "parentHash": "0x128133536f44733af5e59ba865744690498529592c1e85655348ec6bb559c658",
+              "feeRecipient": "0x8943545177806ed17b9f23f0a21ee5948ecaa776",
+              "stateRoot": "0xfb458127dfb40b16693e70886d0f503160be2ad409ab885fb4051d96b07bdef1",
+              "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+              "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+              "prevRandao": "0x4c2db6d476f102aa7b68808f9262c70760e6cd5f23213c039cbe7309437a8d9d",
+              "blockNumber": "0x29",
+              "gasLimit": "0x1c9c380",
+              "gasUsed": "0x0",
+              "timestamp": "0x671214b3",
+              "extraData": "0xd883010e0c846765746888676f312e32332e32856c696e7578",
+              "baseFeePerGas": "0x403226",
+              "blockHash": "0x49a38631ab242befe4d9fbb1a49c7059c21363a534542f8bcf419a82b92a229b",
+              "transactions": [],
+              "withdrawals": [
+                {
+                  "index": "0xbb",
+                  "validatorIndex": "0xd1",
+                  "address": "0x65d08a056c17ae13370565b04cf77d2afa1cb9fa",
+                  "amount": "0x51f0"
+                },
+                {
+                  "index": "0xbc",
+                  "validatorIndex": "0xd2",
+                  "address": "0x65d08a056c17ae13370565b04cf77d2afa1cb9fa",
+                  "amount": "0x51f0"
+                }
+              ],
+              "blobGasUsed": "0x0",
+              "excessBlobGas": "0x0"
+            },
+            "blockValue": "0x0",
+            "blobsBundle": {
+              "commitments": [],
+              "proofs": [],
+              "blobs": []
+            },
+            "executionRequests": [
+              "0x",
+              "0x",
+              "0x"
+            ],
+            "shouldOverrideBuilder": false
+          }
+        });
+
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(200).body(body.to_string());
+        });
+
+        let config = Arc::new(Config::mainnet());
+        let auth = Arc::default();
+        let server_url = server.url("/").parse()?;
+
+        let eth1_api = Arc::new(Eth1Api::new(
+            config,
+            Client::new(),
+            auth,
+            vec![server_url],
+            None,
+            None,
+        ));
+
+        let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
+        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
+
+        assert_eq!(payload.value.phase(), Phase::Deneb);
+        assert_eq!(
+            payload.execution_requests,
+            Some(ExecutionRequests::default())
+        );
 
         Ok(())
     }

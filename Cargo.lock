@@ -2342,7 +2342,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "serde_utils",
  "ssz",
  "static_assertions",
  "std_ext",
