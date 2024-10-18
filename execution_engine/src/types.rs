@@ -362,162 +362,6 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
-/// [`ExecutionPayloadV4`](https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#ExecutionPayloadV4)
-#[derive(Deserialize, Serialize)]
-#[serde(bound = "", rename_all = "camelCase")]
-pub struct ExecutionPayloadV4<P: Preset> {
-    pub parent_hash: ExecutionBlockHash,
-    pub fee_recipient: ExecutionAddress,
-    pub state_root: H256,
-    pub receipts_root: H256,
-    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
-    pub prev_randao: H256,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub block_number: ExecutionBlockNumber,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub gas_limit: Gas,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub gas_used: Gas,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub timestamp: UnixSeconds,
-    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub base_fee_per_gas: Wei,
-    pub block_hash: ExecutionBlockHash,
-    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
-    pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub blob_gas_used: Gas,
-    #[serde(with = "serde_utils::prefixed_hex_quantity")]
-    pub excess_blob_gas: Gas,
-    #[serde(rename = "depositRequests")]
-    pub deposit_requests: ContiguousList<DepositRequestV1, P::MaxDepositRequestsPerPayload>,
-    pub withdrawal_requests:
-        ContiguousList<WithdrawalRequestV1, P::MaxWithdrawalRequestsPerPayload>,
-    pub consolidation_requests:
-        ContiguousList<ConsolidationRequestV1, P::MaxConsolidationRequestsPerPayload>,
-}
-
-impl<P: Preset> From<(DenebExecutionPayload<P>, ExecutionRequests<P>)> for ExecutionPayloadV4<P> {
-    fn from(
-        (payload, execution_requests): (DenebExecutionPayload<P>, ExecutionRequests<P>),
-    ) -> Self {
-        let DenebExecutionPayload {
-            parent_hash,
-            fee_recipient,
-            state_root,
-            receipts_root,
-            logs_bloom,
-            prev_randao,
-            block_number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            extra_data,
-            base_fee_per_gas,
-            block_hash,
-            transactions,
-            withdrawals,
-            blob_gas_used,
-            excess_blob_gas,
-        } = payload;
-
-        let ExecutionRequests {
-            deposits: deposit_requests,
-            withdrawals: withdrawal_requests,
-            consolidations: consolidation_requests,
-        } = execution_requests;
-
-        let withdrawals = withdrawals.map(Into::into);
-        let deposit_requests = deposit_requests.map(Into::into);
-        let withdrawal_requests = withdrawal_requests.map(Into::into);
-        let consolidation_requests = consolidation_requests.map(Into::into);
-
-        Self {
-            parent_hash,
-            fee_recipient,
-            state_root,
-            receipts_root,
-            logs_bloom,
-            prev_randao,
-            block_number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            extra_data,
-            base_fee_per_gas,
-            block_hash,
-            transactions,
-            withdrawals,
-            blob_gas_used,
-            excess_blob_gas,
-            deposit_requests,
-            withdrawal_requests,
-            consolidation_requests,
-        }
-    }
-}
-
-impl<P: Preset> From<ExecutionPayloadV4<P>> for (DenebExecutionPayload<P>, ExecutionRequests<P>) {
-    fn from(payload: ExecutionPayloadV4<P>) -> Self {
-        let ExecutionPayloadV4 {
-            parent_hash,
-            fee_recipient,
-            state_root,
-            receipts_root,
-            logs_bloom,
-            prev_randao,
-            block_number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            extra_data,
-            base_fee_per_gas,
-            block_hash,
-            transactions,
-            withdrawals,
-            blob_gas_used,
-            excess_blob_gas,
-            deposit_requests,
-            withdrawal_requests,
-            consolidation_requests,
-        } = payload;
-
-        let withdrawals = withdrawals.map(Into::into);
-        let deposit_requests = deposit_requests.map(Into::into);
-        let withdrawal_requests = withdrawal_requests.map(Into::into);
-        let consolidation_requests = consolidation_requests.map(Into::into);
-
-        let execution_payload = DenebExecutionPayload {
-            parent_hash,
-            fee_recipient,
-            state_root,
-            receipts_root,
-            logs_bloom,
-            prev_randao,
-            block_number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            extra_data,
-            base_fee_per_gas,
-            block_hash,
-            transactions,
-            withdrawals,
-            blob_gas_used,
-            excess_blob_gas,
-        };
-
-        let execution_requests = ExecutionRequests {
-            deposits: deposit_requests,
-            withdrawals: withdrawal_requests,
-            consolidations: consolidation_requests,
-        };
-
-        (execution_payload, execution_requests)
-    }
-}
-
 #[derive(Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct DepositRequestV1 {
@@ -786,11 +630,12 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
 #[derive(Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV4Response<P: Preset> {
-    pub execution_payload: ExecutionPayloadV4<P>,
+    pub execution_payload: ExecutionPayloadV3<P>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub block_value: Wei,
     pub blobs_bundle: BlobsBundleV1<P>,
     pub should_override_builder: bool,
+    pub execution_requests: ExecutionRequests<P>,
 }
 
 impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<ExecutionPayload<P>, P> {
@@ -799,10 +644,11 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
             execution_payload,
             block_value,
             blobs_bundle,
+            execution_requests,
             ..
         } = response;
 
-        let (execution_payload, execution_requests) = execution_payload.into();
+        let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
 
         let BlobsBundleV1 {
             commitments,
@@ -811,7 +657,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
         } = blobs_bundle;
 
         Self::new(
-            execution_payload.into(),
+            execution_payload,
             Some(commitments),
             Some(proofs),
             Some(blobs),

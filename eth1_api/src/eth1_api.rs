@@ -8,8 +8,7 @@ use ethereum_types::H64;
 use execution_engine::{
     EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
     EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
-    PayloadStatusV1,
+    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
 use log::warn;
@@ -256,11 +255,12 @@ impl Eth1Api {
                     execution_requests,
                 }),
             ) => {
-                let payload_v4 = ExecutionPayloadV4::from((payload, execution_requests));
+                let payload_v3 = ExecutionPayloadV3::from(payload);
                 let params = vec![
-                    serde_json::to_value(payload_v4)?,
+                    serde_json::to_value(payload_v3)?,
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
+                    serde_json::to_value(execution_requests)?,
                 ];
                 self.execute(
                     "engine_newPayloadV4",
