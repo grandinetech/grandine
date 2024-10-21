@@ -31,7 +31,7 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
         .filter_module("liveness_tracker", LevelFilter::Info)
         .filter_module("metrics", LevelFilter::Info)
         .filter_module("operation_pools", LevelFilter::Info)
-        .filter_module("p2p", LevelFilter::Info)
+        .filter_module("p2p", LevelFilter::Debug)
         .filter_module("prometheus_metrics", LevelFilter::Info)
         .filter_module("runtime", LevelFilter::Info)
         .filter_module("signer", LevelFilter::Info)
@@ -41,7 +41,7 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
         .filter_module("storage", LevelFilter::Info)
         .filter_module("validator", LevelFilter::Info)
         .filter_module("validator_key_cache", LevelFilter::Info)
-        .filter_module("web3", LevelFilter::Info)
+        .filter_module("web3", LevelFilter::Debug)
         .filter_module(module_path!(), LevelFilter::Info)
         .filter_module(module_path, LevelFilter::Info)
         .format(|formatter, record| {
