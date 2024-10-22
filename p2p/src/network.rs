@@ -919,7 +919,9 @@ impl<P: Preset> Network<P> {
 
                     debug!(
                         "sending BeaconBlocksByRange response chunk \
-                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, block: {block:?})",
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, block: {}, slot: {})",
+                        block_with_root.root,
+                        block.message().slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -976,10 +978,12 @@ impl<P: Preset> Network<P> {
                 let blob_sidecars = controller.blob_sidecars_by_range(start_slot..end_slot)?;
 
                 for blob_sidecar in blob_sidecars {
+                    let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
+
                     debug!(
                         "sending BlobSidecarsByRange response chunk \
                         (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
-                        blob_sidecar: {blob_sidecar:?})",
+                        blob_sidecar: {blob_identifier:?})",
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -1033,10 +1037,12 @@ impl<P: Preset> Network<P> {
                 let blob_sidecars = controller.blob_sidecars_by_ids(blob_ids)?;
 
                 for blob_sidecar in blob_sidecars {
+                    let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
+
                     debug!(
                         "sending BlobSidecarsByRoot response chunk \
                         (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
-                        blob_sidecar: {blob_sidecar:?})",
+                        blob_sidecar: {blob_identifier:?})",
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -1213,13 +1219,14 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRoot(Some(block)) => {
-                debug!(
-                    "received BeaconBlocksByRoot response chunk \
-                    (request_id: {request_id}, peer_id: {peer_id}, block: {block:?})",
-                );
-
                 let block_root = block.message().hash_tree_root();
                 let block_slot = block.message().slot();
+
+                debug!(
+                    "received BeaconBlocksByRoot response chunk \
+                    (request_id: {request_id}, peer_id: {peer_id}, block: {block_root:?}, \
+                    block_slot: {block_slot})",
+                );
 
                 info!("received beacon block from RPC slot: {block_slot}, root: {block_root:?}");
 

@@ -497,7 +497,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         if slot < blob_serve_slot {
             debug!(
-                "Ignoring needed blob sidecar request: slot: {slot} < blob_serve_slot: {blob_serve_slot}"
+                "ignoring needed blob sidecar request: slot: {slot} < blob_serve_slot: {blob_serve_slot}"
             );
             return Ok(());
         }
@@ -555,7 +555,7 @@ impl<P: Preset> BlockSyncService<P> {
 
     fn request_peer_status_update(&mut self, status: StatusMessage) -> Result<()> {
         for peer_id in self.sync_manager.outdated_peers(status) {
-            debug!("Update outdated peer: {peer_id}");
+            debug!("update outdated peer: {peer_id}");
             self.request_peer_status(peer_id)?;
         }
 
