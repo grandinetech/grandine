@@ -350,8 +350,9 @@ impl SyncManager {
         Ok(sync_batches)
     }
 
-    pub fn ready_to_request_blocks_by_range(&mut self) -> bool {
+    pub fn ready_to_request_by_range(&mut self) -> bool {
         self.block_requests.ready_to_request_by_range()
+            && self.blob_requests.ready_to_request_by_range()
     }
 
     pub fn ready_to_request_block_by_root(

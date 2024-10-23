@@ -292,7 +292,7 @@ impl<P: Preset> BlockSyncService<P> {
 
                             if request_direction == Some(SyncDirection::Back) {
                                 // aka batch finished
-                                if self.sync_manager.ready_to_request_blocks_by_range() {
+                                if self.sync_manager.ready_to_request_by_range() {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
                                         if let Some(database) = self.database.as_ref() {
                                             if let Err(error) = back_sync.verify_blocks(
@@ -406,7 +406,7 @@ impl<P: Preset> BlockSyncService<P> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
 
-        if !self.sync_manager.ready_to_request_blocks_by_range() {
+        if !self.sync_manager.ready_to_request_by_range() {
             return Ok(());
         }
 
