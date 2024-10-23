@@ -22,7 +22,7 @@ use eth2_libp2p::{
     NetworkGlobals, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Request,
     Response, ShutdownReason, Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
 };
-use fork_choice_control::P2pMessage;
+use fork_choice_control::{BlockWithRoot, P2pMessage};
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
@@ -915,12 +915,12 @@ impl<P: Preset> Network<P> {
                 let blocks = controller.blocks_by_range(start_slot..end_slot)?;
 
                 for block_with_root in blocks {
-                    let block = block_with_root.block;
+                    let BlockWithRoot { block, root } = block_with_root;
 
                     debug!(
                         "sending BeaconBlocksByRange response chunk \
-                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, block: {}, slot: {})",
-                        block_with_root.root,
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
+                        slot: {}, root: {root:?})",
                         block.message().slot(),
                     );
 
@@ -983,7 +983,8 @@ impl<P: Preset> Network<P> {
                     debug!(
                         "sending BlobSidecarsByRange response chunk \
                         (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
-                        blob_sidecar: {blob_identifier:?})",
+                        slot: {}, id: {blob_identifier:?})",
+                        blob_sidecar.slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -1042,7 +1043,8 @@ impl<P: Preset> Network<P> {
                     debug!(
                         "sending BlobSidecarsByRoot response chunk \
                         (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
-                        blob_sidecar: {blob_identifier:?})",
+                        slot: {}, id: {blob_identifier:?})",
+                        blob_sidecar.slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -1093,7 +1095,8 @@ impl<P: Preset> Network<P> {
                 for block in blocks.into_iter().map(WithStatus::value) {
                     debug!(
                         "sending BeaconBlocksByRoot response chunk \
-                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, slot: {}, root: {:?})",
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
+                        slot: {}, root: {:?})",
                         block.message().slot(),
                         block.message().hash_tree_root(),
                     );
@@ -1133,16 +1136,21 @@ impl<P: Preset> Network<P> {
             // > blob sidecar is well-formatted, has valid inclusion proof, and is correct w.r.t. the expected KZG commitments
             // > through `verify_blob_kzg_proof``.
             Response::BlobsByRange(Some(blob_sidecar)) => {
+                let blob_identifier = blob_sidecar.as_ref().into();
+
                 debug!(
                     "received BlobsByRange response chunk \
-                    (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {})",
-                    blob_sidecar.signed_block_header.message.slot,
+                    (request_id: {request_id}, peer_id: {peer_id}, \
+                    slot: {}, id: {blob_identifier:?})",
+                    blob_sidecar.slot(),
                 );
 
-                let blob_identifier = blob_sidecar.as_ref().into();
-                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+                info!(
+                    "received blob sidecar from RPC slot: {}, id: {blob_identifier:?}",
+                    blob_sidecar.slot()
+                );
 
-                if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
+                if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar.slot()) {
                     let block_seen = self
                         .received_block_roots
                         .contains_key(&blob_identifier.block_root);
@@ -1161,21 +1169,21 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRoot(Some(blob_sidecar)) => {
+                let blob_identifier = blob_sidecar.as_ref().into();
+
                 debug!(
                     "received BlobsByRoot response chunk \
-                    (request_id: {request_id}, peer_id: {peer_id}, blob_sidecar.slot: {})",
-                    blob_sidecar.signed_block_header.message.slot,
+                    (request_id: {request_id}, peer_id: {peer_id}, \
+                    slot: {}, id: {blob_identifier:?})",
+                    blob_sidecar.slot(),
                 );
 
-                let blob_identifier = blob_sidecar.as_ref().into();
-                let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
-
-                debug!(
-                    "received blob from RPC (blob_id: {blob_identifier:?}, \
-                    slot: {blob_sidecar_slot}, peer_id: {peer_id}, request_id: {request_id})",
+                info!(
+                    "received blob sidecar from RPC slot: {}, id: {blob_identifier:?}",
+                    blob_sidecar.slot()
                 );
 
-                if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
+                if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar.slot()) {
                     let block_seen = self
                         .received_block_roots
                         .contains_key(&blob_identifier.block_root);
@@ -1198,8 +1206,9 @@ impl<P: Preset> Network<P> {
                 let block_slot = block.message().slot();
 
                 debug!(
-                    "received BeaconBlocksByRange response chunk (request_id: {request_id}, \
-                    peer_id: {peer_id}, block.message.slot: {block_slot})",
+                    "received BeaconBlocksByRange response chunk \
+                    (request_id: {request_id}, peer_id: {peer_id}, \
+                    slot: {block_slot}, root: {block_root:?})",
                 );
 
                 info!("received beacon block from RPC slot: {block_slot}, root: {block_root:?}");
@@ -1224,8 +1233,8 @@ impl<P: Preset> Network<P> {
 
                 debug!(
                     "received BeaconBlocksByRoot response chunk \
-                    (request_id: {request_id}, peer_id: {peer_id}, block: {block_root:?}, \
-                    block_slot: {block_slot})",
+                    (request_id: {request_id}, peer_id: {peer_id}, \
+                    slot: {block_slot}, root: {block_root:?})",
                 );
 
                 info!("received beacon block from RPC slot: {block_slot}, root: {block_root:?}");
