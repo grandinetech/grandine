@@ -11,7 +11,7 @@ use crate::{
         },
         primitives::KzgCommitment,
     },
-    phase0::primitives::H256,
+    phase0::primitives::{Slot, H256},
     preset::Preset,
 };
 
@@ -122,6 +122,12 @@ impl<P: Preset> BlindedBeaconBlock<P> {
     pub const fn with_state_root(mut self, state_root: H256) -> Self {
         self.state_root = state_root;
         self
+    }
+}
+
+impl<P: Preset> BlobSidecar<P> {
+    pub const fn slot(&self) -> Slot {
+        self.signed_block_header.message.slot
     }
 }
 
