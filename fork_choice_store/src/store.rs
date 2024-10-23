@@ -1750,6 +1750,23 @@ impl<P: Preset> Store<P> {
                     .unwrap_or_else(|| self.head().state(self))
             });
 
+        if state.slot() < block_header.slot {
+            if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced() {
+                // `Backtrace::force_capture` can be costly and a warning may be excessive,
+                // but this is controlled by a `Feature` that should be disabled by default.
+                warn!(
+                    "processing slots for beacon state not found in state cache before state transition \
+                    (block root: {:?}, from slot {} to {})\n{}",
+                    block_header.parent_root,
+                    state.slot(),
+                    block_header.slot,
+                    Backtrace::force_capture(),
+                );
+            }
+
+            combined::process_slots(&self.chain_config, state.make_mut(), block_header.slot)?;
+        }
+
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         SingleVerifier.verify_singular(
             blob_sidecar
@@ -1830,23 +1847,6 @@ impl<P: Preset> Store<P> {
         // If the proposer_index cannot immediately be verified against the expected shuffling,
         // the sidecar MAY be queued for later processing while proposers for the block's branch are calculated --
         // in such a case do not REJECT, instead IGNORE this message.
-        if state.slot() < block_header.slot {
-            if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced() {
-                // `Backtrace::force_capture` can be costly and a warning may be excessive,
-                // but this is controlled by a `Feature` that should be disabled by default.
-                warn!(
-                    "processing slots for beacon state not found in state cache before state transition \
-                    (block root: {:?}, from slot {} to {})\n{}",
-                    block_header.parent_root,
-                    state.slot(),
-                    block_header.slot,
-                    Backtrace::force_capture(),
-                );
-            }
-
-            combined::process_slots(&self.chain_config, state.make_mut(), block_header.slot)?;
-        }
-
         let computed = accessors::get_beacon_proposer_index(&state)?;
 
         ensure!(
