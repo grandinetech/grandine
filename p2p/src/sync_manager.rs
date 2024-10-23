@@ -540,7 +540,8 @@ impl SyncManager {
     fn chain_with_max_peer_count(&self) -> Option<ChainId> {
         self.chains_with_peer_counts()
             .into_iter()
-            .max_by_key(|(_, peer_count)| *peer_count)
+            // .max_by_key(|(_, peer_count)| *peer_count)
+            .max_by_key(|(chain_id, peer_count)| (chain_id.finalized_epoch, *peer_count))
             .map(|(chain_id, _)| chain_id)
     }
 
