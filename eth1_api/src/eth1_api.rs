@@ -8,8 +8,8 @@ use ethereum_types::H64;
 use execution_engine::{
     EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
     EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
-    PayloadStatusV1,
+    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
+    RawExecutionRequests,
 };
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
 use log::warn;
@@ -194,7 +194,7 @@ impl Eth1Api {
         Ok(deposit_events)
     }
 
-    /// Calls [`engine_newPayloadV1`] or [`engine_newPayloadV2`] or [`engine_newPayloadV3`] depending on `payload`.
+    /// Calls [`engine_newPayloadV1`] or [`engine_newPayloadV2`] or [`engine_newPayloadV3`] or [`engine_newPayloadV4`] depending on `payload`.
     ///
     /// Later versions of `engine_newPayload` accept parameters of all prior versions,
     /// but using the earlier versions allows the application to work with old execution clients.
@@ -202,6 +202,7 @@ impl Eth1Api {
     /// [`engine_newPayloadV1`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#engine_newpayloadv1
     /// [`engine_newPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_newpayloadv2
     /// [`engine_newPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_newpayloadv3
+    /// [`engine_newPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_newpayloadv4
     pub async fn new_payload<P: Preset>(
         &self,
         payload: ExecutionPayload<P>,
@@ -256,12 +257,16 @@ impl Eth1Api {
                     execution_requests,
                 }),
             ) => {
-                let payload_v4 = ExecutionPayloadV4::from((payload, execution_requests));
+                let payload_v3 = ExecutionPayloadV3::from(payload);
+                let raw_execution_requests = RawExecutionRequests::from(execution_requests);
+
                 let params = vec![
-                    serde_json::to_value(payload_v4)?,
+                    serde_json::to_value(payload_v3)?,
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
+                    serde_json::to_value(raw_execution_requests)?,
                 ];
+
                 self.execute(
                     "engine_newPayloadV4",
                     params,
@@ -370,7 +375,7 @@ impl Eth1Api {
         })
     }
 
-    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`]depending on `payload_id`.
+    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] depending on `payload_id`.
     ///
     /// Newer versions of the method may be used to request payloads from all prior versions,
     /// but using the old methods allows the application to work with old execution clients.
@@ -378,6 +383,7 @@ impl Eth1Api {
     /// [`engine_getPayloadV1`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#engine_getpayloadv1
     /// [`engine_getPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_getpayloadv2
     /// [`engine_getPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_getpayloadv3
+    /// [`engine_getPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_getpayloadv4
     pub async fn get_payload<P: Preset>(
         &self,
         payload_id: PayloadId,
@@ -573,9 +579,12 @@ mod tests {
     use hex_literal::hex;
     use httpmock::{Method, MockServer};
     use serde_json::json;
+    use ssz::ContiguousList;
     use types::{
         bellatrix::containers::ExecutionPayload as BellatrixExecutionPayload,
-        phase0::primitives::H256, preset::Mainnet,
+        electra::containers::{DepositRequest, ExecutionRequests},
+        phase0::primitives::H256,
+        preset::Mainnet,
     };
 
     use super::*;
@@ -707,6 +716,195 @@ mod tests {
         let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
 
         assert_eq!(payload.value.phase(), Phase::Capella);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_electra_payload_deserialization_with_default_execution_requests() -> Result<()> {
+        let body = json!({
+          "jsonrpc": "2.0",
+          "id": 0,
+          "result": {
+            "executionPayload": {
+              "parentHash": "0x128133536f44733af5e59ba865744690498529592c1e85655348ec6bb559c658",
+              "feeRecipient": "0x8943545177806ed17b9f23f0a21ee5948ecaa776",
+              "stateRoot": "0xfb458127dfb40b16693e70886d0f503160be2ad409ab885fb4051d96b07bdef1",
+              "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+              "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+              "prevRandao": "0x4c2db6d476f102aa7b68808f9262c70760e6cd5f23213c039cbe7309437a8d9d",
+              "blockNumber": "0x29",
+              "gasLimit": "0x1c9c380",
+              "gasUsed": "0x0",
+              "timestamp": "0x671214b3",
+              "extraData": "0xd883010e0c846765746888676f312e32332e32856c696e7578",
+              "baseFeePerGas": "0x403226",
+              "blockHash": "0x49a38631ab242befe4d9fbb1a49c7059c21363a534542f8bcf419a82b92a229b",
+              "transactions": [],
+              "withdrawals": [
+                {
+                  "index": "0xbb",
+                  "validatorIndex": "0xd1",
+                  "address": "0x65d08a056c17ae13370565b04cf77d2afa1cb9fa",
+                  "amount": "0x51f0"
+                },
+                {
+                  "index": "0xbc",
+                  "validatorIndex": "0xd2",
+                  "address": "0x65d08a056c17ae13370565b04cf77d2afa1cb9fa",
+                  "amount": "0x51f0"
+                }
+              ],
+              "blobGasUsed": "0x0",
+              "excessBlobGas": "0x0"
+            },
+            "blockValue": "0x0",
+            "blobsBundle": {
+              "commitments": [],
+              "proofs": [],
+              "blobs": []
+            },
+            "executionRequests": [
+              "0x",
+              "0x",
+              "0x"
+            ],
+            "shouldOverrideBuilder": false
+          }
+        });
+
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(200).body(body.to_string());
+        });
+
+        let config = Arc::new(Config::mainnet());
+        let auth = Arc::default();
+        let server_url = server.url("/").parse()?;
+
+        let eth1_api = Arc::new(Eth1Api::new(
+            config,
+            Client::new(),
+            auth,
+            vec![server_url],
+            None,
+            None,
+        ));
+
+        let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
+        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
+
+        assert_eq!(payload.value.phase(), Phase::Deneb);
+        assert_eq!(
+            payload.execution_requests,
+            Some(ExecutionRequests::default())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_electra_payload_deserialization_with_non_empty_execution_requests() -> Result<()>
+    {
+        let body = json!({
+          "jsonrpc": "2.0",
+          "id": 0,
+          "result": {
+            "executionPayload": {
+              "parentHash": "0x128133536f44733af5e59ba865744690498529592c1e85655348ec6bb559c658",
+              "feeRecipient": "0x8943545177806ed17b9f23f0a21ee5948ecaa776",
+              "stateRoot": "0xfb458127dfb40b16693e70886d0f503160be2ad409ab885fb4051d96b07bdef1",
+              "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+              "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+              "prevRandao": "0x4c2db6d476f102aa7b68808f9262c70760e6cd5f23213c039cbe7309437a8d9d",
+              "blockNumber": "0x29",
+              "gasLimit": "0x1c9c380",
+              "gasUsed": "0x0",
+              "timestamp": "0x671214b3",
+              "extraData": "0xd883010e0c846765746888676f312e32332e32856c696e7578",
+              "baseFeePerGas": "0x403226",
+              "blockHash": "0x49a38631ab242befe4d9fbb1a49c7059c21363a534542f8bcf419a82b92a229b",
+              "transactions": [],
+              "withdrawals": [
+                {
+                  "index": "0xbb",
+                  "validatorIndex": "0xd1",
+                  "address": "0x65d08a056c17ae13370565b04cf77d2afa1cb9fa",
+                  "amount": "0x51f0"
+                },
+                {
+                  "index": "0xbc",
+                  "validatorIndex": "0xd2",
+                  "address": "0x65d08a056c17ae13370565b04cf77d2afa1cb9fa",
+                  "amount": "0x51f0"
+                }
+              ],
+              "blobGasUsed": "0x0",
+              "excessBlobGas": "0x0"
+            },
+            "blockValue": "0x0",
+            "blobsBundle": {
+              "commitments": [],
+              "proofs": [],
+              "blobs": []
+            },
+            "executionRequests": [
+              "0x92f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68802000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b000000000000000090a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d602000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e00100000000000000",
+              "0x",
+              "0x"
+            ],
+            "shouldOverrideBuilder": false
+          }
+        });
+
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(200).body(body.to_string());
+        });
+
+        let config = Arc::new(Config::mainnet());
+        let auth = Arc::default();
+        let server_url = server.url("/").parse()?;
+
+        let eth1_api = Arc::new(Eth1Api::new(
+            config,
+            Client::new(),
+            auth,
+            vec![server_url],
+            None,
+            None,
+        ));
+
+        let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
+        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
+
+        assert_eq!(payload.value.phase(), Phase::Deneb);
+        assert_eq!(
+            payload.execution_requests,
+            Some(ExecutionRequests {
+                deposits: ContiguousList::try_from(vec![
+                    DepositRequest {
+                        pubkey: hex!("92f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688").into(),
+                        withdrawal_credentials: hex!("02000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa").into(),
+                        amount: 1_000_000_000_000,
+                        signature: hex!("a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b").into(),
+                        index: 0,
+                    },
+                    DepositRequest {
+                        pubkey: hex!("90a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d6").into(),
+                        withdrawal_credentials: hex!("02000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa").into(),
+                        amount: 1_000_000_000_000,
+                        signature: hex!("b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e0").into(),
+                        index: 1,
+                    }
+                ])?,
+                ..Default::default()
+            })
+        );
 
         Ok(())
     }

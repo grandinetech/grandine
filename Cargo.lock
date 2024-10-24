@@ -2500,7 +2500,6 @@ name = "execution_engine"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "bls",
  "either",
  "ethereum-types",
  "futures",
