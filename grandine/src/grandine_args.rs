@@ -35,10 +35,14 @@ use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
 use reqwest::{header::HeaderValue, Url};
 use runtime::{
-    MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
-    DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
-    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_REQUEST_TIMEOUT,
-    DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
+    config_dir::{
+        self, CONFIG_FILE, DEPOSIT_CONTRACT_BLOCK_FILE, GENESIS_STATE_FILE, PLAIN_BOOTNODES_FILE,
+    },
+    GrandineCommand, GrandineConfig, MetricsConfig, PredefinedNetwork, StorageConfig, Validators,
+    DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE, DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT,
+    DEFAULT_LIBP2P_QUIC_IPV4_PORT, DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT,
+    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
+    GRANDINE_DONATION_ADDRESS,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -58,17 +62,6 @@ use types::{
     preset::PresetName,
 };
 use validator::{ValidatorApiConfig, ValidatorConfig};
-
-use crate::{
-    commands::GrandineCommand,
-    config_dir::{
-        self, CONFIG_FILE, DEPOSIT_CONTRACT_BLOCK_FILE, GENESIS_STATE_FILE, PLAIN_BOOTNODES_FILE,
-    },
-    consts::GRANDINE_DONATION_ADDRESS,
-    grandine_config::GrandineConfig,
-    predefined_network::PredefinedNetwork,
-    validators::Validators,
-};
 
 /// Grandine Team <info@grandine.io>
 /// Fast PoS and Sharding client supporting Ethereum 2.0 networks

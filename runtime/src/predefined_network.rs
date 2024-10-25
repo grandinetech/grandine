@@ -19,6 +19,8 @@ use types::{
 #[cfg(any(feature = "network-mainnet", test))]
 use ::{hex_literal::hex, types::phase0::primitives::H256};
 
+use crate::defaults::default_network_config;
+
 #[derive(Clone, Copy, Display)]
 #[strum(serialize_all = "lowercase")]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
@@ -246,7 +248,7 @@ impl PredefinedNetwork {
 
     #[must_use]
     pub fn network_config(self) -> NetworkConfig {
-        let mut config = runtime::default_network_config();
+        let mut config = default_network_config();
         config.boot_nodes_enr = self.bootnodes();
         config
     }

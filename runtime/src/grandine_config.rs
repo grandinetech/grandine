@@ -9,7 +9,6 @@ use itertools::Itertools as _;
 use log::info;
 use p2p::NetworkConfig;
 use reqwest::Url;
-use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
 use types::{
     config::Config as ChainConfig,
@@ -18,7 +17,10 @@ use types::{
 use validator::ValidatorApiConfig;
 
 use crate::{
-    commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
+    commands::GrandineCommand,
+    misc::{MetricsConfig, StorageConfig},
+    predefined_network::PredefinedNetwork,
+    validators::Validators,
 };
 
 // False positive. The `bool`s are independent.

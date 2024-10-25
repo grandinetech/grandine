@@ -8,8 +8,9 @@ use fork_choice_control::{
     UnfinalizedBlockByRoot,
 };
 use log::{info, warn};
-use runtime::StorageConfig;
 use types::preset::Preset;
+
+use crate::misc::StorageConfig;
 
 #[derive(Default, Debug)]
 struct EntriesInfo {
