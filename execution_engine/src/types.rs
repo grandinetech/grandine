@@ -807,7 +807,7 @@ mod tests {
     #[test]
     fn test_default_raw_execution_requests_serialization() -> Result<()> {
         let serialized = serde_json::to_value(RawExecutionRequests::<Mainnet>::default())?;
-        assert_eq!(serialized, json!(vec!["0x", "0x", "0x"]));
+        assert_eq!(serialized, json!(["0x", "0x", "0x"]));
         Ok(())
     }
 

@@ -547,9 +547,10 @@ pub async fn run_after_genesis<P: Preset>(
     // and the metrics server to convert collected metrics to an HTTP response for Prometheus.
     let gossip_registry = prometheus_client::registry::Registry::default();
     let mut registry = network_config.metrics_enabled.then_some(gossip_registry);
+    let network_config = Arc::new(network_config);
 
     let network = Network::new(
-        &network_config,
+        network_config.clone_arc(),
         controller.clone_arc(),
         current_tick.slot,
         p2p_channels,
@@ -588,7 +589,7 @@ pub async fn run_after_genesis<P: Preset>(
         eth1_api,
         validator_keys,
         validator_config,
-        network_config: Arc::new(network_config),
+        network_config,
         http_api_config,
         attestation_agg_pool,
         sync_committee_agg_pool,
