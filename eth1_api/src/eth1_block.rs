@@ -26,10 +26,6 @@ enum Error {
     MissingNumber {
         block: Block<ExecutionTransactionHash>,
     },
-    #[error("RPC returned block without total difficulty: {block:?}")]
-    MissingTotalDifficulty {
-        block: Block<ExecutionTransactionHash>,
-    },
 }
 
 #[derive(Default, Debug, Ssz)]
@@ -69,7 +65,7 @@ impl TryFrom<Block<ExecutionTransactionHash>> for Eth1Block {
 
         let total_difficulty = match total_difficulty {
             Some(total_difficulty) => total_difficulty.into(),
-            None => bail!(Error::MissingTotalDifficulty { block }),
+            None => Difficulty::ZERO,
         };
 
         Ok(Self {
