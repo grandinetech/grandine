@@ -188,6 +188,7 @@ async fn handle_events<P: Preset>(
     let EventChannels {
         attestations,
         attester_slashings,
+        blob_sidecars,
         blocks,
         bls_to_execution_changes,
         chain_reorgs,
@@ -236,6 +237,10 @@ async fn handle_events<P: Preset>(
                     ApiMessage::AttestationEvent(attestation) => {
                         let event = Topic::Attestation.build(attestation)?;
                         attestations.send(event).unwrap_or_default()
+                    }
+                    ApiMessage::BlobSidecarEvent(blob_sidecar) => {
+                        let event = Topic::BlobSidecar.build(blob_sidecar)?;
+                        blob_sidecars.send(event).unwrap_or_default()
                     }
                     ApiMessage::BlockEvent(block_event) => {
                         let event = Topic::Block.build(block_event)?;

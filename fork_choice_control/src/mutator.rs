@@ -59,8 +59,8 @@ use types::{
 use crate::{
     block_processor::BlockProcessor,
     messages::{
-        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
-        SyncMessage, ValidatorMessage,
+        AttestationVerifierMessage, BlobSidecarEvent, MutatorMessage, P2pMessage, PoolMessage,
+        SubnetMessage, SyncMessage, ValidatorMessage,
     },
     misc::{
         Delayed, MutatorRejectionReason, PendingAggregateAndProof, PendingAttestation,
@@ -1055,7 +1055,7 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
-                self.accept_blob_sidecar(&wait_group, blob_sidecar);
+                self.accept_blob_sidecar(&wait_group, &blob_sidecar);
             }
             Ok(BlobSidecarAction::Ignore(publishable)) => {
                 let (gossip_id, sender) = origin.split();
@@ -1609,18 +1609,22 @@ where
         Ok(())
     }
 
-    fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: Arc<BlobSidecar<P>>) {
+    fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: &Arc<BlobSidecar<P>>) {
         let old_head = self.store.head().clone();
         let head_was_optimistic = old_head.is_optimistic();
         let block_root = blob_sidecar.signed_block_header.message.hash_tree_root();
 
-        self.store_mut().apply_blob_sidecar(blob_sidecar);
+        self.store_mut()
+            .apply_blob_sidecar(blob_sidecar.clone_arc());
 
         self.update_store_snapshot();
 
         if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
             self.retry_block(wait_group.clone(), pending_block.clone());
         }
+
+        ApiMessage::BlobSidecarEvent(BlobSidecarEvent::new(block_root, blob_sidecar))
+            .send(&self.api_tx);
 
         self.spawn(PersistBlobSidecarsTask {
             store_snapshot: self.owned_store(),

@@ -9,6 +9,7 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 pub enum Topic {
     Attestation,
     AttesterSlashing,
+    BlobSidecar,
     Block,
     BlsToExecutionChange,
     ChainReorg,
@@ -28,6 +29,7 @@ impl Topic {
 pub struct EventChannels {
     pub attestations: Sender<Event>,
     pub attester_slashings: Sender<Event>,
+    pub blob_sidecars: Sender<Event>,
     pub blocks: Sender<Event>,
     pub bls_to_execution_changes: Sender<Event>,
     pub chain_reorgs: Sender<Event>,
@@ -43,6 +45,7 @@ impl EventChannels {
         Self {
             attestations: broadcast::channel(max_events).0,
             attester_slashings: broadcast::channel(max_events).0,
+            blob_sidecars: broadcast::channel(max_events).0,
             blocks: broadcast::channel(max_events).0,
             bls_to_execution_changes: broadcast::channel(max_events).0,
             chain_reorgs: broadcast::channel(max_events).0,
@@ -58,6 +61,7 @@ impl EventChannels {
         match topic {
             Topic::Attestation => &self.attestations,
             Topic::AttesterSlashing => &self.attester_slashings,
+            Topic::BlobSidecar => &self.blob_sidecars,
             Topic::Block => &self.blocks,
             Topic::BlsToExecutionChange => &self.bls_to_execution_changes,
             Topic::ChainReorg => &self.chain_reorgs,
