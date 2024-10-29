@@ -190,6 +190,9 @@ impl Context {
 
         let signer_snapshot = signer.load();
 
+        // TODO: remove this when done debugging Eth1
+        Feature::DebugEth1.enable();
+
         if eth1_rpc_urls.is_empty() {
             ensure!(
                 signer_snapshot.no_keys(),
