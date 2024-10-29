@@ -19,6 +19,7 @@ use ssz::ContiguousList;
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
+    combined::BeaconState as CombinedBeaconState,
     config::Config,
     phase0::{
         containers::{Deposit, Eth1Data},
@@ -179,7 +180,7 @@ pub trait Eth1Storage {
 
     fn pending_deposits<P: Preset>(
         &self,
-        state: &impl BeaconState<P>,
+        state: &CombinedBeaconState<P>,
         eth1_vote: Eth1Data,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<ContiguousList<Deposit, P::MaxDeposits>> {
@@ -198,6 +199,17 @@ pub trait Eth1Storage {
         };
 
         let eth1_deposit_index = state.eth1_deposit_index();
+
+        if let CombinedBeaconState::Electra(state) = state {
+            let eth1_deposit_index_limit = state
+                .eth1_data()
+                .deposit_count
+                .min(state.deposit_requests_start_index);
+
+            if eth1_deposit_index >= eth1_deposit_index_limit {
+                return Ok(ContiguousList::default());
+            }
+        }
 
         features::log!(DebugEth1, "state.eth1_deposit_index: {eth1_deposit_index}");
         features::log!(DebugEth1, "eth1_data: {eth1_data:?}");
