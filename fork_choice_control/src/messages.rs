@@ -18,7 +18,10 @@ use serde::Serialize;
 use tap::Pipe as _;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobIdentifier,
+    deneb::{
+        containers::{BlobIdentifier, BlobSidecar},
+        primitives::{BlobIndex, KzgCommitment, VersionedHash},
+    },
     phase0::{
         containers::Checkpoint,
         primitives::{DepositIndex, Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -213,6 +216,7 @@ impl<P: Preset, W> ValidatorMessage<P, W> {
 #[derive(Debug)]
 pub enum ApiMessage<P: Preset> {
     AttestationEvent(Arc<Attestation<P>>),
+    BlobSidecarEvent(BlobSidecarEvent),
     BlockEvent(BlockEvent),
     ChainReorgEvent(ChainReorgEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
@@ -251,6 +255,31 @@ impl<P: Preset> SyncMessage<P> {
             debug!(
                 "send to block sync service failed because the receiver was dropped: {message:?}"
             );
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlobSidecarEvent {
+    pub block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub index: BlobIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    pub kzg_commitment: KzgCommitment,
+    pub versioned_hash: VersionedHash,
+}
+
+impl BlobSidecarEvent {
+    pub fn new<P: Preset>(block_root: H256, blob_sidecar: &BlobSidecar<P>) -> Self {
+        let kzg_commitment = blob_sidecar.kzg_commitment;
+
+        Self {
+            block_root,
+            index: blob_sidecar.index,
+            slot: blob_sidecar.slot(),
+            kzg_commitment,
+            versioned_hash: misc::kzg_commitment_to_versioned_hash(kzg_commitment),
         }
     }
 }
