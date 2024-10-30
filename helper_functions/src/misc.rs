@@ -17,7 +17,7 @@ use types::{
     combined::{Attestation, SignedBeaconBlock},
     config::Config,
     deneb::{
-        consts::{BlobCommitmentTreeDepth, BlobSidecarSubnetCount, VERSIONED_HASH_VERSION_KZG},
+        consts::{BlobCommitmentTreeDepth, VERSIONED_HASH_VERSION_KZG},
         containers::BlobSidecar,
         primitives::{
             Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
@@ -204,8 +204,8 @@ pub fn compute_subnet_for_attestation<P: Preset>(
 
 /// [`compute_subnet_for_blob_sidecar`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.1/specs/deneb/validator.md#sidecar)
 #[must_use]
-pub fn compute_subnet_for_blob_sidecar(blob_index: BlobIndex) -> SubnetId {
-    blob_index.mod_typenum::<BlobSidecarSubnetCount>()
+pub const fn compute_subnet_for_blob_sidecar(config: &Config, blob_index: BlobIndex) -> SubnetId {
+    blob_index % config.blob_sidecar_subnet_count
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#broadcast-sync-committee-message>
