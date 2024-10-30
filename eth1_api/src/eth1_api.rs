@@ -525,7 +525,7 @@ impl Eth1Api {
         // Syncing a predefined network without proposing blocks does not require an Eth1 RPC
         // (except during the Merge transition).
         ensure!(
-            self.endpoints.lock().await.is_empty(),
+            !self.endpoints.lock().await.is_empty(),
             Error::NoEndpointsProvided
         );
 
