@@ -318,6 +318,7 @@ where
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
@@ -354,7 +355,20 @@ where
                 if let Some(execution_payload) = head.block.as_ref().clone().execution_payload() {
                     let mut params = None;
 
-                    if let Some(body) = head.block.message().body().post_deneb() {
+                    if let Some(body) = head.block.message().body().post_electra() {
+                        let versioned_hashes = body
+                            .blob_kzg_commitments()
+                            .iter()
+                            .copied()
+                            .map(misc::kzg_commitment_to_versioned_hash)
+                            .collect();
+
+                        params = Some(ExecutionPayloadParams::Electra {
+                            versioned_hashes,
+                            parent_beacon_block_root: head.block.message().parent_root(),
+                            execution_requests: body.execution_requests().clone(),
+                        });
+                    } else if let Some(body) = head.block.message().body().post_deneb() {
                         let versioned_hashes = body
                             .blob_kzg_commitments()
                             .iter()
