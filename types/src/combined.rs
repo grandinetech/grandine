@@ -19,6 +19,7 @@ use crate::{
             BeaconBlock as AltairBeaconBlock, LightClientBootstrap as AltairLightClientBootstrap,
             LightClientFinalityUpdate as AltairLightClientFinalityUpdate,
             LightClientOptimisticUpdate as AltairLightClientOptimisticUpdate,
+            LightClientUpdate as AltairLightClientUpdate,
             SignedBeaconBlock as AltairSignedBeaconBlock,
         },
     },
@@ -41,6 +42,7 @@ use crate::{
             LightClientBootstrap as CapellaLightClientBootstrap,
             LightClientFinalityUpdate as CapellaLightClientFinalityUpdate,
             LightClientOptimisticUpdate as CapellaLightClientOptimisticUpdate,
+            LightClientUpdate as CapellaLightClientUpdate,
             SignedBeaconBlock as CapellaSignedBeaconBlock,
             SignedBlindedBeaconBlock as CapellaSignedBlindedBeaconBlock,
         },
@@ -55,6 +57,7 @@ use crate::{
             LightClientBootstrap as DenebLightClientBootstrap,
             LightClientFinalityUpdate as DenebLightClientFinalityUpdate,
             LightClientOptimisticUpdate as DenebLightClientOptimisticUpdate,
+            LightClientUpdate as DenebLightClientUpdate,
             SignedBeaconBlock as DenebSignedBeaconBlock,
             SignedBlindedBeaconBlock as DenebSignedBlindedBeaconBlock,
         },
@@ -69,6 +72,7 @@ use crate::{
             LightClientBootstrap as ElectraLightClientBootstrap,
             LightClientFinalityUpdate as ElectraLightClientFinalityUpdate,
             LightClientOptimisticUpdate as ElectraLightClientOptimisticUpdate,
+            LightClientUpdate as ElectraLightClientUpdate,
             SignedAggregateAndProof as ElectraSignedAggregateAndProof,
             SignedBeaconBlock as ElectraSignedBeaconBlock,
             SignedBlindedBeaconBlock as ElectraSignedBlindedBeaconBlock,
@@ -1214,6 +1218,64 @@ impl<P: Preset> SszWrite for LightClientOptimisticUpdate<P> {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum LightClientUpdate<P: Preset> {
+    // Boxed to pass `clippy::large_enum_variant`.
+    Altair(Box<AltairLightClientUpdate<P>>),
+    Capella(Box<CapellaLightClientUpdate<P>>),
+    Deneb(Box<DenebLightClientUpdate<P>>),
+    Electra(Box<ElectraLightClientUpdate<P>>),
+}
+
+// It is difficult to implement `SszRead` for the combined `LightClientUpdate`.
+// `attested_header` starts with a slot, but `LightClientHeader` becomes variable-size in Capella.
+// It is possible to distinguish variants of `LightClientUpdate` by length as of Capella,
+// but it becomes more difficult in Deneb and may become impossible in later phases.
+assert_not_impl_any!(LightClientUpdate<Mainnet>: SszRead<Config>);
+
+impl<P: Preset> SszSize for LightClientUpdate<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 2 }>([
+        AltairLightClientUpdate::<P>::SIZE,
+        CapellaLightClientUpdate::<P>::SIZE,
+        DenebLightClientUpdate::<P>::SIZE,
+        ElectraLightClientUpdate::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszWrite for LightClientUpdate<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Altair(update) => {
+                let size = AltairLightClientUpdate::<P>::SIZE.get();
+                let length_before = bytes.len();
+                let length_after = length_before + size;
+
+                bytes.resize(length_after, 0);
+                update.write_fixed(&mut bytes[length_before..]);
+
+                Ok(())
+            }
+            Self::Capella(update) => update.write_variable(bytes),
+            Self::Deneb(update) => update.write_variable(bytes),
+            Self::Electra(update) => update.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> LightClientUpdate<P> {
+    #[must_use]
+    pub fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum AggregateAndProof<P: Preset> {
@@ -1591,30 +1653,40 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/LightClientFinalityUpdate/*/*"]      [altair_minimal_finality_update]      [LightClientFinalityUpdate]   [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/LightClientOptimisticUpdate/*/*"]    [altair_mainnet_optimistic_update]    [LightClientOptimisticUpdate] [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/LightClientOptimisticUpdate/*/*"]    [altair_minimal_optimistic_update]    [LightClientOptimisticUpdate] [Minimal] [Altair];
+        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/LightClientUpdate/*/*"]              [altair_mainnet_update]               [LightClientUpdate]           [Mainnet] [Altair];
+        ["consensus-spec-tests/tests/minimal/altair/ssz_static/LightClientUpdate/*/*"]              [altair_minimal_update]               [LightClientUpdate]           [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/LightClientBootstrap/*/*"]        [bellatrix_mainnet_bootstrap]         [LightClientBootstrap]        [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/LightClientBootstrap/*/*"]        [bellatrix_minimal_bootstrap]         [LightClientBootstrap]        [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/LightClientFinalityUpdate/*/*"]   [bellatrix_mainnet_finality_update]   [LightClientFinalityUpdate]   [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/LightClientFinalityUpdate/*/*"]   [bellatrix_minimal_finality_update]   [LightClientFinalityUpdate]   [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/LightClientOptimisticUpdate/*/*"] [bellatrix_mainnet_optimistic_update] [LightClientOptimisticUpdate] [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/LightClientOptimisticUpdate/*/*"] [bellatrix_minimal_optimistic_update] [LightClientOptimisticUpdate] [Minimal] [Altair];
+        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/LightClientUpdate/*/*"]           [bellatrix_mainnet_update]            [LightClientUpdate]           [Mainnet] [Altair];
+        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/LightClientUpdate/*/*"]           [bellatrix_minimal_update]            [LightClientUpdate]           [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/LightClientBootstrap/*/*"]          [capella_mainnet_bootstrap]           [LightClientBootstrap]        [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/LightClientBootstrap/*/*"]          [capella_minimal_bootstrap]           [LightClientBootstrap]        [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/LightClientFinalityUpdate/*/*"]     [capella_mainnet_finality_update]     [LightClientFinalityUpdate]   [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/LightClientFinalityUpdate/*/*"]     [capella_minimal_finality_update]     [LightClientFinalityUpdate]   [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/LightClientOptimisticUpdate/*/*"]   [capella_mainnet_optimistic_update]   [LightClientOptimisticUpdate] [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/LightClientOptimisticUpdate/*/*"]   [capella_minimal_optimistic_update]   [LightClientOptimisticUpdate] [Minimal] [Capella];
+        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/LightClientUpdate/*/*"]             [capella_mainnet_update]              [LightClientUpdate]           [Mainnet] [Capella];
+        ["consensus-spec-tests/tests/minimal/capella/ssz_static/LightClientUpdate/*/*"]             [capella_minimal_update]              [LightClientUpdate]           [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/LightClientBootstrap/*/*"]            [deneb_mainnet_bootstrap]             [LightClientBootstrap]        [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/LightClientBootstrap/*/*"]            [deneb_minimal_bootstrap]             [LightClientBootstrap]        [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/LightClientFinalityUpdate/*/*"]       [deneb_mainnet_finality_update]       [LightClientFinalityUpdate]   [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/LightClientFinalityUpdate/*/*"]       [deneb_minimal_finality_update]       [LightClientFinalityUpdate]   [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/LightClientOptimisticUpdate/*/*"]     [deneb_mainnet_optimistic_update]     [LightClientOptimisticUpdate] [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/LightClientOptimisticUpdate/*/*"]     [deneb_minimal_optimistic_update]     [LightClientOptimisticUpdate] [Minimal] [Deneb];
+        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/LightClientUpdate/*/*"]               [deneb_mainnet_update]                [LightClientUpdate]           [Mainnet] [Deneb];
+        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/LightClientUpdate/*/*"]               [deneb_minimal_update]                [LightClientUpdate]           [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/LightClientBootstrap/*/*"]          [electra_mainnet_bootstrap]           [LightClientBootstrap]        [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/LightClientBootstrap/*/*"]          [electra_minimal_bootstrap]           [LightClientBootstrap]        [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/LightClientFinalityUpdate/*/*"]     [electra_mainnet_finality_update]     [LightClientFinalityUpdate]   [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/LightClientFinalityUpdate/*/*"]     [electra_minimal_finality_update]     [LightClientFinalityUpdate]   [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/LightClientOptimisticUpdate/*/*"]   [electra_mainnet_optimistic_update]   [LightClientOptimisticUpdate] [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/LightClientOptimisticUpdate/*/*"]   [electra_minimal_optimistic_update]   [LightClientOptimisticUpdate] [Minimal] [Electra];
+        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/LightClientUpdate/*/*"]             [electra_mainnet_update]              [LightClientUpdate]           [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/electra/ssz_static/LightClientUpdate/*/*"]             [electra_minimal_update]              [LightClientUpdate]           [Minimal] [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
