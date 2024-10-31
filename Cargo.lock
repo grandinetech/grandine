@@ -1091,6 +1091,7 @@ dependencies = [
  "grandine_version",
  "http_api",
  "libc",
+ "reqwest",
  "runtime",
  "signer",
  "slasher",

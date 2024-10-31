@@ -8,11 +8,12 @@ use slasher::SlasherConfig;
 use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
 use types::phase0::primitives::H256;
 use validator::ValidatorConfig;
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
 use eth1_api::AuthOptions;
 use anyhow::{Result, ensure};
 use thiserror::Error;
+use reqwest::Url;
 
 #[derive(Debug, Error)]
 enum Error {
@@ -52,10 +53,12 @@ pub extern "C" fn grandine_run() -> u64 {
         deposit_contract_starting_block: None,
         genesis_state_file: None,
         genesis_state_download_url: None,
-        checkpoint_sync_url: None,
-        force_checkpoint_sync: false,
+        checkpoint_sync_url: Some(Url::parse("https://holesky-checkpoint-sync.stakely.io/").unwrap()),
+        force_checkpoint_sync: true,
         back_sync: false,
-        eth1_rpc_urls: Vec::new(),
+        eth1_rpc_urls: vec![
+            Url::parse("http://0.0.0.0:8783").unwrap()
+        ],
         data_dir,
         validators: None,
         keystore_storage_password_file: None,
@@ -80,7 +83,7 @@ pub extern "C" fn grandine_run() -> u64 {
         features: Vec::new(),
         state_slot: None,
         auth_options: AuthOptions {
-            secrets_path: None,
+            secrets_path: Some(PathBuf::from("/jwtsecret")),
             id: None,
             version: None,
         },

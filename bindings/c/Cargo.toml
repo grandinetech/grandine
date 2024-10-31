@@ -21,6 +21,7 @@ slasher = { workspace = true }
 anyhow = { workspace = true }
 types = { workspace = true }
 thiserror = { workspace = true }
+reqwest = { workspace = true }
 libc = "0.2.2"
 
 [build-dependencies]
