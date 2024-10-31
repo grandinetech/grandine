@@ -1723,17 +1723,15 @@ where
         let safe_block_hash = self.store.safe_execution_payload_hash();
         let finalized_block_hash = self.store.finalized_execution_payload_hash();
 
-        if !new_head.is_valid() {
-            let head_block_hash = state.latest_execution_payload_header().block_hash();
+        let head_block_hash = state.latest_execution_payload_header().block_hash();
 
-            self.execution_engine.notify_forkchoice_updated(
-                head_block_hash,
-                safe_block_hash,
-                finalized_block_hash,
-                Either::Left(new_head.block.phase()),
-                None,
-            );
-        }
+        self.execution_engine.notify_forkchoice_updated(
+            head_block_hash,
+            safe_block_hash,
+            finalized_block_hash,
+            Either::Left(new_head.block.phase()),
+            None,
+        );
     }
 
     fn delay_block_until_blobs(&mut self, beacon_block_root: H256, pending_block: PendingBlock<P>) {
