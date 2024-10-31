@@ -65,7 +65,11 @@ network-goerli      = ['network-any', 'preset-mainnet']
 network-mainnet     = ['network-any', 'preset-mainnet']
 network-sepolia     = ['network-any', 'preset-mainnet']
 network-shadow      = ['network-any', 'preset-mainnet']
-network-holesky     = ['network-any', 'preset-mainnet']
+network-holesky     = [
+    'network-any', 
+    'preset-mainnet',
+    'runtime/network-holesky'
+]
 
 default-networks = [
     'network-mainnet',

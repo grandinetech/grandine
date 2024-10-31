@@ -1,0 +1,27 @@
+[package]
+name = "c_grandine"
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+runtime = { workspace = true, features = ["network-holesky"] }
+directories = { workspace = true }
+grandine_version = { workspace = true }
+validator = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+eth1_api = { workspace = true }
+signer = { workspace = true }
+slashing_protection = { workspace = true }
+http_api = { workspace = true }
+slasher = { workspace = true }
+anyhow = { workspace = true }
+types = { workspace = true }
+thiserror = { workspace = true }
+libc = "0.2.2"
+
+[build-dependencies]
+cbindgen = "0.26.0"

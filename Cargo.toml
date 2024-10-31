@@ -59,6 +59,7 @@ members = [
     'types',
     'validator',
     'validator_key_cache',
+    'bindings/c'
 ]
 # Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
 # virtual workspaces. Starting with Rust 1.72.0, Cargo warns if a Rust 2021 virtual workspace does
