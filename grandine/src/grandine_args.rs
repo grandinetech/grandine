@@ -3,7 +3,6 @@
 #![allow(clippy::doc_markdown)]
 
 use core::{
-    fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     num::{NonZeroU16, NonZeroU64},
     ops::Not as _,
@@ -307,12 +306,8 @@ struct BeaconNodeOptions {
     state_slot: Option<Slot>,
 
     /// Subscribe to all subnets
-    #[clap(long, default_value_t = true)]
-    subscribe_all_subnets: bool,
-
-    /// Subscribe to all data column subnets
     #[clap(long)]
-    subscribe_all_data_column_subnets: bool,
+    subscribe_all_subnets: bool,
 
     /// Suggested value for the feeRecipient field of the new payload
     #[clap(long, value_name = "EXECUTION_ADDRESS")]
@@ -908,7 +903,6 @@ impl GrandineArgs {
             state_cache_lock_timeout,
             state_slot,
             subscribe_all_subnets,
-            subscribe_all_data_column_subnets,
             suggested_fee_recipient,
             jwt_id,
             jwt_secret,
@@ -1194,11 +1188,8 @@ impl GrandineArgs {
         let features = features
             .into_iter()
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
-            .chain(
-                subscribe_all_data_column_subnets
-                    .then_some(Feature::SubscribeToAllDataColumnSubnets),
-            )
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
+            .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllDataColumnSubnets))
             .collect::<Vec<_>>();
 
         // enabling these features here, because it being used in below network config conversion

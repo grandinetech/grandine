@@ -24,7 +24,8 @@ use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor, Store, StoreConfig,
+    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor, Store,
+    StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -39,10 +40,7 @@ use types::{
     deneb::containers::BlobSidecar,
     eip7594::{ColumnIndex, DataColumnSidecar},
     nonstandard::ValidationOutcome,
-    phase0::{
-        containers::{Attestation, AttesterSlashing, SignedAggregateAndProof},
-        primitives::{ExecutionBlockHash, Slot, SubnetId},
-    },
+    phase0::primitives::{ExecutionBlockHash, Slot, SubnetId},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -244,12 +242,21 @@ where
         self.spawn_data_column_sidecar_task_with_wait_group(
             wait_group,
             data_column_sidecar,
+            true,
             DataColumnSidecarOrigin::Own,
         )
     }
 
-    pub fn on_api_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
-        self.spawn_data_column_sidecar_task(data_column_sidecar, DataColumnSidecarOrigin::Api)
+    pub fn on_api_data_column_sidecar(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        sender: Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        self.spawn_data_column_sidecar_task(
+            data_column_sidecar,
+            true,
+            DataColumnSidecarOrigin::Api(sender),
+        )
     }
 
     pub fn on_api_block(
@@ -443,9 +450,11 @@ where
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         subnet_id: SubnetId,
         gossip_id: GossipId,
+        block_seen: bool,
     ) {
         self.spawn_data_column_sidecar_task(
             data_column_sidecar,
+            block_seen,
             DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
         )
     }
@@ -471,6 +480,7 @@ where
     pub fn on_requested_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
         peer_id: PeerId,
     ) {
         self.spawn(DataColumnSidecarTask {
@@ -478,6 +488,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             data_column_sidecar,
+            block_seen,
             origin: DataColumnSidecarOrigin::Requested(peer_id),
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
@@ -537,11 +548,13 @@ where
     fn spawn_data_column_sidecar_task(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
         origin: DataColumnSidecarOrigin,
     ) {
         self.spawn_data_column_sidecar_task_with_wait_group(
             self.owned_wait_group(),
             data_column_sidecar,
+            block_seen,
             origin,
         )
     }
@@ -550,6 +563,7 @@ where
         &self,
         wait_group: W,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
         origin: DataColumnSidecarOrigin,
     ) {
         self.spawn(DataColumnSidecarTask {
@@ -557,6 +571,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             data_column_sidecar,
+            block_seen,
             origin,
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),

@@ -7,8 +7,6 @@ use eth2_libp2p::GossipId;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
-    AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationOrigin,
-    BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
@@ -16,10 +14,7 @@ use types::{
     combined::{SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     eip7594::DataColumnSidecar,
-    phase0::{
-        containers::{Attestation, SignedAggregateAndProof},
-        primitives::ValidatorIndex,
-    },
+    phase0::primitives::ValidatorIndex,
     preset::Preset,
 };
 
@@ -114,6 +109,7 @@ pub struct PendingBlobSidecar<P: Preset> {
 #[derive(Debug)]
 pub struct PendingDataColumnSidecar<P: Preset> {
     pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub block_seen: bool,
     pub origin: DataColumnSidecarOrigin,
     pub submission_time: Instant,
 }

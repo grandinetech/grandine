@@ -80,7 +80,7 @@ pub use crate::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-        ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, PartialBlockAction, 
+        ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, PartialBlockAction,
         PayloadAction, ValidAttestation,
     },
     segment::Segment,

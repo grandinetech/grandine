@@ -308,6 +308,7 @@ pub trait Eth1Storage {
         let deposit_requests_transition_period_finished = deposit_requests_start_index
             .is_some_and(|requests_start_index| requests_start_index <= finalized_deposit_index);
 
+
         let position = if deposit_requests_transition_period_finished {
             Some(unfinalized_blocks.len())
         } else {

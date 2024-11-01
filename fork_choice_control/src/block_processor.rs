@@ -7,7 +7,7 @@ use fork_choice_store::{
     validate_merge_block, BlockAction, PartialBlockAction, StateCacheProcessor, Store,
 };
 use helper_functions::{
-    predicates,
+    accessors, predicates,
     slot_report::{NullSlotReport, RealSlotReport, SlotReport, SyncAggregateRewards},
     verifier::Verifier,
 };
@@ -18,9 +18,11 @@ use transition_functions::{
     combined,
     unphased::{ProcessSlots, StateRootPolicy},
 };
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock},
     config::Config as ChainConfig,
+    eip7594::NumberOfColumns,
     nonstandard::{BlockRewards, Phase, SlashingKind},
     phase0::primitives::H256,
     preset::Preset,
@@ -213,6 +215,25 @@ impl<P: Preset> BlockProcessor<P> {
                             return Ok((state, Some(BlockAction::Ignore(false))))
                         }
                     }
+                }
+            }
+
+            // > [Modified in EIP7594] Check if blob data is available
+            //
+            // If not, this block MAY be queued and subsequently considered when blob data becomes available
+            if self
+                .chain_config
+                .is_eip7594_fork(accessors::get_current_epoch(&state))
+            {
+                let missing_indices = store.indices_of_missing_data_columns(&parent.block);
+
+                if missing_indices.len() * 2 >= NumberOfColumns::USIZE && store.is_forward_synced()
+                {
+                    return Ok((state, Some(BlockAction::DelayUntilBlobs(block.clone_arc()))));
+                }
+            } else {
+                if !store.indices_of_missing_blobs(block).is_empty() {
+                    return Ok((state, Some(BlockAction::DelayUntilBlobs(block.clone_arc()))));
                 }
             }
 

@@ -19,17 +19,13 @@ type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 pub type CellIndex = u64;
 pub type RowIndex = u64;
 pub type ColumnIndex = u64;
-pub type Cell = Box<ByteVector<BytesPerCell>>;
+pub type DataColumnSubnetId = u64;
+
 pub type NumberOfColumns = U128;
+type KzgCommitmentsInclusionProofDepth = U4;
 
-pub type KzgCommitmentsInclusionProofDepth = U4;
-
+pub type Cell = Box<ByteVector<BytesPerCell>>;
 pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsInclusionProofDepth>;
-
-// TODO(feature/das): convert to type const
-pub const CUSTODY_REQUIREMENT: u64 = 4;
-pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 128;
-pub const SAMPLES_PER_SLOT: u64 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]

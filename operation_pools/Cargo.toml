@@ -37,8 +37,5 @@ tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 
-[dev-dependencies]
-eth2_cache_utils = { workspace = true }
-
 [features]
 eth2-cache = []

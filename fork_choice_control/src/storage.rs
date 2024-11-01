@@ -942,7 +942,7 @@ impl PrefixableKey for SlotBlobId {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:x}{_1}", Self::PREFIX)]
+#[display("{}{_0:x}{_1}", Self::PREFIX)]
 pub struct DataColumnSidecarByColumnIndex(pub H256, pub ColumnIndex);
 
 impl DataColumnSidecarByColumnIndex {
@@ -950,7 +950,7 @@ impl DataColumnSidecarByColumnIndex {
 }
 
 #[derive(Display)]
-#[display(fmt = "{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
+#[display("{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
 pub struct SlotColumnIndex(pub Slot, pub H256, pub ColumnIndex);
 
 impl SlotColumnIndex {

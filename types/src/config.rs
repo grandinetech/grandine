@@ -69,6 +69,7 @@ pub struct Config {
     pub electra_fork_version: Version,
     #[serde(with = "serde_utils::string_or_native")]
     pub eip7594_fork_epoch: Epoch,
+    pub eip7594_fork_version: Version,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -198,7 +199,8 @@ impl Default for Config {
             electra_fork_epoch: FAR_FUTURE_EPOCH,
             electra_fork_version: H32(hex!("05000000")),
             eip7594_fork_epoch: FAR_FUTURE_EPOCH,
-            
+            eip7594_fork_version: H32(hex!("06000000")),
+
             // Time parameters
             eth1_follow_distance: 2048,
             min_validator_withdrawability_delay: 256,
@@ -315,6 +317,7 @@ impl Config {
             capella_fork_version: H32(hex!("03000001")),
             deneb_fork_version: H32(hex!("04000001")),
             electra_fork_version: H32(hex!("05000001")),
+            eip7594_fork_version: H32(hex!("06000001")),
 
             // Time parameters
             eth1_follow_distance: 16,
@@ -672,7 +675,7 @@ impl Config {
             Phase::Bellatrix => self.bellatrix_fork_epoch,
             Phase::Capella => self.capella_fork_epoch,
             Phase::Deneb => self.deneb_fork_epoch,
-Phase::Electra => self.electra_fork_epoch,
+            Phase::Electra => self.electra_fork_epoch,
         }
     }
 
@@ -720,6 +723,18 @@ Phase::Electra => self.electra_fork_epoch,
     #[must_use]
     pub const fn is_eip7594_enabled(&self) -> bool {
         self.eip7594_fork_epoch != FAR_FUTURE_EPOCH
+    }
+
+    pub const fn data_column_sidecar_subnet_count(&self) -> u64 {
+        self.data_column_sidecar_subnet_count
+    }
+
+    pub const fn samples_per_slot(&self) -> u64 {
+        self.samples_per_slot
+    }
+
+    pub const fn custody_requirement(&self) -> u64 {
+        self.custody_requirement
     }
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {

@@ -123,6 +123,7 @@ pub enum MutatorMessage<P: Preset, W> {
     DataColumnSidecar {
         wait_group: W,
         result: Result<DataColumnSidecarAction<P>>,
+        block_seen: bool,
         origin: DataColumnSidecarOrigin,
         submission_time: Instant,
     },
@@ -194,7 +195,6 @@ pub enum P2pMessage<P: Preset> {
     DataColumnsNeeded(Vec<DataColumnIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
-    ReverifyGossipAttestation(Arc<Attestation<P>>, SubnetId, GossipId),
     DataColumnsReconstructed(Vec<Arc<DataColumnSidecar<P>>>, Slot),
 }
 

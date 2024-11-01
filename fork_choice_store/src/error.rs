@@ -7,11 +7,8 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
-    phase0::{
-        containers::{Attestation, SignedAggregateAndProof},
-        primitives::{Slot, SubnetId, ValidatorIndex},
-    },
+    eip7594::{DataColumnSidecar, DataColumnSubnetId},
+    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -117,8 +114,8 @@ pub enum Error<P: Preset> {
     )]
     DataColumnSidecarOnIncorrectSubnet {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
-        expected: SubnetId,
-        actual: SubnetId,
+        expected: DataColumnSubnetId,
+        actual: DataColumnSubnetId,
     },
     #[error(
         "data_column sidecar has incorrect proposer index \

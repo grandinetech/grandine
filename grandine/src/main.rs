@@ -224,8 +224,6 @@ impl Context {
             storage_config.eth1_database()?
         };
 
-        Feature::DebugP2p.enable();
-
         log::info!("CHAIN CONFIG: {chain_config:#?}");
 
         let eth1_chain = Eth1Chain::new(

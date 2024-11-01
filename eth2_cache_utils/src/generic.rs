@@ -162,7 +162,7 @@ pub fn blob_sidecars<P: Preset>(
         .skip_while(|path| path < Path::new(low.as_str()))
         .take_while(|path| path < Path::new(high.as_str()))
         .map(|path| case.ssz_uncompressed::<_, Arc<BlobSidecar<P>>>(config, path))
-        .chunks(|blob| blob.signed_block_header.message.slot)
+        .group_by(|blob| blob.signed_block_header.message.slot)
         .into_iter()
         .map(|(slot, blobs)| (slot, blobs.collect_vec()))
         .collect::<BTreeMap<_, _>>();

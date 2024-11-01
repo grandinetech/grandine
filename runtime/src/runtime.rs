@@ -552,15 +552,17 @@ pub async fn run_after_genesis<P: Preset>(
     let block_sync_database = if in_memory {
         Database::in_memory()
     } else {
-        Database::persistent(
-            "sync",
-            directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .join("sync"),
-            db_size,
-        )?
+        // Database::persistent(
+        //     "sync",
+        //     directories
+        //         .store_directory
+        //         .clone()
+        //         .unwrap_or_default()
+        //         .join("sync"),
+        //     db_size,
+
+        // )?
+        storage_config.sync_database()?
     };
 
     let mut block_sync_service = BlockSyncService::new(

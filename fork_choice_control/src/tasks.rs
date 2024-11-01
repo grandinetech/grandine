@@ -10,7 +10,7 @@ use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor, 
+    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor,
     Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
@@ -20,11 +20,12 @@ use helper_functions::{
 };
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
+use typenum::Unsigned as _;
 use types::{
     combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
+    eip7594::{DataColumnSidecar, NumberOfColumns},
     nonstandard::{RelativeEpoch, ValidationOutcome},
-    eip7594::{ColumnIndex, DataColumnSidecar},
     phase0::{
         containers::Checkpoint,
         primitives::{Slot, H256},
@@ -362,6 +363,7 @@ pub struct DataColumnSidecarTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub block_seen: bool,
     pub origin: DataColumnSidecarOrigin,
     pub submission_time: Instant,
     pub metrics: Option<Arc<Metrics>>,
@@ -374,6 +376,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             mutator_tx,
             wait_group,
             data_column_sidecar,
+            block_seen,
             origin,
             submission_time,
             metrics,
@@ -385,6 +388,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
 
         let result = store_snapshot.validate_data_column_sidecar(
             data_column_sidecar,
+            block_seen,
             &origin,
             store_snapshot.slot(),
             MultiVerifier::default(),
@@ -394,6 +398,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
         MutatorMessage::DataColumnSidecar {
             wait_group,
             result,
+            block_seen,
             origin,
             submission_time,
         }
@@ -486,7 +491,6 @@ pub struct ReconstructDataColumnSidecarsTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub block: Arc<SignedBeaconBlock<P>>,
-    pub available_data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     pub blob_count: usize,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -498,7 +502,6 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
             mutator_tx,
             wait_group,
             block,
-            available_data_column_sidecars,
             blob_count,
             metrics,
         } = self;
@@ -507,23 +510,29 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
-        let partial_matrix = available_data_column_sidecars
-            .into_iter()
-            .flat_map(|sidecar| eip_7594::compute_matrix_for_data_column_sidecar(&sidecar))
-            .collect::<Vec<_>>();
+        let available_columns = store_snapshot.available_columns_at_block(&block);
 
-        match eip_7594::recover_matrix(partial_matrix, blob_count, &metrics) {
-            Ok(full_matrix) => {
-                MutatorMessage::ReconstructedMissingColumns {
-                    wait_group,
-                    block,
-                    full_matrix,
+        if available_columns.len() < NumberOfColumns::USIZE {
+            let partial_matrix = available_columns
+                .into_iter()
+                .flat_map(|sidecar| eip_7594::compute_matrix_for_data_column_sidecar(&sidecar))
+                .collect::<Vec<_>>();
+
+            match eip_7594::recover_matrix(partial_matrix, blob_count, &metrics) {
+                Ok(full_matrix) => {
+                    MutatorMessage::ReconstructedMissingColumns {
+                        wait_group,
+                        block,
+                        full_matrix,
+                    }
+                    .send(&mutator_tx);
                 }
-                .send(&mutator_tx);
+                Err(error) => {
+                    warn!("failed to reconstruct missing data column sidecars: {error:?}");
+                }
             }
-            Err(error) => {
-                warn!("failed to reconstruct missing data column sidecars: {error:?}");
-            }
+        } else {
+            debug!("all required sample columns are available, dismiss recontruction");
         }
     }
 }

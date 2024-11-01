@@ -22,6 +22,7 @@ helper_functions = { workspace = true, features = ['metrics'] }
 http_api_utils = { workspace = true }
 jemalloc-ctl = { workspace = true }
 log = { workspace = true }
+num_threads = { workspace = true }
 p2p = { workspace = true }
 prometheus = { workspace = true }
 # `prometheus-client` is only needed for libp2p metrics.

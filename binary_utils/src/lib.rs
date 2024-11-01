@@ -7,7 +7,11 @@ use log::LevelFilter;
 use logging::PEER_LOG_METRICS;
 use rayon::ThreadPoolBuilder;
 
-pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<()> {
+pub fn initialize_logger(
+    module_path: &str,
+    always_write_style: bool,
+    parse_env: bool,
+) -> Result<()> {
     let mut builder = Builder::new();
 
     builder
@@ -19,7 +23,7 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
         .filter_module("doppelganger_protection", LevelFilter::Info)
         .filter_module("eth1", LevelFilter::Info)
         .filter_module("eth1_api", LevelFilter::Info)
-        .filter_module("eth2_libp2p", LevelFilter::Debug)
+        .filter_module("eth2_libp2p", LevelFilter::Info)
         .filter_module("execution_engine", LevelFilter::Info)
         .filter_module("features", LevelFilter::Info)
         .filter_module("fork_choice_control", LevelFilter::Info)
@@ -62,6 +66,14 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
 
     if always_write_style {
         builder.write_style(WriteStyle::Always);
+    }
+
+    if parse_env {
+        let env = Env::new()
+            .filter("GRANDINE_LOG")
+            .write_style("GRANDINE_LOG_STYLE");
+
+        builder.parse_env(env);
     }
 
     let env = Env::new()

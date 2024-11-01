@@ -444,7 +444,7 @@ fn attestation_batch_triples<'a, P: Preset>(
         .map(|attestation| {
             let triple = match attestation {
                 Attestation::Phase0(attestation) => {
-                    let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
+                    let indexed_attestation = phase0::get_indexed_attestation(state, &attestation)?;
 
                     let mut triple = Triple::default();
 
@@ -458,7 +458,8 @@ fn attestation_batch_triples<'a, P: Preset>(
                     triple
                 }
                 Attestation::Electra(attestation) => {
-                    let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+                    let indexed_attestation =
+                        electra::get_indexed_attestation(state, &attestation)?;
 
                     let mut triple = Triple::default();
 

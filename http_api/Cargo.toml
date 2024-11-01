@@ -28,6 +28,7 @@ http_api_utils = { workspace = true }
 itertools = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }
+mediatype = { workspace = true }
 metrics = { workspace = true }
 mime = { workspace = true }
 operation_pools = { workspace = true }
@@ -64,7 +65,6 @@ database = { workspace = true }
 dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }
 eth1 = { workspace = true }
-eth2_cache_utils = { workspace = true }
 execution_engine = { workspace = true }
 factory = { workspace = true }
 fork_choice_store = { workspace = true }

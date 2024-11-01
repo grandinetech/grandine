@@ -22,10 +22,9 @@ use helper_functions::{
 };
 use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
-use log::{error, warn};
-use primitive_types::H384;
+use log::{debug, error, warn};
 use prometheus_metrics::Metrics;
-use ssz::SszHash as _;
+use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use transition_functions::{
@@ -62,17 +61,16 @@ use crate::{
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
-        BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, DataColumnSidecarAction, 
-        Difference, DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId,
+        BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink,
+        DataColumnSidecarAction, Difference, DifferenceAtLocation, DissolvedDifference,
+        LatestMessage, Location, PartialAttestationAction, PayloadAction, Score, SegmentId,
         UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
-    validations::validate_merge_block,
-    DataColumnSidecarOrigin,
+    validate_merge_block, DataColumnSidecarOrigin, PartialBlockAction,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -1006,6 +1004,24 @@ impl<P: Preset> Store<P> {
                 }
             }
 
+            // > [Modified in EIP7594] Check if blob data is available
+            //
+            // If not, this block MAY be queued and subsequently considered when blob data becomes available
+            if self
+                .chain_config
+                .is_eip7594_fork(accessors::get_current_epoch(&state))
+            {
+                let missing_indices = self.indices_of_missing_data_columns(&parent.block);
+
+                if missing_indices.len() * 2 >= NumberOfColumns::USIZE && self.is_forward_synced() {
+                    return Ok((state, Some(BlockAction::DelayUntilBlobs(block.clone_arc()))));
+                }
+            } else {
+                if !self.indices_of_missing_blobs(block).is_empty() {
+                    return Ok((state, Some(BlockAction::DelayUntilBlobs(block.clone_arc()))));
+                }
+            }
+
             // > Check the block is valid and compute the post-state
             combined::custom_state_transition(
                 &self.chain_config,
@@ -1060,25 +1076,34 @@ impl<P: Preset> Store<P> {
             return Some(BlockAction::Ignore(false));
         }
 
-        // > [Modified in EIP7594] Check if blob data is available
-        //
-        // If not, this block MAY be queued and subsequently considered when blob data becomes available
-        if self
-            .chain_config
-            .is_eip7594_fork(accessors::get_current_epoch(&state))
-        {
-            let missing_indices = self.indices_of_missing_data_columns(&parent.block);
+        None
+    }
 
-            if missing_indices.len() * 2 >= NumberOfColumns::USIZE && self.is_forward_synced() {
-                return Some(BlockAction::DelayUntilBlobs(block));
-            }
-        } else {
-            if !self.indices_of_missing_blobs(&block).is_empty() {
-                return Some(BlockAction::DelayUntilBlobs(block));
-            }
+    pub fn validate_block_for_gossip(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        state_transition_for_gossip: impl FnOnce(&ChainLink<P>) -> Result<Option<BlockAction<P>>>,
+    ) -> Result<Option<BlockAction<P>>> {
+        let block_root = block.message().hash_tree_root();
+        let block_action = self.validate_gossip_rules(block, block_root);
+
+        if let Some(action) = block_action {
+            return Ok(Some(action));
         }
 
-        None
+        // > Parent block must be known
+        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+            return Ok(Some(BlockAction::DelayUntilParent(block.clone_arc())));
+        };
+
+        // > Check the block is valid and compute the post-state
+        let block_action = state_transition_for_gossip(parent)?;
+
+        if let Some(action) = block_action {
+            return Ok(Some(action));
+        }
+
+        Ok(None)
     }
 
     pub fn validate_block_with_custom_state_transition(
@@ -1096,9 +1121,18 @@ impl<P: Preset> Store<P> {
             return Ok(action);
         }
 
+        // > Parent block must be known
+        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+            return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
+        };
+
         // > Check the block is valid and compute the post-state
         let (state, block_action) = state_transition(block_root, parent)?;
-        
+
+        if let Some(action) = block_action {
+            return Ok(action);
+        }
+
         let attester_slashing_results = block
             .message()
             .body()
@@ -1853,6 +1887,7 @@ impl<P: Preset> Store<P> {
     pub fn validate_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         current_slot: Slot,
         mut verifier: impl Verifier + Send,
@@ -1869,9 +1904,8 @@ impl<P: Preset> Store<P> {
         let block_header = data_column_sidecar.signed_block_header.message;
 
         let mut state = self
-            .preprocessed_states
-            .before_or_at_slot(block_header.parent_root, block_header.slot)
-            .cloned()
+            .state_cache
+            .before_or_at_slot(self, block_header.parent_root, block_header.slot)
             .unwrap_or_else(|| {
                 self.chain_link(block_header.parent_root)
                     .or_else(|| self.chain_link_before_or_at(block_header.slot))
@@ -1889,7 +1923,10 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
         if let Some(subnet_id) = origin.subnet_id() {
-            let expected = misc::compute_subnet_for_data_column_sidecar(data_column_sidecar.index);
+            let expected = misc::compute_subnet_for_data_column_sidecar(
+                data_column_sidecar.index,
+                &self.chain_config,
+            );
 
             ensure!(
                 subnet_id == expected,
@@ -1994,7 +2031,8 @@ impl<P: Preset> Store<P> {
             block_header.slot,
             block_header.proposer_index,
             data_column_sidecar.index,
-        )) {
+        )) && !block_seen
+        {
             return Ok(DataColumnSidecarAction::Ignore);
         }
 
@@ -2782,7 +2820,7 @@ impl<P: Preset> Store<P> {
         for (segment_id, group) in &self
             .propagate_and_dissolve_differences(differences)?
             .into_iter()
-            .chunk_by(|dissolved_difference| dissolved_difference.segment_id)
+            .group_by(|dissolved_difference| dissolved_difference.segment_id)
         {
             let segment = &mut self.unfinalized[&segment_id];
 
@@ -3248,7 +3286,11 @@ impl<P: Preset> Store<P> {
             return vec![];
         };
 
-        if self.sample_columns.is_empty() || body.blob_kzg_commitments().is_empty() {
+        if body.blob_kzg_commitments().is_empty()
+            || !self
+                .chain_config
+                .is_eip7594_fork(misc::compute_epoch_at_slot::<P>(block.slot()))
+        {
             return vec![];
         }
 
@@ -3329,10 +3371,8 @@ impl<P: Preset> Store<P> {
         (0..NumberOfColumns::U64)
             .into_iter()
             .filter_map(|index| {
-                self.data_column_cache.get(DataColumnIdentifier {
-                    block_root,
-                    index 
-                })
+                self.data_column_cache
+                    .get(DataColumnIdentifier { block_root, index })
             })
             .collect()
     }
@@ -3358,9 +3398,9 @@ impl<P: Preset> Store<P> {
         );
         metrics.set_collection_length(
             module_path!(),
-            &type_name, 
-            "data_column_store", 
-            self.data_column_cache.size()
+            &type_name,
+            "data_column_store",
+            self.data_column_cache.size(),
         );
         metrics.set_collection_length(
             module_path!(),

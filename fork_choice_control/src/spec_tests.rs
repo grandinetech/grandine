@@ -4,6 +4,7 @@ use clock::Tick;
 use duplicate::duplicate_item;
 use execution_engine::PayloadStatusWithBlockHash;
 use helper_functions::misc;
+use itertools::izip;
 use serde::Deserialize;
 use spec_test_utils::Case;
 use ssz::ContiguousList;
@@ -13,14 +14,17 @@ use test_generator::test_resources;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
     config::Config,
-    deneb::primitives::{Blob, KzgProof},
+    deneb::{
+        containers::BlobSidecar,
+        primitives::{Blob, KzgProof},
+    },
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
         primitives::{Slot, UnixSeconds, H256},
     },
     preset::{Mainnet, Minimal, Preset},
-    traits::{BeaconState as _, PostDenebBeaconBlockBody, SignedBeaconBlock as _},
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
 use crate::helpers::Context;
@@ -174,34 +178,49 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 proofs,
                 valid,
             } => {
-                type BlobBundle<P> = ContiguousList<Blob<P>, <P as Preset>::MaxBlobsPerBlock>;
+                let mut expected_blob_count = 0;
 
                 let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
 
-                let blobs = blobs
-                    .map(|path| case.ssz_default::<BlobBundle<P>>(path))
-                    .into_iter()
-                    .flatten();
+                if let Some(body) = block.message().body().post_deneb() {
+                    type BlobBundle<P> = ContiguousList<Blob<P>, <P as Preset>::MaxBlobsPerBlock>;
 
-                let proofs = proofs.into_iter().flatten();
+                    let blobs = blobs.map(|path| case.ssz_default::<BlobBundle<P>>(path));
+                    let signed_block_header = block.to_header();
 
-                // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
-                //                      Consider mocking `retrieve_blobs_and_proofs`
-                //                      from `consensus-specs` using something like
-                //                      `TestExecutionEngine`.
-                let blob_sidecars = misc::construct_blob_sidecars(&block, blobs, proofs)
-                    .expect("blob sidecars should be constructed successfully");
+                    for (index, blob, kzg_proof, kzg_commitment) in izip!(
+                        0..,
+                        blobs.unwrap_or_default(),
+                        proofs.unwrap_or_default(),
+                        body.blob_kzg_commitments().iter().copied(),
+                    ) {
+                        // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
+                        //                      Consider mocking `retrieve_blobs_and_proofs`
+                        //                      from `consensus-specs` using something like
+                        //                      `TestExecutionEngine`.
+                        let kzg_commitment_inclusion_proof = if let Some(post_electra_body) =
+                            block.message().body().post_electra()
+                        {
+                            misc::electra_kzg_commitment_inclusion_proof(post_electra_body, index)
+                                .expect("inclusion proof should be constructed successfully")
+                        } else {
+                            misc::deneb_kzg_commitment_inclusion_proof(body, index)
+                                .expect("inclusion proof should be constructed successfully")
+                        };
 
-                let expected_blob_count = block
-                    .message()
-                    .body()
-                    .post_deneb()
-                    .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
-                    .map(|contiguous_list| contiguous_list.len())
-                    .unwrap_or_default();
+                        let blob_sidecar = BlobSidecar {
+                            index,
+                            blob,
+                            kzg_commitment,
+                            kzg_proof,
+                            signed_block_header,
+                            kzg_commitment_inclusion_proof,
+                        };
 
-                for blob_sidecar in blob_sidecars {
-                    context.on_blob_sidecar(blob_sidecar);
+                        context.on_blob_sidecar(blob_sidecar);
+                    }
+
+                    expected_blob_count = body.blob_kzg_commitments().len();
                 }
 
                 if !valid && expected_blob_count > 0 {

@@ -1433,7 +1433,7 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     let grouped_by_target = attestations
         .into_iter()
         .enumerate()
-        .chunk_by(|(_, attestation)| attestation.data().target);
+        .group_by(|(_, attestation)| attestation.data().target);
 
     let (targets, target_attestations): (Vec<_>, Vec<_>) = grouped_by_target
         .into_iter()
@@ -2703,10 +2703,18 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
 
     match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => {
-            publish_block_to_network_with_data_column_sidecars(block, data_column_sidecars, api_to_p2p_tx);
+            publish_block_to_network_with_data_column_sidecars(
+                block,
+                data_column_sidecars,
+                api_to_p2p_tx,
+            );
         }
         Ok(Some(ValidationOutcome::Ignore(true))) => {
-            publish_block_to_network_with_data_column_sidecars(block, data_column_sidecars, api_to_p2p_tx);
+            publish_block_to_network_with_data_column_sidecars(
+                block,
+                data_column_sidecars,
+                api_to_p2p_tx,
+            );
             return Ok(Some(StatusCode::ACCEPTED));
         }
         Ok(Some(ValidationOutcome::Ignore(false))) => {
@@ -2743,7 +2751,7 @@ fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
     data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
 ) {
-    ApiToP2p::PublishDataColumnSidecars(data_column_sidecars.clone_arc()).send(api_to_p2p_tx);
+    ApiToP2p::PublishDataColumnSidecars(data_column_sidecars.to_vec()).send(api_to_p2p_tx);
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
@@ -2775,7 +2783,7 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => StatusCode::OK,
-        Ok(Some(ValidationOutcome::Ignore)) => {
+        Ok(Some(ValidationOutcome::Ignore(_))) => {
             // We log only the root with `info!` because this is not an exceptional case.
             // Vouch submits blocks it constructs to all beacon nodes it is connected to.
             // The blocks often reach our application through gossip faster than through the API.
@@ -2912,18 +2920,22 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
             return Ok(status_code);
         }
     }
-    
+
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
 
     controller.on_api_block(block.clone_arc(), sender);
 
     let status_code = match receiver.next().await.transpose() {
-        Ok(Some(accept_or_ignore_status)) => {            
-           match accept_or_ignore_status {
+        Ok(Some(accept_or_ignore_status)) => {
+            match accept_or_ignore_status {
                 ValidationOutcome::Accept => match broadcast_validation {
                     BroadcastValidation::Gossip => StatusCode::OK,
                     BroadcastValidation::Consensus => {
-                        publish_block_to_network_with_data_column_sidecars(block, &data_column_sidecars, &api_to_p2p_tx);
+                        publish_block_to_network_with_data_column_sidecars(
+                            block,
+                            &data_column_sidecars,
+                            &api_to_p2p_tx,
+                        );
                         StatusCode::OK
                     }
                     BroadcastValidation::ConsensusAndEquivocation => {
@@ -2931,10 +2943,14 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                             return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
                         }
 
-                        publish_block_to_network_with_data_column_sidecars(block, &data_column_sidecars, &api_to_p2p_tx);
+                        publish_block_to_network_with_data_column_sidecars(
+                            block,
+                            &data_column_sidecars,
+                            &api_to_p2p_tx,
+                        );
                         StatusCode::OK
                     }
-                }
+                },
                 ValidationOutcome::Ignore(publishable) => {
                     // We log only the root with `info!` because this is not an exceptional case.
                     // Vouch submits blocks it constructs to all beacon nodes it is connected to.
@@ -2948,7 +2964,11 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                     if broadcast_validation == BroadcastValidation::Gossip {
                         StatusCode::ACCEPTED
                     } else if publishable {
-                        publish_block_to_network_with_data_column_sidecars(block, &data_column_sidecars, &api_to_p2p_tx);
+                        publish_block_to_network_with_data_column_sidecars(
+                            block,
+                            &data_column_sidecars,
+                            &api_to_p2p_tx,
+                        );
                         StatusCode::ACCEPTED
                     } else {
                         return Err(Error::UnableToPublishBlock);
@@ -2963,7 +2983,6 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
             } else {
                 return Err(Error::UnableToPublishBlock);
             }
-
         }
         Err(error) => {
             warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
@@ -3077,7 +3096,9 @@ async fn submit_data_column_sidecars<P: Preset, W: Wait>(
 ) -> Result<(), Error> {
     let results: Result<Vec<_>> = data_column_sidecars
         .iter()
-        .map(|data_column_sidecar| submit_data_column_sidecar(controller.clone_arc(), data_column_sidecar.clone_arc()))
+        .map(|data_column_sidecar| {
+            submit_data_column_sidecar(controller.clone_arc(), data_column_sidecar.clone_arc())
+        })
         .collect::<FuturesUnordered<_>>()
         .collect::<Vec<_>>()
         .await
@@ -3098,7 +3119,6 @@ async fn submit_data_column_sidecars<P: Preset, W: Wait>(
 
     Ok(())
 }
-
 
 fn send_attester_slashing_event<P: Preset>(
     attester_slashing: AttesterSlashing<P>,

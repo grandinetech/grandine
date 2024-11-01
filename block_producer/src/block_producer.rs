@@ -853,7 +853,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .filter_map(|attestation| {
                             operation_pools::convert_to_electra_attestation(attestation).ok()
                         })
-                        .chunk_by(|attestation| attestation.data);
+                        .group_by(|attestation| attestation.data);
 
                     let attestations = attestations
                         .into_iter()

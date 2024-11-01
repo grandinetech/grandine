@@ -80,8 +80,8 @@ use crate::{
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask, PreprocessStateTask,
-        ReconstructDataColumnSidecarsTask,
+        DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        PreprocessStateTask, ReconstructDataColumnSidecarsTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -256,9 +256,16 @@ where
                 MutatorMessage::DataColumnSidecar {
                     wait_group,
                     result,
+                    block_seen,
                     origin,
                     submission_time,
-                } => self.handle_data_column_sidecar(wait_group, result, origin, submission_time),
+                } => self.handle_data_column_sidecar(
+                    wait_group,
+                    result,
+                    block_seen,
+                    origin,
+                    submission_time,
+                ),
                 MutatorMessage::FinishedPersistingBlobSidecars {
                     wait_group,
                     persisted_blob_ids,
@@ -274,8 +281,8 @@ where
                         persisted_data_column_ids,
                     );
                 }
-                MutatorMessage::PreprocessedBeaconState { block_root, state } => {
-                    self.handle_preprocessed_beacon_state(block_root, &state);
+                MutatorMessage::PreprocessedBeaconState { state } => {
+                    self.prepare_execution_payload_for_next_slot(&state);
                 }
                 MutatorMessage::NotifiedForkChoiceUpdate {
                     wait_group,
@@ -567,7 +574,7 @@ where
                             {
                                 if !self
                                     .store
-                                    .has_reconstructed_data_column_sidecars(block_root)
+                                    .has_reconstructed_data_column_sidecars(parent.block_root)
                                 {
                                     info!(
                                         "reconstructing missing columns: [{}] of {} blobs at slot: {slot}", 
@@ -576,12 +583,11 @@ where
                                     );
                                     self.handle_reconstruct_missing_data_column_sidecars(
                                         &wait_group,
-                                        block,
-                                        available_columns,
+                                        parent.block.clone_arc(),
                                         blob_count,
                                     );
                                 } else {
-                                    debug!("reconstructing already in progress, proceed to retry apply the block: {block_root}");
+                                    debug!("reconstructing in progress, proceed to retry the block: {block_root}");
                                 }
                             }
                         }
@@ -1237,6 +1243,7 @@ where
         &mut self,
         wait_group: W,
         result: Result<DataColumnSidecarAction<P>>,
+        block_seen: bool,
         origin: DataColumnSidecarOrigin,
         submission_time: Instant,
     ) {
@@ -1258,6 +1265,7 @@ where
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
+                    block_seen,
                     origin,
                     submission_time,
                 };
@@ -1279,6 +1287,7 @@ where
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
+                    block_seen,
                     origin,
                     submission_time,
                 };
@@ -1306,7 +1315,6 @@ where
         &mut self,
         wait_group: &W,
         block: Arc<SignedBeaconBlock<P>>,
-        available_data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
         blob_count: usize,
     ) {
         let block_root = block.message().hash_tree_root();
@@ -1318,7 +1326,6 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group: wait_group.clone(),
             block,
-            available_data_column_sidecars,
             blob_count,
             metrics: self.metrics.clone(),
         });
@@ -1423,70 +1430,81 @@ where
         block: Arc<SignedBeaconBlock<P>>,
         full_matrix: Vec<MatrixEntry>,
     ) -> Result<()> {
-        // the node MUST expose the new column as if it had received it over the network.
-        // If the node is subscribed to the subnet corresponding to the column,
-        // it MUST send the reconstructed DataColumnSidecar to its topic mesh neighbors.
-        // If instead the node is not subscribed to the corresponding subnet,
-        // it SHOULD still expose the availability of the DataColumnSidecar as part of the gossip emission process.
-        // See <https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/eip7594/das-core.md#reconstruction-and-cross-seeding>
-        //
-        // first, convert the matrix into full data column sidecars
-        let mut cells_and_kzg_proofs: Vec<(
-            [Cell; NumberOfColumns::USIZE],
-            [KzgProof; NumberOfColumns::USIZE],
-        )> = vec![];
-        for entry in full_matrix.into_iter() {
-            let MatrixEntry {
-                cell,
-                kzg_proof,
-                column_index,
-                row_index,
-            } = entry;
-            cells_and_kzg_proofs[row_index as usize].0[column_index as usize] = cell;
-            cells_and_kzg_proofs[row_index as usize].1[column_index as usize] = kzg_proof;
-        }
-        let data_column_sidecars =
-            eip_7594::get_data_column_sidecars(&block, cells_and_kzg_proofs)?;
+        if let Some(post_deneb_body) = block.message().body().post_deneb() {
+            let blob_count = post_deneb_body.blob_kzg_commitments().len();
 
-        // then, accept/store those missing data column sidecars
-        let missing_column_indices = self.store.indices_of_missing_data_columns(&block);
-        let columns_to_store = data_column_sidecars
-            .into_iter()
-            .filter_map(|sidecar| {
-                if missing_column_indices.contains(&sidecar.index) {
-                    Some(Arc::new(sidecar))
-                } else {
-                    None
+            // the node MUST expose the new column as if it had received it over the network.
+            // If the node is subscribed to the subnet corresponding to the column,
+            // it MUST send the reconstructed DataColumnSidecar to its topic mesh neighbors.
+            // If instead the node is not subscribed to the corresponding subnet,
+            // it SHOULD still expose the availability of the DataColumnSidecar as part of the gossip emission process.
+            // See <https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/eip7594/das-core.md#reconstruction-and-cross-seeding>
+            //
+            // first, convert the matrix into full data column sidecars
+            let default_cell = Cell::default();
+            let mut cells_and_kzg_proofs: Vec<(
+                [Cell; NumberOfColumns::USIZE],
+                [KzgProof; NumberOfColumns::USIZE],
+            )> = vec![
+                (
+                    core::array::from_fn(|_| default_cell.clone()),
+                    [KzgProof::repeat_byte(u8::MAX); NumberOfColumns::USIZE],
+                );
+                blob_count
+            ];
+            for entry in full_matrix {
+                let MatrixEntry {
+                    cell,
+                    kzg_proof,
+                    column_index,
+                    row_index,
+                } = entry;
+
+                cells_and_kzg_proofs[row_index as usize].0[column_index as usize] = cell;
+                cells_and_kzg_proofs[row_index as usize].1[column_index as usize] = kzg_proof;
+            }
+
+            let data_column_sidecars =
+                eip_7594::get_data_column_sidecars(&block, cells_and_kzg_proofs)?;
+
+            // then, accept/store those missing data column sidecars
+            let missing_column_indices = self.store.indices_of_missing_data_columns(&block);
+            let columns_to_store = data_column_sidecars
+                .into_iter()
+                .filter_map(|sidecar| {
+                    if missing_column_indices.contains(&sidecar.index) {
+                        Some(Arc::new(sidecar))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if !columns_to_store.is_empty() {
+                info!(
+                    "storing reconstructed data column sidecars (indexes: [{}], block: {}, slot: {})",
+                    columns_to_store.iter().map(|c| c.index).join(", "),
+                    block.message().hash_tree_root(),
+                    block.message().slot(),
+                );
+
+                for data_column_sidecar in columns_to_store.iter() {
+                    debug!(
+                        "storing reconstructed data column sidecar (index: {}, column: {data_column_sidecar:?}",
+                        data_column_sidecar.index,
+                    );
+                    self.accept_data_column_sidecar(&wait_group, data_column_sidecar.clone_arc());
                 }
-            })
-            .collect::<Vec<_>>();
 
-        info!(
-            "storing reconstructed data column sidecars (indexes: [{}], block: {}, slot: {})",
-            columns_to_store.iter().map(|c| c.index).join(", "),
-            block.message().hash_tree_root(),
-            block.message().slot(),
-        );
-        for data_column_sidecar in columns_to_store.iter() {
-            debug!(
-                "storing reconstructed data column sidecar (index: {}, column: {data_column_sidecar:?}",
-                data_column_sidecar.index,
-            );
-            self.accept_data_column_sidecar(&wait_group, data_column_sidecar.clone_arc());
+                // after that, publish/propagate those columns on the respective subnets
+                P2pMessage::DataColumnsReconstructed(columns_to_store, block.message().slot())
+                    .send(&self.p2p_tx);
+            } else {
+                warn!("no missing columns, all are available after reconstruction");
+            }
         }
 
-        // after that, publish/propagate those columns on the respective subnets
-        P2pMessage::DataColumnsReconstructed(columns_to_store, block.message().slot())
-            .send(&self.p2p_tx);
         Ok(())
-    }
-
-    fn handle_preprocessed_beacon_state(&mut self, block_root: H256, state: &Arc<BeaconState<P>>) {
-        self.store_mut()
-            .insert_preprocessed_state(block_root, state.clone_arc());
-        self.update_store_snapshot();
-
-        self.prepare_execution_payload_for_next_slot(state);
     }
 
     fn handle_notified_forkchoice_update_result(
@@ -1641,12 +1659,15 @@ where
     }
 
     fn handle_store_sample_columns(&mut self, sample_columns: HashSet<ColumnIndex>) {
+        let mut sorted_items: Vec<_> = sample_columns.into_iter().collect();
+        sorted_items.sort();
+
         info!(
             "storing index of column sidecars to sample: [{}] for further data availability check",
-            sample_columns.iter().join(", "),
+            sorted_items.iter().join(", "),
         );
 
-        self.store_mut().store_sample_columns(sample_columns.into());
+        self.store_mut().store_sample_columns(sorted_items.into());
     }
 
     #[allow(clippy::cognitive_complexity)]
@@ -2415,6 +2436,7 @@ where
 
         let PendingDataColumnSidecar {
             data_column_sidecar,
+            block_seen,
             origin,
             submission_time,
         } = pending_data_column_sidecar;
@@ -2424,6 +2446,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             data_column_sidecar,
+            block_seen,
             origin,
             submission_time,
             metrics: self.metrics.clone(),
@@ -2696,7 +2719,7 @@ where
                         debug!("pruned old blob sidecards from storage up to slot {up_to_slot}");
                     }
                     Err(error) => {
-                        error!("pruning old blob sidecards from storage failed: {error:?}")
+                        error!("prutrack_collection_metricsning old blob sidecards from storage failed: {error:?}")
                     }
                 }
             })?;

@@ -63,7 +63,7 @@ pub struct Metrics {
     pub data_column_sidecar_kzg_verification_single: Histogram, // TODO?
     pub data_column_sidecar_kzg_verification_batch: Histogram,
     pub beacon_custody_columns_count_total: IntCounter, // TODO
-    
+
     // Extra Network stats
     gossip_block_slot_start_delay_time: Histogram,
 
@@ -191,7 +191,7 @@ pub struct Metrics {
     pub jemalloc_bytes_retained: IntGauge,
 
     // Tick delay metrics
-    tick_delay_times: GaugeVec, 
+    tick_delay_times: GaugeVec,
 }
 
 impl Metrics {
@@ -799,7 +799,7 @@ impl Metrics {
             tick_delay_times: GaugeVec::new(
                 opts!("TICK_DELAY_TIMES", "Tick delay times"),
                 &["tick"],
-            )?, 
+            )?,
         })
     }
 
@@ -829,20 +829,19 @@ impl Metrics {
             self.received_aggregated_attestation_subsets.clone(),
         ))?;
         default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
-        default_registry.register(Box::new(self.data_column_sidecars_submitted_for_processing.clone()))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecars_submitted_for_processing.clone(),
+        ))?;
         default_registry.register(Box::new(self.verified_gossip_data_column_sidecar.clone()))?;
         default_registry.register(Box::new(
             self.data_column_sidecar_verification_times.clone(),
         ))?;
-        default_registry.register(Box::new(self.reconstructed_columns.clone(),))?;
+        default_registry.register(Box::new(self.reconstructed_columns.clone()))?;
+        default_registry.register(Box::new(self.columns_reconstruction_time.clone()))?;
+        default_registry.register(Box::new(self.data_column_sidecar_computation.clone()))?;
         default_registry.register(Box::new(
-            self.columns_reconstruction_time.clone(),
-        ))?;
-        default_registry.register(Box::new(
-            self.data_column_sidecar_computation.clone(),
-        ))?;
-        default_registry.register(Box::new(
-            self.data_column_sidecar_inclusion_proof_verification.clone(),
+            self.data_column_sidecar_inclusion_proof_verification
+                .clone(),
         ))?;
         default_registry.register(Box::new(
             self.data_column_sidecar_kzg_verification_single.clone(),
@@ -850,9 +849,7 @@ impl Metrics {
         default_registry.register(Box::new(
             self.data_column_sidecar_kzg_verification_batch.clone(),
         ))?;
-        default_registry.register(Box::new(
-            self.beacon_custody_columns_count_total.clone(),
-        ))?;
+        default_registry.register(Box::new(self.beacon_custody_columns_count_total.clone()))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
@@ -1107,7 +1104,7 @@ impl Metrics {
             }
         }
     }
-    
+
     // Extra Network stats
     pub fn observe_block_duration_to_slot(&self, block_slot_timestamp: UnixSeconds) {
         match helpers::duration_from_now_to(block_slot_timestamp) {

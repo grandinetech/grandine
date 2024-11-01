@@ -830,21 +830,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        // Check before broadcasting to avoid slashing. See:
-        // <https://github.com/ethereum/consensus-specs/blob/2f99d0b44460a8e0f2404dc53c7a1d3cd9d9a329/specs/phase0/validator.md#proposer-slashing>
-        let control_flow = self
-            .validate_and_store_block(
-                &beacon_block,
-                &slot_head.beacon_state,
-                public_key.to_bytes(),
-                slot_head.current_epoch(),
-            )
-            .await?;
-
-        if control_flow.is_break() {
-            return Ok(());
-        }
-
         info!(
             "validator {} proposing beacon block with root {:?} in slot {}",
             proposer_index,
@@ -989,7 +974,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             } = own_attestation;
 
-            let committee_index = misc::committee_index(attestation);
+            let committee_index = misc::committee_index(&attestation);
 
             debug!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
@@ -1281,53 +1266,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 slot_head.beacon_state.clone_arc(),
             );
         }
-    }
-
-    async fn validate_and_store_block(
-        &self,
-        block: &SignedBeaconBlock<P>,
-        state: &BeaconState<P>,
-        pubkey: PublicKeyBytes,
-        current_epoch: Epoch,
-    ) -> Result<ControlFlow<()>> {
-        let proposal = BlockProposal {
-            slot: block.message().slot(),
-            signing_root: Some(block.message().signing_root(&self.chain_config, state)),
-        };
-
-        debug!("validating beacon block proposal: {block:?}");
-
-        let validation_outcome = {
-            // Tracking slashing protector metrics could be moved to slashing protector methods
-            // but here we additionally collect locking times
-            let _timer = self.metrics.as_ref().map(|metrics| {
-                metrics
-                    .validator_proposal_slashing_protector_times
-                    .start_timer()
-            });
-
-            self.slashing_protector
-                .lock()
-                .await
-                .validate_and_store_proposal(proposal, pubkey, current_epoch)?
-        };
-
-        let control_flow = match validation_outcome {
-            SlashingValidationOutcome::Accept => ControlFlow::Continue(()),
-            SlashingValidationOutcome::Ignore => {
-                warn!("slashing protector ignored duplicate beacon block: {block:?}");
-                ControlFlow::Break(())
-            }
-            SlashingValidationOutcome::Reject(error) => {
-                warn!(
-                    "slashing protector rejected slashable beacon block \
-                     (error: {error}, block: {block:?})",
-                );
-                ControlFlow::Break(())
-            }
-        };
-
-        Ok(control_flow)
     }
 
     async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) -> Result<()> {

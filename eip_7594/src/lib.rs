@@ -16,12 +16,13 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned;
 use types::{
     combined::SignedBeaconBlock,
+    config::Config,
     deneb::primitives::{Blob, KzgProof},
     eip7594::{
-        BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, MatrixEntry,
-        NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT, SAMPLES_PER_SLOT,
+        BlobCommitmentsInclusionProof, Cell, ColumnIndex, DataColumnSidecar, DataColumnSubnetId,
+        MatrixEntry, NumberOfColumns,
     },
-    phase0::primitives::{NodeId, SubnetId},
+    phase0::primitives::NodeId,
     preset::Preset,
     traits::{PostDenebBeaconBlockBody, PostElectraBeaconBlockBody, SignedBeaconBlock as _},
 };
@@ -84,38 +85,16 @@ pub fn verify_data_column_sidecar<P: Preset>(data_column_sidecar: &DataColumnSid
     } = data_column_sidecar;
 
     // The sidecar index must be within the valid range
-    // ensure!(
-    //     *index < NumberOfColumns::U64,
-    //     VerifyKzgProofsError::SidecarIndexOutOfBounds { index: *index }
-    // );
     if *index >= NumberOfColumns::U64 {
         return false;
     }
 
     // A sidecar for zero blobs is invalid
-    // ensure!(
-    //     kzg_commitments.len() > 0,
-    //     VerifyKzgProofsError::SidecarWithoutCommitments
-    // );
     if kzg_commitments.len() == 0 {
         return false;
     }
 
     // The column length must be equal to the number of commitments/proofs
-    // ensure!(
-    //     column.len() == kzg_commitments.len(),
-    //     VerifyKzgProofsError::SidecarCommitmentsLengthError {
-    //         column_length: column.len(),
-    //         commitments_length: kzg_commitments.len(),
-    //     }
-    // );
-    // ensure!(
-    //     column.len() == kzg_proofs.len(),
-    //     VerifyKzgProofsError::SidecarProofsLengthError {
-    //         column_length: column.len(),
-    //         proofs_length: kzg_proofs.len(),
-    //     }
-    // );
     if column.len() != kzg_commitments.len() || column.len() != kzg_proofs.len() {
         return false;
     }
@@ -128,9 +107,11 @@ pub fn verify_kzg_proofs<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     metrics: &Option<Arc<Metrics>>,
 ) -> Result<bool> {
-    if let Some(metrics) = metrics.as_ref() {
-        let _timer = metrics.data_column_sidecar_verification_times.start_timer();
-    }
+    let _timer = metrics.as_ref().map(|metrics| {
+        metrics
+            .data_column_sidecar_kzg_verification_batch
+            .start_timer()
+    });
 
     let DataColumnSidecar {
         index,
@@ -174,11 +155,11 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     metrics: &Option<Arc<Metrics>>,
 ) -> bool {
-    if let Some(metrics) = metrics.as_ref() {
-        let _timer = metrics
+    let _timer = metrics.as_ref().map(|metrics| {
+        metrics
             .data_column_sidecar_inclusion_proof_verification
-            .start_timer();
-    }
+            .start_timer()
+    });
 
     let DataColumnSidecar {
         kzg_commitments,
@@ -202,8 +183,9 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
 pub fn get_custody_subnets(
     node_id: NodeId,
     custody_subnet_count: u64,
-) -> impl Iterator<Item = SubnetId> {
-    assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
+    config: &Arc<Config>,
+) -> impl Iterator<Item = DataColumnSubnetId> {
+    assert!(custody_subnet_count <= config.data_column_sidecar_subnet_count);
 
     let mut subnet_ids = vec![];
     let mut current_id = node_id;
@@ -222,7 +204,7 @@ pub fn get_custody_subnets(
         ];
 
         let output_prefix_u64 = u64::from_le_bytes(output_prefix);
-        let subnet_id = output_prefix_u64 % DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+        let subnet_id = output_prefix_u64 % config.data_column_sidecar_subnet_count;
 
         if !subnet_ids.contains(&subnet_id) {
             subnet_ids.push(subnet_id);
@@ -235,23 +217,29 @@ pub fn get_custody_subnets(
         current_id = current_id + Uint256::one();
     }
 
-    subnet_ids.into_iter()
+    subnet_ids.into_iter().sorted()
 }
 
 pub fn get_custody_columns(
     node_id: NodeId,
     custody_subnet_count: u64,
+    config: &Arc<Config>,
 ) -> impl Iterator<Item = ColumnIndex> {
-    get_custody_subnets(node_id, custody_subnet_count)
-        .flat_map(|subnet_id| get_columns_index_for_subnet(subnet_id))
+    get_custody_subnets(node_id, custody_subnet_count, &config)
+        .flat_map(|subnet_id| get_columns_index_for_subnet(subnet_id, &config))
         .sorted()
 }
 
-fn get_columns_index_for_subnet(subnet_id: SubnetId) -> impl Iterator<Item = ColumnIndex> {
-    let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+fn get_columns_index_for_subnet(
+    subnet_id: DataColumnSubnetId,
+    config: &Arc<Config>,
+) -> impl Iterator<Item = ColumnIndex> {
+    let data_column_sidecar_subnet_count = config.data_column_sidecar_subnet_count();
+    let columns_per_subnet = NumberOfColumns::U64 / data_column_sidecar_subnet_count;
 
     (0..columns_per_subnet)
-        .map(move |column_index| (DATA_COLUMN_SIDECAR_SUBNET_COUNT * column_index + subnet_id))
+        .map(move |column_index| (data_column_sidecar_subnet_count * column_index + subnet_id))
+        .sorted()
 }
 
 pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
@@ -287,9 +275,9 @@ pub fn compute_matrix(
     blobs: Vec<CKzgBlob>,
     metrics: &Option<Arc<Metrics>>,
 ) -> Result<Vec<MatrixEntry>> {
-    if let Some(metrics) = metrics.as_ref() {
-        let _timer = metrics.data_column_sidecar_computation.start_timer();
-    }
+    let _timer = metrics
+        .as_ref()
+        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
     let kzg_settings = settings();
 
@@ -319,9 +307,9 @@ pub fn recover_matrix(
     blob_count: usize,
     metrics: &Option<Arc<Metrics>>,
 ) -> Result<Vec<MatrixEntry>> {
-    if let Some(metrics) = metrics.as_ref() {
-        let _timer = metrics.columns_reconstruction_time.start_timer();
-    }
+    let _timer = metrics
+        .as_ref()
+        .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
     let mut matrix = vec![];
     for blob_index in 0..blob_count {
@@ -407,9 +395,10 @@ pub fn get_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: Vec<([Cell; CELLS_PER_EXT_BLOB], [KzgProof; CELLS_PER_EXT_BLOB])>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
+    let signed_block_header = signed_block.to_header();
+
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
     if let Some(post_deneb_beacon_block_body) = signed_block.message().body().post_deneb() {
-        let signed_block_header = signed_block.to_header();
         let kzg_commitments = post_deneb_beacon_block_body.blob_kzg_commitments();
 
         if kzg_commitments.is_empty() {
@@ -424,8 +413,15 @@ pub fn get_data_column_sidecars<P: Preset>(
                 commitments_length: kzg_commitments.len(),
             }
         );
-        let kzg_commitments_inclusion_proof =
-            kzg_commitment_inclusion_proof(post_deneb_beacon_block_body);
+
+        let kzg_commitments_inclusion_proof = signed_block
+            .message()
+            .body()
+            .post_electra()
+            .map(|post_electra_beacon_block_body| {
+                electra_kzg_commitment_inclusion_proof(post_electra_beacon_block_body)
+            })
+            .unwrap_or_else(|| kzg_commitment_inclusion_proof(post_deneb_beacon_block_body));
 
         for column_index in 0..NumberOfColumns::U64 {
             let column_cells: Vec<Cell> = (0..blob_count)
@@ -454,7 +450,7 @@ pub fn get_data_column_sidecars<P: Preset>(
 }
 
 fn kzg_commitment_inclusion_proof<P: Preset>(
-    body: &(impl PostDenebBeaconBlockBody<P> + PostElectraBeaconBlockBody<P> + ?Sized),
+    body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
 ) -> BlobCommitmentsInclusionProof {
     let mut proof = BlobCommitmentsInclusionProof::default();
 
@@ -476,10 +472,44 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
             hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
         ),
         hashing::hash_256_256(
+            hashing::hash_256_256(body.attester_slashings_root(), body.attestations_root()),
             hashing::hash_256_256(
-                body.attester_slashings().hash_tree_root(),
-                body.attestations().hash_tree_root(),
+                body.deposits().hash_tree_root(),
+                body.voluntary_exits().hash_tree_root(),
             ),
+        ),
+    );
+
+    proof
+}
+
+fn electra_kzg_commitment_inclusion_proof<P: Preset>(
+    body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
+) -> BlobCommitmentsInclusionProof {
+    let mut proof = BlobCommitmentsInclusionProof::default();
+
+    proof[0] = body.bls_to_execution_changes().hash_tree_root();
+
+    proof[1] = hashing::hash_256_256(
+        body.sync_aggregate().hash_tree_root(),
+        body.execution_payload().hash_tree_root(),
+    );
+
+    proof[2] = hashing::hash_256_256(
+        hashing::hash_256_256(body.execution_requests().hash_tree_root(), ZERO_HASHES[0]),
+        ZERO_HASHES[1],
+    );
+
+    proof[3] = hashing::hash_256_256(
+        hashing::hash_256_256(
+            hashing::hash_256_256(
+                body.randao_reveal().hash_tree_root(),
+                body.eth1_data().hash_tree_root(),
+            ),
+            hashing::hash_256_256(body.graffiti(), body.proposer_slashings().hash_tree_root()),
+        ),
+        hashing::hash_256_256(
+            hashing::hash_256_256(body.attester_slashings_root(), body.attestations_root()),
             hashing::hash_256_256(
                 body.deposits().hash_tree_root(),
                 body.voluntary_exits().hash_tree_root(),
@@ -496,7 +526,7 @@ fn kzg_commitment_inclusion_proof<P: Preset>(
  * This helper demonstrates how to calculate the number of columns to query per slot when
  * allowing given number of failures, assuming uniform random selection without replacement.
 */
-pub fn get_extended_sample_count(allowed_failures: u64) -> Result<u64> {
+pub fn get_extended_sample_count(allowed_failures: u64, config: &Config) -> Result<u64> {
     // check that `allowed_failures` within the accepted range [0 -> NUMBER_OF_COLUMNS // 2]
     // missing chunks for more than a half is the worst case
     let worst_case_missing = NumberOfColumns::U64 / 2 + 1;
@@ -525,11 +555,11 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> Result<u64> {
         0,
         NumberOfColumns::U64,
         worst_case_missing,
-        SAMPLES_PER_SLOT,
+        config.samples_per_slot(),
     );
 
     // number of unique column IDs
-    let mut sample_count = SAMPLES_PER_SLOT;
+    let mut sample_count = config.samples_per_slot();
     while sample_count <= NumberOfColumns::U64 {
         if hypergeom_cdf(
             allowed_failures,
@@ -548,6 +578,8 @@ pub fn get_extended_sample_count(allowed_failures: u64) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use duplicate::duplicate_item;
     use helper_functions::predicates::{index_at_commitment_depth, is_valid_merkle_branch};
     use serde::Deserialize;
@@ -556,6 +588,7 @@ mod tests {
     use test_generator::test_resources;
     use typenum::Unsigned as _;
     use types::{
+        config::Config,
         deneb::containers::BeaconBlockBody as DenebBeaconBlockBody,
         phase0::primitives::NodeId,
         preset::{Mainnet, Minimal, Preset},
@@ -590,8 +623,9 @@ mod tests {
             result,
         } = case.yaml::<Meta>("meta");
 
+        let config = Arc::new(Config::default());
         assert_eq!(
-            get_custody_columns(node_id, custody_subnet_count).collect::<Vec<_>>(),
+            get_custody_columns(node_id, custody_subnet_count, &config).collect::<Vec<_>>(),
             result
         );
     }
@@ -605,7 +639,7 @@ mod tests {
     }
 
     #[duplicate_item(
-        glob                                                                                              function_name                            preset;
+        glob                                                                                                                   function_name                            preset;
         ["consensus-spec-tests/tests/mainnet/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [kzg_commitment_inclusion_proof_mainnet] [Mainnet];
         ["consensus-spec-tests/tests/minimal/eip7594/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [kzg_commitment_inclusion_proof_minimal] [Minimal];
     )]
