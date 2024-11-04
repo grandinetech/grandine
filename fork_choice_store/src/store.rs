@@ -1275,14 +1275,30 @@ impl<P: Preset> Store<P> {
             },
         );
 
-        let committee = accessors::beacon_committee(&target_state, slot, index)?;
+        let committee = if let Some(committee_bits) = aggregate.committee_bits() {
+            let committee_indices = misc::get_committee_indices::<P>(*committee_bits);
+
+            let mut committees = vec![];
+
+            for committee_index in committee_indices {
+                let committee = accessors::beacon_committee(&target_state, slot, committee_index)?;
+
+                committees.extend(committee);
+            }
+
+            committees.into()
+        } else {
+            accessors::beacon_committee(&target_state, slot, index)?
+                .into_iter()
+                .collect::<Box<[_]>>()
+        };
 
         // > The aggregator's validator index is within the committee
         ensure!(
-            committee.into_iter().contains(&aggregator_index),
+            committee.contains(&aggregator_index),
             Error::AggregatorNotInCommittee {
                 aggregate_and_proof,
-                committee: committee.into_iter().collect(),
+                committee,
             },
         );
 
