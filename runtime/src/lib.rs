@@ -12,8 +12,10 @@ pub use crate::{
     misc::{MetricsConfig, StorageConfig},
     predefined_network::PredefinedNetwork,
     validators::Validators,
+    args::GrandineArgs
 };
 
+mod args;
 mod commands;
 mod consts;
 mod context;

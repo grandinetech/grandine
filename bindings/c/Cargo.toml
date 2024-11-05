@@ -4,10 +4,10 @@ edition = { workspace = true }
 authors = ["Grandine <info@grandine.io>"]
 
 [lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-runtime = { workspace = true, features = ["network-holesky"] }
+runtime = { workspace = true, features = ["network-goerli", "network-mainnet", "network-sepolia", "network-shadow", "network-holesky"] }
 directories = { workspace = true }
 grandine_version = { workspace = true }
 validator = { workspace = true }
@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 reqwest = { workspace = true }
 libc = "0.2.2"
 allocator = { workspace = true }
+clap = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.26.0"

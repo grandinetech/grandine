@@ -4,11 +4,7 @@ use allocator as _;
 use anyhow::Result;
 use clap::{Error as ClapError, Parser as _};
 use log::error;
-use runtime::Error;
-
-use crate::grandine_args::GrandineArgs;
-
-mod grandine_args;
+use runtime::{Error, GrandineArgs};
 
 #[cfg(not(any(feature = "preset-any", test, doc)))]
 compile_error! {

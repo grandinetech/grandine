@@ -19,11 +19,15 @@ clock = { workspace = true }
 database = { workspace = true }
 dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }
+derivative = { workspace = true }
+derive_more = { workspace = true }
 directories = { workspace = true }
 doppelganger_protection = { workspace = true }
 eip_2335 = { workspace = true }
+enum-iterator = { workspace = true }
 eth1 = { workspace = true }
 eth1_api = { workspace = true }
+eth2_libp2p = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
@@ -54,6 +58,7 @@ reqwest = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 signer = { workspace = true }
 slasher = { workspace = true }
 slashing_protection = { workspace = true }
@@ -63,6 +68,7 @@ strum = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tower-http = { workspace = true }
 types = { workspace = true }
 validator = { workspace = true }
 validator_key_cache = { workspace = true }
@@ -85,15 +91,8 @@ preset-minimal = ['preset-any']
 
 network-any = []
 
-network-goerli      = ['network-any', 'preset-mainnet']
-network-mainnet     = ['network-any', 'preset-mainnet']
-network-sepolia     = ['network-any', 'preset-mainnet']
-network-shadow      = ['network-any', 'preset-mainnet']
-network-holesky     = ['network-any', 'preset-mainnet']
-
-default-networks = [
-    'network-mainnet',
-    'network-sepolia',
-    'network-shadow',
-    'network-holesky',
-]
+network-goerli = ['network-any', 'preset-mainnet']
+network-mainnet = ['network-any', 'preset-mainnet']
+network-sepolia = ['network-any', 'preset-mainnet']
+network-shadow = ['network-any', 'preset-mainnet']
+network-holesky = ['network-any', 'preset-mainnet']

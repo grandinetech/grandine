@@ -9,40 +9,9 @@ workspace = true
 [dependencies]
 allocator = { workspace = true }
 anyhow = { workspace = true }
-bls = { workspace = true }
-builder_api = { workspace = true }
-bytesize = { workspace = true }
 clap = { workspace = true }
-derivative = { workspace = true }
-derive_more = { workspace = true }
-directories = { workspace = true }
-enum-iterator = { workspace = true }
-eth1_api = { workspace = true }
-eth2_libp2p = { workspace = true }
-features = { workspace = true }
-fork_choice_control = { workspace = true }
-fork_choice_store = { workspace = true }
-fs-err = { workspace = true }
-grandine_version = { workspace = true }
-http_api = { workspace = true }
-itertools = { workspace = true }
 log = { workspace = true }
-metrics = { workspace = true }
-p2p = { workspace = true }
-prometheus_metrics = { workspace = true }
-reqwest = { workspace = true }
 runtime = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-serde_yaml = { workspace = true }
-signer = { workspace = true }
-slasher = { workspace = true }
-slashing_protection = { workspace = true }
-std_ext = { workspace = true }
-thiserror = { workspace = true }
-tower-http = { workspace = true }
-types = { workspace = true }
-validator = { workspace = true }
 
 [dev-dependencies]
 dirs = { workspace = true }
@@ -50,22 +19,38 @@ tempfile = { workspace = true }
 test-case = { workspace = true }
 
 [features]
-logger-always-write-style = []
+logger-always-write-style = ['runtime/logger-always-write-style']
 
 # `preset-any` and `network-any` should not be passed to Cargo.
 # They only exist to avoid duplicating lists of features.
 preset-any = []
 
-preset-mainnet = ['preset-any']
-preset-minimal = ['preset-any']
+preset-mainnet = ['preset-any', 'runtime/preset-mainnet']
+preset-minimal = ['preset-any', 'runtime/preset-minimal']
 
 network-any = []
 
-network-goerli      = ['network-any', 'preset-mainnet']
-network-mainnet     = ['network-any', 'preset-mainnet']
-network-sepolia     = ['network-any', 'preset-mainnet']
-network-shadow      = ['network-any', 'preset-mainnet']
-network-holesky     = [
+network-goerli = [
+    'network-any', 
+    'preset-mainnet',
+    'runtime/network-goerli'
+]
+network-mainnet = [
+    'network-any', 
+    'preset-mainnet',
+    'runtime/network-mainnet'
+]
+network-sepolia = [
+    'network-any', 
+    'preset-mainnet',
+    'runtime/network-sepolia'
+]
+network-shadow = [
+    'network-any', 
+    'preset-mainnet',
+    'runtime/network-shadow'
+]
+network-holesky = [
     'network-any', 
     'preset-mainnet',
     'runtime/network-holesky'

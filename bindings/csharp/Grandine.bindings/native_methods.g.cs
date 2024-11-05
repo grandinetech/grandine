@@ -17,7 +17,7 @@ namespace Grandine.Native
 
 
         [DllImport(__DllName, EntryPoint = "grandine_run", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern ulong grandine_run();
+        internal static extern ulong grandine_run(ulong argc, byte** argv);
 
 
     }
