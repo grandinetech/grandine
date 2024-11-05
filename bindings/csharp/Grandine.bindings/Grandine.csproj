@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>grandine</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>Grandine</Authors>
+    <Copyright>Grandine, MB (Lithuania)</Copyright>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PackageId>Grandine.Bindings</PackageId>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <IncludeSymbols>true</IncludeSymbols>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/grandinetech/grandine</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="runtimes\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

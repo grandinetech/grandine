@@ -1082,6 +1082,7 @@ dependencies = [
 name = "c_grandine"
 version = "0.0.0"
 dependencies = [
+ "allocator",
  "anyhow",
  "cbindgen",
  "directories",
@@ -1629,6 +1630,24 @@ checksum = "b584a330336237c1eecd3e94266efb216c56ed91225d634cb2991c5f3fd1aeab"
 dependencies = [
  "generic-array",
  "subtle",
+]
+
+[[package]]
+name = "csbindgen"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c26b9831049b947d154bba920e4124053def72447be6fb106a96f483874b482a"
+dependencies = [
+ "regex",
+ "syn 2.0.79",
+]
+
+[[package]]
+name = "csharp_grandine"
+version = "0.0.0"
+dependencies = [
+ "csbindgen",
+ "toml 0.5.11",
 ]
 
 [[package]]

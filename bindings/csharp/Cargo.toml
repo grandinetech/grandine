@@ -1,0 +1,11 @@
+[package]
+name = "csharp_grandine"
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lib]
+path = "_stub.rs"
+
+[build-dependencies]
+csbindgen = "1.9.3"
+toml = "0.5"

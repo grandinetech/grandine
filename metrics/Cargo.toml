@@ -20,7 +20,7 @@ futures = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
-jemalloc-ctl = { workspace = true }
+jemalloc-ctl = { workspace = true, features = ["disable_initial_exec_tls"] }
 log = { workspace = true }
 num_threads = { workspace = true }
 p2p = { workspace = true }

@@ -23,6 +23,12 @@ types = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
 libc = "0.2.2"
+allocator = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.26.0"
+
+[features]
+jemalloc_disable_initial_exec_tls = [
+    "allocator/jemalloc_disable_initial_exec_tls"
+]

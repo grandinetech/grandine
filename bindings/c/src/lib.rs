@@ -14,6 +14,7 @@ use eth1_api::AuthOptions;
 use anyhow::{Result, ensure};
 use thiserror::Error;
 use reqwest::Url;
+use allocator as _;
 
 #[derive(Debug, Error)]
 enum Error {
