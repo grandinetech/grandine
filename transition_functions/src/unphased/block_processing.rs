@@ -23,7 +23,7 @@ use ssz::SszHash as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
-    nonstandard::{AttestationEpoch, GweiVec},
+    nonstandard::{AttestationEpoch, GweiVec, U64Vec},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
@@ -43,16 +43,30 @@ use crate::unphased::Error;
 pub enum CombinedDeposit {
     NewValidator {
         pubkey: CachedPublicKey,
-        withdrawal_credentials: H256,
+        withdrawal_credentials: Vec<H256>,
         amounts: GweiVec,
         signatures: Vec<SignatureBytes>,
+        positions: U64Vec,
     },
     TopUp {
         validator_index: ValidatorIndex,
         withdrawal_credentials: Vec<H256>,
         amounts: GweiVec,
         signatures: Vec<SignatureBytes>,
+        positions: U64Vec,
     },
+}
+
+impl CombinedDeposit {
+    fn positions(&self) -> &[u64] {
+        match self {
+            Self::NewValidator { positions, .. } | Self::TopUp { positions, .. } => positions,
+        }
+    }
+
+    fn first_position(&self) -> Option<u64> {
+        self.positions().first().copied()
+    }
 }
 
 pub fn process_block_header_for_gossip<P: Preset>(
@@ -371,11 +385,12 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     validate_constructed_indexed_attestation(config, state, &indexed_attestation, verifier)
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn validate_deposits<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     deposits: impl IntoIterator<Item = Deposit>,
-) -> Result<impl Iterator<Item = CombinedDeposit>> {
+) -> Result<Vec<CombinedDeposit>> {
     let deposits_by_pubkey = (0..)
         .zip(deposits)
         .into_group_map_by(|(_, deposit)| deposit.data.pubkey)
@@ -430,27 +445,26 @@ pub fn validate_deposits<P: Preset>(
                 )?;
             }
 
-            let (first_position, _) = deposits[0];
-
             if let Some(validator_index) = existing_validator_index {
-                let ((amounts, withdrawal_credentials), signatures) = deposits
+                let (amounts, withdrawal_credentials, signatures, positions) = deposits
                     .into_iter()
-                    .map(|(_, deposit)| {
+                    .map(|(position, deposit)| {
                         (
-                            (deposit.data.amount, deposit.data.withdrawal_credentials),
+                            deposit.data.amount,
+                            deposit.data.withdrawal_credentials,
                             deposit.data.signature,
+                            position,
                         )
                     })
-                    .unzip();
+                    .multiunzip();
 
-                let combined_deposit = CombinedDeposit::TopUp {
+                return Ok(Some(CombinedDeposit::TopUp {
                     validator_index,
                     withdrawal_credentials,
                     amounts,
                     signatures,
-                };
-
-                return Ok(Some((first_position, combined_deposit)));
+                    positions,
+                }));
             }
 
             let mut deposits = deposits.into_iter();
@@ -470,38 +484,47 @@ pub fn validate_deposits<P: Preset>(
                 })
             };
 
-            Ok(first_valid.map(|(position, deposit)| {
+            Ok(first_valid.map(|(first_position, deposit)| {
                 let DepositData {
                     pubkey,
-                    withdrawal_credentials,
+                    withdrawal_credentials: first_withdrawal_credentials,
                     amount: first_amount,
                     signature: first_signature,
                 } = deposit.data;
 
-                let (amounts, signatures) = core::iter::once((first_amount, first_signature))
-                    .chain(
-                        deposits.map(|(_, deposit)| (deposit.data.amount, deposit.data.signature)),
-                    )
-                    .collect();
+                let (withdrawal_credentials, amounts, signatures, positions) = core::iter::once((
+                    first_withdrawal_credentials,
+                    first_amount,
+                    first_signature,
+                    first_position,
+                ))
+                .chain(deposits.map(|(position, deposit)| {
+                    let DepositData {
+                        pubkey: _,
+                        withdrawal_credentials,
+                        amount,
+                        signature,
+                    } = deposit.data;
 
-                let combined_deposit = CombinedDeposit::NewValidator {
+                    (withdrawal_credentials, amount, signature, position)
+                }))
+                .multiunzip();
+
+                CombinedDeposit::NewValidator {
                     pubkey: pubkey.into(),
                     withdrawal_credentials,
                     amounts,
                     signatures,
-                };
-
-                (position, combined_deposit)
+                    positions,
+                }
             }))
         })
         .filter_map(Result::transpose)
         .collect::<Result<Vec<_>>>()?;
 
-    combined_deposits.sort_unstable_by_key(|(position, _)| *position);
+    combined_deposits.sort_unstable_by_key(CombinedDeposit::first_position);
 
-    Ok(combined_deposits
-        .into_iter()
-        .map(|(_, combined_deposit)| combined_deposit))
+    Ok(combined_deposits)
 }
 
 pub fn verify_deposit_merkle_branch<P: Preset>(
