@@ -534,7 +534,11 @@ impl<P: Preset> Network<P> {
     }
 
     fn publish_blob_sidecar(&self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        let subnet_id = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index);
+        let subnet_id = misc::compute_subnet_for_blob_sidecar(
+            self.controller.chain_config(),
+            blob_sidecar.index,
+        );
+
         let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
         debug!("publishing blob sidecar: {blob_identifier:?}, subnet_id: {subnet_id}");
@@ -843,22 +847,32 @@ impl<P: Preset> Network<P> {
                 self.handle_blocks_by_root_request(peer_id, peer_request_id, request_id, request);
                 Ok(())
             }
+            RequestType::DataColumnsByRange(_) => {
+                debug!("received DataColumnsByRange request (peer_id: {peer_id})");
+                Ok(())
+            }
+            RequestType::DataColumnsByRoot(_) => {
+                debug!("received DataColumnsByRoot request (peer_id: {peer_id})");
+                Ok(())
+            }
             RequestType::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientBootstrap request (peer_id: {peer_id})");
-
                 Ok(())
             }
             RequestType::LightClientFinalityUpdate => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientFinalityUpdate request (peer_id: {peer_id})");
-
                 Ok(())
             }
             RequestType::LightClientOptimisticUpdate => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientOptimisticUpdate request (peer_id: {peer_id})");
-
+                Ok(())
+            }
+            RequestType::LightClientUpdatesByRange(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                debug!("received LightClientUpdatesByRange request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::BlobsByRange(request) => {
@@ -1290,6 +1304,7 @@ impl<P: Preset> Network<P> {
                     request_id: {request_id}",
                 );
             }
+            Response::DataColumnsByRange(_) | Response::DataColumnsByRoot(_) => {}
             Response::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
@@ -1301,6 +1316,10 @@ impl<P: Preset> Network<P> {
             Response::LightClientOptimisticUpdate(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientOptimisticUpdate response (peer_id: {peer_id})");
+            }
+            Response::LightClientUpdatesByRange(_) => {
+                // TODO(Altair Light Client Sync Protocol)
+                debug!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
             }
         }
     }
@@ -1372,9 +1391,7 @@ impl<P: Preset> Network<P> {
                     block_seen,
                 );
             }
-            PubsubMessage::DataColumnSidecar(_) => {
-                // TODO
-            }
+            PubsubMessage::DataColumnSidecar(_) => {}
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_gossip_object(&["aggregate_and_proof_attestation"]);
@@ -1725,7 +1742,7 @@ impl<P: Preset> Network<P> {
 
         let current_phase = self.fork_context.current_fork();
 
-        for kind in core_topics_to_subscribe(current_phase)
+        for kind in core_topics_to_subscribe(self.controller.chain_config(), current_phase)
             .iter()
             .filter(|kind| !subscribed_topics.contains(kind))
             .cloned()
