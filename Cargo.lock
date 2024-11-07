@@ -1084,6 +1084,7 @@ version = "0.0.0"
 dependencies = [
  "allocator",
  "anyhow",
+ "binary_utils",
  "cbindgen",
  "clap 4.5.18",
  "directories",
@@ -1093,6 +1094,7 @@ dependencies = [
  "grandine_version",
  "http_api",
  "libc",
+ "log",
  "reqwest",
  "runtime",
  "signer",

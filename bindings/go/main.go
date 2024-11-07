@@ -14,6 +14,7 @@ func RunGrandine(args []string) {
 
 	for idx, arg := range args {
 		a[idx] = C.CString(arg)
+		defer C.free(unsafe.Pointer(a[idx]))
 	}
 
 	C.grandine_run(C.ulong(len(args)), (**C.char)(cargs))

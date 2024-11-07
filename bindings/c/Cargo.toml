@@ -25,6 +25,8 @@ reqwest = { workspace = true }
 libc = "0.2.2"
 allocator = { workspace = true }
 clap = { workspace = true }
+log = { workspace = true }
+binary_utils = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.26.0"
