@@ -1057,13 +1057,7 @@ impl<P: Preset> Store<P> {
         };
 
         // > Check the block is valid and compute the post-state
-        let block_action = state_transition_for_gossip(parent)?;
-
-        if let Some(action) = block_action {
-            return Ok(Some(action));
-        }
-
-        Ok(None)
+        state_transition_for_gossip(parent)
     }
 
     pub fn validate_block_with_custom_state_transition(
@@ -1740,32 +1734,15 @@ impl<P: Preset> Store<P> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
-        let mut state = self
+        let state = self
             .state_cache
-            .before_or_at_slot(self, block_header.parent_root, block_header.slot)
+            .try_state_at_slot(self, block_header.parent_root, block_header.slot)?
             .unwrap_or_else(|| {
                 self.chain_link(block_header.parent_root)
                     .or_else(|| self.chain_link_before_or_at(block_header.slot))
                     .map(|chain_link| chain_link.state(self))
                     .unwrap_or_else(|| self.head().state(self))
             });
-
-        if state.slot() < block_header.slot {
-            if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced() {
-                // `Backtrace::force_capture` can be costly and a warning may be excessive,
-                // but this is controlled by a `Feature` that should be disabled by default.
-                warn!(
-                    "processing slots for beacon state not found in state cache before state transition \
-                    (block root: {:?}, from slot {} to {})\n{}",
-                    block_header.parent_root,
-                    state.slot(),
-                    block_header.slot,
-                    Backtrace::force_capture(),
-                );
-            }
-
-            combined::process_slots(&self.chain_config, state.make_mut(), block_header.slot)?;
-        }
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         SingleVerifier.verify_singular(
