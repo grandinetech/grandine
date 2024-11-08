@@ -780,6 +780,7 @@ pub fn process_deposit_data<P: Preset>(
             withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
             signatures: vec![signature],
+            positions: smallvec![0],
         };
 
         apply_deposits(state, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -799,9 +800,10 @@ pub fn process_deposit_data<P: Preset>(
 
         let combined_deposit = CombinedDeposit::NewValidator {
             pubkey,
-            withdrawal_credentials,
+            withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
             signatures: vec![signature],
+            positions: smallvec![0],
         };
 
         apply_deposits(state, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -862,6 +864,8 @@ fn apply_deposits<P: Preset>(
     combined_deposits: impl IntoIterator<Item = CombinedDeposit>,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
+    let mut pending_deposits_with_positions = vec![];
+
     for combined_deposit in combined_deposits {
         match combined_deposit {
             // > Add validator and balance entries
@@ -870,20 +874,27 @@ fn apply_deposits<P: Preset>(
                 withdrawal_credentials,
                 amounts,
                 signatures,
+                positions,
             } => {
-                let public_key_bytes = pubkey.to_bytes();
+                let first_withdrawal_credentials = withdrawal_credentials[0];
                 let validator_index = state.validators().len_u64();
+                let public_key_bytes = pubkey.to_bytes();
 
-                add_validator_to_registry(state, pubkey, withdrawal_credentials, 0)?;
+                add_validator_to_registry(state, pubkey, first_withdrawal_credentials, 0)?;
 
-                for (amount, signature) in amounts.into_iter().zip(signatures) {
-                    state.pending_deposits_mut().push(PendingDeposit {
-                        pubkey: public_key_bytes,
-                        withdrawal_credentials,
-                        amount,
-                        signature,
-                        slot: GENESIS_SLOT,
-                    })?;
+                for (withdrawal_credentials, amount, signature, position) in
+                    izip!(withdrawal_credentials, amounts, signatures, positions)
+                {
+                    pending_deposits_with_positions.push((
+                        PendingDeposit {
+                            pubkey: public_key_bytes,
+                            withdrawal_credentials,
+                            amount,
+                            signature,
+                            slot: GENESIS_SLOT,
+                        },
+                        position,
+                    ));
 
                     // TODO(feature/electra):
                     slot_report.add_deposit(validator_index, amount);
@@ -895,26 +906,34 @@ fn apply_deposits<P: Preset>(
                 withdrawal_credentials,
                 amounts,
                 signatures,
+                positions,
             } => {
                 let pubkey = accessors::public_key(state, validator_index)?.to_bytes();
 
-                for ((amount, signature), withdrawal_credentials) in amounts
-                    .into_iter()
-                    .zip(signatures)
-                    .zip(withdrawal_credentials)
+                for (withdrawal_credentials, amount, signature, position) in
+                    izip!(withdrawal_credentials, amounts, signatures, positions)
                 {
-                    state.pending_deposits_mut().push(PendingDeposit {
-                        pubkey,
-                        withdrawal_credentials,
-                        amount,
-                        signature,
-                        slot: GENESIS_SLOT,
-                    })?;
+                    pending_deposits_with_positions.push((
+                        PendingDeposit {
+                            pubkey,
+                            withdrawal_credentials,
+                            amount,
+                            signature,
+                            slot: GENESIS_SLOT,
+                        },
+                        position,
+                    ));
 
                     slot_report.add_deposit(validator_index, amount);
                 }
             }
         }
+    }
+
+    pending_deposits_with_positions.sort_unstable_by_key(|(_, position)| *position);
+
+    for (pending_deposit, _) in pending_deposits_with_positions {
+        state.pending_deposits_mut().push(pending_deposit)?;
     }
 
     Ok(())

@@ -352,6 +352,7 @@ pub fn process_deposit_data<P: Preset>(
             withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
             signatures: vec![signature],
+            positions: smallvec![0],
         };
 
         apply_deposits(state, 1, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -371,9 +372,10 @@ pub fn process_deposit_data<P: Preset>(
 
         let combined_deposit = CombinedDeposit::NewValidator {
             pubkey,
-            withdrawal_credentials,
+            withdrawal_credentials: vec![withdrawal_credentials],
             amounts: smallvec![amount],
             signatures: vec![signature],
+            positions: smallvec![0],
         };
 
         apply_deposits(state, 1, core::iter::once(combined_deposit), NullSlotReport)?;
@@ -405,6 +407,7 @@ pub fn apply_deposits<P: Preset>(
                 ..
             } => {
                 let public_key_bytes = pubkey.to_bytes();
+                let withdrawal_credentials = withdrawal_credentials[0];
                 let first_amount = amounts[0];
                 let total_amount = amounts.iter().sum();
 
