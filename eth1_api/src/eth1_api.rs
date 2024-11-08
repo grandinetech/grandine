@@ -525,7 +525,7 @@ impl Eth1Api {
         // Syncing a predefined network without proposing blocks does not require an Eth1 RPC
         // (except during the Merge transition).
         ensure!(
-            self.endpoints.lock().await.is_empty(),
+            !self.endpoints.lock().await.is_empty(),
             Error::NoEndpointsProvided
         );
 
@@ -561,6 +561,7 @@ struct RawForkChoiceUpdatedResponse {
 }
 
 #[derive(Debug, Error)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 enum Error {
     #[error("all Eth1 RPC endpoints exhausted")]
     EndpointsExhausted,
@@ -588,6 +589,137 @@ mod tests {
     };
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_eth1_endpoints_error_with_no_endpoints() -> Result<()> {
+        let config = Arc::new(Config::mainnet());
+        let auth = Arc::default();
+
+        let eth1_api = Arc::new(Eth1Api::new(
+            config,
+            Client::new(),
+            auth,
+            vec![],
+            None,
+            None,
+        ));
+
+        assert!(eth1_api.el_offline().await);
+        assert_eq!(eth1_api.current_endpoint().await, None);
+
+        assert_eq!(
+            eth1_api
+                .current_head_number()
+                .await
+                .expect_err("Eth1Api with no endpoints should return an error")
+                .downcast::<Error>()?,
+            Error::NoEndpointsProvided,
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_eth1_endpoints_error_with_single_endpoint() -> Result<()> {
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(500).body("{}");
+        });
+
+        let config = Arc::new(Config::mainnet());
+        let auth = Arc::default();
+        let server_url = server.url("/").parse()?;
+
+        let eth1_api = Arc::new(Eth1Api::new(
+            config,
+            Client::new(),
+            auth,
+            vec![server_url],
+            None,
+            None,
+        ));
+
+        assert!(!eth1_api.el_offline().await);
+        assert_eq!(
+            eth1_api
+                .current_head_number()
+                .await
+                .expect_err("500 response should be a an error")
+                .downcast::<Error>()?,
+            Error::EndpointsExhausted,
+        );
+
+        // Despite the endpoint returning an error, it remains the only available option
+        assert!(eth1_api.current_endpoint().await.is_some());
+        assert!(eth1_api.el_offline().await);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_eth1_endpoints_error_with_multiple_endpoints() -> Result<()> {
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(500).body("{}");
+        });
+
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x1d243",
+        });
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/next");
+            then.status(200).body(body.to_string());
+        });
+
+        let config = Arc::new(Config::mainnet());
+        let auth = Arc::default();
+        let server_url = server.url("/").parse()?;
+        let next_server_url = server.url("/next").parse()?;
+
+        let eth1_api = Arc::new(Eth1Api::new(
+            config,
+            Client::new(),
+            auth,
+            vec![server_url, next_server_url],
+            None,
+            None,
+        ));
+
+        // Set to use the primary endpoint which is not a fallback
+        assert!(!eth1_api.el_offline().await);
+        assert!(!eth1_api
+            .current_endpoint()
+            .await
+            .expect("endpoint should be avaialble")
+            .is_fallback());
+
+        assert_eq!(
+            eth1_api
+                .current_head_number()
+                .await
+                .expect("the fallback endpoint should be working"),
+            119_363,
+        );
+
+        // Expect to use the fallback endpoint when the primary endpoint returns an error
+        assert!(eth1_api
+            .current_endpoint()
+            .await
+            .expect("the fallback endpoint should be avaialble")
+            .is_fallback());
+
+        // Even though the primary endpoint is offline, eth1_api itself is not offline
+        assert!(!eth1_api.el_offline().await);
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_bellatrix_payload_deserialization_with_real_response() -> Result<()> {
