@@ -204,7 +204,7 @@ pub fn compute_subnet_for_attestation<P: Preset>(
 
 /// [`compute_subnet_for_blob_sidecar`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.1/specs/deneb/validator.md#sidecar)
 #[must_use]
-pub const fn compute_subnet_for_blob_sidecar(config: &Config, blob_index: BlobIndex) -> SubnetId {
+pub fn compute_subnet_for_blob_sidecar(config: &Config, blob_index: BlobIndex) -> SubnetId {
     blob_index % config.blob_sidecar_subnet_count
 }
 
