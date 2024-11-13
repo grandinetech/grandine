@@ -1269,6 +1269,11 @@ impl<P: Preset> Store<P> {
             },
         );
 
+        let index = aggregate
+            .committee_bits()
+            .and_then(|bits| misc::get_committee_indices::<P>(*bits).next())
+            .unwrap_or(index);
+
         let committee = accessors::beacon_committee(&target_state, slot, index)?;
 
         // > The aggregator's validator index is within the committee
