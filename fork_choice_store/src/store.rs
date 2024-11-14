@@ -22,12 +22,18 @@ use helper_functions::{
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier},
 };
+#[cfg(not(target_os = "zkvm"))]
 use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use log::{error, warn};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
+#[cfg(target_os = "zkvm")]
+use std::{
+    collections::{BTreeMap as OrdMap, HashMap, HashSet},
+    vec::Vec as Vector,
+};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use transition_functions::{
@@ -278,7 +284,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             unrealized_finalized_checkpoint: checkpoint,
             proposer_boost_root: H256::zero(),
             equivocating_indices: HashSet::new(),
-            finalized: Vector::unit(anchor),
+            finalized: if cfg!(not(target_os = "zkvm")) {
+                vec![anchor]
+            } else {
+                Vector::unit(anchor)
+            },
             unfinalized: ordmap! {},
             finalized_indices: HashMap::unit(block_root, 0),
             unfinalized_locations: hashmap! {},
