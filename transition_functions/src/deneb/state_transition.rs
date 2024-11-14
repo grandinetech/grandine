@@ -1,18 +1,21 @@
 use core::ops::Not as _;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors,
     error::SignatureKind,
-    misc, phase0, predicates,
+    misc, par_utils, phase0, predicates,
     signing::{RandaoEpoch, SignForAllForksWithGenesis as _, SignForSingleFork as _},
     slot_report::SlotReport,
     verifier::{NullVerifier, Triple, Verifier, VerifierOption},
 };
 use pubkey_cache::PubkeyCache;
-use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
+#[cfg(not(target_os = "zkvm"))]
+use rayon::iter::ParallelIterator as _;
 use ssz::Hc;
+#[cfg(target_os = "zkvm")]
+use ssz::SszHash;
 use std_ext::ArcExt as _;
 use types::{
     config::Config,
@@ -64,6 +67,9 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
             slot_report,
         )?;
 
+        #[cfg(target_os = "zkvm")]
+        bls::set_rand_seed(state.hash_tree_root().0);
+
         // > Verify state root
         state_root_policy.verify(state, block)?;
 
@@ -71,22 +77,8 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
     };
 
     if let Some(verify_signatures) = verify_signatures {
-        std::thread::scope(|scope| {
-            let verify_signatures = scope.spawn(verify_signatures);
-            let process_block = scope.spawn(process_block);
-
-            let signature_result = verify_signatures
-                .join()
-                .map_err(|_| anyhow!("failed to verify signatures"))
-                .and_then(|result| result);
-
-            let block_result = process_block
-                .join()
-                .map_err(|_| anyhow!("failed to process block"))
-                .and_then(|result| result);
-
-            signature_result.and(block_result)
-        })
+        let (block_result, signature_result) = par_utils::join(process_block, verify_signatures);
+        signature_result.and(block_result)
     } else {
         process_block()
     }
@@ -178,8 +170,7 @@ pub fn verify_signatures<P: Preset>(
 
         accessors::initialize_shuffled_indices(state, attestations.iter())?;
 
-        let triples = attestations
-            .par_iter()
+        let triples = helper_functions::par_iter!(attestations)
             .map(|attestation| {
                 let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
 

@@ -5,9 +5,12 @@ use core::{
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
+#[cfg(not(target_os = "zkvm"))]
 use im::{HashMap, OrdMap};
 use log::{info, warn};
 use parking_lot::{Mutex, MutexGuard};
+#[cfg(target_os = "zkvm")]
+use std::collections::{BTreeMap as OrdMap, HashMap};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use thiserror::Error;

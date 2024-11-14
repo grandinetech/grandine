@@ -20,3 +20,6 @@ implement_backend!(bls_blst);
 
 #[cfg(feature = "zkcrypto")]
 implement_backend!(bls_zkcrypto);
+
+#[cfg(all(feature = "zkcrypto", target_os = "zkvm"))]
+pub use bls_zkcrypto::signature::set_rand_seed;

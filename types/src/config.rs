@@ -700,6 +700,60 @@ impl Config {
 
             // Transition
             terminal_total_difficulty: Difficulty::ZERO,
+            // Custody
+            samples_per_slot: 8,
+
+            ..Self::default()
+        }
+    }
+
+    // [Pectra devnet 6 configuration](https://github.com/ethpandaops/pectra-devnets/blob/8bb780acb223896287ffb034db571455c876e56d/network-configs/devnet-6/metadata/config.yaml)
+    #[must_use]
+    pub fn pectra_devnet_6() -> Self {
+        Self {
+            // Meta
+            config_name: Cow::Borrowed("testnet"),
+
+            // Genesis
+            genesis_delay: 60,
+            genesis_fork_version: H32(hex!("10585557")),
+            min_genesis_active_validator_count: nonzero!(71_000_u64),
+            min_genesis_time: 1_738_603_800,
+
+            // Forking
+            altair_fork_epoch: 0,
+            altair_fork_version: H32(hex!("20585557")),
+            bellatrix_fork_epoch: 0,
+            bellatrix_fork_version: H32(hex!("30585557")),
+            capella_fork_epoch: 0,
+            capella_fork_version: H32(hex!("40585557")),
+            deneb_fork_epoch: 0,
+            deneb_fork_version: H32(hex!("50585557")),
+            electra_fork_epoch: 10,
+            electra_fork_version: H32(hex!("60585557")),
+
+            // Time parameters
+            min_validator_withdrawability_delay: 2,
+            seconds_per_eth1_block: 12,
+            shard_committee_period: 256,
+
+            // Validator cycle
+            churn_limit_quotient: nonzero!(128_u64),
+
+            // Deposit contract
+            deposit_chain_id: 7_072_151_312,
+            deposit_contract_address: H160(hex!("4242424242424242424242424242424242424242")),
+            deposit_network_id: 7_072_151_312,
+
+            // Networking
+            max_request_blocks: 1024,
+
+            // Transition
+            terminal_block_hash: ExecutionBlockHash::zero(),
+            terminal_block_hash_activation_epoch: FAR_FUTURE_EPOCH,
+            terminal_total_difficulty: Difficulty::from_be_bytes(hex!(
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            )),
 
             // Custody
             samples_per_slot: 8,

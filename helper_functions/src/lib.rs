@@ -7,6 +7,7 @@ pub mod error;
 pub mod fork;
 pub mod misc;
 pub mod mutators;
+pub mod par_utils;
 pub mod phase0;
 pub mod predicates;
 pub mod signing;

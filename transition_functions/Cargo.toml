@@ -20,7 +20,6 @@ itertools = { workspace = true }
 num-integer = { workspace = true }
 prometheus_metrics = { workspace = true, optional = true }
 pubkey_cache = { workspace = true }
-rayon = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
@@ -31,6 +30,9 @@ try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+rayon = { workspace = true }
 
 [dev-dependencies]
 duplicate = { workspace = true }

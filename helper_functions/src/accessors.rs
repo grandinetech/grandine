@@ -9,12 +9,15 @@ use anyhow::{bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::{traits::PublicKey as _, AggregatePublicKey, PublicKeyBytes};
+#[cfg(not(target_os = "zkvm"))]
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
 use ssz::{ContiguousVector, FitsInU64, Hc, SszHash as _};
+#[cfg(target_os = "zkvm")]
+use std::collections::HashMap;
 use std_ext::CopyExt as _;
 use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
@@ -45,7 +48,7 @@ use types::{
     },
 };
 
-use crate::{error::Error, misc, predicates};
+use crate::{error::Error, misc, par_utils, predicates};
 
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
@@ -868,7 +871,7 @@ pub fn initialize_shuffled_indices<'attestations, P: Preset>(
         need_current && !have_current,
     ) {
         (true, true) => {
-            rayon::join(initialize_previous, initialize_current);
+            par_utils::join(initialize_previous, initialize_current);
         }
         (true, false) => {
             initialize_previous();
