@@ -55,6 +55,10 @@ pub enum ReadError {
 pub enum WriteError {
     #[error("offset {offset} does not fit in {BYTES_PER_LENGTH_OFFSET} bytes")]
     OffsetTooBig { offset: usize },
+
+    // TODO(Grandine Team): The same as `ReadError::Custom`
+    #[error("{message}")]
+    Custom { message: &'static str },
 }
 
 #[derive(Debug, Error)]

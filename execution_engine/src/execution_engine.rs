@@ -5,8 +5,8 @@ use std::{
 
 use anyhow::{ensure, Result};
 use either::Either;
-use eth2_libp2p::PeerId;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
+use libp2p_identity::PeerId;
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
