@@ -198,7 +198,7 @@ impl PoolMessage {
 
 pub enum ValidatorMessage<P: Preset, W> {
     Tick(W, Tick),
-    FinalizedEth1Data(DepositIndex),
+    FinalizedEth1Data(DepositIndex, Option<DepositIndex>),
     Head(W, ChainLink<P>),
     ValidAttestation(W, Arc<Attestation<P>>),
     PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),

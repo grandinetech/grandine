@@ -90,7 +90,7 @@ pub struct BeaconState<P: Preset> {
     // > Deep history valid from Capella onwards
     pub historical_summaries: HistoricalSummaries<P>,
     #[serde(with = "serde_utils::string_or_native")]
-    pub deposit_requests_start_index: u64,
+    pub deposit_requests_start_index: DepositIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub deposit_balance_to_consume: Gwei,
     #[serde(with = "serde_utils::string_or_native")]

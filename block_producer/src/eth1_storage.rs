@@ -290,17 +290,34 @@ pub trait Eth1Storage {
         deposits.try_into().map_err(Into::into)
     }
 
-    fn finalize_deposits(&self, finalized_deposit_index: DepositIndex) -> Result<()> {
-        features::log!(DebugEth1, "Finalizing deposits: {finalized_deposit_index}");
+    fn finalize_deposits(
+        &self,
+        finalized_deposit_index: DepositIndex,
+        deposit_requests_start_index: Option<DepositIndex>,
+    ) -> Result<()> {
+        features::log!(
+            DebugEth1,
+            "Finalizing deposits: {finalized_deposit_index}, \
+            deposit requests start index: {deposit_requests_start_index:?}"
+        );
 
         let mut unfinalized_blocks = self.unfinalized_blocks_mut();
 
-        let position = unfinalized_blocks.iter().position(|block| {
-            block
-                .deposit_events
-                .iter()
-                .any(|deposit| deposit.index == finalized_deposit_index)
-        });
+        //  Prune downloaded eth1 blocks as a temporary measure:
+        // `https://eips.ethereum.org/EIPS/eip-6110#eth1data-poll-deprecation`
+        let deposit_requests_transition_period_finished = deposit_requests_start_index
+            .is_some_and(|requests_start_index| requests_start_index <= finalized_deposit_index);
+
+        let position = if deposit_requests_transition_period_finished {
+            Some(unfinalized_blocks.len())
+        } else {
+            unfinalized_blocks.iter().position(|block| {
+                block
+                    .deposit_events
+                    .iter()
+                    .any(|deposit| deposit.index == finalized_deposit_index)
+            })
+        };
 
         let Some(block_position) = position else {
             return Ok(());

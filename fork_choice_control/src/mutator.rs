@@ -1662,11 +1662,11 @@ where
             metrics.set_beacon_previous_justified_epoch(previous_justified_checkpoint.epoch);
         }
 
+        let finalized_state = self.store.last_finalized().state(&self.store);
+
         ValidatorMessage::FinalizedEth1Data(
-            self.store
-                .last_finalized()
-                .state(&self.store)
-                .eth1_deposit_index(),
+            finalized_state.eth1_deposit_index(),
+            finalized_state.deposit_requests_start_index(),
         )
         .send(&self.validator_tx);
 

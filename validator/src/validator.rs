@@ -252,8 +252,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     ValidatorMessage::Tick(wait_group, tick) => {
                         self.handle_tick(wait_group, tick).await?;
                     }
-                    ValidatorMessage::FinalizedEth1Data(finalized_eth1_deposit_index) => {
-                        self.block_producer.finalize_deposits(finalized_eth1_deposit_index)?;
+                    ValidatorMessage::FinalizedEth1Data(finalized_eth1_data, deposit_requests_start_index) => {
+                        self.block_producer.finalize_deposits(finalized_eth1_data, deposit_requests_start_index)?;
                     },
                     ValidatorMessage::Head(wait_group, head) => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
