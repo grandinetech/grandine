@@ -88,7 +88,10 @@ use crate::{
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock, SignedBeaconBlockHeader,
         },
-        primitives::{ExecutionBlockHash, ExecutionBlockNumber, Slot, UnixSeconds, ValidatorIndex},
+        primitives::{
+            DepositIndex, ExecutionBlockHash, ExecutionBlockNumber, Slot, UnixSeconds,
+            ValidatorIndex,
+        },
     },
     preset::{Mainnet, Preset},
     traits::{
@@ -318,6 +321,17 @@ impl<P: Preset> BeaconState<P> {
             Self::Capella(state) => state.set_cached_root(root),
             Self::Deneb(state) => state.set_cached_root(root),
             Self::Electra(state) => state.set_cached_root(root),
+        }
+    }
+
+    pub fn deposit_requests_start_index(&self) -> Option<DepositIndex> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => None,
+            Self::Electra(state) => Some(state.deposit_requests_start_index),
         }
     }
 }

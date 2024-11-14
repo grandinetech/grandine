@@ -270,10 +270,14 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             })
     }
 
-    pub fn finalize_deposits(&self, finalized_deposit_index: DepositIndex) -> Result<()> {
+    pub fn finalize_deposits(
+        &self,
+        finalized_deposit_index: DepositIndex,
+        deposit_requests_start_index: Option<DepositIndex>,
+    ) -> Result<()> {
         self.producer_context
             .eth1_chain
-            .finalize_deposits(finalized_deposit_index)
+            .finalize_deposits(finalized_deposit_index, deposit_requests_start_index)
     }
 
     pub async fn get_attester_slashings(&self) -> Vec<AttesterSlashing<P>> {
