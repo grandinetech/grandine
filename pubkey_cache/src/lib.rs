@@ -2,11 +2,15 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bls::{traits::PublicKey as _, PublicKey, PublicKeyBytes, COMPRESSED_SIZE, DECOMPRESSED_SIZE};
+use core::ops::RangeFrom;
 use dashmap::{DashMap, DashSet};
-use database::{Database, PrefixableKey};
+use database::{Database, InMemoryMap, PrefixableKey};
 use log::{debug, info, warn};
+#[cfg(not(target_os = "zkvm"))]
 use prometheus_metrics::Metrics;
+use ssz::{ContiguousList, Size, Ssz, SszRead, SszSize, SszWrite};
 use std_ext::ArcExt;
+use typenum::U65536;
 use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
 
 type CachedKeys = DashMap<PublicKeyBytes, Arc<PublicKey>>;
@@ -16,6 +20,66 @@ pub struct PubkeyCache {
     database: Option<Database>,
     keys: CachedKeys,
     unpersisted: DashSet<PublicKeyBytes>,
+}
+
+impl SszSize for PubkeyCache {
+    const SIZE: Size = Size::Variable { minimum_size: 0 };
+}
+
+#[derive(Ssz)]
+struct CacheKeyPair {
+    key: ContiguousList<u8, U65536>,
+    value: ContiguousList<u8, U65536>,
+}
+
+impl<C> SszRead<C> for PubkeyCache {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> core::result::Result<Self, ssz::ReadError> {
+        let vals: ContiguousList<CacheKeyPair, U65536> = ContiguousList::from_ssz(context, bytes)?;
+
+        let map: InMemoryMap = vals
+            .as_ref()
+            .iter()
+            .map(|v| {
+                let key: Arc<[u8]> = v.key.as_ref().into();
+                let value: Arc<[u8]> = v.value.as_ref().into();
+                (key, value)
+            })
+            .collect();
+
+        Ok(Self::load(Database::from(map)))
+    }
+}
+
+impl SszWrite for PubkeyCache {
+    fn to_ssz(&self) -> core::result::Result<Vec<u8>, ssz::WriteError> {
+        let Some(ref database) = self.database else {
+            return Ok(Vec::new());
+        };
+
+        let vals: ContiguousList<CacheKeyPair, U65536> = database
+            .iterator_ascending(RangeFrom { start: [] })
+            .map_err(|_| ssz::WriteError::Custom {
+                message: "failed to read database entries",
+            })?
+            .map(|v| {
+                v.and_then(|(key, value)| {
+                    Ok(CacheKeyPair {
+                        key: key.to_vec().try_into()?,
+                        value: value.try_into()?,
+                    })
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ssz::WriteError::Custom {
+                message: "failed to serialize cache key pairs",
+            })?
+            .try_into()
+            .map_err(|_| ssz::WriteError::Custom {
+                message: "failed to convert vector",
+            })?;
+
+        vals.to_ssz()
+    }
 }
 
 impl PubkeyCache {
@@ -109,6 +173,7 @@ impl PubkeyCache {
         Ok(pubkey)
     }
 
+    #[cfg(not(target_os = "zkvm"))]
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         let type_name = tynm::type_name::<Self>();
 

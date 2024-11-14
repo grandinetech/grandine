@@ -8,18 +8,20 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-bytesize = { workspace = true }
-fs-err = { workspace = true }
-futures = { workspace = true }
 im = { workspace = true }
-itertools = { workspace = true }
-libmdbx = { workspace = true }
-log = { workspace = true }
 snap = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
-thiserror = { workspace = true }
 unwrap_none = { workspace = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+bytesize = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true }
+itertools = { workspace = true }
+libmdbx = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

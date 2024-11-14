@@ -20,7 +20,6 @@ ethereum-types = { workspace = true }
 generic-array = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
-im = { workspace = true }
 nonzero_ext = { workspace = true }
 once_cell = { workspace = true }
 primitive-types = { workspace = true }
@@ -36,6 +35,9 @@ thiserror = { workspace = true }
 typenum = { workspace = true }
 url = { workspace = true }
 variant_count = { workspace = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+im = { workspace = true }
 
 [dev-dependencies]
 bincode = { workspace = true }

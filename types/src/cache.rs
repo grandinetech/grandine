@@ -4,8 +4,11 @@ use std::sync::Arc;
 use bls::PublicKeyBytes;
 use duplicate::duplicate;
 use enum_map::EnumMap;
+#[cfg(not(target_os = "zkvm"))]
 use im::HashMap;
 use once_cell::sync::OnceCell;
+#[cfg(target_os = "zkvm")]
+use std::collections::HashMap;
 
 use crate::{
     altair::primitives::NonZeroGwei, nonstandard::RelativeEpoch, phase0::primitives::ValidatorIndex,

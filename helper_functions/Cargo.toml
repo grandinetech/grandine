@@ -15,13 +15,11 @@ derive_more = { workspace = true }
 enum-map = { workspace = true }
 enumset = { workspace = true }
 hashing = { workspace = true }
-im = { workspace = true }
 itertools = { workspace = true }
 num-integer = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true, optional = true }
 pubkey_cache = { workspace = true }
-rayon = { workspace = true }
 rc-box = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
@@ -35,6 +33,10 @@ try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+im = { workspace = true }
+rayon = { workspace = true }
 
 [dev-dependencies]
 duplicate = { workspace = true }

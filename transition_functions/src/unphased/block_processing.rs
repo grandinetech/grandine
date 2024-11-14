@@ -19,7 +19,8 @@ use helper_functions::{
 };
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
+#[cfg(not(target_os = "zkvm"))]
+use rayon::iter::ParallelIterator as _;
 use ssz::SszHash as _;
 use typenum::Unsigned as _;
 use types::{
@@ -444,8 +445,7 @@ pub fn validate_deposits<P: Preset>(
     //
     // On our development machines `multi_verify` is a little slower but uses less CPU.
     // It will likely be faster than parallel verification on CPUs with fewer cores.
-    let required_signatures_valid = deposits_by_pubkey
-        .par_iter()
+    let required_signatures_valid = helper_functions::par_iter!(deposits_by_pubkey)
         .filter(|(existing_validator_index, _, _)| existing_validator_index.is_none())
         .map(|(_, pubkey, deposits)| {
             let (_, first_deposit) = deposits[0];
@@ -469,8 +469,7 @@ pub fn validate_deposits<P: Preset>(
         .and_then(|triples| MultiVerifier::from(triples).finish())
         .is_ok();
 
-    let mut combined_deposits = deposits_by_pubkey
-        .into_par_iter()
+    let mut combined_deposits = helper_functions::into_par_iter!(deposits_by_pubkey)
         .map(|(existing_validator_index, pubkey, deposits)| {
             for (position, deposit) in deposits.iter().copied() {
                 // > Verify the Merkle branch

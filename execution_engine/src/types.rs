@@ -4,8 +4,8 @@ use core::{
 };
 use std::sync::Arc;
 
-use eth2_libp2p::PeerId;
 use ethereum_types::H64;
+use libp2p_identity::PeerId;
 use serde::{
     de::Visitor,
     ser::{Error as _, SerializeSeq as _},

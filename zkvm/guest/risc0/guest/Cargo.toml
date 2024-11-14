@@ -1,0 +1,26 @@
+[package]
+name = "risc0_grandine_state_transition"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+anyhow = '1.0.93'
+bls = { path = '../../../../bls', features = ['zkcrypto'] }
+database = { path = '../../../../database' }
+enum-iterator = '2'
+pubkey_cache = { path = '../../../../pubkey_cache' }
+risc0-zkvm = { version = "2.3.1", default-features = false, features = ['std', 'unstable', 'heap-embedded-alloc'] }
+risc0-zkvm-platform = { version = "2.0.3", features = ['sys-getenv', 'heap-embedded-alloc'] }
+serde = { version = "1.0", features = ["derive"] }
+ssz = { path = '../../../../ssz' }
+transition_functions = { path = '../../../../transition_functions' }
+types = { path = '../../../../types' }
+
+[patch.crates-io]
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0' }
+
+[patch.'https://github.com/zkcrypto/bls12_381.git']
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
+

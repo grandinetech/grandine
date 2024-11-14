@@ -15,8 +15,8 @@ jobs:
             default_kzg_backend: arkworks
             test_kzg_backends: |
               set KZG_BACKEND=constantine
-              cargo test --release --no-default-features --features arkworks,constantine,zkcrypto -- kzg
-              cargo test --release --no-default-features --features zkcrypto -- kzg
+              cargo test --release --no-default-features --features arkworks,constantine,zkcrypto --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- kzg
+              cargo test --release --no-default-features --features zkcrypto --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- kzg
           - os: macos-latest
             backend: arkworks,blst,mcl
 
@@ -51,7 +51,7 @@ jobs:
         submodules: true
         lfs: true
     - name: Run cargo build
-      run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }}
+      run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
     - name: Check if code is formatted (Linux)
       if: runner.os == 'Linux'
       run: cargo fmt --check
@@ -61,11 +61,11 @@ jobs:
     # It's a known issue that networking tests randomly fails on Macos
     - name: Run tests
       if: runner.os == 'Macos'
-      run: cargo test --release --no-fail-fast --no-default-features --features ${{ matrix.backend }} -- --skip behaviour --skip common
+      run: cargo test --release --no-fail-fast --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- --skip behaviour --skip common
     # For debugging on window-specific error
     - name: Run tests
       if: runner.os != 'Macos'
-      run: cargo test --release --no-default-features --features ${{ matrix.backend }} -- --nocapture
+      run: cargo test --release --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
       env:
         KZG_BACKEND: ${{ matrix.default_kzg_backend }}
     - name: Run other kzg backend tests

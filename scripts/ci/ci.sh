@@ -37,5 +37,5 @@ curl                     \
 )
 
 ./clippy.bash --deny warnings
-cargo test --release --no-fail-fast --features stub-grandine-version
+cargo test --release --no-fail-fast --features stub-grandine-version --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
 ./consensus-spec-tests-coverage.rb

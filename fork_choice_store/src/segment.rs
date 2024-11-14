@@ -5,10 +5,13 @@ use core::{
 
 use anyhow::Result;
 use derive_more::Debug;
+#[cfg(not(target_os = "zkvm"))]
 use im::{
     vector::{Iter, IterMut},
     Vector,
 };
+#[cfg(target_os = "zkvm")]
+use std::vec::Vec as Vector;
 use thiserror::Error;
 use types::{phase0::primitives::Slot, preset::Preset};
 
