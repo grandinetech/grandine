@@ -1316,12 +1316,12 @@ impl<P: Preset> Store<P> {
         )?;
 
         // https://github.com/ethereum/consensus-specs/pull/2847
-        let is_superset = self.aggregate_and_proof_supersets.check(&aggregate);
+        let is_subset_aggregate = !self.aggregate_and_proof_supersets.check(&aggregate);
 
         Ok(AggregateAndProofAction::Accept {
             aggregate_and_proof,
             attesting_indices,
-            is_superset,
+            is_subset_aggregate,
         })
     }
 
