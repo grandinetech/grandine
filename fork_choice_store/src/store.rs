@@ -1057,13 +1057,7 @@ impl<P: Preset> Store<P> {
         };
 
         // > Check the block is valid and compute the post-state
-        let block_action = state_transition_for_gossip(parent)?;
-
-        if let Some(action) = block_action {
-            return Ok(Some(action));
-        }
-
-        Ok(None)
+        state_transition_for_gossip(parent)
     }
 
     pub fn validate_block_with_custom_state_transition(
@@ -1275,30 +1269,19 @@ impl<P: Preset> Store<P> {
             },
         );
 
-        let committee = if let Some(committee_bits) = aggregate.committee_bits() {
-            let committee_indices = misc::get_committee_indices::<P>(*committee_bits);
+        let index = aggregate
+            .committee_bits()
+            .and_then(|bits| misc::get_committee_indices::<P>(*bits).next())
+            .unwrap_or(index);
 
-            let mut committees = vec![];
-
-            for committee_index in committee_indices {
-                let committee = accessors::beacon_committee(&target_state, slot, committee_index)?;
-
-                committees.extend(committee);
-            }
-
-            committees.into()
-        } else {
-            accessors::beacon_committee(&target_state, slot, index)?
-                .into_iter()
-                .collect::<Box<[_]>>()
-        };
+        let committee = accessors::beacon_committee(&target_state, slot, index)?;
 
         // > The aggregator's validator index is within the committee
         ensure!(
-            committee.contains(&aggregator_index),
+            committee.into_iter().contains(&aggregator_index),
             Error::AggregatorNotInCommittee {
                 aggregate_and_proof,
-                committee,
+                committee: committee.into_iter().collect(),
             },
         );
 
@@ -1333,12 +1316,12 @@ impl<P: Preset> Store<P> {
         )?;
 
         // https://github.com/ethereum/consensus-specs/pull/2847
-        let is_superset = self.aggregate_and_proof_supersets.check(&aggregate);
+        let is_subset_aggregate = !self.aggregate_and_proof_supersets.check(&aggregate);
 
         Ok(AggregateAndProofAction::Accept {
             aggregate_and_proof,
             attesting_indices,
-            is_superset,
+            is_subset_aggregate,
         })
     }
 
@@ -1757,32 +1740,15 @@ impl<P: Preset> Store<P> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
-        let mut state = self
+        let state = self
             .state_cache
-            .before_or_at_slot(self, block_header.parent_root, block_header.slot)
+            .try_state_at_slot(self, block_header.parent_root, block_header.slot)?
             .unwrap_or_else(|| {
                 self.chain_link(block_header.parent_root)
                     .or_else(|| self.chain_link_before_or_at(block_header.slot))
                     .map(|chain_link| chain_link.state(self))
                     .unwrap_or_else(|| self.head().state(self))
             });
-
-        if state.slot() < block_header.slot {
-            if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced() {
-                // `Backtrace::force_capture` can be costly and a warning may be excessive,
-                // but this is controlled by a `Feature` that should be disabled by default.
-                warn!(
-                    "processing slots for beacon state not found in state cache before state transition \
-                    (block root: {:?}, from slot {} to {})\n{}",
-                    block_header.parent_root,
-                    state.slot(),
-                    block_header.slot,
-                    Backtrace::force_capture(),
-                );
-            }
-
-            combined::process_slots(&self.chain_config, state.make_mut(), block_header.slot)?;
-        }
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         SingleVerifier.verify_singular(

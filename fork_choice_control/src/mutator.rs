@@ -650,7 +650,7 @@ where
             Ok(AggregateAndProofAction::Accept {
                 aggregate_and_proof,
                 attesting_indices,
-                is_superset,
+                is_subset_aggregate,
             }) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["accepted"]);
@@ -671,10 +671,10 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    if is_superset {
-                        P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
-                    } else {
+                    if is_subset_aggregate {
                         P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                    } else {
+                        P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
                     }
                 }
 

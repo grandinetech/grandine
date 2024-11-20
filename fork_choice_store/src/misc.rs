@@ -548,7 +548,7 @@ pub enum AggregateAndProofAction<P: Preset> {
     Accept {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         attesting_indices: AttestingIndices<P>,
-        is_superset: bool,
+        is_subset_aggregate: bool,
     },
     Ignore,
     DelayUntilBlock(Arc<SignedAggregateAndProof<P>>, H256),
