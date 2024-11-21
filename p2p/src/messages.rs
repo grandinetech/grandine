@@ -204,6 +204,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     UnsubscribeFromForkTopicsExcept(ForkDigest),
     UpdateEnrSubnet(Subnet, bool),
     UpdateForkVersion(EnrForkId),
+    UpdateGossipsubParameters(u64, Slot),
 }
 
 impl<P: Preset> ServiceInboundMessage<P> {
