@@ -203,7 +203,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     Unsubscribe(GossipTopic),
     UnsubscribeFromForkTopicsExcept(ForkDigest),
     UpdateEnrSubnet(Subnet, bool),
-    UpdateForkVersion(EnrForkId),
+    UpdateFork(EnrForkId),
     UpdateGossipsubParameters(u64, Slot),
 }
 

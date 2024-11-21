@@ -457,8 +457,7 @@ impl<P: Preset> Network<P> {
 
             let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
-            ServiceInboundMessage::UpdateForkVersion(new_enr_fork_id)
-                .send(&self.network_to_service_tx);
+            ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
         // Subscribe to the topics of the next phase.
@@ -1894,8 +1893,9 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::UpdateEnrSubnet(subnet, advertise) => {
                             service.update_enr_subnet(subnet, advertise);
                         }
-                        ServiceInboundMessage::UpdateForkVersion(enr_fork_id) => {
+                        ServiceInboundMessage::UpdateFork(enr_fork_id) => {
                             service.update_fork_version(enr_fork_id);
+                            service.remove_topic_weight_except(enr_fork_id.fork_digest);
                         }
                         ServiceInboundMessage::UpdateGossipsubParameters(active_validator_count, slot) => {
                             if let Err(error) = service.update_gossipsub_parameters(
