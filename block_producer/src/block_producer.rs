@@ -101,6 +101,11 @@ pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBu
 pub type LocalExecutionPayloadJoinHandle<P> =
     JoinHandle<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>>;
 
+#[derive(Default)]
+pub struct Options {
+    pub fake_execution_payloads: bool,
+}
+
 pub struct BlockProducer<P: Preset, W: Wait> {
     producer_context: Arc<ProducerContext<P, W>>,
 }
@@ -118,7 +123,12 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         metrics: Option<Arc<Metrics>>,
+        options: Option<Options>,
     ) -> Self {
+        let Options {
+            fake_execution_payloads,
+        } = options.unwrap_or_default();
+
         let producer_context = Arc::new(ProducerContext {
             chain_config: controller.chain_config().clone_arc(),
             proposer_configs,
@@ -137,6 +147,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             payload_cache: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             payload_id_cache: Mutex::new(SizedCache::with_size(PAYLOAD_ID_CACHE_SIZE)),
             metrics,
+            fake_execution_payloads,
         });
 
         Self { producer_context }
@@ -574,6 +585,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     payload_cache: Mutex<SizedCache<H256, WithBlobsAndMev<ExecutionPayload<P>, P>>>,
     payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
     metrics: Option<Arc<Metrics>>,
+    fake_execution_payloads: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1019,29 +1031,24 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         let WithBlobsAndMev {
-            value: mut execution_payload,
+            value: execution_payload,
             commitments,
             proofs,
             blobs,
             mev,
             execution_requests,
-        } = with_blobs_and_mev.unwrap_or_else(|| WithBlobsAndMev::with_default(None));
+        } = match with_blobs_and_mev {
+            Some(payload_with_mev) => payload_with_mev,
+            None => {
+                if self.beacon_state.post_capella().is_some()
+                    || post_merge_state(&self.beacon_state).is_some()
+                {
+                    return Err(AnyhowError::msg("no execution payload to include in block"));
+                }
 
-        let slot = self.beacon_state.slot();
-
-        // Starting with Capella, all blocks must be post-Merge.
-        // Construct a superficially valid execution payload for snapshot testing.
-        // It will almost always be invalid in a real network, but so would a default payload.
-        // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
-        // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
-        if self.beacon_state.phase() >= Phase::Capella && execution_payload.is_none() {
-            execution_payload = Some(factory::execution_payload(
-                &self.producer_context.chain_config,
-                &self.beacon_state,
-                slot,
-                ExecutionBlockHash::from_low_u64_be(slot),
-            )?);
-        }
+                WithBlobsAndMev::with_default(None)
+            }
+        };
 
         let without_state_root_with_payload = block_without_state_root
             .with_execution_payload(execution_payload)?
@@ -1703,6 +1710,29 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     async fn local_execution_payload_option(
         &self,
     ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
+        if self.producer_context.fake_execution_payloads {
+            let slot = self.beacon_state.slot();
+
+            // Starting with Capella, all blocks must be post-Merge.
+            // Construct a superficially valid execution payload for snapshot testing.
+            // It will almost always be invalid in a real network, but so would a default payload.
+            // Construct the payload with a fictitious `ExecutionBlockHash` derived from the slot.
+            // Computing the real `ExecutionBlockHash` would make maintaining tests much harder.
+            if self.beacon_state.phase() >= Phase::Capella {
+                let execution_payload = factory::execution_payload(
+                    &self.producer_context.chain_config,
+                    &self.beacon_state,
+                    slot,
+                    ExecutionBlockHash::from_low_u64_be(slot),
+                );
+
+                match execution_payload {
+                    Ok(payload) => return Some(WithBlobsAndMev::with_default(payload)),
+                    Err(error) => panic!("failed to produce fake payload: {error:?}"),
+                };
+            }
+        }
+
         let _timer = self
             .producer_context
             .metrics
