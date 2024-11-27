@@ -9,7 +9,6 @@ use helper_functions::{
     mutators::decrease_balance,
     predicates::is_in_inactivity_leak,
 };
-use prometheus_metrics::METRICS;
 use ssz::PersistentList;
 use typenum::Unsigned as _;
 use types::{
@@ -29,6 +28,9 @@ use super::epoch_intermediates::{
 };
 use crate::unphased::{self, SlashingPenalties};
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 pub struct EpochReport {
     pub statistics: Statistics,
     pub summaries: Vec<AltairValidatorSummary>,
@@ -38,6 +40,7 @@ pub struct EpochReport {
 }
 
 pub fn process_epoch(config: &Config, state: &mut AltairBeaconState<impl Preset>) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.epoch_processing_times.start_timer());

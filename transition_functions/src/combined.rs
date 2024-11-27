@@ -7,7 +7,6 @@ use helper_functions::{
     slot_report::{NullSlotReport, RealSlotReport, SlotReport},
     verifier::{MultiVerifier, NullVerifier, Verifier, VerifierOption},
 };
-use prometheus_metrics::METRICS;
 use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{
@@ -30,6 +29,9 @@ use crate::{
     },
     unphased::{self, Error, ProcessSlots, StateRootPolicy},
 };
+
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
 
 #[derive(From)]
 pub enum EpochReport {
@@ -247,6 +249,7 @@ pub fn process_slots<P: Preset>(
         },
     );
 
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.process_slot_times.start_timer());

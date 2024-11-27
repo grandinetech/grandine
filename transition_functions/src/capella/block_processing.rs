@@ -13,7 +13,6 @@ use helper_functions::{
     verifier::{SingleVerifier, Triple, Verifier},
 };
 use itertools::izip;
-use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use ssz::SszHash as _;
 use tap::Pipe as _;
@@ -40,6 +39,9 @@ use crate::{
     unphased::{self, Error},
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 /// [`process_block`](https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/capella/beacon-chain.md#block-processing)
 ///
 /// This also serves as a substitute for [`compute_new_state_root`]. `compute_new_state_root` as
@@ -58,6 +60,7 @@ pub fn process_block<P: Preset>(
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());

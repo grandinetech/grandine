@@ -8,7 +8,6 @@ use helper_functions::{
     predicates::{is_active_validator, is_eligible_for_activation},
 };
 use itertools::Itertools as _;
-use prometheus_metrics::METRICS;
 use ssz::SszHash as _;
 use types::{
     capella::containers::HistoricalSummary, config::Config, deneb::beacon_state::BeaconState,
@@ -22,7 +21,11 @@ use crate::{
     unphased::ValidatorSummary,
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.epoch_processing_times.start_timer());

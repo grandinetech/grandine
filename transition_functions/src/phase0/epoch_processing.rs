@@ -5,7 +5,6 @@ use anyhow::Result;
 use helper_functions::{
     accessors::get_current_epoch, misc::vec_of_default, mutators::decrease_balance,
 };
-use prometheus_metrics::METRICS;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -22,6 +21,9 @@ use super::epoch_intermediates::{
 };
 use crate::unphased::{self, SlashingPenalties};
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 pub struct EpochReport {
     pub statistics: StatisticsForReport,
     pub summaries: Vec<Phase0ValidatorSummary>,
@@ -32,6 +34,7 @@ pub struct EpochReport {
 }
 
 pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.epoch_processing_times.start_timer());

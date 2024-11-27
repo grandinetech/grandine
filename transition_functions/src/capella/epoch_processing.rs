@@ -1,7 +1,6 @@
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use helper_functions::{accessors::get_next_epoch, misc::vec_of_default};
-use prometheus_metrics::METRICS;
 use ssz::SszHash as _;
 use types::{
     capella::{beacon_state::BeaconState, containers::HistoricalSummary},
@@ -16,7 +15,11 @@ use crate::{
     bellatrix, unphased,
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.epoch_processing_times.start_timer());
