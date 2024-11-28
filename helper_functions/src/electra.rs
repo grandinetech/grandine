@@ -90,16 +90,25 @@ pub fn get_attesting_indices<P: Preset>(
     for index in committee_indices {
         let committee = beacon_committee(state, attestation.data.slot, index)?;
 
-        let committee_attesters = committee.into_iter().enumerate().filter_map(|(i, index)| {
-            (*attestation.aggregation_bits.get(committee_offset + i)?).then_some(index)
-        });
+        let committee_attesters = committee
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, index)| {
+                (*attestation.aggregation_bits.get(committee_offset + i)?).then_some(index)
+            })
+            .collect::<Vec<_>>();
+
+        ensure!(
+            !committee_attesters.is_empty(),
+            Error::NoCommitteeAttesters { index },
+        );
 
         output.extend(committee_attesters);
 
         committee_offset += committee.len();
     }
 
-    // This works the same as `assert len(attestation.aggregation_bits) == participants_count`
+    // This works the same as `assert len(attestation.aggregation_bits) == committee_offset`
     ensure!(
         committee_offset == attestation.aggregation_bits.len(),
         Error::ParticipantsCountMismatch {

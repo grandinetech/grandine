@@ -235,7 +235,9 @@ fn process_withdrawals<P: Preset>(
 where
     P::MaxWithdrawalsPerPayload: NonZero,
 {
-    let (expected_withdrawals, partial_withdrawals_count) = get_expected_withdrawals(state)?;
+    let (expected_withdrawals, processed_partial_withdrawals_count) =
+        get_expected_withdrawals(state)?;
+
     let computed = expected_withdrawals.len();
     let in_block = execution_payload.withdrawals().len();
 
@@ -268,7 +270,7 @@ where
             .pending_partial_withdrawals()
             .into_iter()
             .copied()
-            .skip(partial_withdrawals_count),
+            .skip(processed_partial_withdrawals_count),
     )?;
 
     // > Update the next withdrawal index if this block contained withdrawals
@@ -316,7 +318,7 @@ pub fn get_expected_withdrawals<P: Preset>(
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut validator_index = state.next_withdrawal_validator_index();
     let mut withdrawals = vec![];
-    let mut partial_withdrawals_count = 0;
+    let mut processed_partial_withdrawals_count = 0;
 
     // > [New in Electra:EIP7251] Consume pending partial withdrawals
     for withdrawal in &state.pending_partial_withdrawals().clone() {
@@ -354,13 +356,24 @@ pub fn get_expected_withdrawals<P: Preset>(
             withdrawal_index += 1;
         }
 
-        partial_withdrawals_count += 1;
+        processed_partial_withdrawals_count += 1;
     }
 
     // > Sweep for remaining
     for _ in 0..bound {
-        let balance = state.balances().get(validator_index).copied()?;
         let validator = state.validators().get(validator_index)?;
+
+        let partially_withdrawn_balance = withdrawals
+            .iter()
+            .filter(|withdrawal| withdrawal.validator_index == validator_index)
+            .map(|withdrawal| withdrawal.amount)
+            .sum();
+
+        let balance = state
+            .balances()
+            .get(validator_index)
+            .copied()?
+            .saturating_sub(partially_withdrawn_balance);
 
         let address = validator
             .withdrawal_credentials
@@ -408,7 +421,7 @@ pub fn get_expected_withdrawals<P: Preset>(
             .expect("total_validators being 0 should prevent the loop from being executed");
     }
 
-    Ok((withdrawals, partial_withdrawals_count))
+    Ok((withdrawals, processed_partial_withdrawals_count))
 }
 
 fn process_execution_payload<P: Preset>(
@@ -441,8 +454,6 @@ fn process_execution_payload<P: Preset>(
 
     process_execution_payload_for_gossip(config, state, body)?;
 
-    // TODO(feature/electra): Verify `is_valid_block_hash`.
-    // TODO(feature/electra): Verify `versioned_hashes`.
     // > Verify the execution payload is valid
     let versioned_hashes = body
         .blob_kzg_commitments
@@ -1170,12 +1181,25 @@ pub fn process_consolidation_request<P: Preset>(
         return Ok(());
     }
 
+    let source_validator = state.validators().get(source_index)?;
+
+    // > Verify the source has been active long enough
+    if current_epoch < source_validator.activation_epoch + config.shard_committee_period {
+        return Ok(());
+    }
+
+    // > Verify the source has no pending withdrawals in the queue
+    if get_pending_balance_to_withdraw(state, source_index) > 0 {
+        return Ok(());
+    }
+
     // > Initiate source validator exit and append pending consolidation
     let exit_epoch = compute_consolidation_epoch_and_update_churn(
         config,
         state,
         source_validator.effective_balance,
     );
+
     let source_validator = state.validators_mut().get_mut(source_index)?;
 
     source_validator.exit_epoch = exit_epoch;

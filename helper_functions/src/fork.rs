@@ -546,53 +546,19 @@ pub fn upgrade_to_electra<P: Preset>(
         epoch,
     };
 
-    let DenebExecutionPayloadHeader {
-        parent_hash,
-        fee_recipient,
-        state_root,
-        receipts_root,
-        logs_bloom,
-        prev_randao,
-        block_number,
-        gas_limit,
-        gas_used,
-        timestamp,
-        extra_data,
-        base_fee_per_gas,
-        block_hash,
-        transactions_root,
-        withdrawals_root,
-        blob_gas_used,
-        excess_blob_gas,
-    } = latest_execution_payload_header;
+    let mut earliest_exit_epoch = misc::compute_activation_exit_epoch::<P>(epoch);
 
-    let latest_execution_payload_header = DenebExecutionPayloadHeader {
-        parent_hash,
-        fee_recipient,
-        state_root,
-        receipts_root,
-        logs_bloom,
-        prev_randao,
-        block_number,
-        gas_limit,
-        gas_used,
-        timestamp,
-        extra_data,
-        base_fee_per_gas,
-        block_hash,
-        transactions_root,
-        withdrawals_root,
-        blob_gas_used,
-        excess_blob_gas,
-    };
-
-    let earliest_exit_epoch = validators
+    for exit_epoch in validators
         .into_iter()
         .map(|validator| validator.exit_epoch)
         .filter(|exit_epoch| *exit_epoch != FAR_FUTURE_EPOCH)
-        .max()
-        .unwrap_or(epoch)
-        + 1;
+    {
+        if exit_epoch > earliest_exit_epoch {
+            earliest_exit_epoch = exit_epoch;
+        }
+    }
+
+    earliest_exit_epoch += 1;
 
     let mut post = ElectraBeaconState {
         // > Versioning
