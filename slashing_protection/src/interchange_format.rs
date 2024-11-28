@@ -55,6 +55,13 @@ pub struct InterchangeAttestation {
     pub signing_root: Option<H256>,
 }
 
+impl InterchangeData {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.signed_attestations.is_empty() && self.signed_blocks.is_empty()
+    }
+}
+
 impl InterchangeFormat {
     #[must_use]
     pub const fn new(genesis_validators_root: H256, data: Vec<InterchangeData>) -> Self {
@@ -93,6 +100,11 @@ impl InterchangeFormat {
         );
 
         Ok(())
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.iter().all(InterchangeData::is_empty)
     }
 }
 
@@ -261,5 +273,51 @@ mod tests {
         assert_eq!(interchange, expected_interchange);
 
         Ok(())
+    }
+
+    #[test]
+    fn interchange_format_emptyness_test() {
+        let mut interchange = InterchangeFormat {
+            metadata: InterchangeMeta {
+                interchange_format_version: 5,
+                genesis_validators_root: hex!(
+                    "04700007fabc8282644aed6d1c7c9e21d38a03a0c4ba193f3afe428824b3a673"
+                )
+                .into(),
+            },
+            data: vec![],
+        };
+
+        assert!(interchange.is_empty());
+
+        let empty_interchange_data = InterchangeData {
+            pubkey: hex!("b845089a1457f811bfc000588fbb4e713669be8ce060ea6be3c6ece09afc3794106c91ca73acda5e5457122d58723bec").into(),
+            signed_blocks: vec![],
+            signed_attestations: vec![],
+        };
+
+        assert!(empty_interchange_data.is_empty());
+
+        interchange.data.push(empty_interchange_data);
+
+        // interchange with empty interchange data should also be considered empty
+        assert!(interchange.is_empty());
+
+        let interchange_data = InterchangeData {
+            pubkey: hex!("b845089a1457f811bfc000588fbb4e713669be8ce060ea6be3c6ece09afc3794106c91ca73acda5e5457122d58723bed").into(),
+            signed_blocks: vec![
+                InterchangeBlock {
+                    slot: 81952,
+                    signing_root: Some(hex!("4ff6f743a43f3b4f95350831aeaf0a122a1a392922c45d804280284a69eb850b").into()),
+                },
+            ],
+            signed_attestations: vec![],
+        };
+
+        assert!(!interchange_data.is_empty());
+
+        interchange.data.push(interchange_data);
+
+        assert!(!interchange.is_empty());
     }
 }

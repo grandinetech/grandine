@@ -304,7 +304,7 @@ impl SlashingProtector {
         &mut self,
         interchange_file_path: impl AsRef<Path>,
         genesis_validators_root: H256,
-    ) -> Result<()> {
+    ) -> Result<InterchangeFormat> {
         let interchange = self.build_interchange_data(genesis_validators_root)?;
 
         let interchange_file_path = interchange_file_path.as_ref();
@@ -316,7 +316,7 @@ impl SlashingProtector {
 
         info!("Interchange file saved");
 
-        Ok(())
+        Ok(interchange)
     }
 
     pub fn build_interchange_data(
