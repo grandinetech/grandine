@@ -1,6 +1,5 @@
 use anyhow::{ensure, Result};
 use helper_functions::{accessors, misc, slot_report::SlotReport, verifier::Verifier};
-use prometheus_metrics::METRICS;
 use types::{
     config::Config,
     electra::{
@@ -16,6 +15,9 @@ use crate::{
     unphased::{self, Error},
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 pub fn custom_process_blinded_block<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
@@ -23,6 +25,7 @@ pub fn custom_process_blinded_block<P: Preset>(
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.blinded_block_transition_times.start_timer());

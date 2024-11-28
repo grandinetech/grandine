@@ -19,7 +19,7 @@ im = { workspace = true }
 itertools = { workspace = true }
 num-integer = { workspace = true }
 parse-display = { workspace = true }
-prometheus_metrics = { workspace = true }
+prometheus_metrics = { workspace = true, optional = true }
 rayon = { workspace = true }
 rc-box = { workspace = true }
 serde = { workspace = true }
@@ -41,3 +41,6 @@ nonzero_ext = { workspace = true }
 spec_test_utils = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }
+
+[features]
+metrics = ['prometheus_metrics']

@@ -501,6 +501,7 @@ pub async fn run_after_genesis<P: Preset>(
         bls_to_execution_change_pool.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
         metrics.clone(),
+        None,
     ));
 
     let validator_channels = ValidatorChannels {

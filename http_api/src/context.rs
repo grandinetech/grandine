@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
-use block_producer::BlockProducer;
+use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use bls::{PublicKeyBytes, SecretKey};
 use clock::Tick;
 use database::Database;
@@ -284,6 +284,9 @@ impl<P: Preset> Context<P> {
             bls_to_execution_change_pool.clone_arc(),
             sync_committee_agg_pool.clone_arc(),
             None,
+            Some(BlockProducerOptions {
+                fake_execution_payloads: true,
+            }),
         ));
 
         let validator_channels = ValidatorChannels {

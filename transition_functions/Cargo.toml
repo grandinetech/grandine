@@ -18,7 +18,7 @@ hashing = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 num-integer = { workspace = true }
-prometheus_metrics = { workspace = true }
+prometheus_metrics = { workspace = true, optional = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }
@@ -35,3 +35,6 @@ unwrap_none = { workspace = true }
 duplicate = { workspace = true }
 spec_test_utils = { workspace = true }
 test-generator = { workspace = true }
+
+[features]
+metrics = ['helper_functions/metrics', 'prometheus_metrics']

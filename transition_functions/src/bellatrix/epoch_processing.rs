@@ -6,7 +6,6 @@ use helper_functions::{
     misc::vec_of_default,
     mutators::decrease_balance,
 };
-use prometheus_metrics::METRICS;
 use typenum::Unsigned as _;
 use types::{
     bellatrix::beacon_state::BeaconState as CapellaBeaconState, config::Config,
@@ -19,7 +18,11 @@ use crate::{
     unphased::{self, SlashingPenalties},
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 pub fn process_epoch(config: &Config, state: &mut CapellaBeaconState<impl Preset>) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.epoch_processing_times.start_timer());

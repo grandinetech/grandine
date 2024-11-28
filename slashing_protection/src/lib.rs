@@ -200,6 +200,10 @@ impl SlashingProtector {
         // See <https://sqlite.org/pragma.html#pragma_cache_size>.
         connection.pragma_update(None, "cache_size", -20000)?;
 
+        // Prevent other processes from accessing the database file.
+        // See <https://eips.ethereum.org/EIPS/eip-3076#general-recommendations>.
+        connection.pragma_update(None, "locking_mode", "EXCLUSIVE")?;
+
         Ok(())
     }
 
@@ -241,7 +245,7 @@ impl SlashingProtector {
             let result = Self::find_or_store_validator(&transaction, pubkey);
 
             if let Ok(validator_id) = result {
-                debug!("Successfully imported validator (pubkey: {pubkey:?})");
+                debug!("successfully imported validator (pubkey: {pubkey:?})");
 
                 report.validators.succeeded.push(interchange_record.pubkey);
 
@@ -300,19 +304,19 @@ impl SlashingProtector {
         &mut self,
         interchange_file_path: impl AsRef<Path>,
         genesis_validators_root: H256,
-    ) -> Result<()> {
+    ) -> Result<InterchangeFormat> {
         let interchange = self.build_interchange_data(genesis_validators_root)?;
 
         let interchange_file_path = interchange_file_path.as_ref();
 
-        info!("Saving validator information to interchange file: {interchange_file_path:?}");
+        info!("saving validator information to interchange file: {interchange_file_path:?}");
 
         let file = File::create(interchange_file_path)?;
         serde_json::to_writer(file, &interchange)?;
 
-        info!("Interchange file saved");
+        info!("interchange file saved");
 
-        Ok(())
+        Ok(interchange)
     }
 
     pub fn build_interchange_data(
@@ -409,7 +413,7 @@ impl SlashingProtector {
             return Ok(validator_id);
         }
 
-        debug!("Saving validator information to slashing protection db (pubkey: {pubkey:?})",);
+        debug!("saving validator information to slashing protection db (pubkey: {pubkey:?})");
 
         transaction.execute(
             "INSERT INTO validators (pubkey) VALUES (?1)",
@@ -621,7 +625,7 @@ impl SlashingProtector {
                 Ok(outcome) => match outcome {
                     SlashingValidationOutcome::Accept => Some(attestation),
                     SlashingValidationOutcome::Ignore => {
-                        warn!("slashing protector ignored duplicate attestation: {attestation:?}",);
+                        warn!("slashing protector ignored duplicate attestation: {attestation:?}");
 
                         None
                     }
@@ -742,10 +746,10 @@ impl SlashingProtector {
             None => self.store_current_epoch(current_epoch)?,
         }
 
-        info!("Pruning slashing protection db, current epoch: {current_epoch}");
+        info!("pruning slashing protection db, current epoch: {current_epoch}");
 
         let Some(prune_up_to_epoch) = current_epoch.checked_sub(self.history_limit) else {
-            debug!("Skipping slashing protection db pruning for epoch: {current_epoch}");
+            debug!("skipping slashing protection db pruning for epoch: {current_epoch}");
 
             return Ok(());
         };
@@ -758,8 +762,8 @@ impl SlashingProtector {
         };
 
         match run() {
-            Ok(()) => info!("Slashing protection db pruning completed for epoch: {current_epoch}"),
-            Err(error) => warn!("Error occurred while pruning slashing protection db: {error:?}"),
+            Ok(()) => info!("slashing protection db pruning completed for epoch: {current_epoch}"),
+            Err(error) => warn!("error occurred while pruning slashing protection db: {error:?}"),
         }
 
         Ok(())
@@ -908,7 +912,7 @@ fn remove_fork_version_from_validators_if_needed(
         return Ok(());
     }
 
-    info!("Migrating the slashing protection database. Please wait…");
+    info!("migrating the slashing protection database. Please wait…");
 
     let interchange = slashing_protector.build_interchange_data(genesis_validators_root)?;
 
@@ -918,14 +922,14 @@ fn remove_fork_version_from_validators_if_needed(
     ));
 
     info!(
-        "Saving validator information to interchange file as a backup: {}",
+        "saving validator information to interchange file as a backup: {}",
         interchange_file_path.display(),
     );
 
     let file = File::create(interchange_file_path)?;
     serde_json::to_writer(file, &interchange)?;
 
-    info!("Interchange file saved");
+    info!("interchange file saved");
 
     fs_err::remove_file(validator_directory.as_ref().join(DB_PATH))?;
 
@@ -1133,8 +1137,15 @@ mod tests {
             |row| row.get::<_, i64>(0),
         )?;
 
+        let locking_mode = slashing_protector.connection.query_row(
+            "SELECT locking_mode FROM pragma_locking_mode",
+            (),
+            |row| row.get::<_, String>(0),
+        )?;
+
         assert!(foreign_keys);
         assert_eq!(cache_size, -20000);
+        assert_eq!(locking_mode, "exclusive");
 
         Ok(())
     }

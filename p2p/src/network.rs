@@ -29,7 +29,7 @@ use futures::{
     select,
     stream::StreamExt as _,
 };
-use helper_functions::misc;
+use helper_functions::{accessors, misc};
 use log::{debug, error, info, trace, warn};
 use logging::PEER_LOG_METRICS;
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
@@ -39,12 +39,13 @@ use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tokio_stream::wrappers::IntervalStream;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    nonstandard::{Phase, WithStatus},
+    nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
@@ -63,6 +64,7 @@ use crate::{
     upnp::PortMappings,
 };
 
+const GOSSIPSUB_PARAMETER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_FOR_DOS_PREVENTION: u64 = 64;
 
 /// Number of slots before a new phase to subscribe to its topics.
@@ -202,8 +204,15 @@ impl<P: Preset> Network<P> {
 
     #[allow(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<Never> {
+        let mut gossipsub_parameter_update_interval =
+            IntervalStream::new(tokio::time::interval(GOSSIPSUB_PARAMETER_UPDATE_INTERVAL)).fuse();
+
         loop {
             select! {
+                _ = gossipsub_parameter_update_interval.select_next_some() => {
+                    self.update_gossipsub_parameters();
+                },
+
                 message = self.service_to_network_rx.select_next_some() => {
                     match message {
                         ServiceOutboundMessage::NetworkEvent(network_event) => {
@@ -449,8 +458,7 @@ impl<P: Preset> Network<P> {
 
             let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
-            ServiceInboundMessage::UpdateForkVersion(new_enr_fork_id)
-                .send(&self.network_to_service_tx);
+            ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
         // Subscribe to the topics of the next phase.
@@ -721,6 +729,15 @@ impl<P: Preset> Network<P> {
             ServiceInboundMessage::UpdateEnrSubnet(subnet, add_to_enr)
                 .send(&self.network_to_service_tx);
         }
+    }
+
+    fn update_gossipsub_parameters(&self) {
+        let head_state = self.controller.head_state().value();
+        let active_validator_count =
+            accessors::active_validator_count_u64(&head_state, RelativeEpoch::Current);
+
+        ServiceInboundMessage::UpdateGossipsubParameters(active_validator_count, head_state.slot())
+            .send(&self.network_to_service_tx);
     }
 
     fn update_sync_committee_subnets(
@@ -1938,8 +1955,17 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::UpdateEnrSubnet(subnet, advertise) => {
                             service.update_enr_subnet(subnet, advertise);
                         }
-                        ServiceInboundMessage::UpdateForkVersion(enr_fork_id) => {
+                        ServiceInboundMessage::UpdateFork(enr_fork_id) => {
                             service.update_fork_version(enr_fork_id);
+                            service.remove_topic_weight_except(enr_fork_id.fork_digest);
+                        }
+                        ServiceInboundMessage::UpdateGossipsubParameters(active_validator_count, slot) => {
+                            if let Err(error) = service.update_gossipsub_parameters(
+                                active_validator_count,
+                                slot
+                            ) {
+                                warn!("unable to update gossipsub scoring parameters: {error:?}");
+                            }
                         }
                     }
                 }

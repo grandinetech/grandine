@@ -18,7 +18,7 @@ eth2_libp2p = { workspace = true }
 fork_choice_control = { workspace = true }
 futures = { workspace = true }
 grandine_version = { workspace = true }
-helper_functions = { workspace = true }
+helper_functions = { workspace = true, features = ['metrics'] }
 http_api_utils = { workspace = true }
 jemalloc-ctl = { workspace = true }
 log = { workspace = true }
@@ -37,7 +37,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
-transition_functions = { workspace = true }
+transition_functions = { workspace = true, features = ['metrics'] }
 types = { workspace = true }
 
 [dev-dependencies]

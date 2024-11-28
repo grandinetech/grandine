@@ -27,7 +27,7 @@ use reqwest::{Client, ClientBuilder, Url};
 use runtime::{MetricsConfig, StorageConfig};
 use signer::{KeyOrigin, Signer};
 use slasher::SlasherConfig;
-use slashing_protection::SlashingProtector;
+use slashing_protection::{interchange_format::InterchangeData, SlashingProtector};
 use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -722,8 +722,29 @@ fn handle_command<P: Preset>(
                     );
                 }
                 InterchangeCommand::Export { file_path } => {
-                    slashing_protector
+                    let interchange = slashing_protector
                         .export_to_interchange_file(&file_path, genesis_validators_root)?;
+
+                    if interchange.is_empty() {
+                        warn!(
+                            "no records were exported. \
+                            This may indicate an issue if active validators are present. \
+                            Please verify your configuration settings.",
+                        );
+                    } else {
+                        for data in interchange.data {
+                            let InterchangeData {
+                                pubkey,
+                                signed_attestations,
+                                signed_blocks,
+                            } = data;
+
+                            info!(
+                                "exported {} records for {pubkey:?}",
+                                signed_attestations.len() + signed_blocks.len(),
+                            );
+                        }
+                    }
 
                     info!("interchange file exported to {file_path:?}");
                 }

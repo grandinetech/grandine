@@ -15,7 +15,6 @@ use helper_functions::{
     slot_report::{Delta, NullSlotReport, SlotReport, SyncAggregateRewards},
     verifier::{SingleVerifier, Triple, Verifier},
 };
-use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
@@ -47,6 +46,9 @@ use crate::{
     unphased::{self, CombinedDeposit, Error},
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 /// <https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/altair/beacon-chain.md#block-processing>
 ///
 /// This also serves as a substitute for [`compute_new_state_root`]. `compute_new_state_root` as
@@ -65,6 +67,7 @@ pub fn process_block<P: Preset>(
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());

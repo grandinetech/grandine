@@ -12,7 +12,6 @@ use helper_functions::{
     slot_report::SlotReport,
     verifier::{SingleVerifier, Triple, Verifier},
 };
-use prometheus_metrics::METRICS;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use ssz::SszHash as _;
 use typenum::Unsigned as _;
@@ -39,6 +38,9 @@ use crate::{
     unphased::{self, Error},
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 /// [`process_block`](TODO(feature/deneb))
 ///
 /// This also serves as a substitute for [`compute_new_state_root`]. `compute_new_state_root` as
@@ -57,6 +59,7 @@ pub fn process_block<P: Preset>(
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
+    #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
