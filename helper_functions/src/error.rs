@@ -1,5 +1,6 @@
 use parse_display::Display;
 use thiserror::Error;
+use types::phase0::primitives::CommitteeIndex;
 
 #[derive(Debug, Error)]
 pub(crate) enum Error {
@@ -28,6 +29,8 @@ pub(crate) enum Error {
     FailedToSelectProposer,
     #[error("no validators are active")]
     NoActiveValidators,
+    #[error("no committee attesters for {index} committee")]
+    NoCommitteeAttesters { index: CommitteeIndex },
     #[error("aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}")]
     ParticipantsCountMismatch {
         aggregation_bitlist_length: usize,
