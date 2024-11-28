@@ -200,6 +200,10 @@ impl SlashingProtector {
         // See <https://sqlite.org/pragma.html#pragma_cache_size>.
         connection.pragma_update(None, "cache_size", -20000)?;
 
+        // Prevent other processes from accessing the database file.
+        // See <https://eips.ethereum.org/EIPS/eip-3076#general-recommendations>.
+        connection.pragma_update(None, "locking_mode", "EXCLUSIVE")?;
+
         Ok(())
     }
 
@@ -1133,8 +1137,15 @@ mod tests {
             |row| row.get::<_, i64>(0),
         )?;
 
+        let locking_mode = slashing_protector.connection.query_row(
+            "SELECT locking_mode FROM pragma_locking_mode",
+            (),
+            |row| row.get::<_, String>(0),
+        )?;
+
         assert!(foreign_keys);
         assert_eq!(cache_size, -20000);
+        assert_eq!(locking_mode, "exclusive");
 
         Ok(())
     }
