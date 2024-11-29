@@ -17,7 +17,7 @@ use itertools::{izip, Itertools as _};
 use log::{info, warn};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
-use reqwest::{Client, Url};
+use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -25,6 +25,7 @@ use types::{
     combined::BeaconState,
     phase0::primitives::{Slot, H256},
     preset::Preset,
+    redacting_url::RedactingUrl,
 };
 
 use crate::{
@@ -49,7 +50,7 @@ pub enum KeyOrigin {
 #[derive(Clone)]
 enum SignMethod {
     SecretKey(Arc<SecretKey>, KeyOrigin),
-    Web3Signer(Url),
+    Web3Signer(RedactingUrl),
 }
 
 pub struct Signer {
@@ -187,7 +188,7 @@ impl Snapshot {
             })
     }
 
-    pub fn web3signer_keys(&self) -> impl Iterator<Item = (PublicKeyBytes, Url)> + '_ {
+    pub fn web3signer_keys(&self) -> impl Iterator<Item = (PublicKeyBytes, RedactingUrl)> + '_ {
         self.sign_methods
             .iter()
             .filter_map(|(pubkey, sign_method)| match sign_method {
@@ -212,7 +213,7 @@ impl Snapshot {
         }
     }
 
-    pub fn append_remote_key(&mut self, public_key: PublicKeyBytes, url: Url) -> bool {
+    pub fn append_remote_key(&mut self, public_key: PublicKeyBytes, url: RedactingUrl) -> bool {
         match self.sign_methods.entry(public_key) {
             Entry::Occupied(_) => false,
             Entry::Vacant(vacant) => {

@@ -3,6 +3,7 @@ pub mod combined;
 pub mod config;
 pub mod nonstandard;
 pub mod preset;
+pub mod redacting_url;
 pub mod traits;
 
 pub mod phase0 {

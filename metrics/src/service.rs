@@ -3,16 +3,17 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
+use derive_more::Debug;
 use directories::Directories;
 use eth1_api::{Eth1ApiToMetrics, Eth1Metrics, RealController};
 use futures::{channel::mpsc::UnboundedReceiver, future::Either, select, StreamExt as _};
 use log::{debug, info, warn};
 use p2p::SyncToMetrics;
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use sysinfo::System;
 use tokio_stream::wrappers::IntervalStream;
-use types::preset::Preset;
+use types::{preset::Preset, redacting_url::RedactingUrl};
 
 use crate::{
     beaconchain::{
@@ -37,7 +38,7 @@ pub struct MetricsChannels {
 
 #[derive(Clone, Debug)]
 pub struct MetricsServiceConfig {
-    pub remote_metrics_url: Option<Url>,
+    pub remote_metrics_url: Option<RedactingUrl>,
     pub directories: Arc<Directories>,
 }
 
@@ -109,7 +110,7 @@ impl<P: Preset> MetricsService<P> {
                         let process_metrics = ProcessMetrics::get();
 
                         let response = client
-                            .post(url)
+                            .post(url.into_url())
                             .json(&[
                                 self.beacon_node_metrics(process_metrics),
                                 self.validator_metrics(process_metrics),
@@ -219,5 +220,35 @@ fn refresh_system_stats(system: &mut System, time: &mut Instant) {
     if time.elapsed() >= MIN_TIME_BETWEEN_SYSTEM_STATS_REFRESH {
         *time = Instant::now();
         system.refresh_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use anyhow::Result;
+    use types::redacting_url::RedactingUrl;
+
+    use super::MetricsServiceConfig;
+
+    #[test]
+    fn test_config_debug_with_sensitive_url() -> Result<()> {
+        let config = MetricsServiceConfig {
+            remote_metrics_url: "http://username:password@metrics.service.url"
+                .parse::<RedactingUrl>()?
+                .into(),
+            directories: Arc::default(),
+        };
+
+        assert_eq!(
+            format!("{config:?}"),
+            "MetricsServiceConfig { \
+                remote_metrics_url: Some(\"http://*:*@metrics.service.url/\"), \
+                directories: Directories { data_dir: None, store_directory: None, network_dir: None, validator_dir: None } \
+            }",
+        );
+
+        Ok(())
     }
 }

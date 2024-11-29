@@ -14,7 +14,7 @@ use execution_engine::{
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
 use log::warn;
 use prometheus_metrics::Metrics;
-use reqwest::{header::HeaderMap, Client, Url};
+use reqwest::{header::HeaderMap, Client};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_assertions::const_assert_eq;
@@ -26,6 +26,7 @@ use types::{
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::Preset,
+    redacting_url::RedactingUrl,
 };
 use web3::{
     api::{Eth, Namespace as _},
@@ -63,7 +64,7 @@ impl Eth1Api {
         config: Arc<Config>,
         client: Client,
         auth: Arc<Auth>,
-        eth1_rpc_urls: Vec<Url>,
+        eth1_rpc_urls: Vec<RedactingUrl>,
         eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
@@ -469,7 +470,7 @@ impl Eth1Api {
     {
         while let Some(endpoint) = self.current_endpoint().await {
             let url = endpoint.url();
-            let http = Http::with_client(self.client.clone(), url.clone());
+            let http = Http::with_client(self.client.clone(), url.clone().into_url());
             let api = Web3::new(http).eth();
             let headers = self.auth.headers()?;
             let query = request_from_api((api, headers))?.await;

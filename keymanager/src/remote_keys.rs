@@ -3,7 +3,6 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{anyhow, Result};
 use bls::PublicKeyBytes;
 use futures::lock::Mutex;
-use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use signer::{KeyOrigin, Signer};
 use slashing_protection::SlashingProtector;
@@ -81,7 +80,7 @@ impl RemoteKeyManager {
             import_results.clear();
 
             for RemoteKey { pubkey, url } in &remote_keys {
-                let result = match Url::parse(url) {
+                let result = match url.parse() {
                     Ok(url) => {
                         if snapshot.append_remote_key(*pubkey, url) {
                             imported_pubkeys.push(*pubkey);

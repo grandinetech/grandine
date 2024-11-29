@@ -6,7 +6,7 @@ use helper_functions::misc;
 use http_api_utils::{BlockId, StateId};
 use log::info;
 use mime::APPLICATION_OCTET_STREAM;
-use reqwest::{header::ACCEPT, Client, StatusCode, Url};
+use reqwest::{header::ACCEPT, Client, StatusCode};
 use ssz::SszRead;
 use thiserror::Error;
 use types::{
@@ -15,13 +15,14 @@ use types::{
     nonstandard::FinalizedCheckpoint,
     phase0::{consts::GENESIS_EPOCH, primitives::H256},
     preset::Preset,
+    redacting_url::RedactingUrl,
     traits::SignedBeaconBlock as _,
 };
 
 pub async fn load_finalized_from_remote<P: Preset>(
     config: &Config,
     client: &Client,
-    url: &Url,
+    url: &RedactingUrl,
 ) -> Result<FinalizedCheckpoint<P>> {
     info!("performing checkpoint sync from {url}…");
 
@@ -63,7 +64,7 @@ pub async fn load_finalized_from_remote<P: Preset>(
 async fn fetch_block<P: Preset>(
     config: &Config,
     client: &Client,
-    url: &Url,
+    url: &RedactingUrl,
     block_id: BlockId,
 ) -> Result<Option<Arc<SignedBeaconBlock<P>>>> {
     let url = url.join(&format!("/eth/v2/beacon/blocks/{block_id}"))?;
@@ -74,7 +75,7 @@ async fn fetch_block<P: Preset>(
 async fn fetch_state<P: Preset>(
     config: &Config,
     client: &Client,
-    url: &Url,
+    url: &RedactingUrl,
     state_id: StateId,
 ) -> Result<Option<Arc<BeaconState<P>>>> {
     let url = url.join(&format!("/eth/v2/debug/beacon/states/{state_id}"))?;
@@ -85,10 +86,10 @@ async fn fetch_state<P: Preset>(
 async fn fetch<T: SszRead<Config>>(
     config: &Config,
     client: &Client,
-    url: Url,
+    url: RedactingUrl,
 ) -> Result<Option<T>> {
     let response = client
-        .get(url)
+        .get(url.into_url())
         .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
         .timeout(Duration::from_secs(600))
         .send()

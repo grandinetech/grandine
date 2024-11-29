@@ -27,4 +27,3 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tynm = { workspace = true }
 types = { workspace = true }
-url = { workspace = true }

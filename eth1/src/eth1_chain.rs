@@ -15,8 +15,10 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::time::Duration;
 use tokio_stream::StreamExt as _;
-use types::{config::Config as ChainConfig, phase0::primitives::ExecutionBlockNumber};
-use url::Url;
+use types::{
+    config::Config as ChainConfig, phase0::primitives::ExecutionBlockNumber,
+    redacting_url::RedactingUrl,
+};
 
 use crate::{
     download_manager::{DownloadManager, Error as DownloadError},
@@ -30,7 +32,7 @@ const STREAM_BATCH_SIZE: usize = 1000;
 #[derive(Default)]
 pub struct Eth1Config {
     pub eth1_auth: Arc<Auth>,
-    pub eth1_rpc_urls: Vec<Url>,
+    pub eth1_rpc_urls: Vec<RedactingUrl>,
     pub deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     pub default_deposit_tree: Option<DepositTree>,
 }

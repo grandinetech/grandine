@@ -11,7 +11,7 @@ use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use log::{debug, info, warn};
 use nonzero_ext::nonzero;
-use reqwest::{Client, Url};
+use reqwest::Client;
 use ssz::{Ssz, SszRead, SszReadDefault as _, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -29,6 +29,7 @@ use types::{
         primitives::{Epoch, Slot, H256},
     },
     preset::Preset,
+    redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
@@ -39,11 +40,11 @@ pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 pub enum StateLoadStrategy<P: Preset> {
     Auto {
         state_slot: Option<Slot>,
-        checkpoint_sync_url: Option<Url>,
+        checkpoint_sync_url: Option<RedactingUrl>,
         anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     },
     Remote {
-        checkpoint_sync_url: Url,
+        checkpoint_sync_url: RedactingUrl,
     },
     Anchor {
         block: Arc<SignedBeaconBlock<P>>,

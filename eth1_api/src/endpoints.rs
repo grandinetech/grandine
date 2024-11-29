@@ -1,7 +1,8 @@
-use reqwest::Url;
+use derive_more::Debug;
+use types::redacting_url::RedactingUrl;
 
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum EndpointStatus {
     Online,
     Offline,
@@ -13,16 +14,16 @@ impl EndpointStatus {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Endpoint {
     index: usize,
     status: EndpointStatus,
-    url: Url,
+    url: RedactingUrl,
 }
 
 impl Endpoint {
-    pub const fn url(&self) -> &Url {
+    pub const fn url(&self) -> &RedactingUrl {
         &self.url
     }
 
@@ -37,7 +38,7 @@ pub struct Endpoints {
 }
 
 impl Endpoints {
-    pub fn new(urls: impl IntoIterator<Item = Url>) -> Self {
+    pub fn new(urls: impl IntoIterator<Item = RedactingUrl>) -> Self {
         let endpoints = urls
             .into_iter()
             .enumerate()

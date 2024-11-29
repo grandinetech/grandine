@@ -23,7 +23,7 @@ use log::{error, info, warn};
 use logging::PEER_LOG_METRICS;
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
-use reqwest::{Client, ClientBuilder, Url};
+use reqwest::{Client, ClientBuilder};
 use runtime::{MetricsConfig, StorageConfig};
 use signer::{KeyOrigin, Signer};
 use slasher::SlasherConfig;
@@ -36,6 +36,7 @@ use types::{
     config::Config as ChainConfig,
     phase0::primitives::{ExecutionBlockNumber, Slot},
     preset::{Preset, PresetName},
+    redacting_url::RedactingUrl,
     traits::BeaconState as _,
 };
 use validator::{ValidatorApiConfig, ValidatorConfig};
@@ -78,13 +79,13 @@ struct Context {
     store_config: StoreConfig,
     deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     genesis_state_file: Option<PathBuf>,
-    genesis_state_download_url: Option<Url>,
+    genesis_state_download_url: Option<RedactingUrl>,
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
-    checkpoint_sync_url: Option<Url>,
+    checkpoint_sync_url: Option<RedactingUrl>,
     force_checkpoint_sync: bool,
     back_sync: bool,
-    eth1_rpc_urls: Vec<Url>,
+    eth1_rpc_urls: Vec<RedactingUrl>,
     network_config: NetworkConfig,
     storage_config: StorageConfig,
     command: Option<GrandineCommand>,
@@ -759,7 +760,7 @@ async fn genesis_checkpoint_provider<P: Preset>(
     predefined_network: Option<PredefinedNetwork>,
     client: &Client,
     store_directory: PathBuf,
-    genesis_state_download_url: Option<Url>,
+    genesis_state_download_url: Option<RedactingUrl>,
     eth1_chain: &Eth1Chain,
 ) -> Result<AnchorCheckpointProvider<P>> {
     if let Some(file_path) = genesis_state_file {

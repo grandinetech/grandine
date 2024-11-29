@@ -8,7 +8,7 @@ use helper_functions::signing::SignForAllForks;
 use itertools::Itertools as _;
 use log::{debug, info};
 use prometheus_metrics::Metrics;
-use reqwest::{Client, Response, StatusCode, Url};
+use reqwest::{Client, Response, StatusCode};
 use ssz::SszHash as _;
 use thiserror::Error;
 use typenum::Unsigned as _;
@@ -21,6 +21,7 @@ use types::{
         primitives::{ExecutionBlockHash, Slot, UnixSeconds, H256},
     },
     preset::Preset,
+    redacting_url::RedactingUrl,
     traits::SignedBeaconBlock as _,
 };
 
@@ -120,7 +121,7 @@ impl Api {
         let url = self.url("/eth/v1/builder/validators")?;
         let response = self
             .client
-            .post(url)
+            .post(url.into_url())
             .json(validator_registrations)
             .send()
             .await?;
@@ -151,7 +152,12 @@ impl Api {
 
         debug!("getting execution payload header from {url}");
 
-        let response = self.client.get(url).timeout(REQUEST_TIMEOUT).send().await?;
+        let response = self
+            .client
+            .get(url.into_url())
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await?;
         let response = handle_error(response).await?;
 
         if response.status() == StatusCode::NO_CONTENT {
@@ -222,7 +228,7 @@ impl Api {
 
         let response = self
             .client
-            .post(url)
+            .post(url.into_url())
             .json(block)
             .timeout(remaining_time)
             .send()
@@ -256,7 +262,7 @@ impl Api {
         Ok(response)
     }
 
-    fn url(&self, path: &str) -> Result<Url> {
+    fn url(&self, path: &str) -> Result<RedactingUrl> {
         self.config.builder_api_url.join(path).map_err(Into::into)
     }
 }
@@ -289,7 +295,7 @@ fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use reqwest::{Client, Url};
+    use reqwest::Client;
     use test_case::test_case;
     use types::preset::Mainnet;
 
@@ -335,7 +341,8 @@ mod tests {
     ) -> Result<(), BuilderApiError> {
         let api = BuilderApi::new(
             BuilderConfig {
-                builder_api_url: Url::parse("http://localhost")
+                builder_api_url: "http://localhost"
+                    .parse()
                     .expect("http://localhost should be a valid URL"),
                 builder_disable_checks: false,
                 builder_max_skipped_slots_per_epoch: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,

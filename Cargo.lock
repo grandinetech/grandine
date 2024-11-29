@@ -2313,7 +2313,6 @@ dependencies = [
  "tokio-stream",
  "tynm",
  "types",
- "url",
 ]
 
 [[package]]
@@ -5089,6 +5088,7 @@ dependencies = [
  "bls",
  "build-time",
  "chrono",
+ "derive_more 1.0.0",
  "directories",
  "eth1_api",
  "eth2_libp2p",
@@ -7250,6 +7250,7 @@ dependencies = [
  "arc-swap",
  "bls",
  "builder_api",
+ "derive_more 1.0.0",
  "doppelganger_protection",
  "futures",
  "helper_functions",
@@ -8290,6 +8291,7 @@ checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 name = "types"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "arithmetic",
  "bincode",
  "bit_field",
@@ -8321,6 +8323,7 @@ dependencies = [
  "test-generator",
  "thiserror",
  "typenum",
+ "url",
  "variant_count",
 ]
 

@@ -5,22 +5,23 @@ use std::{
 
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
+use derive_more::Debug;
 use log::warn;
 use prometheus_metrics::Metrics;
-use reqwest::{Client, Url};
-use types::{phase0::primitives::H256, preset::Preset};
+use reqwest::Client;
+use types::{phase0::primitives::H256, preset::Preset, redacting_url::RedactingUrl};
 
 use crate::{ForkInfo, SigningMessage};
 
 use super::types::{SigningRequest, SigningResponse};
 
-pub type FetchedKeys = HashMap<Url, Option<HashSet<PublicKeyBytes>>>;
+pub type FetchedKeys = HashMap<RedactingUrl, Option<HashSet<PublicKeyBytes>>>;
 
 #[derive(Clone, Default, Debug)]
 pub struct Config {
     pub allow_to_reload_keys: bool,
     pub public_keys: HashSet<PublicKeyBytes>,
-    pub urls: Vec<Url>,
+    pub urls: Vec<RedactingUrl>,
 }
 
 impl Config {
@@ -35,7 +36,7 @@ pub struct Web3Signer {
     client: Client,
     config: Config,
     metrics: Option<Arc<Metrics>>,
-    keys_loaded: HashSet<Url>,
+    keys_loaded: HashSet<RedactingUrl>,
 }
 
 impl Web3Signer {
@@ -86,13 +87,13 @@ impl Web3Signer {
         keys
     }
 
-    pub fn mark_keys_loaded_from(&mut self, url: Url) {
+    pub fn mark_keys_loaded_from(&mut self, url: RedactingUrl) {
         self.keys_loaded.insert(url);
     }
 
     pub async fn sign<P: Preset>(
         &self,
-        api_url: &Url,
+        api_url: &RedactingUrl,
         message: SigningMessage<'_, P>,
         signing_root: H256,
         fork_info: Option<ForkInfo<P>>,
@@ -109,7 +110,7 @@ impl Web3Signer {
 
         let response = self
             .client
-            .post(url)
+            .post(url.into_url())
             .json(&request)
             .send()
             .await?
@@ -119,11 +120,14 @@ impl Web3Signer {
         Ok(response.signature)
     }
 
-    async fn fetch_public_keys_from_url(&self, api_url: &Url) -> Result<HashSet<PublicKeyBytes>> {
+    async fn fetch_public_keys_from_url(
+        &self,
+        api_url: &RedactingUrl,
+    ) -> Result<HashSet<PublicKeyBytes>> {
         let url = api_url.join("/api/v1/eth2/publicKeys")?;
 
         self.client
-            .get(url)
+            .get(url.into_url())
             .send()
             .await?
             .json()
@@ -165,7 +169,7 @@ mod tests {
                 .body(json!([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]).to_string());
         });
 
-        let url = Url::parse(&server.url("/"))?;
+        let url = server.url("/").parse::<RedactingUrl>()?;
         let config = super::Config {
             allow_to_reload_keys: false,
             public_keys: HashSet::new(),
@@ -185,9 +189,7 @@ mod tests {
 
         let response = web3signer.fetch_public_keys().await;
         // By default, do not load pubkeys from Web3Signer again if keys were loaded
-        let expected = HashMap::new();
-
-        assert_eq!(response, expected);
+        assert!(response.is_empty());
 
         Ok(())
     }
@@ -202,7 +204,7 @@ mod tests {
                 .body(json!([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]).to_string());
         });
 
-        let url = Url::parse(&server.url("/"))?;
+        let url = server.url("/").parse::<RedactingUrl>()?;
         let config = super::Config {
             allow_to_reload_keys: true,
             public_keys: HashSet::new(),
@@ -237,7 +239,7 @@ mod tests {
                 .body(json!([SAMPLE_PUBKEY, SAMPLE_PUBKEY_2]).to_string());
         });
 
-        let url = Url::parse(&server.url("/"))?;
+        let url = server.url("/").parse::<RedactingUrl>()?;
         let config = super::Config {
             allow_to_reload_keys: false,
             public_keys: vec![SAMPLE_PUBKEY_2].into_iter().collect(),
@@ -264,7 +266,7 @@ mod tests {
                 .body(json!({ "signature": SAMPLE_SIGNATURE }).to_string());
         });
 
-        let url = Url::parse(&server.url("/"))?;
+        let url = server.url("/").parse::<RedactingUrl>()?;
         let config = super::Config {
             allow_to_reload_keys: false,
             public_keys: HashSet::new(),

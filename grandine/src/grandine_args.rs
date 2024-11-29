@@ -33,7 +33,7 @@ use log::warn;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
-use reqwest::{header::HeaderValue, Url};
+use reqwest::header::HeaderValue;
 use runtime::{
     MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
     DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
@@ -56,6 +56,7 @@ use types::{
         Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Slot, H256,
     },
     preset::PresetName,
+    redacting_url::RedactingUrl,
 };
 use validator::{ValidatorApiConfig, ValidatorConfig};
 
@@ -173,7 +174,7 @@ struct ChainOptions {
 
     /// Download genesis state from specified URL
     #[clap(long, value_name = "URL")]
-    genesis_state_download_url: Option<Url>,
+    genesis_state_download_url: Option<RedactingUrl>,
 }
 
 #[derive(Args)]
@@ -246,7 +247,7 @@ struct BeaconNodeOptions {
     /// Beacon node API URL to load recent finalized checkpoint and sync from it
     /// [default: None]
     #[clap(long)]
-    checkpoint_sync_url: Option<Url>,
+    checkpoint_sync_url: Option<RedactingUrl>,
 
     /// Force checkpoint sync. Requires --checkpoint-sync-url
     /// [default: disabled]
@@ -255,7 +256,7 @@ struct BeaconNodeOptions {
 
     /// List of Eth1 RPC URLs
     #[clap(long, num_args = 1..)]
-    eth1_rpc_urls: Vec<Url>,
+    eth1_rpc_urls: Vec<RedactingUrl>,
 
     /// Parent directory for application data files
     /// [default: $HOME/.grandine/{network}]
@@ -346,7 +347,7 @@ struct BeaconNodeOptions {
 
     /// Optional remote metrics URL that Grandine will periodically send metrics to
     #[clap(long)]
-    remote_metrics_url: Option<Url>,
+    remote_metrics_url: Option<RedactingUrl>,
 
     /// Enable validator liveness tracking
     /// [default: disabled]
@@ -689,11 +690,11 @@ struct ValidatorOptions {
 
     /// [DEPRECATED] External block builder API URL
     #[clap(long)]
-    builder_api_url: Option<Url>,
+    builder_api_url: Option<RedactingUrl>,
 
     /// External block builder URL
     #[clap(long)]
-    builder_url: Option<Url>,
+    builder_url: Option<RedactingUrl>,
 
     /// Always use specified external block builder without checking for circuit breaker conditions
     #[clap(long)]
@@ -717,11 +718,11 @@ struct ValidatorOptions {
 
     /// [DEPRECATED] List of Web3Signer API URLs
     #[clap(long, num_args = 1..)]
-    web3signer_api_urls: Vec<Url>,
+    web3signer_api_urls: Vec<RedactingUrl>,
 
     /// List of Web3Signer URLs
     #[clap(long, num_args = 1..)]
-    web3signer_urls: Vec<Url>,
+    web3signer_urls: Vec<RedactingUrl>,
 
     /// Use validator key cache for faster startup
     #[clap(long)]
@@ -1476,7 +1477,7 @@ mod tests {
         let config = config_from_args(["--eth1-rpc-urls", "http://localhost:8545"]);
 
         itertools::assert_equal(
-            config.eth1_rpc_urls.iter().map(Url::as_str),
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
             ["http://localhost:8545/"],
         );
     }
@@ -1490,7 +1491,7 @@ mod tests {
         ]);
 
         itertools::assert_equal(
-            config.eth1_rpc_urls.iter().map(Url::as_str),
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
             ["http://localhost:8545/", "http://example.com:8545/"],
         );
     }
@@ -1505,7 +1506,7 @@ mod tests {
         ]);
 
         itertools::assert_equal(
-            config.eth1_rpc_urls.iter().map(Url::as_str),
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
             ["http://localhost:8545/", "http://example.com:8545/"],
         );
     }

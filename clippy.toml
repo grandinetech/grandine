@@ -63,6 +63,9 @@ disallowed-types = [
 
     { path = 'once_cell::sync::Lazy',   reason = 'use std::sync::LazyLock'  },
     { path = 'once_cell::unsync::Lazy', reason = 'use core::cell::LazyCell' },
+
+    { path = 'url::Url',     reason = 'use types::redacting_url::RedactingUrl for print-safe URLs' },
+    { path = 'reqwest::Url', reason = 'use types::redacting_url::RedactingUrl for print-safe URLs' },
 ]
 enforced-import-renames = [
     { path = 'core::fmt::Result', rename = 'FmtResult' },

@@ -7,6 +7,7 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 arithmetic = { workspace = true }
 bit_field = { workspace = true }
 bls = { workspace = true }
@@ -32,6 +33,7 @@ std_ext = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 typenum = { workspace = true }
+url = { workspace = true }
 variant_count = { workspace = true }
 
 [dev-dependencies]

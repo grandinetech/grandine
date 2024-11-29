@@ -6,7 +6,7 @@ use deposit_tree::DepositTree;
 use genesis::AnchorCheckpointProvider;
 use log::info;
 use p2p::{Enr, NetworkConfig};
-use reqwest::{Client, Url};
+use reqwest::Client;
 use ssz::SszRead as _;
 use strum::Display;
 use tap::Pipe as _;
@@ -14,6 +14,7 @@ use types::{
     config::Config as ChainConfig,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
     preset::Preset,
+    redacting_url::RedactingUrl,
 };
 
 #[cfg(any(feature = "network-mainnet", test))]
@@ -128,7 +129,7 @@ impl PredefinedNetwork {
         self,
         client: &Client,
         store_directory: impl AsRef<Path> + Send,
-        genesis_download_url: Option<Url>,
+        genesis_download_url: Option<RedactingUrl>,
     ) -> Result<AnchorCheckpointProvider<P>> {
         let config = &self.chain_config();
 
@@ -145,7 +146,7 @@ impl PredefinedNetwork {
                 store_directory,
                 genesis_download_url.unwrap_or_else(|| {
                     default_download_url
-                        .try_into()
+                        .parse()
                         .expect("hard-coded genesis state download URL should be valid")
                 }),
             )
@@ -276,7 +277,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
     config: &ChainConfig,
     client: &Client,
     store_directory: impl AsRef<Path> + Send,
-    download_url: Url,
+    download_url: RedactingUrl,
 ) -> Result<WithOrigin<FinalizedCheckpoint<P>>> {
     let genesis_state_path = store_directory.as_ref().join("genesis_state.ssz");
 
@@ -292,7 +293,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
             info!("downloading genesis state from {download_url}…");
 
             let bytes = client
-                .get(download_url)
+                .get(download_url.into_url())
                 .timeout(Duration::from_secs(600))
                 .send()
                 .await?

@@ -8,18 +8,21 @@ use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use log::info;
 use p2p::NetworkConfig;
-use reqwest::Url;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
 use types::{
     config::Config as ChainConfig,
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Slot, H256},
+    redacting_url::RedactingUrl,
 };
 use validator::ValidatorApiConfig;
 
 use crate::{
     commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
 };
+
+#[cfg(test)]
+use derive_more::Debug;
 
 // False positive. The `bool`s are independent.
 #[allow(clippy::struct_excessive_bools)]
@@ -29,11 +32,11 @@ pub struct GrandineConfig {
     pub chain_config: Arc<ChainConfig>,
     pub deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     pub genesis_state_file: Option<PathBuf>,
-    pub genesis_state_download_url: Option<Url>,
-    pub checkpoint_sync_url: Option<Url>,
+    pub genesis_state_download_url: Option<RedactingUrl>,
+    pub checkpoint_sync_url: Option<RedactingUrl>,
     pub force_checkpoint_sync: bool,
     pub back_sync: bool,
-    pub eth1_rpc_urls: Vec<Url>,
+    pub eth1_rpc_urls: Vec<RedactingUrl>,
     pub data_dir: PathBuf,
     pub validators: Option<Validators>,
     pub keystore_storage_password_file: Option<PathBuf>,
