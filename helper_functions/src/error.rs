@@ -9,7 +9,7 @@ pub(crate) enum Error {
     AttestationSourceMismatch,
     #[error("attesting indices are not sorted and unique")]
     AttestingIndicesNotSortedAndUnique,
-    #[error("commitee index is out of bounds")]
+    #[error("committee index is out of bounds")]
     CommitteeIndexOutOfBounds,
     #[error("aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}")]
     CommitteeLengthMismatch {

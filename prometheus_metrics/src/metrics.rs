@@ -66,7 +66,7 @@ pub struct Metrics {
     attestation_verifier_active_task_count: IntGauge,
 
     pub attestation_verifier_process_attestation_batch_times: Histogram,
-    pub attestation_verifier_processs_aggregate_batch_times: Histogram,
+    pub attestation_verifier_process_aggregate_batch_times: Histogram,
     pub attestation_verifier_verify_agg_batch_signature_times: Histogram,
 
     // Validator ticks + Epoch processing
@@ -316,7 +316,7 @@ impl Metrics {
                 )
             )?,
 
-            attestation_verifier_processs_aggregate_batch_times: Histogram::with_opts(
+            attestation_verifier_process_aggregate_batch_times: Histogram::with_opts(
                 histogram_opts!(
                     "ATTESTATION_VERIFIER_PROCESS_AGGREGATE_BATCH_TIMES",
                     "Attestation verifier process aggregate batch task times",
@@ -760,7 +760,7 @@ impl Metrics {
                 .clone(),
         ))?;
         default_registry.register(Box::new(
-            self.attestation_verifier_processs_aggregate_batch_times
+            self.attestation_verifier_process_aggregate_batch_times
                 .clone(),
         ))?;
         default_registry.register(Box::new(
@@ -945,7 +945,7 @@ impl Metrics {
             .get_metric_with_label_values(labels)
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
-            Err(error) => warn!("unable to track HTTP API resposne time for {labels:?}: {error:?}"),
+            Err(error) => warn!("unable to track HTTP API response time for {labels:?}: {error:?}"),
         }
     }
 
@@ -957,7 +957,7 @@ impl Metrics {
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
             Err(error) => {
-                warn!("unable to track Validator API resposne time for {labels:?}: {error:?}")
+                warn!("unable to track Validator API response time for {labels:?}: {error:?}")
             }
         }
     }

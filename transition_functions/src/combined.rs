@@ -874,7 +874,7 @@ mod spec_tests {
             if should_run_blinded_block_processing(&pre, blocks.clone()) {
                 let mut state = pre;
 
-                assert_still_succeeeds_with_blinded_blocks(
+                assert_still_succeeds_with_blinded_blocks(
                     config,
                     &mut state,
                     blocks,
@@ -956,7 +956,7 @@ mod spec_tests {
     // We can only test blinded block processing with valid blocks.
     // Processing would falsely succeed with incorrect values in `SignedBeaconBlock.signature`.
     // Having official test cases for blinded block processing would be nice.
-    fn assert_still_succeeeds_with_blinded_blocks<P: Preset>(
+    fn assert_still_succeeds_with_blinded_blocks<P: Preset>(
         config: &Config,
         state: &mut BeaconState<P>,
         blocks: impl IntoIterator<Item = SignedBeaconBlock<P>>,

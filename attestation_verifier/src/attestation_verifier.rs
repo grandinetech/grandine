@@ -199,7 +199,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
         let _timer = metrics.map(|metrics| {
             // metrics.set_attestation_verifier_aggregate_batch_len(aggregates_with_origins.len());
             metrics
-                .attestation_verifier_processs_aggregate_batch_times
+                .attestation_verifier_process_aggregate_batch_times
                 .start_timer()
         });
 

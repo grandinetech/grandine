@@ -1668,7 +1668,7 @@ impl<P: Preset> Network<P> {
         let request = BlocksByRangeRequest::new(start_slot, count);
 
         debug!(
-            "sending BeaconBlocksByRange request (reqeuest_id: {request_id}, peer_id: {peer_id},\
+            "sending BeaconBlocksByRange request (request_id: {request_id}, peer_id: {peer_id},\
             request: {request:?})",
         );
 

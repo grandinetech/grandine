@@ -24,7 +24,7 @@ pub enum MetricsToMetrics {
 impl MetricsToMetrics {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send from metrics servier to metrics service failed because the receiver was dropped");
+            debug!("send from metrics server to metrics service failed because the receiver was dropped");
         }
     }
 }

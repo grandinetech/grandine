@@ -1599,7 +1599,7 @@ mod spec_tests {
 
     #[duplicate_item(
         glob                                                                                        function_name                         combined_type                 preset    phase;
-        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/LightClientBootstrap/*/*"]           [altair_mainnet_boostrap]             [LightClientBootstrap]        [Mainnet] [Altair];
+        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/LightClientBootstrap/*/*"]           [altair_mainnet_bootstrap]            [LightClientBootstrap]        [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/LightClientBootstrap/*/*"]           [altair_minimal_bootstrap]            [LightClientBootstrap]        [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/LightClientFinalityUpdate/*/*"]      [altair_mainnet_finality_update]      [LightClientFinalityUpdate]   [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/LightClientFinalityUpdate/*/*"]      [altair_minimal_finality_update]      [LightClientFinalityUpdate]   [Minimal] [Altair];

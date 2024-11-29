@@ -640,7 +640,7 @@ impl NetworkConfigOptions {
             if !manual_options.is_empty() {
                 warn!(
                     "UPnP enabled with manual ENR settings: {}; \
-                     manual ENR settings might be overriden by UPnP",
+                     manual ENR settings might be overridden by UPnP",
                     manual_options.join(", "),
                 );
             }
@@ -1578,7 +1578,7 @@ mod tests {
     }
 
     #[test]
-    fn http_allowed_origins_option_single_occurence() {
+    fn http_allowed_origins_option_single_occurrence() {
         let config = config_from_args(["--http-allowed-origins", "*"]);
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
@@ -1589,7 +1589,7 @@ mod tests {
     }
 
     #[test]
-    fn http_allowed_origins_option_multiple_occurences() {
+    fn http_allowed_origins_option_multiple_occurrences() {
         let config = config_from_args([
             "--http-allowed-origins",
             "http://localhost",
@@ -1605,7 +1605,7 @@ mod tests {
     }
 
     #[test]
-    fn http_allowed_origins_option_multiple_occurences_including_wildcard() {
+    fn http_allowed_origins_option_multiple_occurrences_including_wildcard() {
         let config = config_from_args([
             "--http-allowed-origins",
             "http://localhost",

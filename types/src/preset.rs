@@ -838,7 +838,7 @@ pub struct DenebPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_blobs_per_block: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    kzg_committment_inclusion_proof_depth: u64,
+    kzg_commitment_inclusion_proof_depth: u64,
 }
 
 impl DenebPreset {
@@ -849,7 +849,7 @@ impl DenebPreset {
             field_elements_per_blob: P::FieldElementsPerBlob::non_zero(),
             max_blob_commitments_per_block: P::MaxBlobCommitmentsPerBlock::U64,
             max_blobs_per_block: P::MaxBlobsPerBlock::U64,
-            kzg_committment_inclusion_proof_depth: P::KzgCommitmentInclusionProofDepth::U64,
+            kzg_commitment_inclusion_proof_depth: P::KzgCommitmentInclusionProofDepth::U64,
         }
     }
 }

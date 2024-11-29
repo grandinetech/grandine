@@ -1386,7 +1386,7 @@ where
         }
 
         // A block may become orphaned while being processed.
-        // The fork choice store is not designed to accomodate blocks like that.
+        // The fork choice store is not designed to accommodate blocks like that.
         if block.message().slot() <= self.store.finalized_slot() {
             debug!(
                 "block became orphaned while being processed \
@@ -1475,7 +1475,7 @@ where
         //                      That is also why the message sending and task spawning was moved here.
         //                      One possible solution is to check `Mutator.delayed_until_payload` in
         //                      this method before calling `Store::apply_block`.
-        // > - If `exection_payload` verification of block's parent by an execution node is *not*
+        // > - If `execution_payload` verification of block's parent by an execution node is *not*
         // >   complete:
         // >   - [REJECT] The block's parent (defined by `block.parent_root`) passes all validation
         // >     (excluding execution node verification of the `block.body.execution_payload`).

@@ -248,7 +248,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_computing_own_beacon_commitee_members() -> Result<()> {
+    async fn test_computing_own_beacon_committee_members() -> Result<()> {
         // beacon committees at slot 1:
         //
         // committee 0: validators 41, 45,  0, 24

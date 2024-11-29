@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn interchange_format_emptyness_test() {
+    fn interchange_format_emptiness_test() {
         let mut interchange = InterchangeFormat {
             metadata: InterchangeMeta {
                 interchange_format_version: 5,

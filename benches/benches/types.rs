@@ -154,7 +154,7 @@ impl Criterion {
 }
 
 fn state_from_ssz<P: Preset>(config: &Config, bytes: &[u8]) -> Arc<BeaconState<P>> {
-    Arc::from_ssz(config, bytes).expect("state has already been sucessfully deserialized")
+    Arc::from_ssz(config, bytes).expect("state has already been successfully deserialized")
 }
 
 fn state_to_ssz(state: &BeaconState<impl Preset>) -> Vec<u8> {

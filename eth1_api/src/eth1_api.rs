@@ -698,7 +698,7 @@ mod tests {
         assert!(!eth1_api
             .current_endpoint()
             .await
-            .expect("endpoint should be avaialble")
+            .expect("endpoint should be available")
             .is_fallback());
 
         assert_eq!(
@@ -713,7 +713,7 @@ mod tests {
         assert!(eth1_api
             .current_endpoint()
             .await
-            .expect("the fallback endpoint should be avaialble")
+            .expect("the fallback endpoint should be available")
             .is_fallback());
 
         // Even though the primary endpoint is offline, eth1_api itself is not offline

@@ -951,7 +951,7 @@ mod tests {
 
         assert_eq!(
             ApiToken::load(token_file.path())
-                .expect_err("inalid tokens should not be loaded")
+                .expect_err("invalid tokens should not be loaded")
                 .to_string(),
             "Invalid character 'y' at position 63"
         );
