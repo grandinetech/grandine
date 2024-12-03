@@ -1705,7 +1705,8 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected = misc::compute_subnet_for_blob_sidecar(blob_sidecar.index);
+            let expected =
+                misc::compute_subnet_for_blob_sidecar(&self.chain_config, blob_sidecar.index);
 
             ensure!(
                 actual == expected,
