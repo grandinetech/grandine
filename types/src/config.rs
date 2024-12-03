@@ -134,6 +134,8 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub max_request_data_column_sidecars: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub min_epochs_for_blob_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: NonZeroU64,
@@ -227,10 +229,10 @@ impl Default for Config {
             resp_timeout: 10,
             subnets_per_node: 2,
             ttfb_timeout: 5,
-            // TODO(feature/deneb): make eth2_libp2p use these constants instead of duplicating them
             max_request_blocks: 1024,
             max_request_blocks_deneb: 128,
             max_request_blob_sidecars: 768,
+            max_request_data_column_sidecars: 0x4000,
             min_epochs_for_blob_sidecars_requests: 4096,
             blob_sidecar_subnet_count: nonzero!(6_u64),
             data_column_sidecar_subnet_count: 64,
@@ -711,6 +713,16 @@ impl Config {
     #[must_use]
     pub const fn is_eip7594_fork_epoch_set(&self) -> bool {
         self.eip7594_fork_epoch != FAR_FUTURE_EPOCH
+    }
+
+    #[must_use]
+    pub const fn max_request_blocks(&self, phase: Phase) -> u64 {
+        match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => {
+                self.max_request_blocks
+            }
+            Phase::Deneb | Phase::Electra => self.max_request_blocks_deneb,
+        }
     }
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {

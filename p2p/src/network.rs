@@ -65,6 +65,8 @@ use crate::{
 };
 
 const GOSSIPSUB_PARAMETER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
+
+// > Clients MAY limit the number of blocks and sidecars in the response.
 const MAX_FOR_DOS_PREVENTION: u64 = 64;
 
 /// Number of slots before a new phase to subscribe to its topics.
@@ -1013,8 +1015,6 @@ impl<P: Preset> Network<P> {
         debug!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
 
         let BlobsByRangeRequest { start_slot, count } = request;
-
-        // > Clients MAY limit the number of blocks and sidecars in the response.
         let difference = count
             .min(self.controller.chain_config().max_request_blob_sidecars)
             .min(MAX_FOR_DOS_PREVENTION);
@@ -1678,7 +1678,6 @@ impl<P: Preset> Network<P> {
         &self,
         request_id: RequestId,
         peer_id: PeerId,
-        // TODO(feature/deneb): move duplicated constants out of eth2_libp2p
         blob_identifiers: Vec<BlobIdentifier>,
     ) {
         let blob_identifiers = blob_identifiers
@@ -1694,11 +1693,8 @@ impl<P: Preset> Network<P> {
             return;
         }
 
-        let request = BlobsByRootRequest::new(
-            blob_identifiers
-                .try_into()
-                .expect("length is under maximum"),
-        );
+        let request =
+            BlobsByRootRequest::new(self.controller.chain_config(), blob_identifiers.into_iter());
 
         debug!(
             "sending BlobSidecarsByRoot request (request_id: {request_id}, peer_id: {peer_id}, \
@@ -1715,7 +1711,6 @@ impl<P: Preset> Network<P> {
         start_slot: Slot,
         count: u64,
     ) {
-        // TODO:
         let request = OldBlocksByRangeRequest::new(start_slot, count, 1);
 
         debug!(
@@ -1732,9 +1727,9 @@ impl<P: Preset> Network<P> {
         }
 
         let request = BlocksByRootRequest::new(
-            vec![block_root]
-                .try_into()
-                .expect("length is under maximum"),
+            self.controller.chain_config(),
+            self.controller.phase(),
+            core::iter::once(block_root),
         );
 
         debug!(
@@ -1978,23 +1973,11 @@ fn run_network_service<P: Preset>(
 mod tests {
     use crate::network::MAX_FOR_DOS_PREVENTION;
 
-    use eth2_libp2p::rpc::methods::{
-        MaxRequestBlobSidecars, MaxRequestBlocks, MaxRequestBlocksDeneb,
-    };
-    use typenum::Unsigned as _;
-    use types::config::Config;
+    use types::{config::Config, nonstandard::Phase};
 
     #[test]
     fn ensure_constant_sanity() {
-        let config = Config::mainnet();
-
-        assert!(MAX_FOR_DOS_PREVENTION < config.max_request_blocks);
-        assert_eq!(MaxRequestBlocks::U64, config.max_request_blocks);
-        assert_eq!(MaxRequestBlocksDeneb::U64, config.max_request_blocks_deneb,);
-
-        assert_eq!(
-            MaxRequestBlobSidecars::U64,
-            config.max_request_blob_sidecars,
-        );
+        assert!(MAX_FOR_DOS_PREVENTION < Config::mainnet().max_request_blocks(Phase::Phase0));
+        assert!(MAX_FOR_DOS_PREVENTION < Config::mainnet().max_request_blocks(Phase::Deneb));
     }
 }

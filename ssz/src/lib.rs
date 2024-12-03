@@ -13,6 +13,7 @@ pub use crate::{
     consts::{Endianness, Offset, BYTES_PER_LENGTH_OFFSET},
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
+    dynamic_list::DynamicList,
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
     merkle_tree::{mix_in_length, MerkleTree, ProofWithLength},
@@ -40,6 +41,7 @@ mod byte_vector;
 mod consts;
 mod contiguous_list;
 mod contiguous_vector;
+mod dynamic_list;
 mod error;
 mod hc;
 mod iter;
