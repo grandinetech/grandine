@@ -1262,9 +1262,8 @@ impl<P: Preset> SszWrite for LightClientUpdate<P> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         match self {
             Self::Altair(update) => {
-                let size = AltairLightClientUpdate::<P>::SIZE.get();
                 let length_before = bytes.len();
-                let length_after = length_before + size;
+                let length_after = length_before + AltairLightClientUpdate::<P>::SIZE.get();
 
                 bytes.resize(length_after, 0);
                 update.write_fixed(&mut bytes[length_before..]);
