@@ -228,7 +228,7 @@ impl Default for Config {
             subnets_per_node: 2,
             ttfb_timeout: 5,
             // TODO(feature/deneb): make eth2_libp2p use these constants instead of duplicating them
-            max_request_blocks: 128,
+            max_request_blocks: 1024,
             max_request_blocks_deneb: 128,
             max_request_blob_sidecars: 768,
             min_epochs_for_blob_sidecars_requests: 4096,

@@ -1976,12 +1976,25 @@ fn run_network_service<P: Preset>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::network::MAX_FOR_DOS_PREVENTION;
 
-    const MAX_REQUEST_BLOCKS: u64 = 1024;
+    use eth2_libp2p::rpc::methods::{
+        MaxRequestBlobSidecars, MaxRequestBlocks, MaxRequestBlocksDeneb,
+    };
+    use typenum::Unsigned as _;
+    use types::config::Config;
 
     #[test]
     fn ensure_constant_sanity() {
-        assert!(MAX_FOR_DOS_PREVENTION < MAX_REQUEST_BLOCKS);
+        let config = Config::mainnet();
+
+        assert!(MAX_FOR_DOS_PREVENTION < config.max_request_blocks);
+        assert_eq!(MaxRequestBlocks::U64, config.max_request_blocks);
+        assert_eq!(MaxRequestBlocksDeneb::U64, config.max_request_blocks_deneb,);
+
+        assert_eq!(
+            MaxRequestBlobSidecars::U64,
+            config.max_request_blob_sidecars,
+        );
     }
 }
