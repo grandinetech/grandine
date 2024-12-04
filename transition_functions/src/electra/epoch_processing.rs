@@ -37,7 +37,7 @@ use crate::{
     altair::{
         self, EpochDeltasForTransition, EpochReport, ValidatorSummary as AltairValidatorSummary,
     },
-    bellatrix, unphased,
+    unphased,
     unphased::{SlashingPenalties, ValidatorSummary},
 };
 
@@ -78,7 +78,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
 
     unphased::process_rewards_and_penalties(state, epoch_deltas);
     process_registry_updates(config, state, summaries.as_mut_slice())?;
-    bellatrix::process_slashings::<_, ()>(state, summaries);
+    process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
     process_pending_deposits(config, state)?;
     process_pending_consolidations(state)?;
