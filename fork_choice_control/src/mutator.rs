@@ -1550,8 +1550,12 @@ where
             .is_finalized_checkpoint_updated()
             .then(|| {
                 let delayed = self.prune_delayed_until_block();
+                let delayed_until_blobs = self.prune_delayed_until_blobs();
                 let waiting = self.prune_waiting_for_checkpoint_states();
-                delayed.into_iter().chain(waiting)
+                delayed
+                    .into_iter()
+                    .chain(delayed_until_blobs)
+                    .chain(waiting)
             })
             .into_iter()
             .flatten();
@@ -1619,8 +1623,8 @@ where
 
         self.update_store_snapshot();
 
-        if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
-            self.retry_block(wait_group.clone(), pending_block.clone());
+        if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
+            self.retry_block(wait_group.clone(), pending_block);
         }
 
         ApiMessage::BlobSidecarEvent(BlobSidecarEvent::new(block_root, blob_sidecar))
@@ -1908,6 +1912,10 @@ where
             .push(pending_blob_sidecar);
     }
 
+    fn take_delayed_until_blobs(&mut self, block_root: H256) -> Option<PendingBlock<P>> {
+        self.delayed_until_blobs.remove(&block_root)
+    }
+
     fn take_delayed_until_block(&mut self, block_root: H256) -> Option<Delayed<P>> {
         self.delayed_until_block.remove(&block_root)
     }
@@ -2038,6 +2046,26 @@ where
             submission_time,
             metrics: self.metrics.clone(),
         });
+    }
+
+    fn prune_delayed_until_blobs(&mut self) -> Vec<GossipId> {
+        let finalized_slot = self.store.finalized_slot();
+
+        let mut gossip_ids = vec![];
+
+        self.delayed_until_blobs.retain(|_, pending_block| {
+            if pending_block.block.message().slot() > finalized_slot {
+                return true;
+            }
+
+            if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                gossip_ids.push(gossip_id);
+            }
+
+            false
+        });
+
+        gossip_ids
     }
 
     // Some objects may be delayed until a block that is itself delayed.
@@ -2347,6 +2375,13 @@ where
             let type_name = tynm::type_name::<Self>();
 
             let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_blobs",
+                self.delayed_until_blobs.len(),
+            );
 
             metrics.set_collection_length(
                 module_path!(),
