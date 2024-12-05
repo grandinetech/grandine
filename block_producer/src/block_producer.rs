@@ -75,13 +75,13 @@ use types::{
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{
-            Attestation, AttesterSlashing as Phase0AttesterSlashing,
+            Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Deposit,
             Eth1Data, ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            DepositIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
-            ValidatorIndex, H256,
+            CommitteeIndex, DepositIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot,
+            Uint256, ValidatorIndex, H256,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
@@ -847,18 +847,55 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 {
                     ContiguousList::default()
                 } else {
-                    // TODO(feature/electra): don't ignore errors
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|attestation| {
-                            operation_pools::convert_to_electra_attestation(attestation).ok()
-                        })
-                        .chunk_by(|attestation| attestation.data);
+                    // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
+                    let mut results: Vec<(
+                        AttestationData,
+                        HashSet<CommitteeIndex>,
+                        Vec<ElectraAttestation<P>>,
+                    )> = Vec::new();
 
-                    let attestations = attestations
+                    for (electra_attestation, committee_index) in
+                        attestations.into_iter().filter_map(|attestation| {
+                            let committee_index = attestation.data.index;
+
+                            match operation_pools::convert_to_electra_attestation(attestation) {
+                                Ok(electra_attestation) => {
+                                    Some((electra_attestation, committee_index))
+                                }
+                                Err(error) => {
+                                    warn!("unable to convert to electra attestation: {error:?}");
+                                    None
+                                }
+                            }
+                        })
+                    {
+                        if let Some((_, indices, attestations)) =
+                            results.iter_mut().find(|(data, indices, _)| {
+                                *data == electra_attestation.data
+                                    && !indices.contains(&committee_index)
+                            })
+                        {
+                            indices.insert(committee_index);
+                            attestations.push(electra_attestation);
+                        } else {
+                            results.push((
+                                electra_attestation.data,
+                                HashSet::from([committee_index]),
+                                vec![electra_attestation],
+                            ))
+                        }
+                    }
+
+                    let attestations = results
                         .into_iter()
-                        .filter_map(|(_, attestations)| {
-                            Self::compute_on_chain_aggregate(attestations).ok()
+                        .filter_map(|(_, _, attestations)| {
+                            match Self::compute_on_chain_aggregate(attestations.into_iter()) {
+                                Ok(electra_aggregate) => Some(electra_aggregate),
+                                Err(error) => {
+                                    warn!("unable to compute on chain aggregate: {error:?}");
+                                    None
+                                }
+                            }
                         })
                         .take(P::MaxAttestationsElectra::USIZE);
 
