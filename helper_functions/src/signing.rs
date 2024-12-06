@@ -26,6 +26,7 @@ use types::{
     electra::containers::{
         AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
     },
+    fulu::containers::BeaconBlock as FuluBeaconBlock,
     phase0::{
         consts::{
             DOMAIN_AGGREGATE_AND_PROOF, DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER,
@@ -304,6 +305,15 @@ impl<P: Preset> SignForSingleFork<P> for DenebBeaconBlock<P> {
 
 /// <https://github.com/ethereum/consensus-specs/blob/99934ee16c7e990c8c39bc66e1aa58845057faa0/specs/phase0/validator.md#signature>
 impl<P: Preset> SignForSingleFork<P> for ElectraBeaconBlock<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+}
+
+impl<P: Preset> SignForSingleFork<P> for FuluBeaconBlock<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
 

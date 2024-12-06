@@ -23,7 +23,7 @@ use types::{
 
 use crate::{
     altair::{self, EpochReport as AltairEpochReport, Statistics as AltairStatistics},
-    bellatrix, capella, deneb, electra,
+    bellatrix, capella, deneb, electra, fulu,
     phase0::{
         self, EpochReport as Phase0EpochReport, StatisticsForReport, StatisticsForTransition,
     },
@@ -183,10 +183,20 @@ pub fn custom_state_transition<P: Preset>(
                 slot_report,
             )
         }
+        (BeaconState::Fulu(state), SignedBeaconBlock::Fulu(block)) => fulu::state_transition(
+            config,
+            state,
+            block,
+            process_slots,
+            state_root_policy,
+            execution_engine,
+            verifier,
+            slot_report,
+        ),
         _ => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
-            const_assert_eq!(Phase::CARDINALITY, 6);
+            const_assert_eq!(Phase::CARDINALITY, 7);
 
             unreachable!("successful slot processing ensures that phases match")
         }
@@ -218,10 +228,13 @@ pub fn verify_signatures<P: Preset>(
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
             electra::verify_signatures(config, state, block, verifier)
         }
+        (BeaconState::Fulu(state), SignedBeaconBlock::Fulu(block)) => {
+            fulu::verify_signatures(config, state, block, verifier)
+        }
         _ => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
-            const_assert_eq!(Phase::CARDINALITY, 6);
+            const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
                 state_phase: state.phase(),
@@ -362,7 +375,26 @@ pub fn process_slots<P: Preset>(
                 }
             }
             BeaconState::Electra(electra_state) => {
-                electra::process_slots(config, electra_state, slot)?;
+                let fulu_fork_slot = config.fork_slot::<P>(Phase::Fulu);
+
+                let last_slot_in_phase = Toption::Some(slot)
+                    .min(fulu_fork_slot)
+                    .expect("result of min should always be Some because slot is always Some");
+
+                if electra_state.slot < last_slot_in_phase {
+                    electra::process_slots(config, electra_state, slot)?;
+
+                    made_progress = true;
+                }
+
+                if Toption::Some(last_slot_in_phase) == fulu_fork_slot {
+                    *state = fork::upgrade_to_fulu(config, electra_state.as_ref().clone()).into();
+
+                    made_progress = true;
+                }
+            }
+            BeaconState::Fulu(fulu_state) => {
+                fulu::process_slots(config, fulu_state, slot)?;
 
                 made_progress = true;
             }
@@ -402,6 +434,10 @@ pub fn process_justification_and_finalization(state: &mut BeaconState<impl Prese
             let (statistics, _, _) = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
+        BeaconState::Fulu(state) => {
+            let (statistics, _, _) = altair::statistics(state);
+            altair::process_justification_and_finalization(state, statistics);
+        }
     }
 
     Ok(())
@@ -415,6 +451,7 @@ pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> R
         BeaconState::Capella(state) => capella::process_epoch(config, state),
         BeaconState::Deneb(state) => deneb::process_epoch(config, state),
         BeaconState::Electra(state) => electra::process_epoch(config, state),
+        BeaconState::Fulu(state) => fulu::process_epoch(config, state),
     }
 }
 
@@ -428,6 +465,7 @@ pub fn epoch_report(config: &Config, state: &mut BeaconState<impl Preset>) -> Re
         BeaconState::Capella(state) => capella::epoch_report(config, state)?.into(),
         BeaconState::Deneb(state) => deneb::epoch_report(config, state)?.into(),
         BeaconState::Electra(state) => electra::epoch_report(config, state)?.into(),
+        BeaconState::Fulu(state) => fulu::epoch_report(config, state)?.into(),
     };
 
     post_process_slots_for_epoch_report(config, state)?;
@@ -506,7 +544,14 @@ fn post_process_slots_for_epoch_report<P: Preset>(
                     *state = fork::upgrade_to_electra(config, deneb_state.as_ref().clone())?.into();
                 }
             }
-            BeaconState::Electra(_) => {}
+            BeaconState::Electra(electra_state) => {
+                let fulu_fork_slot = config.fork_slot::<P>(Phase::Fulu);
+
+                if Toption::Some(post_slot) == fulu_fork_slot {
+                    *state = fork::upgrade_to_fulu(config, electra_state.as_ref().clone()).into();
+                }
+            }
+            BeaconState::Fulu(_) => {}
         }
     }
 
@@ -564,10 +609,13 @@ fn process_block<P: Preset>(
         (BeaconState::Electra(state), BeaconBlock::Electra(block)) => {
             electra::process_block(config, state, block, verifier, slot_report)
         }
+        (BeaconState::Fulu(state), BeaconBlock::Fulu(block)) => {
+            fulu::process_block(config, state, block, verifier, slot_report)
+        }
         (state, _) => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
-            const_assert_eq!(Phase::CARDINALITY, 6);
+            const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
                 state_phase: state.phase(),
@@ -601,10 +649,13 @@ pub fn process_block_for_gossip<P: Preset>(
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
             electra::process_block_for_gossip(config, state, block)
         }
+        (BeaconState::Fulu(state), SignedBeaconBlock::Fulu(block)) => {
+            fulu::process_block_for_gossip(config, state, block)
+        }
         (state, _) => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
-            const_assert_eq!(Phase::CARDINALITY, 6);
+            const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
                 state_phase: state.phase(),
@@ -659,10 +710,13 @@ fn process_blinded_block<P: Preset>(
         (BeaconState::Electra(state), BlindedBeaconBlock::Electra(block)) => {
             electra::custom_process_blinded_block(config, state, block, verifier, slot_report)
         }
+        (BeaconState::Fulu(state), BlindedBeaconBlock::Fulu(block)) => {
+            fulu::custom_process_blinded_block(config, state, block, verifier, slot_report)
+        }
         (state, _) => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
-            const_assert_eq!(Phase::CARDINALITY, 6);
+            const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
                 state_phase: state.phase(),
@@ -696,6 +750,7 @@ pub fn process_deposit_data(
             altair::process_deposit_data(config, state, deposit_data)
         }
         BeaconState::Electra(state) => electra::process_deposit_data(config, state, deposit_data),
+        BeaconState::Fulu(state) => electra::process_deposit_data(config, state, deposit_data),
     }
 }
 
@@ -722,6 +777,10 @@ pub fn statistics<P: Preset>(state: &BeaconState<P>) -> Result<Statistics> {
             statistics.into()
         }
         BeaconState::Electra(state) => {
+            let (statistics, _, _) = altair::statistics(state);
+            statistics.into()
+        }
+        BeaconState::Fulu(state) => {
             let (statistics, _, _) = altair::statistics(state);
             statistics.into()
         }

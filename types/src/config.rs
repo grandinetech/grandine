@@ -69,6 +69,10 @@ pub struct Config {
     pub electra_fork_version: Version,
     #[serde(with = "serde_utils::string_or_native")]
     pub eip7594_fork_epoch: Epoch,
+    pub eip7594_fork_version: Version,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub fulu_fork_epoch: Epoch,
+    pub fulu_fork_version: Version,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -194,6 +198,9 @@ impl Default for Config {
             electra_fork_epoch: FAR_FUTURE_EPOCH,
             electra_fork_version: H32(hex!("05000000")),
             eip7594_fork_epoch: FAR_FUTURE_EPOCH,
+            eip7594_fork_version: H32(hex!("06000000")),
+            fulu_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_version: H32(hex!("06000000")),
 
             // Time parameters
             eth1_follow_distance: 2048,
@@ -308,6 +315,8 @@ impl Config {
             capella_fork_version: H32(hex!("03000001")),
             deneb_fork_version: H32(hex!("04000001")),
             electra_fork_version: H32(hex!("05000001")),
+            eip7594_fork_version: H32(hex!("06000001")),
+            fulu_fork_version: H32(hex!("07000001")),
 
             // Time parameters
             eth1_follow_distance: 16,
@@ -653,6 +662,7 @@ impl Config {
             Phase::Capella => self.capella_fork_version,
             Phase::Deneb => self.deneb_fork_version,
             Phase::Electra => self.electra_fork_version,
+            Phase::Fulu => self.fulu_fork_version,
         }
     }
 
@@ -666,6 +676,7 @@ impl Config {
             Phase::Capella => self.capella_fork_epoch,
             Phase::Deneb => self.deneb_fork_epoch,
             Phase::Electra => self.electra_fork_epoch,
+            Phase::Fulu => self.fulu_fork_epoch,
         }
     }
 
@@ -721,7 +732,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => {
                 self.max_request_blocks
             }
-            Phase::Deneb | Phase::Electra => self.max_request_blocks_deneb,
+            Phase::Deneb | Phase::Electra | Phase::Fulu => self.max_request_blocks_deneb,
         }
     }
 
@@ -738,6 +749,7 @@ impl Config {
             self.capella_fork_epoch,
             self.deneb_fork_epoch,
             self.electra_fork_epoch,
+            self.fulu_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -752,6 +764,7 @@ impl Config {
             &mut self.capella_fork_epoch,
             &mut self.deneb_fork_epoch,
             &mut self.electra_fork_epoch,
+            &mut self.fulu_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)

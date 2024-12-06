@@ -245,7 +245,9 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     | Phase::Bellatrix
                     | Phase::Capella
                     | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
-                    Phase::Electra => AttesterSlashing::Electra(case.ssz(config, file_name)),
+                    Phase::Electra | Phase::Fulu => {
+                        AttesterSlashing::Electra(case.ssz(config, file_name))
+                    }
                 };
 
                 context.on_attester_slashing(attester_slashing);

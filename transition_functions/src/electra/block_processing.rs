@@ -228,7 +228,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     Ok(())
 }
 
-fn process_withdrawals<P: Preset>(
+pub fn process_withdrawals<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     execution_payload: &impl PostCapellaExecutionPayload<P>,
 ) -> Result<()>
@@ -862,7 +862,7 @@ pub fn add_validator_to_registry<P: Preset>(
     Ok(())
 }
 
-fn apply_deposits<P: Preset>(
+pub fn apply_deposits<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     combined_deposits: impl IntoIterator<Item = CombinedDeposit>,
     mut slot_report: impl SlotReport,
@@ -985,7 +985,7 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
     Ok(())
 }
 
-fn process_withdrawal_request<P: Preset>(
+pub fn process_withdrawal_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     withdrawal_request: WithdrawalRequest,
@@ -1074,7 +1074,7 @@ fn process_withdrawal_request<P: Preset>(
     Ok(())
 }
 
-fn process_deposit_request<P: Preset>(
+pub fn process_deposit_request<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     deposit_request: DepositRequest,
 ) -> Result<()> {

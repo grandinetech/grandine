@@ -1,50 +1,28 @@
-use core::{cell::LazyCell, ops::Mul as _};
-
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use helper_functions::{
-    accessors::{
-        self, get_activation_exit_churn_limit, get_current_epoch, get_next_epoch,
-        total_active_balance,
-    },
+    accessors::{get_current_epoch, get_next_epoch},
     electra::{initiate_validator_exit, is_eligible_for_activation_queue},
-    misc::{
-        compute_activation_exit_epoch, compute_start_slot_at_epoch, get_max_effective_balance,
-        vec_of_default,
-    },
-    mutators::{balance, decrease_balance, increase_balance},
+    misc::{compute_activation_exit_epoch, vec_of_default},
     predicates::{is_active_validator, is_eligible_for_activation},
-    signing::SignForAllForks as _,
 };
-use ssz::{PersistentList, SszHash as _};
-use try_from_iterator::TryFromIterator as _;
-use typenum::Unsigned as _;
+use ssz::SszHash as _;
 use types::{
-    capella::containers::HistoricalSummary,
-    config::Config,
-    electra::{beacon_state::BeaconState as ElectraBeaconState, containers::PendingDeposit},
-    phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::DepositMessage,
-        primitives::Gwei,
-    },
-    preset::Preset,
-    traits::{BeaconState, PostElectraBeaconState},
+    capella::containers::HistoricalSummary, config::Config,
+    fulu::beacon_state::BeaconState as FuluBeaconState, preset::Preset, traits::BeaconState,
 };
 
-use super::{block_processing, epoch_intermediates};
+use super::epoch_intermediates;
 use crate::{
-    altair::{
-        self, EpochDeltasForTransition, EpochReport, ValidatorSummary as AltairValidatorSummary,
-    },
-    unphased,
-    unphased::{SlashingPenalties, ValidatorSummary},
+    altair::{self, EpochDeltasForTransition, EpochReport},
+    bellatrix, electra, unphased,
+    unphased::ValidatorSummary,
 };
 
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(config: &Config, state: &mut FuluBeaconState<impl Preset>) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -78,11 +56,11 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
 
     unphased::process_rewards_and_penalties(state, epoch_deltas);
     process_registry_updates(config, state, summaries.as_mut_slice())?;
-    process_slashings::<_, ()>(state, summaries);
+    bellatrix::process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
-    process_pending_deposits(config, state)?;
-    process_pending_consolidations(state)?;
-    process_effective_balance_updates(state);
+    electra::process_pending_deposits(config, state)?;
+    electra::process_pending_consolidations(state)?;
+    electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
 
@@ -97,9 +75,25 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
     Ok(())
 }
 
+fn process_historical_summaries_update<P: Preset>(state: &mut FuluBeaconState<P>) -> Result<()> {
+    let next_epoch = get_next_epoch(state);
+
+    // > Set historical block root accumulator.
+    if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero()) {
+        let historical_summary = HistoricalSummary {
+            block_summary_root: state.block_roots().hash_tree_root(),
+            state_summary_root: state.state_roots().hash_tree_root(),
+        };
+
+        state.historical_summaries.push(historical_summary)?;
+    }
+
+    Ok(())
+}
+
 pub fn epoch_report<P: Preset>(
     config: &Config,
-    state: &mut ElectraBeaconState<P>,
+    state: &mut FuluBeaconState<P>,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
@@ -130,13 +124,13 @@ pub fn epoch_report<P: Preset>(
     unphased::process_rewards_and_penalties(state, epoch_deltas.iter().copied());
     process_registry_updates(config, state, summaries.as_mut_slice())?;
 
-    let slashing_penalties = process_slashings(state, summaries.iter().copied());
+    let slashing_penalties = electra::process_slashings(state, summaries.iter().copied());
     let post_balances = state.balances.into_iter().copied().collect();
 
     // Do the rest of epoch processing to leave the state valid for further transitions.
     // This way it can be used to calculate statistics for multiple epochs in a row.
     unphased::process_eth1_data_reset(state);
-    process_effective_balance_updates(state);
+    electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
@@ -156,7 +150,7 @@ pub fn epoch_report<P: Preset>(
 
 fn process_registry_updates<P: Preset>(
     config: &Config,
-    state: &mut ElectraBeaconState<P>,
+    state: &mut FuluBeaconState<P>,
     summaries: &mut [impl ValidatorSummary],
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
@@ -221,302 +215,13 @@ fn process_registry_updates<P: Preset>(
     Ok(())
 }
 
-pub fn process_pending_deposits<P: Preset>(
-    config: &Config,
-    state: &mut impl PostElectraBeaconState<P>,
-) -> Result<()> {
-    let next_epoch = get_current_epoch(state) + 1;
-    let available_for_processing =
-        state.deposit_balance_to_consume() + get_activation_exit_churn_limit(config, state);
-
-    let mut processed_amount = 0;
-    let mut next_deposit_index: u64 = 0;
-    let mut deposits_to_postpone = vec![];
-    let mut is_churn_limit_reached = false;
-    let finalized_slot = compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
-
-    for deposit in &state.pending_deposits().clone() {
-        // > Do not process deposit requests if Eth1 bridge deposits are not yet applied.
-        if deposit.slot > GENESIS_SLOT
-            && state.eth1_deposit_index() < state.deposit_requests_start_index()
-        {
-            break;
-        }
-
-        // > Check if deposit has been finalized, otherwise, stop processing.
-        if deposit.slot > finalized_slot {
-            break;
-        }
-
-        // > Check if number of processed deposits has not reached the limit, otherwise, stop processing.
-        if next_deposit_index >= P::MAX_PENDING_DEPOSITS_PER_EPOCH {
-            break;
-        }
-
-        let mut is_validator_exited = false;
-        let mut is_validator_withdrawn = false;
-
-        if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
-            let validator = state.validators().get(validator_index)?;
-
-            is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH;
-            is_validator_withdrawn = validator.withdrawable_epoch < next_epoch;
-        }
-
-        if is_validator_withdrawn {
-            // > Deposited balance will never become active. Increase balance but do not consume churn
-            apply_pending_deposit(config, state, deposit)?;
-        } else if is_validator_exited {
-            // > Validator is exiting, postpone the deposit until after withdrawable epoch
-            deposits_to_postpone.push(*deposit);
-        } else {
-            // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
-            is_churn_limit_reached = processed_amount + deposit.amount > available_for_processing;
-
-            if is_churn_limit_reached {
-                break;
-            }
-
-            // > Consume churn and apply deposit.
-            processed_amount += deposit.amount;
-            apply_pending_deposit(config, state, deposit)?;
-        }
-
-        // > Regardless of how the deposit was handled, we move on in the queue.
-        next_deposit_index += 1;
-    }
-
-    *state.pending_deposits_mut() = PersistentList::try_from_iter(
-        state
-            .pending_deposits()
-            .into_iter()
-            .copied()
-            .skip(next_deposit_index.try_into()?)
-            .chain(deposits_to_postpone.into_iter()),
-    )?;
-
-    if is_churn_limit_reached {
-        *state.deposit_balance_to_consume_mut() = available_for_processing - processed_amount;
-    } else {
-        *state.deposit_balance_to_consume_mut() = 0;
-    }
-
-    Ok(())
-}
-
-fn apply_pending_deposit<P: Preset>(
-    config: &Config,
-    state: &mut impl PostElectraBeaconState<P>,
-    deposit: &PendingDeposit,
-) -> Result<()> {
-    let PendingDeposit {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-        ..
-    } = deposit;
-
-    if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
-        increase_balance(balance(state, validator_index)?, *amount);
-    } else if is_valid_deposit_signature(config, deposit) {
-        block_processing::add_validator_to_registry::<P>(
-            state,
-            (*pubkey).into(),
-            *withdrawal_credentials,
-            *amount,
-        )?;
-    }
-
-    Ok(())
-}
-
-fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit) -> bool {
-    let PendingDeposit {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-        signature,
-        ..
-    } = *deposit;
-
-    let deposit_message = DepositMessage {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-    };
-
-    deposit_message
-        .verify(config, signature, &pubkey.into())
-        .is_ok()
-}
-
-pub fn process_pending_consolidations<P: Preset>(
-    state: &mut impl PostElectraBeaconState<P>,
-) -> Result<()> {
-    let next_epoch = get_current_epoch(state) + 1;
-    let mut next_pending_consolidation = 0;
-
-    for pending_consolidation in &state.pending_consolidations().clone() {
-        let source_validator = state.validators().get(pending_consolidation.source_index)?;
-
-        if source_validator.slashed {
-            next_pending_consolidation += 1;
-            continue;
-        }
-
-        if source_validator.withdrawable_epoch > next_epoch {
-            break;
-        }
-
-        // > Calculate the consolidated balance
-        let max_effective_balance = get_max_effective_balance::<P>(source_validator);
-
-        let source_effective_balance = core::cmp::min(
-            state
-                .balances()
-                .get(pending_consolidation.source_index)
-                .copied()?,
-            max_effective_balance,
-        );
-
-        decrease_balance(
-            balance(state, pending_consolidation.source_index)?,
-            source_effective_balance,
-        );
-        increase_balance(
-            balance(state, pending_consolidation.target_index)?,
-            source_effective_balance,
-        );
-
-        next_pending_consolidation += 1;
-    }
-
-    *state.pending_consolidations_mut() = PersistentList::try_from_iter(
-        state
-            .pending_consolidations()
-            .into_iter()
-            .copied()
-            .skip(next_pending_consolidation),
-    )?;
-
-    Ok(())
-}
-
-pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectraBeaconState<P>) {
-    let hysteresis_increment = P::EFFECTIVE_BALANCE_INCREMENT.get() / P::HYSTERESIS_QUOTIENT;
-    let downward_threshold = hysteresis_increment * P::HYSTERESIS_DOWNWARD_MULTIPLIER;
-    let upward_threshold = hysteresis_increment * P::HYSTERESIS_UPWARD_MULTIPLIER;
-
-    let (validators, balances) = state.validators_mut_with_balances();
-
-    // These could be collected into a vector in `process_slashings`. Doing so speeds up this
-    // function by around ~160 μs in Goerli, but may result in a slowdown in `process_slashings`.
-    // The reason why the speedup is so small is likely because values in the balance tree are
-    // packed into bundles of 8.
-    let mut balances = balances.into_iter().copied();
-
-    // > Update effective balances with hysteresis
-    validators.update(|validator| {
-        let max_effective_balance = get_max_effective_balance::<P>(validator);
-
-        let balance = balances
-            .next()
-            .expect("list of validators and list of balances should have the same length");
-
-        let below = balance + downward_threshold < validator.effective_balance;
-        let above = validator.effective_balance + upward_threshold < balance;
-
-        if below || above {
-            validator.effective_balance = balance
-                .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
-                .min(max_effective_balance);
-        }
-    });
-}
-
-fn process_historical_summaries_update<P: Preset>(state: &mut ElectraBeaconState<P>) -> Result<()> {
-    let next_epoch = get_next_epoch(state);
-
-    // > Set historical block root accumulator.
-    if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero()) {
-        let historical_summary = HistoricalSummary {
-            block_summary_root: state.block_roots().hash_tree_root(),
-            state_summary_root: state.state_roots().hash_tree_root(),
-        };
-
-        state.historical_summaries.push(historical_summary)?;
-    }
-
-    Ok(())
-}
-
-pub fn process_slashings<P: Preset, S: SlashingPenalties>(
-    state: &mut impl BeaconState<P>,
-    summaries: impl IntoIterator<Item = AltairValidatorSummary>,
-) -> S {
-    let current_epoch = get_current_epoch(state);
-    let total_active_balance = total_active_balance(state);
-
-    let (balances, slashings) = state.balances_mut_with_slashings();
-
-    // Calculating this lazily saves 30-40 μs in typical networks.
-    let adjusted_total_slashing_balance = LazyCell::new(|| {
-        slashings
-            .into_iter()
-            .sum::<Gwei>()
-            .mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
-            .min(total_active_balance)
-    });
-
-    let mut summaries = (0..).zip(summaries);
-    let mut slashing_penalties = S::default();
-
-    // > Factored out from penalty numerator to avoid uint64 overflow
-    let increment = P::EFFECTIVE_BALANCE_INCREMENT;
-
-    let penalty_per_effective_balance_increment =
-        *adjusted_total_slashing_balance / (total_active_balance / increment);
-
-    balances.update(|balance| {
-        let (validator_index, summary) = summaries
-            .next()
-            .expect("list of validators and list of balances should have the same length");
-
-        let AltairValidatorSummary {
-            effective_balance,
-            slashed,
-            withdrawable_epoch,
-            ..
-        } = summary;
-
-        if !slashed {
-            return;
-        }
-
-        if current_epoch + P::EpochsPerSlashingsVector::U64 / 2 != withdrawable_epoch {
-            return;
-        }
-
-        let effective_balance_increments = effective_balance / increment;
-
-        // > [Modified in Electra:EIP7251]
-        let penalty = penalty_per_effective_balance_increment * effective_balance_increments;
-
-        decrease_balance(balance, penalty);
-
-        slashing_penalties.add(validator_index, penalty);
-    });
-
-    slashing_penalties
-}
-
 #[cfg(test)]
 mod spec_tests {
     use spec_test_utils::Case;
     use test_generator::test_resources;
     use types::preset::{Mainnet, Minimal};
 
-    use crate::altair::ValidatorSummary;
+    use crate::{altair::ValidatorSummary, electra};
 
     use super::*;
 
@@ -759,7 +464,7 @@ mod spec_tests {
         run_case::<P>(case, |state| {
             let (_, summaries, _) = altair::statistics(state);
 
-            process_slashings::<_, ()>(state, summaries);
+            electra::process_slashings::<_, ()>(state, summaries);
 
             Ok(())
         });
@@ -775,7 +480,7 @@ mod spec_tests {
 
     fn run_effective_balance_updates_case<P: Preset>(case: Case) {
         run_case::<P>(case, |state| {
-            process_effective_balance_updates(state);
+            electra::process_effective_balance_updates(state);
 
             Ok(())
         });
@@ -815,17 +520,17 @@ mod spec_tests {
 
     fn run_pending_deposits_case<P: Preset>(case: Case) {
         run_case::<P>(case, |state| {
-            process_pending_deposits(&P::default_config(), state)
+            electra::process_pending_deposits(&P::default_config(), state)
         });
     }
 
     fn run_pending_consolidations_case<P: Preset>(case: Case) {
-        run_case::<P>(case, process_pending_consolidations)
+        run_case::<P>(case, electra::process_pending_consolidations)
     }
 
     fn run_case<P: Preset>(
         case: Case,
-        sub_transition: impl FnOnce(&mut ElectraBeaconState<P>) -> Result<()>,
+        sub_transition: impl FnOnce(&mut FuluBeaconState<P>) -> Result<()>,
     ) {
         let mut state = case.ssz_default("pre");
         let post_option = case.try_ssz_default("post");

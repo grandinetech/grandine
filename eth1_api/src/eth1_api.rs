@@ -347,10 +347,18 @@ impl Eth1Api {
                 )
                 .await?
             }
+            Phase::Fulu => {
+                self.execute(
+                    "engine_forkchoiceUpdatedV3",
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                )
+                .await?
+            }
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 6);
+                const_assert_eq!(Phase::CARDINALITY, 7);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -361,10 +369,11 @@ impl Eth1Api {
             Phase::Capella => payload_id.map(PayloadId::Capella),
             Phase::Deneb => payload_id.map(PayloadId::Deneb),
             Phase::Electra => payload_id.map(PayloadId::Electra),
+            Phase::Fulu => payload_id.map(PayloadId::Fulu),
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 6);
+                const_assert_eq!(Phase::CARDINALITY, 7);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -424,6 +433,17 @@ impl Eth1Api {
                 .map(Into::into)
             }
             PayloadId::Electra(payload_id) => {
+                let params = vec![serde_json::to_value(payload_id)?];
+
+                self.execute::<EngineGetPayloadV4Response<P>>(
+                    "engine_getPayloadV4",
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                )
+                .await
+                .map(Into::into)
+            }
+            PayloadId::Fulu(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV4Response<P>>(

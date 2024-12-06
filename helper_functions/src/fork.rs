@@ -25,6 +25,7 @@ use types::{
         beacon_state::BeaconState as ElectraBeaconState,
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
+    fulu::beacon_state::BeaconState as FuluBeaconState,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -698,6 +699,116 @@ pub fn upgrade_to_electra<P: Preset>(
     }
 
     Ok(post)
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn upgrade_to_fulu<P: Preset>(
+    config: &Config,
+    pre: ElectraBeaconState<P>,
+) -> FuluBeaconState<P> {
+    let epoch = accessors::get_current_epoch(&pre);
+
+    let ElectraBeaconState {
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        validators,
+        balances,
+        randao_mixes,
+        slashings,
+        previous_epoch_participation,
+        current_epoch_participation,
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        inactivity_scores,
+        current_sync_committee,
+        next_sync_committee,
+        latest_execution_payload_header,
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        historical_summaries,
+        deposit_requests_start_index,
+        deposit_balance_to_consume,
+        exit_balance_to_consume,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume,
+        earliest_consolidation_epoch,
+        pending_deposits,
+        pending_partial_withdrawals,
+        pending_consolidations,
+        cache,
+    } = pre;
+
+    let fork = Fork {
+        previous_version: fork.current_version,
+        current_version: config.fulu_fork_version,
+        epoch,
+    };
+
+    FuluBeaconState {
+        // > Versioning
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        // > History
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        // > Eth1
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        // > Registry
+        validators,
+        balances,
+        // > Randomness
+        randao_mixes,
+        // > Slashings
+        slashings,
+        // > Participation
+        previous_epoch_participation,
+        current_epoch_participation,
+        // > Finality
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        // > Inactivity
+        inactivity_scores,
+        // > Sync
+        current_sync_committee,
+        next_sync_committee,
+        // > Execution-layer
+        latest_execution_payload_header,
+        // > Withdrawals
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        // > Deep history valid from Capella onwards
+        historical_summaries,
+        deposit_requests_start_index,
+        deposit_balance_to_consume,
+        exit_balance_to_consume,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume,
+        earliest_consolidation_epoch,
+        pending_deposits,
+        pending_partial_withdrawals,
+        pending_consolidations,
+        // Cache
+        cache,
+    }
 }
 
 #[cfg(test)]

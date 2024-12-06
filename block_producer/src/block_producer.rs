@@ -71,6 +71,7 @@ use types::{
         BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
         ExecutionRequests,
     },
+    fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -887,6 +888,52 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     },
                 })
             }
+            Phase::Fulu => {
+                let attestations = if misc::compute_epoch_at_slot::<P>(slot)
+                    == self.producer_context.chain_config.electra_fork_epoch
+                {
+                    ContiguousList::default()
+                } else {
+                    // TODO(feature/electra): don't ignore errors
+                    let attestations = attestations
+                        .into_iter()
+                        .filter_map(|attestation| {
+                            operation_pools::convert_to_electra_attestation(attestation).ok()
+                        })
+                        .chunk_by(|attestation| attestation.data);
+
+                    let attestations = attestations
+                        .into_iter()
+                        .filter_map(|(_, attestations)| {
+                            Self::compute_on_chain_aggregate(attestations).ok()
+                        })
+                        .take(P::MaxAttestationsElectra::USIZE);
+
+                    ContiguousList::try_from_iter(attestations)?
+                };
+
+                BeaconBlock::from(FuluBeaconBlock {
+                    slot,
+                    proposer_index,
+                    parent_root,
+                    state_root,
+                    body: FuluBeaconBlockBody {
+                        randao_reveal,
+                        eth1_data,
+                        graffiti,
+                        proposer_slashings,
+                        attester_slashings: self.prepare_attester_slashings_electra().await,
+                        attestations,
+                        deposits,
+                        voluntary_exits,
+                        sync_aggregate,
+                        execution_payload: DenebExecutionPayload::default(),
+                        bls_to_execution_changes,
+                        blob_kzg_commitments: ContiguousList::default(),
+                        execution_requests: ExecutionRequests::default(),
+                    },
+                })
+            }
         }
         .pipe(Ok)
     }
@@ -1542,6 +1589,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
                 PayloadAttributes::Electra(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
+            }
+            BeaconState::Fulu(state) => {
+                let (withdrawals, _) = electra::get_expected_withdrawals(state)?;
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
+                PayloadAttributes::Fulu(PayloadAttributesV3 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,

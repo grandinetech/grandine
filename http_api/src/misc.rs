@@ -17,6 +17,7 @@ use types::{
         primitives::{Blob, KzgProof},
     },
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
+    fulu::containers::SignedBeaconBlock as FuluSignedBeaconBlock,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
     preset::Preset,
@@ -94,6 +95,14 @@ pub struct SignedElectraBlockWithBlobs<P: Preset> {
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
 }
 
+#[derive(Deserialize, Ssz)]
+#[serde(bound = "")]
+pub struct SignedFuluBlockWithBlobs<P: Preset> {
+    pub signed_block: FuluSignedBeaconBlock<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+}
+
 #[derive(Serialize, Ssz)]
 #[serde(bound = "")]
 #[ssz(derive_read = false, derive_hash = false)]
@@ -147,6 +156,11 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
                 kzg_proofs: proofs.unwrap_or_default(),
                 blobs: blobs.unwrap_or_default(),
             }),
+            BeaconBlock::Fulu(block) => Self::WithBlobs(BlockWithBlobs {
+                block: block.into(),
+                kzg_proofs: proofs.unwrap_or_default(),
+                blobs: blobs.unwrap_or_default(),
+            }),
         }
     }
 }
@@ -193,6 +207,11 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                     kzg_proofs: proofs.unwrap_or_default(),
                     blobs: blobs.unwrap_or_default(),
                 }),
+                BeaconBlock::Fulu(block) => Self::WithBlobs(BlockWithBlobs {
+                    block: ValidatorBlindedBlock::BeaconBlock(block.into()),
+                    kzg_proofs: proofs.unwrap_or_default(),
+                    blobs: blobs.unwrap_or_default(),
+                }),
             },
         }
     }
@@ -207,6 +226,7 @@ pub enum SignedAPIBlock<P: Preset> {
     Capella(CapellaSignedBeaconBlock<P>),
     Deneb(SignedDenebBlockWithBlobs<P>),
     Electra(SignedElectraBlockWithBlobs<P>),
+    Fulu(SignedFuluBlockWithBlobs<P>),
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
@@ -250,6 +270,15 @@ impl<P: Preset> SignedAPIBlock<P> {
 
                 (signed_block.into(), kzg_proofs, blobs)
             }
+            Self::Fulu(block) => {
+                let SignedFuluBlockWithBlobs {
+                    signed_block,
+                    kzg_proofs,
+                    blobs,
+                } = block;
+
+                (signed_block.into(), kzg_proofs, blobs)
+            }
         }
     }
 }
@@ -264,6 +293,7 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
         CapellaSignedBeaconBlock::<P>::SIZE,
         SignedDenebBlockWithBlobs::<P>::SIZE,
         SignedElectraBlockWithBlobs::<P>::SIZE,
+        SignedFuluBlockWithBlobs::<P>::SIZE,
     ]);
 }
 
@@ -276,6 +306,7 @@ impl<P: Preset> SszRead<Phase> for SignedAPIBlock<P> {
             Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(api_block)

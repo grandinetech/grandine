@@ -60,6 +60,7 @@ pub enum Phase {
     Capella,
     Deneb,
     Electra,
+    Fulu,
 }
 
 /// Like [`Option`], but with [`None`] greater than any [`Some`].
@@ -514,6 +515,7 @@ mod tests {
             Phase::Capella,
             Phase::Deneb,
             Phase::Electra,
+            Phase::Fulu,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);

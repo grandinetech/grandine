@@ -39,6 +39,10 @@ use types::{
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
         },
     },
+    fulu::{
+        beacon_state::BeaconState as FuluBeaconState,
+        containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
+    },
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
@@ -80,6 +84,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
             Phase::Capella => CapellaBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Deneb => DenebBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Electra => ElectraBeaconBlockBody::<P>::default().hash_tree_root(),
+            Phase::Fulu => FuluBeaconBlockBody::<P>::default().hash_tree_root(),
         };
 
         let latest_block_header = BeaconBlockHeader {
@@ -130,6 +135,14 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 latest_block_header,
                 deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
                 ..ElectraBeaconState::default()
+            }
+            .into(),
+            Phase::Fulu => FuluBeaconState {
+                slot,
+                fork,
+                latest_block_header,
+                deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
+                ..FuluBeaconState::default()
             }
             .into(),
         };
@@ -313,6 +326,7 @@ fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBea
         Phase::Capella => BeaconBlock::from(CapellaBeaconBlock::default()),
         Phase::Deneb => BeaconBlock::from(DenebBeaconBlock::default()),
         Phase::Electra => BeaconBlock::from(ElectraBeaconBlock::default()),
+        Phase::Fulu => BeaconBlock::from(FuluBeaconBlock::default()),
     }
     .with_state_root(state_root)
     .with_zero_signature()
@@ -430,7 +444,7 @@ mod spec_tests {
             Phase::Capella => case
                 .try_ssz_default("execution_payload_header")
                 .map(ExecutionPayloadHeader::Capella),
-            Phase::Deneb | Phase::Electra => case
+            Phase::Deneb | Phase::Electra | Phase::Fulu => case
                 .try_ssz_default("execution_payload_header")
                 .map(ExecutionPayloadHeader::Deneb),
         };
