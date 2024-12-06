@@ -22,7 +22,10 @@ use derive_more::Display;
 use directories::Directories;
 use enum_iterator::Sequence;
 use eth1_api::AuthOptions;
-use eth2_libp2p::{rpc::config::OutboundRateLimiterConfig, PeerIdSerialized};
+use eth2_libp2p::{
+    rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig},
+    PeerIdSerialized,
+};
 use features::Feature;
 use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
 use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
@@ -536,6 +539,7 @@ impl NetworkConfigOptions {
         network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
         network_config.libp2p_private_key_file = libp2p_private_key_file;
+        network_config.inbound_rate_limiter_config = Some(InboundRateLimiterConfig::default());
         network_config.outbound_rate_limiter_config = Some(OutboundRateLimiterConfig::default());
 
         if let Some(listen_address_ipv6) = listen_address_ipv6 {
