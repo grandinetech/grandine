@@ -1,26 +1,24 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use block_producer::ValidatorBlindedBlock;
-use bls::SignatureBytes;
 use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
-    ContiguousList, Offset, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize,
-    SszWrite, WriteError,
+    ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize, SszWrite,
+    WriteError,
 };
 use types::{
     altair::containers::SignedBeaconBlock as AltairSignedBeaconBlock,
     bellatrix::containers::SignedBeaconBlock as BellatrixSignedBeaconBlock,
     capella::containers::SignedBeaconBlock as CapellaSignedBeaconBlock,
     combined::{BeaconBlock, SignedBeaconBlock},
-    config::Config,
     deneb::{
         containers::SignedBeaconBlock as DenebSignedBeaconBlock,
         primitives::{Blob, KzgProof},
     },
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
     nonstandard::{Phase, WithBlobsAndMev},
-    phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::Slot},
+    phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
     preset::Preset,
 };
 
@@ -33,6 +31,8 @@ use ::{
     eth1_api::ApiController,
     futures::{channel::mpsc::UnboundedReceiver, lock::Mutex},
 };
+
+pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
 
 const ORDERING: Ordering = Ordering::SeqCst;
 
@@ -267,14 +267,8 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
     ]);
 }
 
-impl<P: Preset> SszRead<Config> for SignedAPIBlock<P> {
-    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
-        let slot_end = slot_start + Slot::SIZE.get();
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
-        let phase = config.phase_at_slot::<P>(slot);
-
+impl<P: Preset> SszRead<Phase> for SignedAPIBlock<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
         let api_block = match phase {
             Phase::Phase0 => Self::Phase0(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Altair => Self::Altair(SszReadDefault::from_ssz_default(bytes)?),
@@ -283,9 +277,6 @@ impl<P: Preset> SszRead<Config> for SignedAPIBlock<P> {
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
-
-        // TODO(feature/deneb)
-        // assert_eq!(slot, api_block.message().slot());
 
         Ok(api_block)
     }

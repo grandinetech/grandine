@@ -29,6 +29,7 @@ use types::{
     altair::containers::SignedContributionAndProof,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof},
     config::Config,
+    nonstandard::Phase,
     phase0::{
         containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ValidatorIndex},
@@ -38,6 +39,7 @@ use types::{
 
 use crate::{
     error::Error,
+    misc::ETH_CONSENSUS_VERSION,
     validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
 };
 
@@ -359,7 +361,7 @@ impl<S, T> FromRequest<S, Body> for EthJsonOrSsz<T>
 where
     Arc<Config>: FromRef<S>,
     S: Send + Sync,
-    T: SszRead<Config> + DeserializeOwned + 'static,
+    T: SszRead<Phase> + DeserializeOwned + 'static,
 {
     type Rejection = Error;
 
@@ -369,9 +371,17 @@ where
                 request.extract_parts::<TypedHeader<ContentType>>().await?;
 
             if content_type == ContentType::octet_stream() {
-                let config = Arc::from_ref(state);
+                let phase = request
+                    .headers()
+                    .get(ETH_CONSENSUS_VERSION)
+                    .ok_or(Error::MissingEthConsensusVersionHeader)?
+                    .to_str()?
+                    .parse()
+                    .map_err(AnyhowError::msg)
+                    .map_err(Error::InvalidEthConsensusVersionHeader)?;
+
                 let bytes = Bytes::from_request(request, state).await?;
-                let block = T::from_ssz(&config, bytes)?;
+                let block = T::from_ssz(&phase, bytes)?;
                 return Ok(Self(block));
             }
 

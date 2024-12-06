@@ -804,17 +804,8 @@ impl<P: Preset> SszSize for SignedBlindedBeaconBlock<P> {
     ]);
 }
 
-impl<P: Preset> SszRead<Config> for SignedBlindedBeaconBlock<P> {
-    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        // There are 2 fixed parts before `block.message.slot`:
-        // - The offset of `block.message`.
-        // - The contents of `block.signature`.
-        let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
-        let slot_end = slot_start + Slot::SIZE.get();
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
-        let phase = config.phase_at_slot::<P>(slot);
-
+impl<P: Preset> SszRead<Phase> for SignedBlindedBeaconBlock<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
         let block = match phase {
             Phase::Phase0 => {
                 return Err(ReadError::Custom {
@@ -831,8 +822,6 @@ impl<P: Preset> SszRead<Config> for SignedBlindedBeaconBlock<P> {
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
-
-        assert_eq!(slot, block.message().slot());
 
         Ok(block)
     }

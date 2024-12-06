@@ -11,9 +11,8 @@ use ssz::SszWrite;
 use tap::Pipe as _;
 use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::H256};
 
-use crate::error::Error;
+use crate::{error::Error, misc::ETH_CONSENSUS_VERSION};
 
-const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
 const ETH_CONSENSUS_BLOCK_VALUE: &str = "eth-consensus-block-value";
 const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
 const ETH_EXECUTION_PAYLOAD_VALUE: &str = "eth-execution-payload-value";
