@@ -310,8 +310,7 @@ impl<P: Preset> Store<P> {
 
     #[must_use]
     pub fn previous_epoch(&self) -> Epoch {
-        // > Use GENESIS_EPOCH for previous when genesis to avoid underflow
-        self.current_epoch().saturating_sub(1).max(GENESIS_EPOCH)
+        misc::previous_epoch(self.current_epoch())
     }
 
     #[must_use]

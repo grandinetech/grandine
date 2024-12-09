@@ -73,7 +73,7 @@ use types::{
     },
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
+        consts::FAR_FUTURE_EPOCH,
         containers::{
             Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Deposit,
@@ -1356,7 +1356,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         //                      `SyncCommitteeMessage`s just like `AttestationPacker` does with
         //                      singular attestations.
         let beacon_block_root = self.head_block_root;
-        let message_slot = self.beacon_state.slot().saturating_sub(1).max(GENESIS_SLOT);
+        let message_slot = misc::previous_slot(self.beacon_state.slot());
         let best_subcommittee_contributions = (0..SyncCommitteeSubnetCount::U64)
             .map(|subcommittee_index| {
                 self.producer_context

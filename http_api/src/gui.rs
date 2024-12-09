@@ -426,7 +426,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
     } else {
         let previous_epoch = query.start - 1;
         let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
-        let slot_before_previous_epoch = start_slot.saturating_sub(1).max(GENESIS_SLOT);
+        let slot_before_previous_epoch = misc::previous_slot(start_slot);
 
         state = match snapshot
             .state_at_slot(slot_before_previous_epoch)?

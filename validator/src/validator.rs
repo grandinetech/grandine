@@ -65,7 +65,7 @@ use types::{
     },
     nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
-        consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        consts::GENESIS_SLOT,
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
@@ -1673,18 +1673,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[allow(clippy::too_many_lines)]
     fn process_validator_votes(&mut self, current_epoch: Epoch) -> Result<()> {
-        let Some(epoch_to_check) = current_epoch
-            .saturating_sub(1)
-            .max(GENESIS_EPOCH)
-            .checked_sub(1)
-        else {
+        let Some(epoch_to_check) = misc::previous_epoch(current_epoch).checked_sub(1) else {
             return Ok(());
         };
 
         // Take beacon blocks from `epoch_to_check` and the epoch before it in case the first
         // slot(s) of `epoch_to_check` are empty.
-        let start_slot = Self::start_of_epoch(epoch_to_check.saturating_sub(1).max(GENESIS_EPOCH));
-        let end_slot = Self::start_of_epoch(current_epoch.saturating_sub(1).max(GENESIS_EPOCH));
+        let start_slot = Self::start_of_epoch(misc::previous_epoch(epoch_to_check));
+        let end_slot = Self::start_of_epoch(misc::previous_epoch(current_epoch));
 
         // We assume that stored blocks from epoch before previous do reflect canonical chain
         let canonical_blocks_with_roots = self.controller.blocks_by_range(start_slot..end_slot)?;

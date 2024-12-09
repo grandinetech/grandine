@@ -14,7 +14,6 @@ use std_ext::ArcExt as _;
 use tokio::sync::{Mutex, RwLock};
 use types::{
     phase0::{
-        consts::GENESIS_EPOCH,
         containers::{Attestation, AttestationData},
         primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
     },
@@ -44,7 +43,7 @@ impl<P: Preset> Pool<P> {
     pub async fn on_slot(&self, slot: Slot) {
         if misc::is_epoch_start::<P>(slot) {
             let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-            let previous_epoch = current_epoch.saturating_sub(1).max(GENESIS_EPOCH);
+            let previous_epoch = misc::previous_epoch(current_epoch);
 
             let mut aggregates = self.aggregates.write().await;
             *aggregates = aggregates.split_off(&previous_epoch);

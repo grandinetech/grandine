@@ -69,7 +69,7 @@ use types::{
         WEI_IN_GWEI,
     },
     phase0::{
-        consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        consts::GENESIS_SLOT,
         containers::{
             AttestationData, Checkpoint, Fork, ProposerSlashing, SignedBeaconBlockHeader,
             SignedVoluntaryExit, Validator,
@@ -1768,7 +1768,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
     // Unlike `GET /eth/v1/validator/duties/proposer/{epoch}`,
     // this endpoint is supposed to return the dependent root for the previous epoch.
-    let previous_epoch = epoch.saturating_sub(1).max(GENESIS_EPOCH);
+    let previous_epoch = misc::previous_epoch(epoch);
     let dependent_root = controller.dependent_root(&state, previous_epoch)?;
 
     let indices = validator_indices
@@ -2174,10 +2174,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     }
 
     let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
-
-    let previous_epoch = misc::compute_epoch_at_slot::<P>(head_slot)
-        .saturating_sub(1)
-        .max(GENESIS_EPOCH);
+    let previous_epoch = misc::previous_epoch(misc::compute_epoch_at_slot::<P>(head_slot));
 
     // Prevent DoS attacks by limiting how far in the past the attested block can be searched.
     if requested_epoch < previous_epoch {

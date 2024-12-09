@@ -13,10 +13,7 @@ use prometheus_metrics::Metrics;
 use types::{
     altair::containers::SyncCommitteeMessage,
     combined::{Attestation, BeaconState, SignedBeaconBlock},
-    phase0::{
-        consts::GENESIS_EPOCH,
-        primitives::{Epoch, ValidatorIndex},
-    },
+    phase0::primitives::{Epoch, ValidatorIndex},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -208,7 +205,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
 
     fn is_epoch_allowed(&self, epoch: Epoch) -> bool {
         let current_epoch = misc::compute_epoch_at_slot::<P>(self.controller.slot());
-        let previous_epoch = current_epoch.saturating_sub(1).max(GENESIS_EPOCH);
+        let previous_epoch = misc::previous_epoch(current_epoch);
         epoch == previous_epoch || epoch == current_epoch
     }
 
