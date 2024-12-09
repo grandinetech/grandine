@@ -370,7 +370,7 @@ pub fn upgrade_to_capella<P: Preset>(
 }
 
 #[must_use]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn upgrade_to_deneb<P: Preset>(
     config: &Config,
     pre: CapellaBeaconState<P>,
@@ -501,7 +501,7 @@ pub fn upgrade_to_deneb<P: Preset>(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn upgrade_to_electra<P: Preset>(
     config: &Config,
     pre: DenebBeaconState<P>,

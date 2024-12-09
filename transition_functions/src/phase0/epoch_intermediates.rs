@@ -99,7 +99,7 @@ impl ValidatorSummary for Phase0ValidatorSummary {
     }
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Clone, Copy, Default)]
 pub struct StatisticsForTransition {
     previous_epoch_source_attesting_balance: Gwei,
@@ -213,7 +213,7 @@ impl Statistics for StatisticsForTransition {
     }
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct StatisticsForReport {
     pub previous_epoch_source_attesting_balance: Gwei,

@@ -1,3 +1,12 @@
+// Having `#[expect(clippy::wrong_self_convention)]` declared directly on violating attributes
+// results in `unfulfilled_lint_expectations` false positive warning.
+// Declaring this for the whole module as a temporary workaround.
+// TODO(Grandine Team): consider removing this workaround when upgrading from Rust 1.82.0.
+#![expect(
+    clippy::wrong_self_convention,
+    reason = "This is needlessly strict. See <https://github.com/rust-lang/rust-clippy/issues/6727>."
+)]
+
 use core::num::{NonZeroU128, NonZeroU64, NonZeroUsize};
 
 use easy_ext::ext;
@@ -23,8 +32,6 @@ pub impl<N: Unsigned + NonZero> N {
     }
 }
 
-// This is needlessly strict. See <https://github.com/rust-lang/rust-clippy/issues/6727>.
-#[allow(clippy::wrong_self_convention)]
 #[ext(UsizeExt)]
 pub impl usize {
     #[inline]
@@ -55,8 +62,6 @@ pub impl usize {
     }
 }
 
-// This is needlessly strict. See <https://github.com/rust-lang/rust-clippy/issues/6727>.
-#[allow(clippy::wrong_self_convention)]
 #[ext(U64Ext)]
 pub impl u64 {
     #[inline]
@@ -90,8 +95,6 @@ pub impl u64 {
     }
 }
 
-// This is needlessly strict. See <https://github.com/rust-lang/rust-clippy/issues/6727>.
-#[allow(clippy::wrong_self_convention)]
 #[ext(U128Ext)]
 pub impl u128 {
     #[inline]

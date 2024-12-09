@@ -22,7 +22,10 @@ pub fn parse_plain_bootnodes(string: &str) -> Result<Vec<Enr>> {
         .map_err(Error::msg)
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Refactoring worsens readability, which is more important in tests."
+)]
 #[cfg(test)]
 mod tests {
     use test_case::test_case;

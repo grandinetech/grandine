@@ -98,7 +98,7 @@ pub struct Channels<P: Preset> {
     pub subnet_service_to_p2p_rx: UnboundedReceiver<SubnetServiceToP2p>,
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Network<P: Preset> {
     network_globals: Arc<NetworkGlobals>,
     received_blob_sidecars: HashMap<BlobIdentifier, Slot>,
@@ -117,7 +117,7 @@ pub struct Network<P: Preset> {
     network_to_service_tx: UnboundedSender<ServiceInboundMessage<P>>,
     service_to_network_rx: UnboundedReceiver<ServiceOutboundMessage<P>>,
     shutdown_rx: Receiver<ShutdownReason>,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     port_mappings: Option<PortMappings>,
 }
 
@@ -127,7 +127,7 @@ impl<P: Preset> Network<P> {
         &self.network_globals
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         network_config: Arc<NetworkConfig>,
         controller: RealController<P>,
@@ -204,7 +204,7 @@ impl<P: Preset> Network<P> {
         Ok(network)
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<Never> {
         let mut gossipsub_parameter_update_interval =
             IntervalStream::new(tokio::time::interval(GOSSIPSUB_PARAMETER_UPDATE_INTERVAL)).fuse();
@@ -1187,7 +1187,7 @@ impl<P: Preset> Network<P> {
             .detach();
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_response(&mut self, peer_id: PeerId, request_id: RequestId, response: Response<P>) {
         match response {
             Response::Status(remote) => {
@@ -1341,8 +1341,8 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    #[allow(clippy::cognitive_complexity)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
+    #[expect(clippy::too_many_lines)]
     fn handle_pubsub_message(
         &mut self,
         message_id: MessageId,

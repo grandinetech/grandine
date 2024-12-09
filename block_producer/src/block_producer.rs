@@ -111,7 +111,7 @@ pub struct BlockProducer<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> BlockProducer<P, W> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         proposer_configs: Arc<ProposerConfigs>,
         builder_api: Option<Arc<BuilderApi>>,
@@ -721,7 +721,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn build_beacon_block_without_state_root(
         &self,
         randao_reveal: SignatureBytes,

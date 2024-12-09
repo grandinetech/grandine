@@ -66,7 +66,7 @@ where
     }
 }
 
-#[allow(clippy::into_iter_without_iter)]
+#[expect(clippy::into_iter_without_iter)]
 impl<'list, T, N, B: BundleSize<T>> IntoIterator for &'list PersistentList<T, N, B> {
     type Item = &'list T;
     type IntoIter = ExactSize<Flatten<Leaves<'list, T, B>>>;
@@ -86,7 +86,7 @@ impl<'list, T, N, B: BundleSize<T>> IntoIterator for &'list PersistentList<T, N,
     }
 }
 
-#[allow(clippy::into_iter_without_iter)]
+#[expect(clippy::into_iter_without_iter)]
 impl<'list, T: Clone, N, B: BundleSize<T>> IntoIterator for &'list mut PersistentList<T, N, B> {
     type Item = &'list mut T;
     type IntoIter = ExactSize<Flatten<LeavesMut<'list, T, B>>>;

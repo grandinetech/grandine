@@ -1,6 +1,8 @@
-// Adding backquotes to doc comments affects `--help` output.
-// `clap` derive macros preserve backquotes even if `verbatim_doc_comment` is disabled.
-#![allow(clippy::doc_markdown)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "Adding backquotes to doc comments affects `--help` output. \
+             `clap` derive macros preserve backquotes even if `verbatim_doc_comment` is disabled."
+)]
 
 use core::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -91,8 +93,10 @@ pub struct GrandineArgs {
     #[clap(flatten)]
     network_config_options: NetworkConfigOptions,
 
-    // TODO(Grandine Team): The slasher is not working properly and should not be used.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "TODO(Grandine Team): The slasher is not working properly and should not be used."
+    )]
     #[clap(skip)]
     slasher_options: SlasherOptions,
 
@@ -240,8 +244,10 @@ impl HttpApiOptions {
     }
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Args)]
 struct BeaconNodeOptions {
     #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
@@ -369,8 +375,10 @@ struct BeaconNodeOptions {
     in_memory: bool,
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Args)]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
@@ -830,8 +838,8 @@ impl Network {
 
 impl GrandineArgs {
     // This is not a `TryFrom` impl because this has side effects.
-    #[allow(clippy::cognitive_complexity)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
+    #[expect(clippy::too_many_lines)]
     pub fn try_into_config(self) -> Result<GrandineConfig> {
         let Self {
             chain_options,

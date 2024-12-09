@@ -343,7 +343,10 @@ mod tests {
             bits.try_into()
         }
 
-        #[allow(clippy::needless_pass_by_value)]
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Refactoring worsens readability, which is more important in tests."
+        )]
         fn concatenate<const SIZE: usize>(
             bit_lists: [BitList<N>; SIZE],
         ) -> Result<BitList<N>, ReadError> {
@@ -376,7 +379,10 @@ mod tests {
             bits.try_into()
         }
 
-        #[allow(clippy::needless_pass_by_value)]
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Refactoring worsens readability, which is more important in tests."
+        )]
         fn concatenate<const SIZE: usize>(
             bit_lists: [BitList<N>; SIZE],
         ) -> Result<BitList<N>, ReadError> {

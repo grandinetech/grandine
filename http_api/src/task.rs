@@ -48,7 +48,7 @@ pub struct Channels<P: Preset> {
     pub validator_to_api_rx: UnboundedReceiver<ValidatorToApi<P>>,
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct HttpApi<P: Preset, W: Wait> {
     pub block_producer: Arc<BlockProducer<P, W>>,
     pub controller: ApiController<P, W>,

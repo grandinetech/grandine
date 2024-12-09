@@ -68,7 +68,7 @@ impl<P: Preset> Context<P> {
         block_on(self.try_run_case(case)).unwrap_or_else(|error| panic!("{error:?}"))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn try_run_case(self, case: Case<'_>) -> Result<()> {
         Feature::ServeCostlyEndpoints.enable();
         Feature::ServeLeakyEndpoints.enable();

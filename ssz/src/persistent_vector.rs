@@ -45,7 +45,7 @@ pub struct PersistentVector<T, N, B: BundleSize<T> = MinimumBundleSize<T>> {
     phantom: PhantomData<N>,
 }
 
-#[allow(clippy::into_iter_without_iter)]
+#[expect(clippy::into_iter_without_iter)]
 impl<'vector, T, N, B> IntoIterator for &'vector PersistentVector<T, N, B>
 where
     N: Unsigned + NonZero,

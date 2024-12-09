@@ -1165,7 +1165,7 @@ impl<P: Preset> Store<P> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,

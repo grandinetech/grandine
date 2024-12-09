@@ -119,7 +119,7 @@ pub struct Channels<P: Preset, W> {
     pub validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Validator<P: Preset, W: Wait> {
     chain_config: Arc<ChainConfig>,
     validator_config: Arc<ValidatorConfig>,
@@ -159,7 +159,7 @@ pub struct Validator<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         validator_config: Arc<ValidatorConfig>,
@@ -232,7 +232,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
         loop {
             let mut slasher_to_validator_rx = self
@@ -439,7 +439,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         message.send(&self.p2p_tx);
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
         if let Some(metrics) = self.metrics.as_ref() {
             if tick.is_start_of_interval() {
@@ -643,7 +643,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
         if slot_head.slot() == GENESIS_SLOT {
             // All peers should already have the genesis block.
@@ -869,7 +869,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     /// See:
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attesting>
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attestation-aggregation>
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn attest_and_start_aggregating(
         &mut self,
         wait_group: &W,
@@ -1016,7 +1016,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         let config = &self.chain_config;
         let phase = slot_head.phase();
@@ -1292,7 +1292,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.signer.load().keys().copied().collect::<HashSet<_>>()
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn own_singular_attestations(
         &self,
         slot_head: &SlotHead<P>,
@@ -1671,7 +1671,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn process_validator_votes(&mut self, current_epoch: Epoch) -> Result<()> {
         let Some(epoch_to_check) = misc::previous_epoch(current_epoch).checked_sub(1) else {
             return Ok(());

@@ -391,8 +391,8 @@ pub fn execution_payload<P: Preset>(
     Ok(execution_payload)
 }
 
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_lines)]
 fn block<P: Preset>(
     config: &Config,
     advanced_state: Arc<BeaconState<P>>,

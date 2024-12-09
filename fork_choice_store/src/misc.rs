@@ -1,3 +1,8 @@
+#![allow(
+    clippy::allow_attributes,
+    reason = "allow_attributes lint trigger from some derive macros. \
+              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
+)]
 use core::{
     fmt::{Formatter, Result as FmtResult},
     num::NonZeroUsize,

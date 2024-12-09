@@ -120,7 +120,7 @@ impl IntoResponse for Error {
     }
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 pub async fn run_metrics_server<P: Preset, W: Wait>(
     config: MetricsServerConfig,
     controller: ApiController<P, W>,

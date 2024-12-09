@@ -1,4 +1,4 @@
-#![allow(clippy::manual_let_else)]
+#![expect(clippy::manual_let_else)]
 
 use kzg::{eip_4844::bytes_to_blob, Fr as _, G1 as _};
 use spec_test_utils::Case;

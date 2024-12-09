@@ -34,7 +34,7 @@ macro_rules! tests_for_type {
         $mainnet_glob: literal,
         $minimal_glob: literal,
     ) => {
-        #[allow(non_snake_case)]
+        #[expect(non_snake_case)]
         mod $type {
             use super::*;
 

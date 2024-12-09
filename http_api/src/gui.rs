@@ -372,8 +372,10 @@ pub fn get_beacon_head<P: Preset, W: Wait>(
 }
 
 /// `GET /validator/statistics?start={start}&end={end}&pubkeys[]={pubkey}&pubkeys[]={pubkey}`
-// TODO(Grandine Team): Clean up when we have snapshot tests for `http_api`.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "TODO(Grandine Team): Clean up when we have snapshot tests for `http_api`."
+)]
 pub async fn get_validator_statistics<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,

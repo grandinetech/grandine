@@ -1,4 +1,4 @@
-#![allow(clippy::string_slice)]
+#![expect(clippy::string_slice)]
 
 use serde::Deserialize;
 

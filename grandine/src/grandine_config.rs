@@ -21,11 +21,10 @@ use crate::{
     commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
 };
 
-#[cfg(test)]
-use derive_more::Debug;
-
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[cfg_attr(test, derive(Debug))]
 pub struct GrandineConfig {
     pub predefined_network: Option<PredefinedNetwork>,
@@ -67,7 +66,7 @@ pub struct GrandineConfig {
 }
 
 impl GrandineConfig {
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     pub fn report(&self) {
         let Self {
             predefined_network,

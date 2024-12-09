@@ -87,7 +87,7 @@ where
     A: UnboundedSink<AttestationVerifierMessage<P, W>>,
     W: Wait,
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         chain_config: Arc<ChainConfig>,
         store_config: StoreConfig,

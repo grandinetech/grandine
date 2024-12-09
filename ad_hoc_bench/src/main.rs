@@ -302,9 +302,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::cast_precision_loss)]
-#[allow(clippy::float_arithmetic)]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::cast_precision_loss)]
+#[expect(clippy::float_arithmetic)]
 fn run<P: Preset>(
     chain_config: ChainConfig,
     options: Options,

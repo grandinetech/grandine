@@ -62,7 +62,7 @@ impl ValidatorSummary for AltairValidatorSummary {
 
 // This has no field for the active balance in the current epoch because during most epoch
 // transitions it should already be calculated and cached in `Cache.total_active_balance`.
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct Statistics {
     pub previous_epoch_source_participating_balance: Gwei,

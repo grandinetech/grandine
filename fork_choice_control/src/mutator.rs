@@ -78,7 +78,7 @@ use crate::{
     ApiMessage, BlockEvent, ChainReorgEvent, FinalizedCheckpointEvent, HeadEvent,
 };
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
@@ -135,7 +135,7 @@ where
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         store_snapshot: Arc<ArcSwap<Store<P>>>,
         state_cache: Arc<StateCacheProcessor<P>>,
@@ -318,7 +318,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
@@ -461,7 +461,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_block(
         &mut self,
         wait_group: W,
@@ -638,7 +638,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_aggregate_and_proof(
         &mut self,
         wait_group: &W,
@@ -1353,8 +1353,8 @@ where
         Ok(())
     }
 
-    #[allow(clippy::cognitive_complexity)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
+    #[expect(clippy::too_many_lines)]
     fn accept_block(
         &mut self,
         wait_group: &W,

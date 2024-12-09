@@ -50,9 +50,9 @@ use crate::misc::{MetricsConfig, StorageConfig};
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
 
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::fn_params_excessive_bools)]
+#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_lines)]
+#[expect(clippy::fn_params_excessive_bools)]
 pub async fn run_after_genesis<P: Preset>(
     chain_config: Arc<ChainConfig>,
     store_config: StoreConfig,

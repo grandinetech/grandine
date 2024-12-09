@@ -591,7 +591,7 @@ mod tests {
         Ok((manager, signer))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     #[tokio::test]
     async fn test_keystore_import_load_and_delete_with_persistent_storage() -> Result<()> {
         let storage_tempdir = Builder::new()

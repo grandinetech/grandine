@@ -67,6 +67,10 @@ pub struct Api {
 }
 
 impl Api {
+    #[expect(
+        clippy::unnecessary_min_or_max,
+        reason = "GENESIS_SLOT const might be adjusted independently."
+    )]
     pub fn can_use_builder_api<P: Preset>(
         &self,
         slot: Slot,

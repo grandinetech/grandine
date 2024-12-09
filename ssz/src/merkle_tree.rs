@@ -12,6 +12,11 @@
 // height 0    0   1     2   3     4   5     6   7     8   9    10   11   12   13   14   15
 //           0000 0001 0010 0011 0100 0101 0110 0111 1000 1001 1010 1011 1100 1101 1110 1111
 // ```
+#![allow(
+    clippy::allow_attributes,
+    reason = "clippy::allow_attributes lint triggers from some derive macros. \
+              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
+)]
 
 use core::ops::{Add, Range};
 
@@ -133,8 +138,10 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
     pub fn push_and_compute_root(&mut self, index: usize, chunk: H256) -> H256 {
         let (updated_sibling, mut hash) = self.push(index, chunk);
 
-        // The suggested rewrite is not an improvement.
-        #[allow(clippy::needless_range_loop)]
+        #[expect(
+            clippy::needless_range_loop,
+            reason = "The suggested rewrite is not an improvement."
+        )]
         for height in updated_sibling..D::USIZE {
             // `self.sibling_hashes[updated_sibling]` will not be accessed during this call.
             // The first iteration of the loop always takes the else branch.

@@ -388,15 +388,15 @@ impl<P: Preset> AttestationPacker<P> {
         }
     }
 
-    #[allow(clippy::float_arithmetic)]
+    #[expect(clippy::float_arithmetic)]
     fn f64_values_are_approximately_equal(a: f64, b: f64) -> bool {
         (a - b).abs() < f64::EPSILON
     }
 
     // This function solves maximum coverage problem by using integer linear programming (https://en.wikipedia.org/wiki/Maximum_coverage_problem)
     // It uses the assumption that all aggregates have the same AttestationData
-    #[allow(clippy::too_many_lines)]
-    #[allow(clippy::float_arithmetic)]
+    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::float_arithmetic)]
     fn select_max_cover_attestation_integer_programming(
         &self,
         aggregates: &[Attestation<P>],

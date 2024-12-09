@@ -2,7 +2,7 @@ use bls::{PublicKeyBytes, SignatureBytes};
 use ssz::BitVector;
 use types::{altair::consts::SyncCommitteeSubnetCount, phase0::primitives::ValidatorIndex};
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Aggregator {
     pub aggregator_index: ValidatorIndex,
     pub position_in_committee: usize,

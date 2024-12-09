@@ -13,8 +13,10 @@ use syn::{
 
 use crate::{crate_path, ssz_field::SszField};
 
-// False positive. The `bool`s are independent and using enums would be too verbose.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent and using enums would be too verbose."
+)]
 #[derive(FromDeriveInput)]
 // Darling has the `#[darling(supports(…))]` attribute for restricting the shape of types that the
 // derive macro can be applied to. We don't use it because the error messages it produces are too
@@ -198,8 +200,10 @@ impl SszType {
         Ok(parse_quote! { #tokens })
     }
 
-    // False positive. The name refers to the function whose implementation this generates.
-    #[allow(clippy::wrong_self_convention)]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "False positive. The name refers to the function whose implementation this generates."
+    )]
     fn from_ssz_unchecked_fn_impl(&self, ssz: &Path) -> Result<ImplItemFn, Error> {
         if self.transparent {
             let (member, _) = self.single_unskipped_field()?;

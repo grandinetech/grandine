@@ -46,7 +46,7 @@ impl<P: Preset> IndexMut<Position> for Segment<P> {
     }
 }
 
-#[allow(clippy::into_iter_without_iter)]
+#[expect(clippy::into_iter_without_iter)]
 impl<'segment, P: Preset> IntoIterator for &'segment Segment<P> {
     type Item = &'segment UnfinalizedBlock<P>;
     type IntoIter = Iter<'segment, UnfinalizedBlock<P>>;
@@ -56,7 +56,7 @@ impl<'segment, P: Preset> IntoIterator for &'segment Segment<P> {
     }
 }
 
-#[allow(clippy::into_iter_without_iter)]
+#[expect(clippy::into_iter_without_iter)]
 impl<'segment, P: Preset> IntoIterator for &'segment mut Segment<P> {
     type Item = &'segment mut UnfinalizedBlock<P>;
     type IntoIter = IterMut<'segment, UnfinalizedBlock<P>>;

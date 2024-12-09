@@ -175,7 +175,7 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(service)
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<Never> {
         let mut interval =
             IntervalStream::new(tokio::time::interval(NETWORK_EVENT_INTERVAL)).fuse();

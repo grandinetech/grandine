@@ -217,7 +217,7 @@ impl SyncManager {
         sync_batches
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn build_forward_sync_batches<P: Preset>(
         &mut self,
         config: &Config,

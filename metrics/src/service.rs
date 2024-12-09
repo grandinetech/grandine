@@ -42,7 +42,7 @@ pub struct MetricsServiceConfig {
     pub directories: Arc<Directories>,
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 pub struct MetricsService<P: Preset> {
     pub(crate) config: MetricsServiceConfig,
     pub(crate) controller: RealController<P>,
@@ -209,7 +209,7 @@ impl<P: Preset> MetricsService<P> {
     }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Debug, Deserialize)]
 struct RemoteError {
     data: String,

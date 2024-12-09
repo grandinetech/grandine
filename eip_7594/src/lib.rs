@@ -85,7 +85,7 @@ mod tests {
         run_case::<preset>(case);
     }
 
-    #[allow(clippy::extra_unused_type_parameters)]
+    #[expect(clippy::extra_unused_type_parameters)]
     fn run_case<P: Preset>(case: Case) {
         let Meta {
             description: _description,

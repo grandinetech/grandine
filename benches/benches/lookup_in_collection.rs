@@ -1,6 +1,8 @@
-// The `unused_crate_dependencies` lint checks every crate in a package separately.
-// See <https://github.com/rust-lang/rust/issues/57274>.
-#![allow(unused_crate_dependencies)]
+#![expect(
+    unused_crate_dependencies,
+    reason = "The `unused_crate_dependencies` lint checks every crate in a package separately. \
+              See <https://github.com/rust-lang/rust/issues/57274>."
+)]
 
 // Since the keys are `usize`, interpolation search could be used as well.
 // We don't bother with it for a number of reasons: it's more complicated, has
@@ -38,7 +40,7 @@ struct Small;
 
 // This is a new type rather than an alias to make the output of `tynm::type_name` look better.
 #[derive(Clone, Copy, Default)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct Large([usize; 8]);
 
 // Criterion macros only add confusion.

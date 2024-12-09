@@ -70,8 +70,10 @@ compile_error! {
      see grandine/Cargo.toml for a list of features"
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Clone)]
 struct Context {
     predefined_network: Option<PredefinedNetwork>,
@@ -153,7 +155,7 @@ impl Context {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn run<P: Preset>(self) -> Result<()> {
         let Self {
             predefined_network,
@@ -332,7 +334,7 @@ fn main() -> ExitCode {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
     binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
     binary_utils::initialize_rayon()?;

@@ -205,7 +205,7 @@ pub struct PublishBlockQuery {
     broadcast_validation: Option<BroadcastValidation>,
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Serialize)]
 pub struct GetGenesisResponse {
     #[serde(with = "serde_utils::string_or_native")]

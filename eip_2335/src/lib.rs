@@ -35,7 +35,7 @@ const VERSION: usize = 4;
 type DerivedKey = Zeroizing<[u8; DERIVED_KEY_LENGTH]>;
 type ScryptCost = u64;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Keystore {
@@ -252,8 +252,10 @@ impl Kdf {
     content = "params"
 )]
 enum Checksum {
-    // The empty braces affect the generated Serde impls.
-    #[allow(clippy::empty_enum_variants_with_brackets)]
+    #[expect(
+        clippy::empty_enum_variants_with_brackets,
+        reason = "The empty braces affect the generated Serde impls."
+    )]
     Sha256 {},
 }
 
@@ -345,7 +347,7 @@ impl FromHex for ChecksumMessage {
 /// BLS12-381 key path as defined by [EIP-2334](https://eips.ethereum.org/EIPS/eip-2334).
 enum Eip2334Path {
     UnknownOrIrrelevant,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     Known {
         coin_type: usize,
         account: usize,

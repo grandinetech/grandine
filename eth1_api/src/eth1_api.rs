@@ -48,7 +48,7 @@ const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
 const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Eth1Api {
     config: Arc<Config>,
     client: Client,

@@ -60,7 +60,7 @@ pub fn is_epoch_start<P: Preset>(slot: Slot) -> bool {
 
 #[expect(
     clippy::unnecessary_min_or_max,
-    reason = "GENESIS_EPOCH const might be adjusted independently"
+    reason = "GENESIS_EPOCH const might be adjusted independently."
 )]
 #[must_use]
 pub fn previous_epoch(epoch: Epoch) -> Epoch {
@@ -69,7 +69,7 @@ pub fn previous_epoch(epoch: Epoch) -> Epoch {
 
 #[expect(
     clippy::unnecessary_min_or_max,
-    reason = "GENESIS_SLOT const might be adjusted independently"
+    reason = "GENESIS_SLOT const might be adjusted independently."
 )]
 #[must_use]
 pub fn previous_slot(slot: Slot) -> Slot {

@@ -140,7 +140,7 @@ fn function_name(case: Case) {
     run_case::<preset>(&config, case);
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
     let anchor_block = case
         .ssz::<_, BeaconBlock<P>>(config.as_ref(), "anchor_block")

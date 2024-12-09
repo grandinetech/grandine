@@ -727,7 +727,7 @@ pub struct BlockWithRoot<P: Preset> {
 ///
 /// [docs]: https://docs.rs/rocksdb/0.18.0/rocksdb/struct.SnapshotWithThreadMode.html
 /// [wiki]: https://github.com/facebook/rocksdb/wiki/Snapshot/e09da0053d05583919354cfaf834b8e8edd97be8
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Snapshot<'storage, P: Preset> {
     // Use a `Guard` instead of an owned snapshot unlike in tasks based on the intuition that
     // `Snapshot`s will be less common than tasks.

@@ -1,4 +1,4 @@
-#![allow(clippy::module_name_repetitions)]
+#![expect(clippy::module_name_repetitions)]
 
 use anyhow::{ensure, Result};
 use bls::{
@@ -427,7 +427,7 @@ impl Verifier for Triple {
 // TODO(Grandine Team): The first 2 variants are no longer used at runtime because
 //                      `BlockVerificationPool` is only used for Phase 0 blocks.
 //                      Try removing them or redesigning to make options unnecessary.
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(EnumSetType)]
 pub enum VerifierOption {
     SkipBlockBaseSignatures,

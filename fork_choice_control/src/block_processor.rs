@@ -126,7 +126,7 @@ impl<P: Preset> BlockProcessor<P> {
             })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn perform_state_transition(
         &self,
         mut state: Arc<BeaconState<P>>,

@@ -175,8 +175,10 @@ enum Error {
     },
 }
 
-// False positive. See <https://github.com/rust-lang/rust-clippy/issues/3307>.
-#[allow(clippy::range_plus_one)]
+#[expect(
+    clippy::range_plus_one,
+    reason = "False positive. See <https://github.com/rust-lang/rust-clippy/issues/3307>."
+)]
 #[cfg(test)]
 mod tests {
     use spec_test_utils::Case;

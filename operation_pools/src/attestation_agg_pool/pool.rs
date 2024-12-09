@@ -23,7 +23,7 @@ use types::{
 
 use crate::attestation_agg_pool::types::{Aggregate, AggregateMap, AttestationMap, AttestationSet};
 
-#[allow(type_alias_bounds)]
+#[expect(type_alias_bounds)]
 type AttestationsWithSlot<P: Preset> = (ContiguousList<Attestation<P>, P::MaxAttestations>, Slot);
 
 #[derive(Default)]

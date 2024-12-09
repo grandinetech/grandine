@@ -33,8 +33,10 @@ use crate::{
 
 pub struct Context<P: Preset> {
     controller: Option<Arc<TestController<P>>>,
-    // Keep the `MutatorHandle` around to avoid joining the mutator thread prematurely.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Keep the `MutatorHandle` around to avoid joining the mutator thread prematurely."
+    )]
     mutator_handle: MutatorHandle<P, WaitGroup>,
     execution_engine: TestExecutionEngine,
     p2p_rx: UnboundedReceiver<P2pMessage<P>>,

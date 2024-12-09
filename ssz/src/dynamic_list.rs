@@ -1,3 +1,8 @@
+#![expect(
+    clippy::allow_attributes,
+    reason = "clippy::allow_attributes lint triggers from some derive macros. \
+              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
+)]
 use core::fmt::Debug;
 
 use derivative::Derivative;

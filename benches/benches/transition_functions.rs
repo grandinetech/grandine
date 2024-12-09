@@ -1,6 +1,8 @@
-// The `unused_crate_dependencies` lint checks every crate in a package separately.
-// See <https://github.com/rust-lang/rust/issues/57274>.
-#![allow(unused_crate_dependencies)]
+#![expect(
+    unused_crate_dependencies,
+    reason = "The `unused_crate_dependencies` lint checks every crate in a package separately. \
+              See <https://github.com/rust-lang/rust/issues/57274>."
+)]
 
 use core::cell::LazyCell;
 use std::sync::Arc;
@@ -26,7 +28,7 @@ use types::{
 const EMPTY_SLOT_COUNT: u64 = 1024;
 
 // Criterion macros only add confusion.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn main() -> Result<()> {
     // Initialize the global Rayon thread pool in advance for more consistent results.
     binary_utils::initialize_rayon()?;
