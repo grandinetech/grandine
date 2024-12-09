@@ -338,8 +338,8 @@ fn run<P: Preset>(
 
     let chain_config = Arc::new(chain_config);
 
-    let unfinalized_states_in_memory =
-        unfinalized_states_in_memory.unwrap_or(StoreConfig::default().unfinalized_states_in_memory);
+    let unfinalized_states_in_memory = unfinalized_states_in_memory
+        .unwrap_or_else(|| StoreConfig::default().unfinalized_states_in_memory);
 
     let store_config = StoreConfig {
         unfinalized_states_in_memory,

@@ -113,6 +113,9 @@ unused_lifetimes                       = 'warn'
 unused_macro_rules                     = 'warn'
 unused_qualifications                  = 'warn'
 
+# These are almost never helpful and require boilerplate.
+unstable_name_collisions               = 'allow'
+
 [workspace.lints.clippy]
 # Additional Clippy lint groups.
 nursery  = 'warn'
