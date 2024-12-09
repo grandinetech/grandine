@@ -1004,7 +1004,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     selection_proof,
                 })?;
 
-                Some((own_attestation.attestation.data(), aggregator))
+                let data = AttestationData {
+                    index: committee_index,
+                    ..own_attestation.attestation.data()
+                };
+
+                Some((data, aggregator))
             })
             .pipe(group_into_btreemap);
 
