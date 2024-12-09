@@ -616,7 +616,6 @@ pub async fn run_after_genesis<P: Preset>(
                 .clone()
                 .expect("Metrics registry must be present for metrics server"),
             metrics_to_metrics_tx,
-            network.network_globals().clone_arc(),
         )),
         None => Either::Right(core::future::pending()),
     };

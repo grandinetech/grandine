@@ -15,7 +15,6 @@ use axum::{
 };
 use directories::Directories;
 use eth1_api::ApiController;
-use eth2_libp2p::NetworkGlobals;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
 use helper_functions::misc;
@@ -58,7 +57,6 @@ pub struct MetricsState<P: Preset, W: Wait> {
     pub libp2p_registry: Option<Arc<Registry>>,
     pub metrics: Arc<Metrics>,
     pub metrics_to_metrics_tx: Option<UnboundedSender<MetricsToMetrics>>, // TODO: is still relevant, update naming if so
-    pub network_globals: Arc<NetworkGlobals>,
 }
 
 impl<P: Preset, W: Wait> FromRef<MetricsState<P, W>> for ApiController<P, W> {
@@ -88,12 +86,6 @@ impl<P: Preset, W: Wait> FromRef<MetricsState<P, W>> for Arc<Metrics> {
 impl<P: Preset, W: Wait> FromRef<MetricsState<P, W>> for Option<UnboundedSender<MetricsToMetrics>> {
     fn from_ref(state: &MetricsState<P, W>) -> Self {
         state.metrics_to_metrics_tx.clone()
-    }
-}
-
-impl<P: Preset, W: Wait> FromRef<MetricsState<P, W>> for Arc<NetworkGlobals> {
-    fn from_ref(state: &MetricsState<P, W>) -> Self {
-        state.network_globals.clone_arc()
     }
 }
 
@@ -127,7 +119,6 @@ pub async fn run_metrics_server<P: Preset, W: Wait>(
     libp2p_registry: Option<Registry>,
     metrics: Arc<Metrics>,
     metrics_to_metrics_tx: Option<UnboundedSender<MetricsToMetrics>>,
-    network_globals: Arc<NetworkGlobals>,
 ) -> Result<()> {
     let addr = SocketAddr::from(&config);
 
@@ -140,7 +131,6 @@ pub async fn run_metrics_server<P: Preset, W: Wait>(
         libp2p_registry: libp2p_registry.map(Arc::new),
         metrics,
         metrics_to_metrics_tx,
-        network_globals,
     };
 
     let router = Router::new()
@@ -171,14 +161,10 @@ pub async fn prometheus_metrics<P: Preset, W: Wait>(
     State(libp2p_registry): State<Option<Arc<Registry>>>,
     State(metrics): State<Arc<Metrics>>,
     State(metrics_to_metrics_tx): State<Option<UnboundedSender<MetricsToMetrics>>>,
-    State(network_globals): State<Arc<NetworkGlobals>>,
 ) -> Result<String, Error> {
     let mut buffer = String::new();
 
     metrics.set_live();
-
-    eth2_libp2p::metrics::scrape_discovery_metrics();
-    eth2_libp2p::metrics::scrape_sync_metrics(&network_globals);
 
     // gossipsub metrics
     if let Some(registry) = libp2p_registry {

@@ -65,6 +65,7 @@ use crate::{
 };
 
 const GOSSIPSUB_PARAMETER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
+const NETWORK_METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
 // > Clients MAY limit the number of blocks and sidecars in the response.
 const MAX_FOR_DOS_PREVENTION: u64 = 64;
@@ -1897,8 +1898,22 @@ fn run_network_service<P: Preset>(
     service_to_network_tx: UnboundedSender<ServiceOutboundMessage<P>>,
 ) {
     tokio::spawn(async move {
+        let mut network_metrics_update_interval =
+            IntervalStream::new(tokio::time::interval(NETWORK_METRICS_UPDATE_INTERVAL)).fuse();
+
+        let metrics_enabled = service.network_globals().network_config.metrics_enabled;
+
         loop {
-            select! {
+            tokio::select! {
+                _ = network_metrics_update_interval.select_next_some(), if metrics_enabled => {
+                    eth2_libp2p::metrics::update_discovery_metrics();
+                    eth2_libp2p::metrics::update_sync_metrics(service.network_globals());
+                    eth2_libp2p::metrics::update_gossipsub_extended_metrics(
+                        service.gossipsub(),
+                        service.network_globals(),
+                    );
+                },
+
                 network_event = service.next_event().fuse() => {
                     ServiceOutboundMessage::NetworkEvent(network_event).send(&service_to_network_tx);
                 }
