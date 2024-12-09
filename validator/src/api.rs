@@ -1,10 +1,10 @@
 use core::{
+    error::Error as StdError,
     fmt::{Debug, Formatter, Result as FmtResult},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
 use std::{
-    error::Error as StdError,
     path::{Path, PathBuf},
     sync::Arc,
 };

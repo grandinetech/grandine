@@ -535,7 +535,6 @@ fn try_main() -> Result<()> {
         PresetName::Mainnet => context.run_with_restart::<Mainnet>(),
         #[cfg(any(feature = "preset-minimal", test))]
         PresetName::Minimal => context.run_with_restart::<Minimal>(),
-        #[allow(unreachable_patterns)]
         preset_name => bail!(Error::PresetNotIncluded { preset_name }),
     }
 }
@@ -753,7 +752,6 @@ fn handle_command<P: Preset>(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn genesis_checkpoint_provider<P: Preset>(
     chain_config: &ChainConfig,
     genesis_state_file: Option<PathBuf>,

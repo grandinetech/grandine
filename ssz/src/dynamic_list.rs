@@ -118,7 +118,7 @@ impl<T> DynamicList<T> {
         Ok(())
     }
 
-    fn new_unchecked(elements: Box<[T]>) -> Self {
+    const fn new_unchecked(elements: Box<[T]>) -> Self {
         Self { elements }
     }
 }

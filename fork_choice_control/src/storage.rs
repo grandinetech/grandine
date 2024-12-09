@@ -63,7 +63,7 @@ pub struct Storage<P> {
 
 impl<P: Preset> Storage<P> {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         config: Arc<Config>,
         database: Database,
         archival_epoch_interval: NonZeroU64,

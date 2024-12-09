@@ -636,9 +636,8 @@ impl<P: Preset> AttestationPacker<P> {
                 .iter()
                 .zip(attestation_weight.validator_weights.iter())
             {
-                if !counted_validator_indices.contains(id) {
+                if counted_validator_indices.insert(id) {
                     ans += weight;
-                    counted_validator_indices.insert(id);
                 }
             }
         }

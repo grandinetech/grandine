@@ -114,7 +114,6 @@ impl<T: Debug, N, B: BundleSize<T>> Debug for PersistentList<T, N, B> {
     }
 }
 
-#[allow(clippy::into_iter_without_iter)]
 impl<T, N: Unsigned, B: BundleSize<T>> TryFromIterator<T> for PersistentList<T, N, B> {
     type Error = ReadError;
 

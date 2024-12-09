@@ -23,7 +23,6 @@ use crate::interchange_format::{
 
 pub mod interchange_format;
 
-#[allow(clippy::str_to_string)]
 mod schema {
     use refinery::embed_migrations;
     embed_migrations!();

@@ -38,7 +38,7 @@ pub struct LivenessTracker<P: Preset, W: Wait> {
 
 impl<P: Preset, W: Wait> LivenessTracker<P, W> {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         controller: ApiController<P, W>,
         metrics: Option<Arc<Metrics>>,
         api_to_liveness_rx: UnboundedReceiver<ApiToLiveness>,

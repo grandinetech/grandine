@@ -1,8 +1,8 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
+use core::error::Error as StdError;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    error::Error as StdError,
     sync::Arc,
     time::SystemTime,
 };

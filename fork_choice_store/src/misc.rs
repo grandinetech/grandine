@@ -299,7 +299,7 @@ pub struct AttestationItem<P: Preset, I> {
 
 impl<P: Preset, I> AttestationItem<P, I> {
     #[must_use]
-    pub fn unverified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+    pub const fn unverified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
         Self {
             item,
             origin,
@@ -308,7 +308,7 @@ impl<P: Preset, I> AttestationItem<P, I> {
     }
 
     #[must_use]
-    pub fn verified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+    pub const fn verified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
         Self {
             item,
             origin,

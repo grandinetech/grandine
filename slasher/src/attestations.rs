@@ -24,7 +24,7 @@ pub struct Attestations<P: Preset> {
 }
 
 impl<P: Preset> Attestations<P> {
-    pub fn new(
+    pub const fn new(
         config: SlasherConfig,
         votes_db: Database,
         attestations_db: Database,

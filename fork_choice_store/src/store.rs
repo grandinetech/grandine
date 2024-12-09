@@ -1690,7 +1690,6 @@ impl<P: Preset> Store<P> {
     }
 
     // TODO(feature/deneb): Format quotes and log message like everything else.
-    #[allow(clippy::too_many_lines)]
     pub fn validate_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,

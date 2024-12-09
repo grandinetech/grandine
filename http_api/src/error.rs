@@ -1,4 +1,5 @@
-use std::{error::Error as StdError, sync::Arc};
+use core::error::Error as StdError;
+use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
 use axum::{
@@ -269,7 +270,6 @@ struct EthErrorResponse<'error> {
     failures: &'error [IndexedError],
 }
 
-#[allow(clippy::needless_pass_by_value)]
 #[cfg(test)]
 mod tests {
     use axum::{extract::rejection::MissingJsonContentType, Error as AxumError};
@@ -280,18 +280,18 @@ mod tests {
     use super::*;
 
     #[test_case(
-        Error::BlockNotFound,
-        json!({
+        &Error::BlockNotFound,
+        &json!({
             "code": 404,
             "message": "block not found",
         })
     )]
     #[test_case(
-        Error::InvalidAttestations(vec![IndexedError {
+        &Error::InvalidAttestations(vec![IndexedError {
             index: 0,
             error: Error::TargetStateNotFound.into(),
         }]),
-        json!({
+        &json!({
             "code": 400,
             "message": "invalid attestations",
             "failures": [
@@ -302,9 +302,9 @@ mod tests {
             ],
         })
     )]
-    fn error_is_serialized_correctly(error: Error, expected_json: Value) -> Result<()> {
+    fn error_is_serialized_correctly(error: &Error, expected_json: &Value) -> Result<()> {
         let actual_json = serde_json::to_value(error.body())?;
-        assert_eq!(actual_json, expected_json);
+        assert_eq!(actual_json, *expected_json);
         Ok(())
     }
 

@@ -16,7 +16,7 @@ pub struct Manager<P: Preset, W: Wait> {
 
 impl<P: Preset, W: Wait> Manager<P, W> {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,

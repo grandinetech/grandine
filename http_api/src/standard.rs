@@ -2,9 +2,6 @@
 //!
 //! [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
 
-// This makes `http_api::routing` less messy at the cost of coupling to `axum` even more.
-#![allow(clippy::unused_async)]
-
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, ensure, Error as AnyhowError, Result};
@@ -204,7 +201,6 @@ pub struct ExpectedWithdrawalsQuery {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
 pub struct PublishBlockQuery {
     broadcast_validation: Option<BroadcastValidation>,
 }
@@ -2325,7 +2321,6 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 /// [the specification]: https://ethereum.github.io/beacon-APIs/
 // We box aggregates to reduce the size of various enums.
 // It's probably faster to deserialize them directly into `Vec<Box<_>>`.
-#[allow(clippy::vec_box)]
 pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
@@ -2636,7 +2631,6 @@ fn publish_block_to_network<P: Preset>(
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn publish_signed_block_v2<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,

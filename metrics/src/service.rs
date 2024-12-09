@@ -56,7 +56,7 @@ pub struct MetricsService<P: Preset> {
 
 impl<P: Preset> MetricsService<P> {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         config: MetricsServiceConfig,
         controller: RealController<P>,
         eth1_metrics: Eth1Metrics,
