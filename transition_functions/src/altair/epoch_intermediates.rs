@@ -366,12 +366,12 @@ mod spec_tests {
 
         TestDeltas::assert_equal(
             epoch_deltas.iter().map(|deltas| deltas.head_reward),
-            itertools::repeat_n(0, epoch_deltas.len()),
+            core::iter::repeat_n(0, epoch_deltas.len()),
             case.ssz_default("head_deltas"),
         );
 
         TestDeltas::assert_equal(
-            itertools::repeat_n(0, epoch_deltas.len()),
+            core::iter::repeat_n(0, epoch_deltas.len()),
             epoch_deltas.iter().map(|deltas| deltas.inactivity_penalty),
             case.ssz_default("inactivity_penalty_deltas"),
         );

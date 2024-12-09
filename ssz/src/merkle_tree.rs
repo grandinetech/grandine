@@ -393,12 +393,12 @@ mod tests {
         let ff_hash_1 = hashing::hash_256_256(ff_hash_0, ff_hash_0);
         let ff_hash_2 = hashing::hash_256_256(ff_hash_1, ff_hash_1);
 
-        let chunks = itertools::repeat_n(ff_hash_0, capacity);
+        let chunks = core::iter::repeat_n(ff_hash_0, capacity);
         let chunk_indices = 0..capacity;
         let proof_indices = chunk_indices.clone();
 
         let expected_proof = [ff_hash_0, ff_hash_1, ff_hash_2, hash_of_length(capacity)].into();
-        let expected_proofs = itertools::repeat_n(expected_proof, capacity);
+        let expected_proofs = core::iter::repeat_n(expected_proof, capacity);
 
         let actual_proofs = MerkleTree::<Depth>::default().extend_and_construct_proofs(
             chunks,
