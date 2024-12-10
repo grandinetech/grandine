@@ -1195,7 +1195,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             match number {
                 BlockNumber::Finalized => (self.eth_get_block_finalized)(),
                 BlockNumber::Safe => (self.eth_get_block_safe)(),
-                BlockNumber::Latest => (self.eth_get_block_finalized)(),
+                BlockNumber::Latest => (self.eth_get_block_latest)(),
                 BlockNumber::Earliest => (self.eth_get_block_earliest)(),
                 BlockNumber::Pending => (self.eth_get_block_pending)(),
                 BlockNumber::Number(number) => (self.eth_get_block_by_number)(number.as_u64()),
