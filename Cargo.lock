@@ -4226,7 +4226,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bls",
- "builder_api",
  "bytesize",
  "database",
  "derive_more 1.0.0",

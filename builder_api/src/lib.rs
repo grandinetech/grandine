@@ -4,6 +4,7 @@ pub use crate::{
         Config as BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
         DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
     },
+    consts::PREFERRED_EXECUTION_GAS_LIMIT,
 };
 
 pub mod combined;

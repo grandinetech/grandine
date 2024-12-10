@@ -447,6 +447,7 @@ pub async fn run_after_genesis<P: Preset>(
             slashing_protector.clone_arc(),
             anchor_state.genesis_validators_root(),
             validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
             graffiti,
         ))
     } else {
@@ -457,6 +458,7 @@ pub async fn run_after_genesis<P: Preset>(
             directories.validator_dir.clone().unwrap_or_default(),
             validator_config.keystore_storage_password_file.as_deref(),
             validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
             graffiti,
         )?)
     };

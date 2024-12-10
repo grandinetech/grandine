@@ -16,6 +16,7 @@ use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
 use builder_api::{
     BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
+    PREFERRED_EXECUTION_GAS_LIMIT,
 };
 use bytesize::ByteSize;
 use clap::{error::ErrorKind, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum};
@@ -54,7 +55,7 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
 use types::{
-    bellatrix::primitives::Difficulty,
+    bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
     nonstandard::Phase,
     phase0::primitives::{
@@ -720,6 +721,10 @@ struct ValidatorOptions {
     #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
     builder_max_skipped_slots_per_epoch: u64,
 
+    /// Default execution gas limit for all validators
+    #[clap(long, default_value_t = PREFERRED_EXECUTION_GAS_LIMIT)]
+    default_gas_limit: Gas,
+
     /// List of public keys to use from Web3Signer
     #[clap(long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
@@ -922,6 +927,7 @@ impl GrandineArgs {
             builder_disable_checks,
             builder_max_skipped_slots,
             builder_max_skipped_slots_per_epoch,
+            default_gas_limit,
             use_validator_key_cache,
             web3signer_public_keys,
             web3signer_refresh_keys_every_epoch,
@@ -1238,6 +1244,7 @@ impl GrandineArgs {
             graffiti,
             max_empty_slots,
             suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
+            default_gas_limit,
             network_config: network_config_options.into_config(
                 network,
                 directories.network_dir.clone().unwrap_or_default(),

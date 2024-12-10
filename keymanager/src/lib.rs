@@ -1,6 +1,7 @@
 pub use keystores::{load_key_storage, load_key_storage_password, ValidatingPubkey};
 pub use misc::OperationStatus as KeymanagerOperationStatus;
 pub use remote_keys::{ListedRemoteKey, RemoteKey};
+pub use types::bellatrix::primitives::Gas;
 
 pub use crate::proposer_configs::ProposerConfigs;
 
@@ -35,10 +36,12 @@ impl KeyManager {
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
         default_fee_recipient: ExecutionAddress,
+        default_gas_limit: Gas,
         default_graffiti: H256,
     ) -> Self {
         let proposer_configs = Arc::new(ProposerConfigs::new_in_memory(
             default_fee_recipient,
+            default_gas_limit,
             default_graffiti,
         ));
 
@@ -57,6 +60,7 @@ impl KeyManager {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub fn new_persistent(
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
@@ -64,11 +68,13 @@ impl KeyManager {
         validator_directory: PathBuf,
         keystore_storage_password_path: Option<&Path>,
         default_fee_recipient: ExecutionAddress,
+        default_gas_limit: Gas,
         default_graffiti: H256,
     ) -> Result<Self> {
         let proposer_configs = Arc::new(ProposerConfigs::new_persistent(
             &validator_directory,
             default_fee_recipient,
+            default_gas_limit,
             default_graffiti,
         )?);
 

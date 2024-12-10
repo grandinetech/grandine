@@ -229,6 +229,7 @@ impl<P: Preset> Context<P> {
             slashing_protector.clone_arc(),
             anchor_state.genesis_validators_root(),
             validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
             H256::default(),
         ));
 
