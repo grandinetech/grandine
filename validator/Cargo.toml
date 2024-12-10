@@ -63,3 +63,6 @@ reqwest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed", "block_producer/embed", "liveness_tracker/embed", "operation_pools/embed", "p2p/embed", "slasher/embed", "doppelganger_protection/embed", "signer/embed", "keymanager/embed"]

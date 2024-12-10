@@ -96,3 +96,5 @@ network-mainnet = ['network-any', 'preset-mainnet']
 network-sepolia = ['network-any', 'preset-mainnet']
 network-shadow = ['network-any', 'preset-mainnet']
 network-holesky = ['network-any', 'preset-mainnet']
+
+embed = ["eth1_api/embed", "attestation_verifier/embed", "block_producer/embed", "eth1/embed", "http_api/embed", "liveness_tracker/embed", "metrics/embed", "operation_pools/embed", "p2p/embed", "slasher/embed", "validator/embed", "doppelganger_protection/embed", "signer/embed", "keymanager/embed"]

@@ -47,3 +47,6 @@ types = { workspace = true }
 
 [dev-dependencies]
 test-case = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed", "operation_pools/embed"]

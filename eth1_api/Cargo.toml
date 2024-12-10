@@ -44,3 +44,6 @@ httpmock = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }
 unwrap_none = { workspace = true }
+
+[features]
+embed = []

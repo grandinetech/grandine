@@ -42,3 +42,4 @@ eth2_cache_utils = { workspace = true }
 
 [features]
 eth2-cache = []
+embed = ["eth1_api/embed"]

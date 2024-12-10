@@ -83,3 +83,4 @@ test-generator = { workspace = true }
 
 [features]
 eth2-cache = []
+embed = ["eth1_api/embed", "attestation_verifier/embed", "block_producer/embed", "eth1/embed", "liveness_tracker/embed", "metrics/embed", "operation_pools/embed", "p2p/embed", "validator/embed", "signer/embed", "keymanager/embed"]

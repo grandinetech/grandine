@@ -12,5 +12,4 @@ libc_grandine.a:
 	cargo build $(CARGO_FLAGS) --manifest-path ../c/Cargo.toml
 	mkdir -p lib
 	cp ../../target/$(CARGO_OUTPUT_DIR)/libc_grandine.a ./lib/libc_grandine.a
-	cp ../../target/$(CARGO_OUTPUT_DIR)/libc_grandine.so ./lib/libc_grandine.so
 	cp ../c/build/c_grandine.h ./lib/c_grandine.h

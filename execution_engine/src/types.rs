@@ -29,7 +29,7 @@ use types::{
 };
 
 /// [`ExecutionPayloadV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#executionpayloadv1)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV1<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
@@ -130,7 +130,7 @@ impl<P: Preset> From<ExecutionPayloadV1<P>> for BellatrixExecutionPayload<P> {
 }
 
 /// [`ExecutionPayloadV2`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#executionpayloadv2)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV2<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
@@ -240,7 +240,7 @@ impl<P: Preset> From<ExecutionPayloadV2<P>> for CapellaExecutionPayload<P> {
 }
 
 /// [`ExecutionPayloadV3`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#executionpayloadv3)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV3<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
@@ -362,7 +362,7 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
 }
 
 /// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobsBundleV1<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
@@ -382,7 +382,7 @@ pub struct ForkChoiceStateV1 {
 }
 
 /// [`PayloadAttributesV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#payloadattributesv1)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV1 {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -392,7 +392,7 @@ pub struct PayloadAttributesV1 {
 }
 
 /// [`PayloadAttributesV2`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#payloadattributesv2)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV2<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -403,7 +403,7 @@ pub struct PayloadAttributesV2<P: Preset> {
 }
 
 /// [`PayloadAttributesV3`](https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#payloadattributesv3)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV3<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -430,7 +430,7 @@ impl<P: Preset> From<EngineGetPayloadV1Response<P>> for WithBlobsAndMev<Executio
 ///
 /// [`engine_getPayloadV2` response]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#response-2
 /// [`execution_payload`]:            #structfield.execution_payload
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV2Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV2<P>,
@@ -455,7 +455,7 @@ impl<P: Preset> From<EngineGetPayloadV2Response<P>> for WithBlobsAndMev<Executio
 ///
 /// [`engine_getPayloadV3` response]: https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#response-2
 /// [`execution_payload`]:            #structfield.execution_payload
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV3Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
@@ -493,7 +493,7 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV4Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
@@ -533,7 +533,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(untagged, bound = "")]
 pub enum PayloadAttributes<P: Preset> {
     Bellatrix(PayloadAttributesV1),
@@ -565,7 +565,7 @@ pub struct PayloadStatusV1 {
 }
 
 /// [`WithdrawalV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#withdrawalv1)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalV1 {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -689,7 +689,7 @@ impl From<PayloadStatus> for PayloadStatusV1 {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Default))]
 pub struct RawExecutionRequests<P: Preset>(
     #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]

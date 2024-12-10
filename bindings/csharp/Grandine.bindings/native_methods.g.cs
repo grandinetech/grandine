@@ -16,10 +16,172 @@ namespace Grandine.Native
 
 
 
+        [DllImport(__DllName, EntryPoint = "grandine_set_execution_layer_adapter", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void grandine_set_execution_layer_adapter(CEmbedAdapter adapter);
+
         [DllImport(__DllName, EntryPoint = "grandine_run", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern ulong grandine_run(ulong argc, byte** argv);
 
 
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CResult
+    {
+        public T value;
+        public ulong error;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct COption
+    {
+        [MarshalAs(UnmanagedType.U1)] public bool is_something;
+        public T value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CTransaction
+    {
+        public byte* bytes;
+        public ulong bytes_len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CExecutionPayloadV1
+    {
+        public fixed byte parent_hash[32];
+        public fixed byte fee_recipient[20];
+        public fixed byte state_root[32];
+        public fixed byte receipts_root[32];
+        public byte* logs_bloom;
+        public ulong logs_bloom_len;
+        public fixed byte prev_randao[32];
+        public ulong block_number;
+        public ulong gas_limit;
+        public ulong gas_used;
+        public ulong timestamp;
+        public byte* extra_data;
+        public ulong extra_data_len;
+        public fixed byte base_fee_per_gas[32];
+        public fixed byte block_hash[32];
+        public CTransaction* transactions;
+        public ulong transactions_len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CWithdrawalV1
+    {
+        public ulong index;
+        public ulong validator_index;
+        public fixed byte address[20];
+        public ulong amount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CExecutionPayloadV2
+    {
+        public fixed byte parent_hash[32];
+        public fixed byte fee_recipient[20];
+        public fixed byte state_root[32];
+        public fixed byte receipts_root[32];
+        public byte* logs_bloom;
+        public ulong logs_bloom_len;
+        public fixed byte prev_randao[32];
+        public ulong block_number;
+        public ulong gas_limit;
+        public ulong gas_used;
+        public ulong timestamp;
+        public byte* extra_data;
+        public ulong extra_data_len;
+        public fixed byte base_fee_per_gas[32];
+        public fixed byte block_hash[32];
+        public CTransaction* transactions;
+        public ulong transactions_len;
+        public CWithdrawalV1* withdrawals;
+        public ulong withdrawals_len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CExecutionPayloadV3
+    {
+        public fixed byte parent_hash[32];
+        public fixed byte fee_recipient[20];
+        public fixed byte state_root[32];
+        public fixed byte receipts_root[32];
+        public byte* logs_bloom;
+        public ulong logs_bloom_len;
+        public fixed byte prev_randao[32];
+        public ulong block_number;
+        public ulong gas_limit;
+        public ulong gas_used;
+        public ulong timestamp;
+        public byte* extra_data;
+        public ulong extra_data_len;
+        public fixed byte base_fee_per_gas[32];
+        public fixed byte block_hash[32];
+        public CTransaction* transactions;
+        public ulong transactions_len;
+        public CWithdrawalV1* withdrawals;
+        public ulong withdrawals_len;
+        public ulong blob_gas_used;
+        public ulong excess_blob_gas;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CForkChoiceStateV1
+    {
+        public fixed byte head_block_hash[32];
+        public fixed byte safe_block_hash[32];
+        public fixed byte finalized_block_hash[32];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CRequest
+    {
+        public byte* bytes;
+        public ulong bytes_len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CExecutionRequests
+    {
+        public CRequest* requests;
+        public ulong requests_len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CFilter
+    {
+        public COption from_block;
+        public COption to_block;
+        public COption address;
+        public COption topics;
+        public COption limit;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CEmbedAdapter
+    {
+        public delegate* unmanaged[Cdecl]<CResult> eth_block_number;
+        public delegate* unmanaged[Cdecl]<fixed byte, CResult> eth_get_block_by_hash;
+        public delegate* unmanaged[Cdecl]<ulong, CResult> eth_get_block_by_number;
+        public delegate* unmanaged[Cdecl]<CResult> eth_get_block_finalized;
+        public delegate* unmanaged[Cdecl]<CResult> eth_get_block_safe;
+        public delegate* unmanaged[Cdecl]<CResult> eth_get_block_latest;
+        public delegate* unmanaged[Cdecl]<CResult> eth_get_block_earliest;
+        public delegate* unmanaged[Cdecl]<CResult> eth_get_block_pending;
+        public delegate* unmanaged[Cdecl]<CFilter, CResult> eth_logs;
+        public delegate* unmanaged[Cdecl]<CExecutionPayloadV1, CResult> engine_new_payload_v1;
+        public delegate* unmanaged[Cdecl]<CExecutionPayloadV2, CResult> engine_new_payload_v2;
+        public delegate* unmanaged[Cdecl]<CExecutionPayloadV3, byte**, ulong, byte*, CResult> engine_new_payload_v3;
+        public delegate* unmanaged[Cdecl]<CExecutionPayloadV3, byte**, ulong, byte*, CExecutionRequests, CResult> engine_new_payload_v4;
+        public delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption, CResult> engine_forkchoice_updated_v1;
+        public delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption, CResult> engine_forkchoice_updated_v2;
+        public delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption, CResult> engine_forkchoice_updated_v3;
+        public delegate* unmanaged[Cdecl]<byte*, CResult> engine_get_payload_v1;
+        public delegate* unmanaged[Cdecl]<byte*, CResult> engine_get_payload_v2;
+        public delegate* unmanaged[Cdecl]<byte*, CResult> engine_get_payload_v3;
+        public delegate* unmanaged[Cdecl]<byte*, CResult> engine_get_payload_v4;
     }
 
 

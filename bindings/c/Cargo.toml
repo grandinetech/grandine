@@ -7,17 +7,17 @@ authors = ["Grandine <info@grandine.io>"]
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-runtime = { workspace = true, features = ["network-goerli", "network-mainnet", "network-sepolia", "network-shadow", "network-holesky"] }
+runtime = { workspace = true, features = ["network-goerli", "network-mainnet", "network-sepolia", "network-shadow", "network-holesky", "embed"] }
 directories = { workspace = true }
 grandine_version = { workspace = true }
-validator = { workspace = true }
+validator = { workspace = true, features = ["embed"] }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
-eth1_api = { workspace = true }
-signer = { workspace = true }
+eth1_api = { workspace = true, features = ["embed"] }
+signer = { workspace = true, features = ["embed"] }
 slashing_protection = { workspace = true }
-http_api = { workspace = true }
-slasher = { workspace = true }
+http_api = { workspace = true, features = ["embed"] }
+slasher = { workspace = true, features = ["embed"] }
 anyhow = { workspace = true }
 types = { workspace = true }
 thiserror = { workspace = true }
@@ -27,6 +27,13 @@ allocator = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 binary_utils = { workspace = true }
+web3 = { workspace = true }
+execution_engine = { workspace = true }
+ssz = { workspace = true }
+try_from_iterator = { workspace = true }
+primitive-types = { workspace = true }
+typenum = { workspace = true }
+bls = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.26.0"

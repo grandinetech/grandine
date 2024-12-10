@@ -26,3 +26,6 @@ types = { workspace = true }
 
 [dev-dependencies]
 unwrap_none = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed", "p2p/embed"]

@@ -3,8 +3,7 @@ use std::{env, fs, path::PathBuf};
 use toml::Value;
 
 /// The path where the generated bindings file will be written, relative to the bindings folder.
-const PATH_FOR_CSHARP_BINDINGS_FILE: &str =
-    "csharp/Grandine.bindings/native_methods.g.cs";
+const PATH_FOR_CSHARP_BINDINGS_FILE: &str = "csharp/Grandine.bindings/native_methods.g.cs";
 
 fn main() {
     let package_name_of_c_crate = get_package_name_of_c_crate();

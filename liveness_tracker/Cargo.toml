@@ -19,3 +19,6 @@ operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 tynm = { workspace = true }
 types = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed", "operation_pools/embed"]

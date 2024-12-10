@@ -45,3 +45,6 @@ types = { workspace = true }
 [dev-dependencies]
 factory = { workspace = true }
 interop = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed", "eth1/embed", "operation_pools/embed", "keymanager/embed"]

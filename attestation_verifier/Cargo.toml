@@ -22,3 +22,6 @@ prometheus_metrics = { workspace = true }
 rayon = { workspace = true }
 std_ext = { workspace = true }
 types = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed"]

@@ -42,3 +42,6 @@ types = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+
+[features]
+embed = ["eth1_api/embed", "p2p/embed"]

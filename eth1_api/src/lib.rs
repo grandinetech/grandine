@@ -9,6 +9,9 @@ pub use crate::{
     misc::{ApiController, RealController},
 };
 
+#[cfg(feature = "embed")]
+pub use eth1_api::{set_adapter, EmbedAdapter, RawForkChoiceUpdatedResponse};
+
 mod auth;
 mod deposit_event;
 mod endpoints;

@@ -34,3 +34,6 @@ httpmock = { workspace = true }
 serde-aux = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+
+[features]
+embed = ["doppelganger_protection/embed"]
