@@ -494,7 +494,7 @@ mod spec_tests {
     validation_tests! {
         validate_voluntary_exit,
         |config, state, voluntary_exit| {
-            electra::validate_voluntary_exit(config, state, voluntary_exit)
+            electra::validate_voluntary_exit_with_verifier(config, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/electra/operations/voluntary_exit/*/*",

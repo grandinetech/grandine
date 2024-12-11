@@ -954,7 +954,7 @@ pub fn process_voluntary_exit<P: Preset>(
     initiate_validator_exit(config, state, signed_voluntary_exit.message.validator_index)
 }
 
-fn validate_voluntary_exit_with_verifier<P: Preset>(
+pub fn validate_voluntary_exit_with_verifier<P: Preset>(
     config: &Config,
     state: &impl PostElectraBeaconState<P>,
     signed_voluntary_exit: SignedVoluntaryExit,

@@ -189,7 +189,7 @@ pub mod electra {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
     pub use block_processing::{
         add_validator_to_registry, get_expected_withdrawals, validate_attestation_with_verifier,
-        validate_voluntary_exit,
+        validate_voluntary_exit_with_verifier,
     };
     pub(crate) use block_processing::{
         apply_attestation, apply_deposits, process_attester_slashing, process_block,
