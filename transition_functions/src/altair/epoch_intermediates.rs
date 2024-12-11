@@ -62,7 +62,7 @@ impl ValidatorSummary for AltairValidatorSummary {
 
 // This has no field for the active balance in the current epoch because during most epoch
 // transitions it should already be calculated and cached in `Cache.total_active_balance`.
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct Statistics {
     pub previous_epoch_source_participating_balance: Gwei,
@@ -366,12 +366,12 @@ mod spec_tests {
 
         TestDeltas::assert_equal(
             epoch_deltas.iter().map(|deltas| deltas.head_reward),
-            itertools::repeat_n(0, epoch_deltas.len()),
+            core::iter::repeat_n(0, epoch_deltas.len()),
             case.ssz_default("head_deltas"),
         );
 
         TestDeltas::assert_equal(
-            itertools::repeat_n(0, epoch_deltas.len()),
+            core::iter::repeat_n(0, epoch_deltas.len()),
             epoch_deltas.iter().map(|deltas| deltas.inactivity_penalty),
             case.ssz_default("inactivity_penalty_deltas"),
         );

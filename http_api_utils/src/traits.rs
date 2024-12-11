@@ -1,5 +1,4 @@
-use core::fmt::Display;
-use std::error::Error as StdError;
+use core::{error::Error as StdError, fmt::Display};
 
 use itertools::Itertools as _;
 
@@ -13,6 +12,6 @@ pub trait ApiError {
         self.sources().format(": ")
     }
 
-    // `StdError::sources` is not stable as of Rust 1.80.1.
+    // `StdError::sources` is not stable as of Rust 1.82.0.
     fn sources(&self) -> impl Iterator<Item = &dyn StdError>;
 }

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::allow_attributes,
+    reason = "allow_attributes lint trigger from some derive macros. \
+              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
+)]
 use std::{
     sync::{mpsc::Sender, Arc},
     time::Instant,

@@ -1,6 +1,8 @@
-// Adding backquotes to doc comments affects `--help` output.
-// `clap` derive macros preserve backquotes even if `verbatim_doc_comment` is disabled.
-#![allow(clippy::doc_markdown)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "Adding backquotes to doc comments affects `--help` output. \
+             `clap` derive macros preserve backquotes even if `verbatim_doc_comment` is disabled."
+)]
 
 use core::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -14,6 +16,7 @@ use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
 use builder_api::{
     BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
+    PREFERRED_EXECUTION_GAS_LIMIT,
 };
 use bytesize::ByteSize;
 use clap::{error::ErrorKind, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum};
@@ -52,7 +55,7 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
 use types::{
-    bellatrix::primitives::Difficulty,
+    bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
     nonstandard::Phase,
     phase0::primitives::{
@@ -91,8 +94,10 @@ pub struct GrandineArgs {
     #[clap(flatten)]
     network_config_options: NetworkConfigOptions,
 
-    // TODO(Grandine Team): The slasher is not working properly and should not be used.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "TODO(Grandine Team): The slasher is not working properly and should not be used."
+    )]
     #[clap(skip)]
     slasher_options: SlasherOptions,
 
@@ -240,8 +245,10 @@ impl HttpApiOptions {
     }
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Args)]
 struct BeaconNodeOptions {
     #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
@@ -369,8 +376,10 @@ struct BeaconNodeOptions {
     in_memory: bool,
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Args)]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
@@ -712,6 +721,10 @@ struct ValidatorOptions {
     #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
     builder_max_skipped_slots_per_epoch: u64,
 
+    /// Default execution gas limit for all validators
+    #[clap(long, default_value_t = PREFERRED_EXECUTION_GAS_LIMIT)]
+    default_gas_limit: Gas,
+
     /// List of public keys to use from Web3Signer
     #[clap(long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
@@ -830,8 +843,8 @@ impl Network {
 
 impl GrandineArgs {
     // This is not a `TryFrom` impl because this has side effects.
-    #[allow(clippy::cognitive_complexity)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
+    #[expect(clippy::too_many_lines)]
     pub fn try_into_config(self) -> Result<GrandineConfig> {
         let Self {
             chain_options,
@@ -914,6 +927,7 @@ impl GrandineArgs {
             builder_disable_checks,
             builder_max_skipped_slots,
             builder_max_skipped_slots_per_epoch,
+            default_gas_limit,
             use_validator_key_cache,
             web3signer_public_keys,
             web3signer_refresh_keys_every_epoch,
@@ -1230,6 +1244,7 @@ impl GrandineArgs {
             graffiti,
             max_empty_slots,
             suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
+            default_gas_limit,
             network_config: network_config_options.into_config(
                 network,
                 directories.network_dir.clone().unwrap_or_default(),

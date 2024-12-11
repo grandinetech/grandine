@@ -169,7 +169,7 @@ impl DepositEvent {
     const LENGTH: usize = size_of::<RawDepositEvent>();
 }
 
-#[allow(clippy::default_trait_access)]
+#[expect(clippy::default_trait_access)]
 #[cfg(test)]
 mod tests {
     use test_case::test_case;

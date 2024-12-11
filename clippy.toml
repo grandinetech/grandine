@@ -49,6 +49,8 @@ disallowed-methods = [
     { path = 'tokio::fs::write',            reason = 'use fs_err::tokio::write for more helpful error messages'            },
 
     { path = 'axum::Router::nest', reason = 'specify full resource paths for searchability' },
+
+    { path = 'itertools::repeat_n', reason = 'use core::iter::repeat_n' },
 ]
 disallowed-types = [
     { path = 'std::fs::DirEntry',      reason = 'use fs_err::DirEntry for more helpful error messages'           },

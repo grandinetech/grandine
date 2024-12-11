@@ -24,7 +24,7 @@ use crate::{
     unphased::{ProcessSlots, StateRootPolicy},
 };
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn state_transition<P: Preset, V: Verifier + Send>(
     config: &Config,
     state: &mut Hc<BeaconState<P>>,

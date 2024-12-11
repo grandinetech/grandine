@@ -52,7 +52,7 @@ pub enum StateLoadStrategy<P: Preset> {
     },
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Storage<P> {
     config: Arc<Config>,
     pub(crate) database: Database,
@@ -63,7 +63,7 @@ pub struct Storage<P> {
 
 impl<P: Preset> Storage<P> {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         config: Arc<Config>,
         database: Database,
         archival_epoch_interval: NonZeroU64,
@@ -83,7 +83,7 @@ impl<P: Preset> Storage<P> {
         &self.config
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn load(
         &self,
         client: &Client,
@@ -933,7 +933,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(clippy::similar_names)]
+    #[expect(clippy::similar_names)]
     fn test_prune_old_blob_sidecars() -> Result<()> {
         let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10), false)?;
 

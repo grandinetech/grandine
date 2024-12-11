@@ -58,7 +58,7 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
             return Ok(attestations);
         }
 
-        DebugAttestationPacker.warn("no optimal attestations for slot: {slot}");
+        DebugAttestationPacker.warn(format_args!("no optimal attestations for slot: {slot}"));
 
         let attestation_packer = AttestationPacker::new(
             controller.chain_config().clone_arc(),

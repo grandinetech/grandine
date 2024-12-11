@@ -2,9 +2,6 @@
 //!
 //! [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
 
-// This makes `http_api::routing` less messy at the cost of coupling to `axum` even more.
-#![allow(clippy::unused_async)]
-
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, ensure, Error as AnyhowError, Result};
@@ -72,7 +69,7 @@ use types::{
         WEI_IN_GWEI,
     },
     phase0::{
-        consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        consts::GENESIS_SLOT,
         containers::{
             AttestationData, Checkpoint, Fork, ProposerSlashing, SignedBeaconBlockHeader,
             SignedVoluntaryExit, Validator,
@@ -204,12 +201,11 @@ pub struct ExpectedWithdrawalsQuery {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
 pub struct PublishBlockQuery {
     broadcast_validation: Option<BroadcastValidation>,
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Serialize)]
 pub struct GetGenesisResponse {
     #[serde(with = "serde_utils::string_or_native")]
@@ -1772,7 +1768,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
     // Unlike `GET /eth/v1/validator/duties/proposer/{epoch}`,
     // this endpoint is supposed to return the dependent root for the previous epoch.
-    let previous_epoch = epoch.saturating_sub(1).max(GENESIS_EPOCH);
+    let previous_epoch = misc::previous_epoch(epoch);
     let dependent_root = controller.dependent_root(&state, previous_epoch)?;
 
     let indices = validator_indices
@@ -2178,10 +2174,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     }
 
     let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
-
-    let previous_epoch = misc::compute_epoch_at_slot::<P>(head_slot)
-        .saturating_sub(1)
-        .max(GENESIS_EPOCH);
+    let previous_epoch = misc::previous_epoch(misc::compute_epoch_at_slot::<P>(head_slot));
 
     // Prevent DoS attacks by limiting how far in the past the attested block can be searched.
     if requested_epoch < previous_epoch {
@@ -2325,7 +2318,6 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 /// [the specification]: https://ethereum.github.io/beacon-APIs/
 // We box aggregates to reduce the size of various enums.
 // It's probably faster to deserialize them directly into `Vec<Box<_>>`.
-#[allow(clippy::vec_box)]
 pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
@@ -2636,7 +2628,6 @@ fn publish_block_to_network<P: Preset>(
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn publish_signed_block_v2<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,

@@ -74,15 +74,15 @@ use types::{
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
+        consts::FAR_FUTURE_EPOCH,
         containers::{
-            Attestation, AttesterSlashing as Phase0AttesterSlashing,
+            Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Deposit,
             Eth1Data, ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            DepositIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
-            ValidatorIndex, H256,
+            CommitteeIndex, DepositIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot,
+            Uint256, ValidatorIndex, H256,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
@@ -112,7 +112,7 @@ pub struct BlockProducer<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> BlockProducer<P, W> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         proposer_configs: Arc<ProposerConfigs>,
         builder_api: Option<Arc<BuilderApi>>,
@@ -722,7 +722,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn build_beacon_block_without_state_root(
         &self,
         randao_reveal: SignatureBytes,
@@ -848,18 +848,55 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 {
                     ContiguousList::default()
                 } else {
-                    // TODO(feature/electra): don't ignore errors
-                    let attestations = attestations
-                        .into_iter()
-                        .filter_map(|attestation| {
-                            operation_pools::convert_to_electra_attestation(attestation).ok()
-                        })
-                        .chunk_by(|attestation| attestation.data);
+                    // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
+                    let mut results: Vec<(
+                        AttestationData,
+                        HashSet<CommitteeIndex>,
+                        Vec<ElectraAttestation<P>>,
+                    )> = Vec::new();
 
-                    let attestations = attestations
+                    for (electra_attestation, committee_index) in
+                        attestations.into_iter().filter_map(|attestation| {
+                            let committee_index = attestation.data.index;
+
+                            match operation_pools::convert_to_electra_attestation(attestation) {
+                                Ok(electra_attestation) => {
+                                    Some((electra_attestation, committee_index))
+                                }
+                                Err(error) => {
+                                    warn!("unable to convert to electra attestation: {error:?}");
+                                    None
+                                }
+                            }
+                        })
+                    {
+                        if let Some((_, indices, attestations)) =
+                            results.iter_mut().find(|(data, indices, _)| {
+                                *data == electra_attestation.data
+                                    && !indices.contains(&committee_index)
+                            })
+                        {
+                            indices.insert(committee_index);
+                            attestations.push(electra_attestation);
+                        } else {
+                            results.push((
+                                electra_attestation.data,
+                                HashSet::from([committee_index]),
+                                vec![electra_attestation],
+                            ))
+                        }
+                    }
+
+                    let attestations = results
                         .into_iter()
-                        .filter_map(|(_, attestations)| {
-                            Self::compute_on_chain_aggregate(attestations).ok()
+                        .filter_map(|(_, _, attestations)| {
+                            match Self::compute_on_chain_aggregate(attestations.into_iter()) {
+                                Ok(electra_aggregate) => Some(electra_aggregate),
+                                Err(error) => {
+                                    warn!("unable to compute on chain aggregate: {error:?}");
+                                    None
+                                }
+                            }
                         })
                         .take(P::MaxAttestationsElectra::USIZE);
 
@@ -1366,7 +1403,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         //                      `SyncCommitteeMessage`s just like `AttestationPacker` does with
         //                      singular attestations.
         let beacon_block_root = self.head_block_root;
-        let message_slot = self.beacon_state.slot().saturating_sub(1).max(GENESIS_SLOT);
+        let message_slot = misc::previous_slot(self.beacon_state.slot());
         let best_subcommittee_contributions = (0..SyncCommitteeSubnetCount::U64)
             .map(|subcommittee_index| {
                 self.producer_context

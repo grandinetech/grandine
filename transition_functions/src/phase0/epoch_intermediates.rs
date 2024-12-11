@@ -99,7 +99,7 @@ impl ValidatorSummary for Phase0ValidatorSummary {
     }
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Clone, Copy, Default)]
 pub struct StatisticsForTransition {
     previous_epoch_source_attesting_balance: Gwei,
@@ -213,7 +213,7 @@ impl Statistics for StatisticsForTransition {
     }
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct StatisticsForReport {
     pub previous_epoch_source_attesting_balance: Gwei,
@@ -818,12 +818,12 @@ mod spec_tests {
             deltas
                 .iter()
                 .map(|deltas| deltas.proposer_reward + deltas.inclusion_delay_reward),
-            itertools::repeat_n(0, deltas.len()),
+            core::iter::repeat_n(0, deltas.len()),
             case.ssz_default("inclusion_delay_deltas"),
         );
 
         TestDeltas::assert_equal(
-            itertools::repeat_n(0, deltas.len()),
+            core::iter::repeat_n(0, deltas.len()),
             deltas
                 .iter()
                 .map(|deltas| deltas.canceling_penalty + deltas.inactivity_penalty),

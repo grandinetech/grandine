@@ -68,7 +68,7 @@ impl<P: Preset> Context<P> {
         block_on(self.try_run_case(case)).unwrap_or_else(|error| panic!("{error:?}"))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn try_run_case(self, case: Case<'_>) -> Result<()> {
         Feature::ServeCostlyEndpoints.enable();
         Feature::ServeLeakyEndpoints.enable();
@@ -229,6 +229,7 @@ impl<P: Preset> Context<P> {
             slashing_protector.clone_arc(),
             anchor_state.genesis_validators_root(),
             validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
             H256::default(),
         ));
 

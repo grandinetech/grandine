@@ -68,7 +68,7 @@ impl<P: Preset> DataColumnSidecar<P> {
     }
 }
 
-#[allow(clippy::missing_fields_in_debug)]
+#[expect(clippy::missing_fields_in_debug)]
 impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DataColumnSidecar")
@@ -114,7 +114,7 @@ mod tests {
             $mainnet_glob: literal,
             $minimal_glob: literal,
         ) => {
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             mod $type {
                 use super::*;
 

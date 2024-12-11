@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use database::Database;
 use eth1_api::RealController;
-use eth2_libp2p::{rpc::StatusMessage, PeerAction, PeerId, ReportSource};
+use eth2_libp2p::{PeerAction, PeerId, ReportSource};
 use fork_choice_control::SyncMessage;
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -175,7 +175,7 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(service)
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<Never> {
         let mut interval =
             IntervalStream::new(tokio::time::interval(NETWORK_EVENT_INTERVAL)).fuse();
@@ -236,7 +236,6 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                         P2pToSync::AddPeer(peer_id, status) => {
                             self.sync_manager.add_peer(peer_id, status);
-                            self.request_peer_status_update(status)?;
                             self.request_blobs_and_blocks_if_ready()?;
                         }
                         P2pToSync::RemovePeer(peer_id) => {
@@ -550,15 +549,6 @@ impl<P: Preset> BlockSyncService<P> {
 
     fn request_peer_status(&mut self, peer_id: PeerId) -> Result<()> {
         SyncToP2p::RequestPeerStatus(self.request_id()?, peer_id).send(&self.sync_to_p2p_tx);
-        Ok(())
-    }
-
-    fn request_peer_status_update(&mut self, status: StatusMessage) -> Result<()> {
-        for peer_id in self.sync_manager.outdated_peers(status) {
-            debug!("Update outdated peer: {peer_id}");
-            self.request_peer_status(peer_id)?;
-        }
-
         Ok(())
     }
 

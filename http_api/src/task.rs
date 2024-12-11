@@ -48,7 +48,7 @@ pub struct Channels<P: Preset> {
     pub validator_to_api_rx: UnboundedReceiver<ValidatorToApi<P>>,
 }
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct HttpApi<P: Preset, W: Wait> {
     pub block_producer: Arc<BlockProducer<P, W>>,
     pub controller: ApiController<P, W>,
@@ -75,7 +75,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
     // Passing in `AddrIncoming` achieves 2 things:
     // - It ensures that the socket is bound and listening by the time we submit requests.
     // - It allows us to extract the port assigned by binding to port 0.
-    #[allow(clippy::too_many_lines)]
     pub(crate) async fn run_internal(
         self,
         extend_router: impl FnOnce(NormalState<P, W>, Router) -> Router + Send,

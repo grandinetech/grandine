@@ -15,7 +15,6 @@ use crate::DepositEvent;
 
 type MaxDepositEvents = U4294967296;
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Error)]
 enum Error {
     #[error("RPC returned block without hash: {block:?}")]

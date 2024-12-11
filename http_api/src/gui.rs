@@ -372,8 +372,10 @@ pub fn get_beacon_head<P: Preset, W: Wait>(
 }
 
 /// `GET /validator/statistics?start={start}&end={end}&pubkeys[]={pubkey}&pubkeys[]={pubkey}`
-// TODO(Grandine Team): Clean up when we have snapshot tests for `http_api`.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "TODO(Grandine Team): Clean up when we have snapshot tests for `http_api`."
+)]
 pub async fn get_validator_statistics<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
@@ -426,7 +428,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
     } else {
         let previous_epoch = query.start - 1;
         let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
-        let slot_before_previous_epoch = start_slot.saturating_sub(1).max(GENESIS_SLOT);
+        let slot_before_previous_epoch = misc::previous_slot(start_slot);
 
         state = match snapshot
             .state_at_slot(slot_before_previous_epoch)?

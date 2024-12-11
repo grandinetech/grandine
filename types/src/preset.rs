@@ -1,4 +1,4 @@
-#![allow(clippy::module_name_repetitions)]
+#![expect(clippy::module_name_repetitions)]
 
 use core::{
     fmt::Debug,
@@ -792,9 +792,10 @@ impl BellatrixPreset {
     }
 }
 
-#[allow(clippy::struct_field_names)]
-// Clippy does approve of all members starting with max.
-// However, specification is written with these terms.
+#[expect(
+    clippy::struct_field_names,
+    reason = "Specification is written with terms starting with max_."
+)]
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct CapellaPreset {

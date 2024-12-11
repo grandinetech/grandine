@@ -23,7 +23,7 @@ impl PoolAdditionOutcome {
     }
 }
 
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(IntoStaticStr, Serialize)]
 #[strum(serialize_all = "snake_case")]
 pub enum PoolRejectionReason {

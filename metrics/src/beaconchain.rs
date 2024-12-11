@@ -132,8 +132,10 @@ impl ProcessMetrics {
     }
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Serialize)]
 pub struct BeaconNodeMetrics {
     disk_beaconchain_bytes_total: u64,

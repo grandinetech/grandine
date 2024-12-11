@@ -4228,7 +4228,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bls",
- "builder_api",
  "bytesize",
  "database",
  "derive_more 1.0.0",
@@ -5002,7 +5001,6 @@ dependencies = [
  "derive_more 1.0.0",
  "directories",
  "eth1_api",
- "eth2_libp2p",
  "fork_choice_control",
  "futures",
  "grandine_version",

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{bail, ensure, Result};
 use bls::PublicKeyBytes;
 use derive_more::Constructor;
-use helper_functions::signing::SignForAllForks;
+use helper_functions::{misc, signing::SignForAllForks};
 use itertools::Itertools as _;
 use log::{debug, info};
 use prometheus_metrics::Metrics;
@@ -67,6 +67,10 @@ pub struct Api {
 }
 
 impl Api {
+    #[expect(
+        clippy::unnecessary_min_or_max,
+        reason = "GENESIS_SLOT const might be adjusted independently."
+    )]
     pub fn can_use_builder_api<P: Preset>(
         &self,
         slot: Slot,
@@ -78,7 +82,7 @@ impl Api {
 
         let mut nonempty_slots = nonempty_slots.into_iter().peekable();
 
-        let end_slot = slot.saturating_sub(1).max(GENESIS_SLOT);
+        let end_slot = misc::previous_slot(slot);
         let head_slot = nonempty_slots.peek().copied().unwrap_or(GENESIS_SLOT);
 
         // check for missed blocks from head

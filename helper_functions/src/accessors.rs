@@ -31,7 +31,7 @@ use types::{
     config::Config,
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
-        consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER, GENESIS_EPOCH},
+        consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
         primitives::{
             CommitteeIndex, DomainType, Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H256,
@@ -51,9 +51,7 @@ use prometheus_metrics::METRICS;
 
 #[must_use]
 pub fn get_previous_epoch<P: Preset>(state: &impl BeaconState<P>) -> Epoch {
-    get_current_epoch(state)
-        .saturating_sub(1)
-        .max(GENESIS_EPOCH)
+    misc::previous_epoch(get_current_epoch(state))
 }
 
 #[must_use]
@@ -845,7 +843,10 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
 #[cfg(test)]
 mod tests {
     use types::{
-        phase0::{beacon_state::BeaconState as Phase0BeaconState, containers::Validator},
+        phase0::{
+            beacon_state::BeaconState as Phase0BeaconState, consts::GENESIS_EPOCH,
+            containers::Validator,
+        },
         preset::Minimal,
     };
 

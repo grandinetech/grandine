@@ -19,7 +19,7 @@ use types::{
 
 type ComputeInAdvanceSlots = U8;
 
-#[allow(clippy::declare_interior_mutable_const)]
+#[expect(clippy::declare_interior_mutable_const)]
 const NONE_MUTEX: Mutex<Option<SlotBeaconCommitteeMembers>> = Mutex::const_new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

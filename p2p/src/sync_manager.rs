@@ -45,7 +45,6 @@ const GREEDY_MODE_PEER_LIMIT: usize = 2;
 const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN_IN_SECONDS: u64 = 12;
-const PEERS_BEFORE_STATUS_UPDATE: usize = 1;
 const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -217,7 +216,7 @@ impl SyncManager {
         sync_batches
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn build_forward_sync_batches<P: Preset>(
         &mut self,
         config: &Config,
@@ -601,33 +600,6 @@ impl SyncManager {
         &mut self,
     ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
         self.block_requests.expired_range_batches()
-    }
-
-    pub fn outdated_peers(&mut self, status: StatusMessage) -> Vec<PeerId> {
-        if let Some(chain) = self.chain_with_max_peer_count() {
-            let status_chain = ChainId::from(&status);
-
-            if chain != status_chain
-                && status_chain.finalized_epoch == chain.finalized_epoch + 1
-                && self.chain_peers(&status_chain).len() >= PEERS_BEFORE_STATUS_UPDATE
-                && self
-                    .status_updates_cache
-                    .cache_get(&status_chain.finalized_epoch)
-                    .is_none()
-            {
-                self.status_updates_cache
-                    .cache_set(status_chain.finalized_epoch, ());
-
-                return self
-                    .peers
-                    .iter()
-                    .filter(move |(_, status)| ChainId::from(*status) == chain)
-                    .map(|(peer_id, _)| *peer_id)
-                    .collect();
-            }
-        }
-
-        vec![]
     }
 
     pub fn cache_clear(&mut self) {

@@ -1,10 +1,10 @@
 use core::{
+    error::Error as StdError,
     fmt::{Debug, Formatter, Result as FmtResult},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
 use std::{
-    error::Error as StdError,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -679,7 +679,7 @@ async fn authorize_token(
     Ok(response)
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 pub async fn run_validator_api<P: Preset, W: Wait>(
     validator_api_config: ValidatorApiConfig,
     controller: ApiController<P, W>,
@@ -878,7 +878,10 @@ impl ApiToken {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Refactoring worsens readability, which is more important in tests."
+)]
 #[cfg(test)]
 mod tests {
     use anyhow::Result as AnyhowResult;

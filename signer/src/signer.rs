@@ -269,7 +269,7 @@ impl Snapshot {
         Ok(signature)
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn sign_triples<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,

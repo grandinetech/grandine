@@ -110,7 +110,7 @@ pub struct VerifyAggregateAndProofResult<P: Preset> {
 pub type VerifyAttestationResult<P> =
     Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>;
 
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(IntoStaticStr, Serialize)]
 #[strum(serialize_all = "snake_case")]
 #[cfg_attr(test, derive(Debug))]

@@ -70,8 +70,10 @@ compile_error! {
      see grandine/Cargo.toml for a list of features"
 }
 
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Clone)]
 struct Context {
     predefined_network: Option<PredefinedNetwork>,
@@ -153,7 +155,7 @@ impl Context {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn run<P: Preset>(self) -> Result<()> {
         let Self {
             predefined_network,
@@ -332,7 +334,7 @@ fn main() -> ExitCode {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
     binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
     binary_utils::initialize_rayon()?;
@@ -360,6 +362,7 @@ fn try_main() -> Result<()> {
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
+        default_gas_limit,
         network_config,
         storage_config,
         request_timeout,
@@ -414,6 +417,7 @@ fn try_main() -> Result<()> {
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
+        default_gas_limit,
         keystore_storage_password_file,
     });
 
@@ -535,7 +539,6 @@ fn try_main() -> Result<()> {
         PresetName::Mainnet => context.run_with_restart::<Mainnet>(),
         #[cfg(any(feature = "preset-minimal", test))]
         PresetName::Minimal => context.run_with_restart::<Minimal>(),
-        #[allow(unreachable_patterns)]
         preset_name => bail!(Error::PresetNotIncluded { preset_name }),
     }
 }
@@ -753,7 +756,6 @@ fn handle_command<P: Preset>(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn genesis_checkpoint_provider<P: Preset>(
     chain_config: &ChainConfig,
     genesis_state_file: Option<PathBuf>,

@@ -11,6 +11,7 @@ use p2p::NetworkConfig;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
 use types::{
+    bellatrix::primitives::Gas,
     config::Config as ChainConfig,
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Slot, H256},
     redacting_url::RedactingUrl,
@@ -21,11 +22,10 @@ use crate::{
     commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
 };
 
-#[cfg(test)]
-use derive_more::Debug;
-
-// False positive. The `bool`s are independent.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[cfg_attr(test, derive(Debug))]
 pub struct GrandineConfig {
     pub predefined_network: Option<PredefinedNetwork>,
@@ -43,6 +43,7 @@ pub struct GrandineConfig {
     pub graffiti: Vec<H256>,
     pub max_empty_slots: u64,
     pub suggested_fee_recipient: ExecutionAddress,
+    pub default_gas_limit: Gas,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
     pub unfinalized_states_in_memory: u64,
@@ -67,7 +68,7 @@ pub struct GrandineConfig {
 }
 
 impl GrandineConfig {
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     pub fn report(&self) {
         let Self {
             predefined_network,

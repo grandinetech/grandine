@@ -29,7 +29,10 @@ pub struct RemoteKeyManager {
 
 impl RemoteKeyManager {
     #[must_use]
-    pub fn new(signer: Arc<Signer>, slashing_protector: Arc<Mutex<SlashingProtector>>) -> Self {
+    pub const fn new(
+        signer: Arc<Signer>,
+        slashing_protector: Arc<Mutex<SlashingProtector>>,
+    ) -> Self {
         Self {
             signer,
             slashing_protector,

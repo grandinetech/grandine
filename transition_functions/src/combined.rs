@@ -100,7 +100,7 @@ pub fn state_transition_for_report<P: Preset>(
     Ok(slot_report)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn custom_state_transition<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,

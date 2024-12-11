@@ -9,6 +9,7 @@ use helper_functions::{
     },
     altair::slash_validator,
     error::SignatureKind,
+    misc,
     mutators::{balance, decrease_balance, increase_balance},
     phase0::get_attesting_indices,
     signing::{SignForAllForks as _, SignForSingleFork as _, SignForSingleForkAtSlot as _},
@@ -31,7 +32,7 @@ use types::{
     config::Config,
     nonstandard::{smallvec, AttestationEpoch, SlashingKind},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
+        consts::FAR_FUTURE_EPOCH,
         containers::{
             Attestation, AttesterSlashing, DepositData, DepositMessage, ProposerSlashing, Validator,
         },
@@ -563,7 +564,7 @@ pub fn verify_sync_aggregate_signature<P: Preset, V: Verifier>(
         .filter(|(_, bit)| *bit)
         .map(|(pubkey, _)| pubkey.decompress());
 
-    let previous_slot = state.slot().saturating_sub(1).max(GENESIS_SLOT);
+    let previous_slot = misc::previous_slot(state.slot());
 
     let block_root = get_block_root_at_slot(state, previous_slot).expect(
         "the bound on P::SlotsPerHistoricalRoot ensures that the \

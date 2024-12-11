@@ -30,11 +30,16 @@ use crate::{
 ///
 /// The `*_fork_epoch` fields have type `Epoch` for compatibility with standard configurations.
 /// `Toption<Epoch>` would be more appropriate.
-// The `clippy::unsafe_derive_deserialize` is a false positive triggered by `nonzero!`.
-// `Config` has no invariants. It is intended to be deserialized from user input.
-// The `unsafe` block in `nonzero!` only operates on the literal passed to it.
-// struct_field_name is allowed to have config_name, as it starts with the same name as struct
-#[allow(clippy::unsafe_derive_deserialize, clippy::struct_field_names)]
+#[expect(
+    clippy::unsafe_derive_deserialize,
+    reason = "A false positive triggered by `nonzero!`. \
+             `Config` has no invariants. It is intended to be deserialized from user input. \
+              The `unsafe` block in `nonzero!` only operates on the literal passed to it."
+)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "struct_field_name is allowed to have config_name, as it starts with the same name as struct"
+)]
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct Config {
@@ -162,9 +167,10 @@ pub struct Config {
     //
     // Collect unknown variables in a map so we can log a warning about them.
     // The downside to this is that we can no longer define `Config`s as constants.
-    //
-    // The warning is a false positive. Serde can only flatten structs and maps.
-    #[allow(clippy::zero_sized_map_values)]
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "False positive. Serde can only flatten structs and maps."
+    )]
     #[serde(flatten, skip_serializing)]
     pub unknown: BTreeMap<String, IgnoredAny>,
 }
@@ -779,7 +785,10 @@ pub enum Error {
     NameContainsIllegalCharacters,
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Refactoring worsens readability, which is more important in tests."
+)]
 #[cfg(test)]
 mod tests {
     use test_case::test_case;

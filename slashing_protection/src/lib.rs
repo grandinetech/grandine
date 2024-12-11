@@ -23,7 +23,6 @@ use crate::interchange_format::{
 
 pub mod interchange_format;
 
-#[allow(clippy::str_to_string)]
 mod schema {
     use refinery::embed_migrations;
     embed_migrations!();
@@ -1029,7 +1028,7 @@ mod tests {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct TestData {
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         name: IgnoredAny,
         genesis_validators_root: H256,
         steps: Vec<TestStep>,
@@ -1052,7 +1051,7 @@ mod tests {
         slot: Slot,
         signing_root: H256,
         pubkey: PublicKeyBytes,
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         should_succeed: bool,
         should_succeed_complete: bool,
     }
@@ -1066,7 +1065,7 @@ mod tests {
         target_epoch: Epoch,
         signing_root: H256,
         pubkey: PublicKeyBytes,
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         should_succeed: bool,
         should_succeed_complete: bool,
     }

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::allow_attributes,
+    reason = "clippy::allow_attributes lint triggers from some derive macros. \
+              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
+)]
 use core::{
     fmt::{Debug, Formatter, Result as FmtResult},
     marker::PhantomData,
@@ -154,7 +159,7 @@ impl<T, N: ArrayLength<T>> ContiguousVector<T, N> {
     where
         T: Clone,
     {
-        Self::try_from_iter(itertools::repeat_n(element, N::USIZE))
+        Self::try_from_iter(core::iter::repeat_n(element, N::USIZE))
             .expect("length of iterator matches type parameter")
     }
 }

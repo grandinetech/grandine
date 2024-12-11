@@ -78,7 +78,7 @@ use crate::{
     ApiMessage, BlockEvent, ChainReorgEvent, FinalizedCheckpointEvent, HeadEvent,
 };
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
@@ -135,7 +135,7 @@ where
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         store_snapshot: Arc<ArcSwap<Store<P>>>,
         state_cache: Arc<StateCacheProcessor<P>>,
@@ -318,7 +318,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
@@ -461,7 +461,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_block(
         &mut self,
         wait_group: W,
@@ -638,7 +638,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn handle_aggregate_and_proof(
         &mut self,
         wait_group: &W,
@@ -798,7 +798,6 @@ where
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
     fn handle_attestation(
         &mut self,
         wait_group: &W,
@@ -1354,8 +1353,8 @@ where
         Ok(())
     }
 
-    #[allow(clippy::cognitive_complexity)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
+    #[expect(clippy::too_many_lines)]
     fn accept_block(
         &mut self,
         wait_group: &W,
@@ -2080,7 +2079,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.80.1.
+        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.82.0.
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
@@ -2154,7 +2153,7 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.80.1.
+        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.82.0.
         self.waiting_for_checkpoint_states
             .retain(|target, waiting| {
                 let prune = target.epoch < finalized_epoch;

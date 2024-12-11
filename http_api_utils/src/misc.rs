@@ -18,7 +18,7 @@ pub struct ApiMetrics {
 
 impl ApiMetrics {
     #[must_use]
-    pub fn http(prometheus_metrics: Arc<Metrics>) -> Self {
+    pub const fn http(prometheus_metrics: Arc<Metrics>) -> Self {
         Self {
             api_type: ApiType::Http,
             prometheus_metrics,
@@ -26,7 +26,7 @@ impl ApiMetrics {
     }
 
     #[must_use]
-    pub fn validator(prometheus_metrics: Arc<Metrics>) -> Self {
+    pub const fn validator(prometheus_metrics: Arc<Metrics>) -> Self {
         Self {
             api_type: ApiType::Validator,
             prometheus_metrics,

@@ -8,8 +8,8 @@
 // Some of the tests had to be adapted for `consensus-specs` version 1.3.0-rc.4 because of the
 // addition of unrealized checkpoints and changes to how viability is determined.
 
-#![allow(clippy::similar_names)]
-#![allow(clippy::too_many_lines)]
+#![expect(clippy::similar_names)]
+#![expect(clippy::too_many_lines)]
 
 #[cfg(feature = "eth2-cache")]
 use std::sync::Arc;

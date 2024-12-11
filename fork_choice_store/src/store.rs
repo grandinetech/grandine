@@ -248,7 +248,7 @@ impl<P: Preset> Store<P> {
         };
 
         let validator_count = anchor_state.validators().len_usize();
-        let latest_messages = itertools::repeat_n(None, validator_count).collect();
+        let latest_messages = core::iter::repeat_n(None, validator_count).collect();
 
         Self {
             chain_config,
@@ -310,8 +310,7 @@ impl<P: Preset> Store<P> {
 
     #[must_use]
     pub fn previous_epoch(&self) -> Epoch {
-        // > Use GENESIS_EPOCH for previous when genesis to avoid underflow
-        self.current_epoch().saturating_sub(1).max(GENESIS_EPOCH)
+        misc::previous_epoch(self.current_epoch())
     }
 
     #[must_use]
@@ -1166,7 +1165,7 @@ impl<P: Preset> Store<P> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -1690,7 +1689,6 @@ impl<P: Preset> Store<P> {
     }
 
     // TODO(feature/deneb): Format quotes and log message like everything else.
-    #[allow(clippy::too_many_lines)]
     pub fn validate_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
@@ -2448,7 +2446,7 @@ impl<P: Preset> Store<P> {
     fn extend_latest_messages_after_finalization(&mut self) {
         let old_length = self.latest_messages.len();
         let new_length = self.last_finalized().state(self).validators().len_usize();
-        let added_vacancies = itertools::repeat_n(None, new_length - old_length);
+        let added_vacancies = core::iter::repeat_n(None, new_length - old_length);
 
         self.latest_messages.extend(added_vacancies);
     }

@@ -1,6 +1,3 @@
-// This makes `http_api::routing` less messy at the cost of coupling to `axum` even more.
-#![allow(clippy::unused_async)]
-
 use axum::{extract::State, Json};
 use clock::Tick;
 use execution_engine::PayloadStatusWithBlockHash;

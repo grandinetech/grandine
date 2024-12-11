@@ -15,7 +15,7 @@ use crate::{
     status::ExplainedAttesterSlashing, targets::Targets,
 };
 
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names)]
 pub struct Attestations<P: Preset> {
     config: SlasherConfig,
     attestation_votes: AttestationVotes,
@@ -24,7 +24,7 @@ pub struct Attestations<P: Preset> {
 }
 
 impl<P: Preset> Attestations<P> {
-    pub fn new(
+    pub const fn new(
         config: SlasherConfig,
         votes_db: Database,
         attestations_db: Database,

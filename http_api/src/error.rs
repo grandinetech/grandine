@@ -1,4 +1,5 @@
-use std::{error::Error as StdError, sync::Arc};
+use core::error::Error as StdError;
+use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
 use axum::{
@@ -251,7 +252,7 @@ impl Error {
     }
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 #[derive(Debug, Serialize)]
 pub struct IndexedError {
     pub index: usize,
@@ -269,7 +270,10 @@ struct EthErrorResponse<'error> {
     failures: &'error [IndexedError],
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Refactoring worsens readability, which is more important in tests."
+)]
 #[cfg(test)]
 mod tests {
     use axum::{extract::rejection::MissingJsonContentType, Error as AxumError};

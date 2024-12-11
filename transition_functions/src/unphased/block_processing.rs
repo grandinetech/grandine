@@ -385,7 +385,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     validate_constructed_indexed_attestation(config, state, &indexed_attestation, verifier)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn validate_deposits<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,

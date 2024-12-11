@@ -143,8 +143,10 @@ fn compute_source(
     round: u8,
     position_window: impl TryInto<u64, Error = impl Debug>,
 ) -> H256 {
-    // Truncate to match the behavior of `compute_shuffled_index` in `consensus-specs`.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "Truncate to match the behavior of `compute_shuffled_index` in `consensus-specs`."
+    )]
     let position_window = position_window
         .try_into()
         .expect("position_window should fit in u64") as u32;
@@ -164,7 +166,7 @@ mod spec_tests {
 
     use super::*;
 
-    #[allow(clippy::struct_field_names)]
+    #[expect(clippy::struct_field_names)]
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Mapping {

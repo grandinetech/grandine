@@ -7,7 +7,6 @@ authors = ["Grandine <info@grandine.io>"]
 [dependencies]
 anyhow = { workspace = true }
 bls = { workspace = true }
-builder_api = { workspace = true }
 bytesize = { workspace = true }
 database = { workspace = true }
 derive_more = { workspace = true }

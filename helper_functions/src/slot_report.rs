@@ -1,4 +1,4 @@
-#![allow(clippy::module_name_repetitions)]
+#![expect(clippy::module_name_repetitions)]
 
 use core::{
     num::{NonZeroU64, TryFromIntError},

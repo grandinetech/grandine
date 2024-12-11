@@ -2,7 +2,6 @@ use std::{path::Path, str};
 
 use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
-use builder_api::consts::PREFERRED_EXECUTION_GAS_LIMIT;
 use bytesize::ByteSize;
 use database::Database;
 use derive_more::Display;
@@ -19,17 +18,23 @@ const DB_MAX_SIZE: ByteSize = ByteSize::gib(1);
 pub struct ProposerConfigs {
     database: Database,
     default_fee_recipient: ExecutionAddress,
+    default_gas_limit: Gas,
     default_graffiti: H256,
 }
 
 impl ProposerConfigs {
     #[must_use]
-    pub fn new_in_memory(default_fee_recipient: ExecutionAddress, default_graffiti: H256) -> Self {
+    pub fn new_in_memory(
+        default_fee_recipient: ExecutionAddress,
+        default_gas_limit: Gas,
+        default_graffiti: H256,
+    ) -> Self {
         let database = Database::in_memory();
 
         Self {
             database,
             default_fee_recipient,
+            default_gas_limit,
             default_graffiti,
         }
     }
@@ -37,6 +42,7 @@ impl ProposerConfigs {
     pub fn new_persistent(
         validator_directory: &Path,
         default_fee_recipient: ExecutionAddress,
+        default_gas_limit: Gas,
         default_graffiti: H256,
     ) -> Result<Self> {
         let database =
@@ -45,6 +51,7 @@ impl ProposerConfigs {
         Ok(Self {
             database,
             default_fee_recipient,
+            default_gas_limit,
             default_graffiti,
         })
     }
@@ -70,7 +77,7 @@ impl ProposerConfigs {
     pub fn gas_limit(&self, pubkey: PublicKeyBytes) -> Result<Gas> {
         let gas_limit = self.db_get(GasLimitByPubkey(pubkey))?;
 
-        Ok(gas_limit.unwrap_or(PREFERRED_EXECUTION_GAS_LIMIT))
+        Ok(gas_limit.unwrap_or(self.default_gas_limit))
     }
 
     pub fn set_gas_limit(&self, pubkey: PublicKeyBytes, gas_limit: Gas) -> Result<()> {
@@ -165,6 +172,7 @@ mod tests {
 
     const DEFAULT_GRAFFITI: &str = "Grandine";
     const DEFAULT_FEE_RECIPIENT: ExecutionAddress = ExecutionAddress::repeat_byte(1);
+    const DEFAULT_GAS_LIMIT: Gas = 30_000_000;
     const TEST_FEE_RECIPIENT: ExecutionAddress = ExecutionAddress::repeat_byte(2);
     const PUBKEY: PublicKeyBytes = PublicKeyBytes::repeat_byte(1);
 
@@ -172,11 +180,15 @@ mod tests {
         let graffiti_bytes = parse_graffiti(DEFAULT_GRAFFITI)?;
 
         match validator_dir {
-            Some(dir) => {
-                ProposerConfigs::new_persistent(dir, DEFAULT_FEE_RECIPIENT, graffiti_bytes)
-            }
+            Some(dir) => ProposerConfigs::new_persistent(
+                dir,
+                DEFAULT_FEE_RECIPIENT,
+                DEFAULT_GAS_LIMIT,
+                graffiti_bytes,
+            ),
             None => Ok(ProposerConfigs::new_in_memory(
                 DEFAULT_FEE_RECIPIENT,
+                DEFAULT_GAS_LIMIT,
                 graffiti_bytes,
             )),
         }
@@ -226,7 +238,7 @@ mod tests {
 
         let gas_limit = proposer_configs.gas_limit(PUBKEY)?;
 
-        assert_eq!(gas_limit, PREFERRED_EXECUTION_GAS_LIMIT);
+        assert_eq!(gas_limit, DEFAULT_GAS_LIMIT);
 
         Ok(())
     }
@@ -253,7 +265,7 @@ mod tests {
 
         let gas_limit = proposer_configs.gas_limit(PUBKEY)?;
 
-        assert_eq!(gas_limit, PREFERRED_EXECUTION_GAS_LIMIT);
+        assert_eq!(gas_limit, DEFAULT_GAS_LIMIT);
 
         Ok(())
     }

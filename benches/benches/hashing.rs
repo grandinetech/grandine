@@ -1,6 +1,8 @@
-// The `unused_crate_dependencies` lint checks every crate in a package separately.
-// See <https://github.com/rust-lang/rust/issues/57274>.
-#![allow(unused_crate_dependencies)]
+#![expect(
+    unused_crate_dependencies,
+    reason = "The `unused_crate_dependencies` lint checks every crate in a package separately. \
+              See <https://github.com/rust-lang/rust/issues/57274>."
+)]
 
 use allocator as _;
 use bls::{PublicKeyBytes, SignatureBytes};
@@ -89,7 +91,7 @@ fn main() {
     criterion.final_summary();
 }
 
-// Arrays of arbitrary length do not implement `Default` as of Rust 1.80.1.
+// Arrays of arbitrary length do not implement `Default` as of Rust 1.82.0.
 // See <https://github.com/rust-lang/rust/issues/61415>.
 // We work around that by using `PublicKeyBytes` and `SignatureBytes` instead.
 

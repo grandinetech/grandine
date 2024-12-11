@@ -113,6 +113,9 @@ unused_lifetimes                       = 'warn'
 unused_macro_rules                     = 'warn'
 unused_qualifications                  = 'warn'
 
+# These are almost never helpful and require boilerplate.
+unstable_name_collisions               = 'allow'
+
 [workspace.lints.clippy]
 # Additional Clippy lint groups.
 nursery  = 'warn'
@@ -173,8 +176,8 @@ wildcard_dependencies   = 'warn'
 #   It's useful to leave some trait methods unimplemented.
 alloc_instead_of_core             = 'warn'
 allow_attributes                  = 'warn'
-allow_attributes_without_reason   = 'warn'
 assertions_on_result_states       = 'warn'
+cfg_not_test                      = 'warn'
 clone_on_ref_ptr                  = 'warn'
 dbg_macro                         = 'warn'
 decimal_literal_representation    = 'warn'

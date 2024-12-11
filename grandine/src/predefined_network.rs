@@ -262,8 +262,6 @@ impl PredefinedNetwork {
             Self::Sepolia => Self::SEPOLIA_BOOTNODES,
             #[cfg(any(feature = "network-holesky", test))]
             Self::Holesky => Self::HOLESKY_BOOTNODES,
-            #[allow(unreachable_patterns)]
-            _ => &[],
         }
         .iter()
         .copied()

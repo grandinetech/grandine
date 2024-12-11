@@ -954,15 +954,6 @@ pub fn process_voluntary_exit<P: Preset>(
     initiate_validator_exit(config, state, signed_voluntary_exit.message.validator_index)
 }
 
-#[allow(dead_code)]
-pub fn validate_voluntary_exit<P: Preset>(
-    config: &Config,
-    state: &impl PostElectraBeaconState<P>,
-    signed_voluntary_exit: SignedVoluntaryExit,
-) -> Result<()> {
-    validate_voluntary_exit_with_verifier(config, state, signed_voluntary_exit, SingleVerifier)
-}
-
 fn validate_voluntary_exit_with_verifier<P: Preset>(
     config: &Config,
     state: &impl PostElectraBeaconState<P>,
@@ -1104,7 +1095,6 @@ pub fn process_deposit_request<P: Preset>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn process_consolidation_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
@@ -1514,7 +1504,7 @@ mod spec_tests {
     validation_tests! {
         validate_voluntary_exit,
         |config, state, voluntary_exit| {
-            validate_voluntary_exit(config, state, voluntary_exit)
+            validate_voluntary_exit_with_verifier(config, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/electra/operations/voluntary_exit/*/*",

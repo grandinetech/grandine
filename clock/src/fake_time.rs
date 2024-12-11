@@ -3,11 +3,8 @@
 //! [`Instant`]:    std::time::Instant
 //! [`SystemTime`]: std::time::SystemTime
 
-use core::time::Duration;
-use std::{
-    error::Error,
-    time::{Instant, SystemTime, SystemTimeError},
-};
+use core::{error::Error, time::Duration};
+use std::time::{Instant, SystemTime, SystemTimeError};
 
 use thiserror::Error;
 

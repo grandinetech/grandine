@@ -58,6 +58,24 @@ pub fn is_epoch_start<P: Preset>(slot: Slot) -> bool {
     slots_since_epoch_start::<P>(slot) == 0
 }
 
+#[expect(
+    clippy::unnecessary_min_or_max,
+    reason = "GENESIS_EPOCH const might be adjusted independently."
+)]
+#[must_use]
+pub fn previous_epoch(epoch: Epoch) -> Epoch {
+    epoch.saturating_sub(1).max(GENESIS_EPOCH)
+}
+
+#[expect(
+    clippy::unnecessary_min_or_max,
+    reason = "GENESIS_SLOT const might be adjusted independently."
+)]
+#[must_use]
+pub fn previous_slot(slot: Slot) -> Slot {
+    slot.saturating_sub(1).max(GENESIS_SLOT)
+}
+
 // `consensus-specs` uses this in at least 2 places:
 // - <https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#compute_slots_since_epoch_start>
 // - <https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/validator.md#broadcast-attestation>

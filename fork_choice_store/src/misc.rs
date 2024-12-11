@@ -1,3 +1,8 @@
+#![expect(
+    clippy::allow_attributes,
+    reason = "allow_attributes lint trigger from some derive macros. \
+              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
+)]
 use core::{
     fmt::{Formatter, Result as FmtResult},
     num::NonZeroUsize,
@@ -299,7 +304,7 @@ pub struct AttestationItem<P: Preset, I> {
 
 impl<P: Preset, I> AttestationItem<P, I> {
     #[must_use]
-    pub fn unverified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+    pub const fn unverified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
         Self {
             item,
             origin,
@@ -308,7 +313,7 @@ impl<P: Preset, I> AttestationItem<P, I> {
     }
 
     #[must_use]
-    pub fn verified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
+    pub const fn verified(item: Arc<Attestation<P>>, origin: AttestationOrigin<I>) -> Self {
         Self {
             item,
             origin,

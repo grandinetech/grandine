@@ -1,4 +1,5 @@
-use std::{error::Error as StdError, sync::Arc};
+use core::error::Error as StdError;
+use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
 use axum::{
