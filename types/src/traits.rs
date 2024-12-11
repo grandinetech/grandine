@@ -1257,7 +1257,6 @@ pub trait PostElectraBeaconBlockBody<P: Preset>: PostDenebBeaconBlockBody<P> {
     fn attester_slashings(
         &self,
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
-    fn consolidation_requests_root(&self) -> H256;
     fn execution_requests(&self) -> &ExecutionRequests<P>;
 }
 
@@ -1270,10 +1269,6 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
         &self,
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
         &self.attester_slashings
-    }
-
-    fn consolidation_requests_root(&self) -> H256 {
-        self.execution_requests.consolidations.hash_tree_root()
     }
 
     fn execution_requests(&self) -> &ExecutionRequests<P> {
@@ -1290,10 +1285,6 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<
         &self,
     ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
         &self.attester_slashings
-    }
-
-    fn consolidation_requests_root(&self) -> H256 {
-        self.execution_requests.consolidations.hash_tree_root()
     }
 
     fn execution_requests(&self) -> &ExecutionRequests<P> {
