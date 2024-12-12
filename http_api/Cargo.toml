@@ -43,7 +43,6 @@ serde_with = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
 std_ext = { workspace = true }
-strum = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

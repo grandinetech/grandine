@@ -6,7 +6,7 @@ pub use crate::{
         DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
     },
     misc::{MetricsConfig, StorageConfig},
-    runtime::run_after_genesis,
+    runtime::{run_after_genesis, RuntimeConfig},
     schema::initialize as initialize_schema,
 };
 

@@ -24,7 +24,7 @@ use logging::PEER_LOG_METRICS;
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use reqwest::{Client, ClientBuilder};
-use runtime::{MetricsConfig, StorageConfig};
+use runtime::{MetricsConfig, RuntimeConfig, StorageConfig};
 use signer::{KeyOrigin, Signer};
 use slasher::SlasherConfig;
 use slashing_protection::{interchange_format::InterchangeData, SlashingProtector};
@@ -97,6 +97,7 @@ struct Context {
     state_slot: Option<Slot>,
     eth1_auth: Arc<Auth>,
     http_api_config: HttpApiConfig,
+    max_events: usize,
     metrics_config: MetricsConfig,
     track_liveness: bool,
     detect_doppelgangers: bool,
@@ -179,6 +180,7 @@ impl Context {
             state_slot,
             eth1_auth,
             http_api_config,
+            max_events,
             metrics_config,
             track_liveness,
             detect_doppelgangers,
@@ -280,6 +282,14 @@ impl Context {
 
         runtime::run_after_genesis(
             chain_config,
+            RuntimeConfig {
+                back_sync_enabled,
+                detect_doppelgangers,
+                max_events,
+                slashing_protection_history_limit,
+                track_liveness,
+                validator_enabled,
+            },
             store_config,
             validator_api_config,
             validator_config,
@@ -293,14 +303,9 @@ impl Context {
             signer,
             slasher_config,
             http_api_config,
-            back_sync_enabled,
             metrics_config,
-            track_liveness,
-            detect_doppelgangers,
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
-            slashing_protection_history_limit,
-            validator_enabled,
         )
         .await
     }
@@ -377,6 +382,7 @@ fn try_main() -> Result<()> {
         builder_config,
         web3signer_config,
         http_api_config,
+        max_events,
         metrics_config,
         track_liveness,
         detect_doppelgangers,
@@ -527,6 +533,7 @@ fn try_main() -> Result<()> {
         state_slot,
         eth1_auth,
         http_api_config,
+        max_events,
         metrics_config,
         track_liveness,
         detect_doppelgangers,

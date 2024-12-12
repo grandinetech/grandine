@@ -7,6 +7,7 @@ use database::Database;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use fork_choice_store::StoreConfig;
 use futures::sink::Drain;
+use http_api_utils::EventChannels;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -104,15 +105,17 @@ where
             false,
         ));
 
+        let event_channels = Arc::new(EventChannels::default());
+
         Self::new(
             chain_config,
             store_config,
             anchor_block,
             anchor_state,
             tick,
+            event_channels,
             execution_engine,
             metrics,
-            futures::sink::drain(),
             futures::sink::drain(),
             p2p_tx,
             futures::sink::drain(),

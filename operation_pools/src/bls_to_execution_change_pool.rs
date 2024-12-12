@@ -11,6 +11,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::predicates;
+use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
@@ -21,7 +22,7 @@ use types::{
 };
 
 use crate::{
-    messages::{PoolToApiMessage, PoolToP2pMessage},
+    messages::PoolToP2pMessage,
     misc::{Origin, PoolAdditionOutcome, PoolRejectionReason},
 };
 
@@ -33,7 +34,7 @@ impl BlsToExecutionChangePool {
     #[must_use]
     pub fn new<P: Preset, W: Wait>(
         controller: ApiController<P, W>,
-        pool_to_api_tx: UnboundedSender<PoolToApiMessage>,
+        event_channels: Arc<EventChannels>,
         pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
         metrics: Option<Arc<Metrics>>,
     ) -> (Arc<Self>, Service<P, W>) {
@@ -44,8 +45,8 @@ impl BlsToExecutionChangePool {
         let service = Service {
             controller,
             bls_to_execution_changes: HashMap::new(),
+            event_channels,
             metrics,
-            pool_to_api_tx,
             pool_to_p2p_tx,
             rx,
         };
@@ -97,8 +98,8 @@ impl BlsToExecutionChangePool {
 pub struct Service<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     bls_to_execution_changes: HashMap<ValidatorIndex, SignedBlsToExecutionChange>,
+    event_channels: Arc<EventChannels>,
     metrics: Option<Arc<Metrics>>,
-    pool_to_api_tx: UnboundedSender<PoolToApiMessage>,
     pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
     rx: UnboundedReceiver<PoolMessage>,
 }
@@ -172,10 +173,8 @@ impl<P: Preset, W: Wait> Service<P, W> {
                         }
                     }
 
-                    PoolToApiMessage::SignedBlsToExecutionChange(Box::new(
-                        signed_bls_to_execution_change,
-                    ))
-                    .send(&self.pool_to_api_tx);
+                    self.event_channels
+                        .send_bls_to_execution_change_event(&signed_bls_to_execution_change);
 
                     PoolAdditionOutcome::Accept
                 }

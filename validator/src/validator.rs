@@ -20,7 +20,6 @@ use derive_more::Display;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
-use execution_engine::{PayloadAttributesEvent, PayloadAttributesEventData};
 use features::Feature;
 use fork_choice_control::{ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
@@ -35,6 +34,7 @@ use helper_functions::{
     accessors, misc,
     signing::{RandaoEpoch, SignForAllForks, SignForSingleFork},
 };
+use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
@@ -78,7 +78,7 @@ use types::{
 };
 
 use crate::{
-    messages::{ApiToValidator, InternalMessage, ValidatorToApi},
+    messages::{ApiToValidator, InternalMessage},
     misc::{Aggregator, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
@@ -115,7 +115,6 @@ pub struct Channels<P: Preset, W> {
     pub p2p_to_validator_rx: UnboundedReceiver<P2pToValidator<P>>,
     pub slasher_to_validator_rx: Option<UnboundedReceiver<SlasherToValidator<P>>>,
     pub subnet_service_tx: UnboundedSender<ToSubnetService>,
-    pub validator_to_api_tx: UnboundedSender<ValidatorToApi<P>>,
     pub validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     pub validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
 }
@@ -142,6 +141,7 @@ pub struct Validator<P: Preset, W: Wait> {
     validator_votes: HashMap<Epoch, Vec<ValidatorVote>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
+    event_channels: Arc<EventChannels>,
     last_registration_epoch: Option<Epoch>,
     proposer_configs: Arc<ProposerConfigs>,
     signer: Arc<Signer>,
@@ -154,7 +154,6 @@ pub struct Validator<P: Preset, W: Wait> {
     metrics: Option<Arc<Metrics>>,
     internal_tx: UnboundedSender<InternalMessage>,
     internal_rx: UnboundedReceiver<InternalMessage>,
-    validator_to_api_tx: UnboundedSender<ValidatorToApi<P>>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
 }
@@ -169,6 +168,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
         doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
+        event_channels: Arc<EventChannels>,
         proposer_configs: Arc<ProposerConfigs>,
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
@@ -183,7 +183,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             p2p_to_validator_rx,
             slasher_to_validator_rx,
             subnet_service_tx,
-            validator_to_api_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
         } = channels;
@@ -216,6 +215,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             validator_votes: HashMap::new(),
             builder_api,
             doppelganger_protection,
+            event_channels,
             last_registration_epoch: None,
             proposer_configs,
             signer,
@@ -227,7 +227,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             metrics,
             internal_rx,
             internal_tx,
-            validator_to_api_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
         }
@@ -308,20 +307,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             if let Some(state) = slot_head.beacon_state.post_bellatrix() {
                                 let payload = state.latest_execution_payload_header();
 
-                                let payload_attributes_event = PayloadAttributesEvent {
-                                    version: slot_head.beacon_state.phase(),
-                                    data: PayloadAttributesEventData {
-                                        proposal_slot: slot,
-                                        proposer_index,
-                                        parent_block_root: slot_head.beacon_block_root,
-                                        payload_attributes: payload_attributes.clone().into(),
-                                        parent_block_number: payload.block_number(),
-                                        parent_block_hash: payload.block_hash(),
-                                    },
-                                };
-
-                                ValidatorToApi::PayloadAttributes(Box::new(payload_attributes_event))
-                                    .send(&self.validator_to_api_tx);
+                                self.event_channels.send_payload_attributes_event(
+                                    slot_head.beacon_state.phase(),
+                                    proposer_index,
+                                    slot,
+                                    slot_head.beacon_block_root,
+                                    &payload_attributes,
+                                    payload.block_number(),
+                                    payload.block_hash(),
+                                );
                             }
 
                             block_build_context.prepare_execution_payload_for_slot(
@@ -351,7 +345,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .await?;
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            ValidatorToApi::AttesterSlashing(slashing).send(&self.validator_to_api_tx);
+                            self.event_channels.send_attester_slashing_event(&slashing);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -363,7 +357,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .await?;
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            ValidatorToApi::ProposerSlashing(slashing).send(&self.validator_to_api_tx);
+                            self.event_channels.send_proposer_slashing_event(&slashing);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -375,7 +369,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .await?;
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            ValidatorToApi::VoluntaryExit(voluntary_exit).send(&self.validator_to_api_tx);
+                            self.event_channels.send_voluntary_exit_event(&voluntary_exit);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -1953,12 +1947,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .filter_map(|(index, contribution_and_proof, result)| async move {
                 match result {
                     Ok(_) => {
-                        ValidatorToApi::ContributionAndProof(Box::new(contribution_and_proof))
-                            .send(&self.validator_to_api_tx);
+                        self.event_channels
+                            .send_contribution_and_proof_event(&contribution_and_proof);
+
                         ValidatorToP2p::PublishContributionAndProof(Box::new(
                             contribution_and_proof,
                         ))
                         .send(&self.p2p_tx);
+
                         None
                     }
                     Err(error) => Some((index, error)),

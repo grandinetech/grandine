@@ -21,6 +21,7 @@ use fork_choice_control::{
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
 use genesis::AnchorCheckpointProvider;
+use http_api_utils::EventChannels;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use once_cell::sync::OnceCell;
@@ -87,7 +88,6 @@ impl<P: Preset> Context<P> {
         let (api_to_liveness_tx, api_to_liveness_rx) = futures::channel::mpsc::unbounded();
         let (api_to_p2p_tx, api_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (api_to_validator_tx, api_to_validator_rx) = futures::channel::mpsc::unbounded();
-        let (fc_to_api_tx, fc_to_api_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_attestation_verifier_tx, fc_to_attestation_verifier_rx) =
             futures::channel::mpsc::unbounded();
         let (fc_to_p2p_tx, fc_to_p2p_rx) = futures::channel::mpsc::unbounded();
@@ -96,14 +96,12 @@ impl<P: Preset> Context<P> {
         let (fc_to_sync_tx, fc_to_sync_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_validator_tx, fc_to_validator_rx) = futures::channel::mpsc::unbounded();
         let (_, p2p_to_validator_rx) = futures::channel::mpsc::unbounded();
-        let (pool_to_api_tx, pool_to_api_rx) = futures::channel::mpsc::unbounded();
         let (pool_to_liveness_tx, pool_to_liveness_rx) = futures::channel::mpsc::unbounded();
         let (pool_to_p2p_tx, pool_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (subnet_service_to_p2p_tx, _subnet_service_to_p2p_rx) =
             futures::channel::mpsc::unbounded();
         let (sync_to_api_tx, sync_to_api_rx) = futures::channel::mpsc::unbounded();
         let (subnet_service_tx, subnet_service_rx) = futures::channel::mpsc::unbounded();
-        let (validator_to_api_tx, validator_to_api_rx) = futures::channel::mpsc::unbounded();
         let (validator_to_liveness_tx, validator_to_liveness_rx) =
             futures::channel::mpsc::unbounded();
         let (validator_to_p2p_tx, validator_to_p2p_rx) = futures::channel::mpsc::unbounded();
@@ -173,15 +171,17 @@ impl<P: Preset> Context<P> {
             .unwrap_or(&anchor_block)
             .pipe(Tick::block_proposal);
 
+        let event_channels = Arc::new(EventChannels::default());
+
         let (controller, mutator_handle) = Controller::new(
             chain_config,
             store_config,
             anchor_block,
             anchor_state.clone_arc(),
             tick,
+            event_channels.clone_arc(),
             execution_engine.clone_arc(),
             None,
-            fc_to_api_tx,
             fc_to_attestation_verifier_tx,
             fc_to_p2p_tx,
             fc_to_pool_tx,
@@ -261,7 +261,7 @@ impl<P: Preset> Context<P> {
         let (bls_to_execution_change_pool, bls_to_execution_change_pool_service) =
             BlsToExecutionChangePool::new(
                 controller.clone_arc(),
-                pool_to_api_tx,
+                event_channels.clone_arc(),
                 pool_to_p2p_tx,
                 None,
             );
@@ -297,7 +297,6 @@ impl<P: Preset> Context<P> {
             p2p_to_validator_rx,
             slasher_to_validator_rx: None,
             subnet_service_tx: subnet_service_tx.clone(),
-            validator_to_api_tx,
             validator_to_liveness_tx: Some(validator_to_liveness_tx),
             validator_to_slasher_tx: None,
         };
@@ -309,6 +308,7 @@ impl<P: Preset> Context<P> {
             attestation_agg_pool.clone_arc(),
             None,
             None,
+            event_channels.clone_arc(),
             keymanager.proposer_configs().clone_arc(),
             signer,
             slashing_protector,
@@ -338,11 +338,8 @@ impl<P: Preset> Context<P> {
             api_to_metrics_tx: None,
             api_to_p2p_tx,
             api_to_validator_tx,
-            fc_to_api_rx,
-            pool_to_api_rx,
             subnet_service_tx,
             sync_to_api_rx,
-            validator_to_api_rx,
         };
 
         let http_api = HttpApi {
@@ -350,6 +347,7 @@ impl<P: Preset> Context<P> {
             controller,
             anchor_checkpoint_provider,
             eth1_api,
+            event_channels,
             validator_keys,
             validator_config,
             network_config,

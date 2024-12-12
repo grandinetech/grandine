@@ -26,6 +26,7 @@ use fork_choice_store::{
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
+use http_api_utils::EventChannels;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -44,8 +45,8 @@ use types::{
 use crate::{
     block_processor::BlockProcessor,
     messages::{
-        ApiMessage, AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage,
-        SubnetMessage, SyncMessage, ValidatorMessage,
+        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
+        SyncMessage, ValidatorMessage,
     },
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
@@ -94,9 +95,9 @@ where
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         tick: Tick,
+        event_channels: Arc<EventChannels>,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
-        api_tx: impl UnboundedSink<ApiMessage<P>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
         pool_tx: impl UnboundedSink<PoolMessage>,
@@ -129,13 +130,13 @@ where
             store_snapshot.clone_arc(),
             state_cache.clone_arc(),
             block_processor.clone_arc(),
+            event_channels,
             execution_engine.clone(),
             storage.clone_arc(),
             thread_pool.clone(),
             metrics.clone(),
             mutator_tx.clone(),
             mutator_rx,
-            api_tx,
             attestation_verifier_tx.clone(),
             p2p_tx,
             pool_tx,

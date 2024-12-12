@@ -34,6 +34,7 @@ use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
 use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
 use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATION_VERSION};
 use http_api::HttpApiConfig;
+use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
 use log::warn;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
@@ -200,10 +201,6 @@ struct HttpApiOptions {
     #[clap(long, value_delimiter = ',')]
     http_allowed_origins: Vec<HeaderValue>,
 
-    /// Max number of events stored in a single channel for HTTP API /events api call
-    #[clap(long, default_value_t = HttpApiConfig::default().max_events)]
-    max_events: usize,
-
     /// HTTP API timeout in milliseconds
     #[clap(long, default_value_t = HttpApiOptions::default_timeout())]
     timeout: u64,
@@ -215,7 +212,6 @@ impl From<HttpApiOptions> for HttpApiConfig {
             http_address,
             http_port,
             http_allowed_origins,
-            max_events,
             timeout,
         } = http_api_options;
 
@@ -228,7 +224,6 @@ impl From<HttpApiOptions> for HttpApiConfig {
         Self {
             address,
             allow_origin: headers_to_allow_origin(http_allowed_origins).unwrap_or(allow_origin),
-            max_events,
             timeout: Some(Duration::from_millis(timeout)),
         }
     }
@@ -253,6 +248,10 @@ impl HttpApiOptions {
 struct BeaconNodeOptions {
     #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
     max_empty_slots: u64,
+
+    /// Max number of events stored in a single channel for HTTP API /events api call
+    #[clap(long, default_value_t = DEFAULT_MAX_EVENTS)]
+    max_events: usize,
 
     /// Beacon node API URL to load recent finalized checkpoint and sync from it
     /// [default: None]
@@ -880,6 +879,7 @@ impl GrandineArgs {
 
         let BeaconNodeOptions {
             max_empty_slots,
+            max_events,
             checkpoint_sync_url,
             eth1_rpc_urls,
             force_checkpoint_sync,
@@ -1264,6 +1264,7 @@ impl GrandineArgs {
             builder_config,
             web3signer_config,
             http_api_config,
+            max_events,
             metrics_config,
             track_liveness,
             detect_doppelgangers,

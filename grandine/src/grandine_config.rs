@@ -58,6 +58,7 @@ pub struct GrandineConfig {
     pub builder_config: Option<BuilderConfig>,
     pub web3signer_config: Web3SignerConfig,
     pub http_api_config: HttpApiConfig,
+    pub max_events: usize,
     pub metrics_config: MetricsConfig,
     pub track_liveness: bool,
     pub detect_doppelgangers: bool,

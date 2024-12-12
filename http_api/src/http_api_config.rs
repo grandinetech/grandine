@@ -11,7 +11,6 @@ use tower_http::cors::AllowOrigin;
 pub struct HttpApiConfig {
     pub address: SocketAddr,
     pub allow_origin: AllowOrigin,
-    pub max_events: usize,
     // `HttpApiConfig.timeout` is optional to prevent timeouts in tests.
     pub timeout: Option<Duration>,
 }
@@ -34,7 +33,6 @@ impl HttpApiConfig {
         Self {
             address,
             allow_origin: AllowOrigin::list([allowed_origin]),
-            max_events: 100,
             timeout: None,
         }
     }

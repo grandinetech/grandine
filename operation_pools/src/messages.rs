@@ -35,15 +35,3 @@ impl PoolToLivenessMessage {
         }
     }
 }
-
-pub enum PoolToApiMessage {
-    SignedBlsToExecutionChange(Box<SignedBlsToExecutionChange>),
-}
-
-impl PoolToApiMessage {
-    pub fn send(self, tx: &UnboundedSender<Self>) {
-        if let Err(message) = tx.unbounded_send(self) {
-            debug!("send to HTTP API failed because the receiver was dropped: {message:?}");
-        }
-    }
-}
