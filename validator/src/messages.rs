@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use anyhow::{Error, Result};
 use bls::PublicKeyBytes;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
+use execution_engine::PayloadAttributesEvent;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::warn;
 use types::{
@@ -47,6 +48,7 @@ impl InternalMessage {
 pub enum ValidatorToApi<P: Preset> {
     AttesterSlashing(Box<AttesterSlashing<P>>),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
+    PayloadAttributes(Box<PayloadAttributesEvent>),
     ProposerSlashing(Box<ProposerSlashing>),
     VoluntaryExit(Box<SignedVoluntaryExit>),
 }

@@ -20,6 +20,7 @@ use derive_more::Display;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
+use execution_engine::{PayloadAttributesEvent, PayloadAttributesEventData};
 use features::Feature;
 use fork_choice_control::{ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
@@ -283,17 +284,51 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
+                            let proposer_index = slot_head.proposer_index()?;
+
                             let block_build_context = self.block_producer.new_build_context(
                                 slot_head.beacon_state.clone_arc(),
                                 slot_head.beacon_block_root,
-                                slot_head.proposer_index()?,
+                                proposer_index,
                                 BlockBuildOptions::default(),
                             );
+
+                            let payload_attributes = match block_build_context.prepare_execution_payload_attributes().await {
+                                Ok(Some(attributes)) => attributes,
+                                Ok(None) => {
+                                    debug!("no payload attributes prepared");
+                                    continue;
+                                },
+                                Err(error) => {
+                                    warn!("failed to prepare execution payload attributes: {error:?}");
+                                    continue
+                                },
+                            };
+
+                            if let Some(state) = slot_head.beacon_state.post_bellatrix() {
+                                let payload = state.latest_execution_payload_header();
+
+                                let payload_attributes_event = PayloadAttributesEvent {
+                                    version: slot_head.beacon_state.phase(),
+                                    data: PayloadAttributesEventData {
+                                        proposal_slot: slot,
+                                        proposer_index,
+                                        parent_block_root: slot_head.beacon_block_root,
+                                        payload_attributes: payload_attributes.clone().into(),
+                                        parent_block_number: payload.block_number(),
+                                        parent_block_hash: payload.block_hash(),
+                                    },
+                                };
+
+                                ValidatorToApi::PayloadAttributes(Box::new(payload_attributes_event))
+                                    .send(&self.validator_to_api_tx);
+                            }
 
                             block_build_context.prepare_execution_payload_for_slot(
                                 slot,
                                 safe_execution_payload_hash,
                                 finalized_execution_payload_hash,
+                                payload_attributes,
                             ).await;
                         }
                     }

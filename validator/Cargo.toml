@@ -21,6 +21,7 @@ directories = { workspace = true }
 doppelganger_protection = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
+execution_engine = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }

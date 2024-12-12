@@ -16,6 +16,7 @@ pub enum Topic {
     ContributionAndProof,
     FinalizedCheckpoint,
     Head,
+    PayloadAttributes,
     ProposerSlashing,
     VoluntaryExit,
 }
@@ -36,6 +37,7 @@ pub struct EventChannels {
     pub contribution_and_proofs: Sender<Event>,
     pub finalized_checkpoints: Sender<Event>,
     pub heads: Sender<Event>,
+    pub payload_attributes: Sender<Event>,
     pub proposer_slashings: Sender<Event>,
     pub voluntary_exits: Sender<Event>,
 }
@@ -52,6 +54,7 @@ impl EventChannels {
             contribution_and_proofs: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
+            payload_attributes: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
             voluntary_exits: broadcast::channel(max_events).0,
         }
@@ -68,6 +71,7 @@ impl EventChannels {
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
+            Topic::PayloadAttributes => &self.payload_attributes,
             Topic::ProposerSlashing => &self.proposer_slashings,
             Topic::VoluntaryExit => &self.voluntary_exits,
         }

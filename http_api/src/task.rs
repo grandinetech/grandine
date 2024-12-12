@@ -194,6 +194,7 @@ async fn handle_events<P: Preset>(
         contribution_and_proofs,
         finalized_checkpoints,
         heads,
+        payload_attributes,
         proposer_slashings,
         voluntary_exits,
     } = event_channels.as_ref();
@@ -217,6 +218,11 @@ async fn handle_events<P: Preset>(
                         let event =
                             Topic::ContributionAndProof.build(signed_contribution_and_proof)?;
                         contribution_and_proofs.send(event).unwrap_or_default()
+                    }
+                    ValidatorToApi::PayloadAttributes(payload_attributes_event) => {
+                        let event =
+                            Topic::PayloadAttributes.build(payload_attributes_event)?;
+                        payload_attributes.send(event).unwrap_or_default()
                     }
                     ValidatorToApi::ProposerSlashing(proposer_slashing) => {
                         let event = Topic::ProposerSlashing.build(proposer_slashing)?;

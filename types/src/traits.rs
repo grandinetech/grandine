@@ -95,7 +95,8 @@ use crate::{
             SignedVoluntaryExit,
         },
         primitives::{
-            DepositIndex, Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, ValidatorIndex, H256,
+            DepositIndex, Epoch, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, UnixSeconds,
+            ValidatorIndex, H256,
         },
     },
     preset::Preset,
@@ -1303,6 +1304,7 @@ impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<
 
 pub trait ExecutionPayload<P: Preset>: SszHash<PackingFactor = U1> {
     fn block_hash(&self) -> ExecutionBlockHash;
+    fn block_number(&self) -> ExecutionBlockNumber;
     fn parent_hash(&self) -> ExecutionBlockHash;
 
     fn is_default_payload(&self) -> bool;
@@ -1312,6 +1314,10 @@ pub trait ExecutionPayload<P: Preset>: SszHash<PackingFactor = U1> {
 impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayload<P> {
     fn block_hash(&self) -> ExecutionBlockHash {
         self.block_hash
+    }
+
+    fn block_number(&self) -> ExecutionBlockNumber {
+        self.block_number
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1332,6 +1338,10 @@ impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayloadHeader<P> {
         self.block_hash
     }
 
+    fn block_number(&self) -> ExecutionBlockNumber {
+        self.block_number
+    }
+
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_hash
     }
@@ -1348,6 +1358,10 @@ impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayloadHeader<P> {
 impl<P: Preset> ExecutionPayload<P> for CapellaExecutionPayload<P> {
     fn block_hash(&self) -> ExecutionBlockHash {
         self.block_hash
+    }
+
+    fn block_number(&self) -> ExecutionBlockNumber {
+        self.block_number
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1368,6 +1382,10 @@ impl<P: Preset> ExecutionPayload<P> for CapellaExecutionPayloadHeader<P> {
         self.block_hash
     }
 
+    fn block_number(&self) -> ExecutionBlockNumber {
+        self.block_number
+    }
+
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_hash
     }
@@ -1386,6 +1404,10 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayload<P> {
         self.block_hash
     }
 
+    fn block_number(&self) -> ExecutionBlockNumber {
+        self.block_number
+    }
+
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_hash
     }
@@ -1402,6 +1424,10 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayload<P> {
 impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayloadHeader<P> {
     fn block_hash(&self) -> ExecutionBlockHash {
         self.block_hash
+    }
+
+    fn block_number(&self) -> ExecutionBlockNumber {
+        self.block_number
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {

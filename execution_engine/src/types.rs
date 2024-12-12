@@ -22,7 +22,7 @@ use types::{
     },
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{
-        ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, UnixSeconds,
+        ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, UnixSeconds,
         ValidatorIndex, H256,
     },
     preset::Preset,
@@ -381,7 +381,7 @@ pub struct ForkChoiceStateV1 {
 }
 
 /// [`PayloadAttributesV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#payloadattributesv1)
-#[derive(Serialize)]
+#[derive(Copy, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV1 {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -391,7 +391,7 @@ pub struct PayloadAttributesV1 {
 }
 
 /// [`PayloadAttributesV2`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#payloadattributesv2)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV2<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -402,7 +402,7 @@ pub struct PayloadAttributesV2<P: Preset> {
 }
 
 /// [`PayloadAttributesV3`](https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#payloadattributesv3)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV3<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -411,6 +411,162 @@ pub struct PayloadAttributesV3<P: Preset> {
     pub suggested_fee_recipient: ExecutionAddress,
     pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
     pub parent_beacon_block_root: H256,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayloadAttributesEvent {
+    pub version: Phase,
+    pub data: PayloadAttributesEventData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayloadAttributesEventData {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub proposal_slot: Slot,
+    pub parent_block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub parent_block_number: ExecutionBlockNumber,
+    pub parent_block_hash: ExecutionBlockHash,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub proposer_index: ValidatorIndex,
+    pub payload_attributes: CombinedPayloadAttributesEventData,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged, bound = "")]
+pub enum CombinedPayloadAttributesEventData {
+    Bellatrix(PayloadAttributesEventDataV1),
+    Capella(PayloadAttributesEventDataV2),
+    Deneb(PayloadAttributesEventDataV3),
+    Electra(PayloadAttributesEventDataV3),
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayloadAttributesEventDataV1 {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayloadAttributesEventDataV2 {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+    pub withdrawals: Vec<WithdrawalEventDataV1>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayloadAttributesEventDataV3 {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+    pub withdrawals: Vec<WithdrawalEventDataV1>,
+    pub parent_beacon_block_root: H256,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WithdrawalEventDataV1 {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub index: WithdrawalIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    pub address: ExecutionAddress,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub amount: Gwei,
+}
+
+impl From<WithdrawalV1> for WithdrawalEventDataV1 {
+    fn from(withdrawal: WithdrawalV1) -> Self {
+        let WithdrawalV1 {
+            index,
+            validator_index,
+            address,
+            amount,
+        } = withdrawal;
+
+        Self {
+            index,
+            validator_index,
+            address,
+            amount,
+        }
+    }
+}
+
+impl From<PayloadAttributesV1> for PayloadAttributesEventDataV1 {
+    fn from(payload_attributes: PayloadAttributesV1) -> Self {
+        let PayloadAttributesV1 {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+        } = payload_attributes;
+
+        Self {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+        }
+    }
+}
+
+impl<P: Preset> From<PayloadAttributesV2<P>> for PayloadAttributesEventDataV2 {
+    fn from(payload_attributes: PayloadAttributesV2<P>) -> Self {
+        let PayloadAttributesV2 {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+            withdrawals,
+        } = payload_attributes;
+
+        Self {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+            withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
+        }
+    }
+}
+
+impl<P: Preset> From<PayloadAttributesV3<P>> for PayloadAttributesEventDataV3 {
+    fn from(payload_attributes: PayloadAttributesV3<P>) -> Self {
+        let PayloadAttributesV3 {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+            withdrawals,
+            parent_beacon_block_root,
+        } = payload_attributes;
+
+        Self {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+            withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
+            parent_beacon_block_root,
+        }
+    }
+}
+impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventData {
+    fn from(payload_attributes: PayloadAttributes<P>) -> Self {
+        match payload_attributes {
+            PayloadAttributes::Bellatrix(payload_attributes_v1) => {
+                Self::Bellatrix(payload_attributes_v1.into())
+            }
+            PayloadAttributes::Capella(payload_attributes_v2) => {
+                Self::Capella(payload_attributes_v2.into())
+            }
+            PayloadAttributes::Deneb(payload_attributes_v3) => {
+                Self::Deneb(payload_attributes_v3.into())
+            }
+            PayloadAttributes::Electra(payload_attributes_v3) => {
+                Self::Electra(payload_attributes_v3.into())
+            }
+        }
+    }
 }
 
 /// [`engine_getPayloadV1` response](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#response-2).
@@ -532,7 +688,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(untagged, bound = "")]
 pub enum PayloadAttributes<P: Preset> {
     Bellatrix(PayloadAttributesV1),
@@ -564,7 +720,7 @@ pub struct PayloadStatusV1 {
 }
 
 /// [`WithdrawalV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#withdrawalv1)
-#[derive(Deserialize, Serialize)]
+#[derive(Copy, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalV1 {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]

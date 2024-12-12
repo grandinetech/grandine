@@ -8342,6 +8342,7 @@ dependencies = [
  "doppelganger_protection",
  "eth1_api",
  "eth2_libp2p",
+ "execution_engine",
  "factory",
  "features",
  "fork_choice_control",
