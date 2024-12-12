@@ -340,8 +340,8 @@ struct BeaconNodeOptions {
 
     /// Enable syncing historical data
     /// [default: disabled]
-    #[clap(long)]
-    back_sync: bool,
+    #[clap(long = "back_sync")]
+    back_sync_enabled: bool,
 
     /// Collect Prometheus metrics
     #[clap(long)]
@@ -899,7 +899,7 @@ impl GrandineArgs {
             jwt_id,
             jwt_secret,
             jwt_version,
-            back_sync,
+            back_sync_enabled,
             metrics,
             metrics_address,
             metrics_port,
@@ -1236,7 +1236,7 @@ impl GrandineArgs {
             genesis_state_download_url,
             checkpoint_sync_url,
             force_checkpoint_sync,
-            back_sync,
+            back_sync_enabled,
             eth1_rpc_urls,
             data_dir: directories.data_dir.clone().unwrap_or_default(),
             validators,
