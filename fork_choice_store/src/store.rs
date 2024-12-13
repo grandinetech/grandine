@@ -1698,8 +1698,14 @@ impl<P: Preset> Store<P> {
         let block_header = blob_sidecar.signed_block_header.message;
 
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
+        let max_blobs_per_block =
+            if self.chain_config().phase_at_slot::<P>(block_header.slot) == Phase::Electra {
+                P::MaxBlobsPerBlockElectra::U64
+            } else {
+                P::MaxBlobsPerBlock::U64
+            };
         ensure!(
-            blob_sidecar.index < P::MaxBlobsPerBlock::U64,
+            blob_sidecar.index < max_blobs_per_block,
             Error::BlobSidecarInvalidIndex { blob_sidecar },
         );
 

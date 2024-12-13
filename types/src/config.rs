@@ -146,6 +146,10 @@ pub struct Config {
     pub blob_sidecar_subnet_count: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub data_column_sidecar_subnet_count: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_request_blob_sidecars_electra: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub blob_sidecar_subnet_count_electra: NonZeroU64,
 
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
@@ -242,6 +246,8 @@ impl Default for Config {
             min_epochs_for_blob_sidecars_requests: 4096,
             blob_sidecar_subnet_count: nonzero!(6_u64),
             data_column_sidecar_subnet_count: 64,
+            max_request_blob_sidecars_electra: 1152,
+            blob_sidecar_subnet_count_electra: nonzero!(9_u64),
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -728,6 +734,16 @@ impl Config {
                 self.max_request_blocks
             }
             Phase::Deneb | Phase::Electra => self.max_request_blocks_deneb,
+        }
+    }
+
+    #[must_use]
+    pub const fn max_request_blob_sidecars(&self, phase: Phase) -> u64 {
+        match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                self.max_request_blob_sidecars
+            }
+            Phase::Electra => self.max_request_blob_sidecars_electra,
         }
     }
 

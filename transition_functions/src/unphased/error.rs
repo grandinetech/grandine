@@ -101,11 +101,8 @@ pub enum Error<P: Preset> {
     SlotNotLater { current: Slot, target: Slot },
     #[error("state root in block ({in_block:?}) does not match state ({computed:?})")]
     StateRootMismatch { computed: H256, in_block: H256 },
-    #[error(
-        "too many blob KZG commitments (maximum: {}, in_block: {in_block})",
-        P::MaxBlobsPerBlock::USIZE
-    )]
-    TooManyBlockKzgCommitments { in_block: usize },
+    #[error("too many blob KZG commitments (maximum: {}, in_block: {in_block})")]
+    TooManyBlockKzgCommitments { maximum: usize, in_block: usize },
     #[error("validator {index} exited in epoch {exit_epoch}")]
     ValidatorAlreadyExited {
         index: ValidatorIndex,

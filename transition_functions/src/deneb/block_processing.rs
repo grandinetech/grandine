@@ -222,7 +222,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
 
     ensure!(
         in_block <= maximum,
-        Error::<P>::TooManyBlockKzgCommitments { in_block },
+        Error::<P>::TooManyBlockKzgCommitments { in_block, maximum },
     );
 
     Ok(())
