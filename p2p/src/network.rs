@@ -1727,7 +1727,6 @@ impl<P: Preset> Network<P> {
 
         let request = BlobsByRootRequest::new(
             self.controller.chain_config(),
-            self.controller.phase(),
             blob_identifiers.into_iter(),
         );
 
