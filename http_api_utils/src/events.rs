@@ -582,6 +582,7 @@ enum CombinedPayloadAttributesEventData {
     Capella(PayloadAttributesEventDataV2),
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
+    Fulu(PayloadAttributesEventDataV3),
 }
 
 #[derive(Debug, Serialize)]
@@ -708,6 +709,9 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             }
             PayloadAttributes::Electra(payload_attributes_v3) => {
                 Self::Electra(payload_attributes_v3.into())
+            }
+            PayloadAttributes::Fulu(payload_attributes_v3) => {
+                Self::Fulu(payload_attributes_v3.into())
             }
         }
     }
