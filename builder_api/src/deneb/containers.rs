@@ -34,8 +34,8 @@ pub struct SignedBuilderBid<P: Preset> {
 #[serde(bound = "", deny_unknown_fields)]
 pub struct BlobsBundle<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+    pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 #[derive(Debug, Deserialize)]

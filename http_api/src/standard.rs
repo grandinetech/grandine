@@ -947,6 +947,9 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 > {
     let block_root =
         block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?.value;
+
+    // TODO(feature/electra): support P::MaxBlobsPerBlockElectra
+
     let blob_identifiers = query
         .indices
         .unwrap_or_else(|| (0..P::MaxBlobsPerBlock::U64).collect())

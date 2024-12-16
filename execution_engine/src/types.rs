@@ -366,8 +366,8 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobsBundleV1<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+    pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 /// [`ForkChoiceStateV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#forkchoicestatev1)

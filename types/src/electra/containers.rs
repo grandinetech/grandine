@@ -220,7 +220,7 @@ pub struct PendingConsolidation {
 #[serde(deny_unknown_fields)]
 pub struct PendingPartialWithdrawal {
     #[serde(with = "serde_utils::string_or_native")]
-    pub index: ValidatorIndex,
+    pub validator_index: ValidatorIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub amount: Gwei,
     #[serde(with = "serde_utils::string_or_native")]

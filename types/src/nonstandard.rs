@@ -270,8 +270,8 @@ pub struct TimedPowBlock {
 pub struct WithBlobsAndMev<T, P: Preset> {
     pub value: T,
     pub commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-    pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobsPerBlock>>,
-    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobsPerBlock>>,
+    pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>>,
+    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
     pub mev: Option<Wei>,
     pub execution_requests: Option<ExecutionRequests<P>>,
 }
