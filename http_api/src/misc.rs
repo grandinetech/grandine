@@ -74,24 +74,24 @@ impl BackSyncedStatus {
 
 pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
     SignedBeaconBlock<P>,
-    ContiguousList<KzgProof, <P as Preset>::MaxBlobsPerBlock>,
-    ContiguousList<Blob<P>, <P as Preset>::MaxBlobsPerBlock>,
+    ContiguousList<KzgProof, <P as Preset>::MaxBlobCommitmentsPerBlock>,
+    ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>,
 );
 
 #[derive(Deserialize, Ssz)]
 #[serde(bound = "")]
 pub struct SignedDenebBlockWithBlobs<P: Preset> {
     pub signed_block: DenebSignedBeaconBlock<P>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 #[derive(Deserialize, Ssz)]
 #[serde(bound = "")]
 pub struct SignedElectraBlockWithBlobs<P: Preset> {
     pub signed_block: ElectraSignedBeaconBlock<P>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 #[derive(Serialize, Ssz)]
@@ -99,8 +99,8 @@ pub struct SignedElectraBlockWithBlobs<P: Preset> {
 #[ssz(derive_read = false, derive_hash = false)]
 pub struct BlockWithBlobs<B: Serialize + SszWrite, P: Preset> {
     pub block: B,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 #[derive(Serialize)]

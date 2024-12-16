@@ -1689,6 +1689,7 @@ impl<P: Preset> Store<P> {
     }
 
     // TODO(feature/deneb): Format quotes and log message like everything else.
+    #[expect(clippy::too_many_lines)]
     pub fn validate_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
@@ -1704,6 +1705,7 @@ impl<P: Preset> Store<P> {
             } else {
                 P::MaxBlobsPerBlock::U64
             };
+
         ensure!(
             blob_sidecar.index < max_blobs_per_block,
             Error::BlobSidecarInvalidIndex { blob_sidecar },

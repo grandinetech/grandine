@@ -3,18 +3,18 @@ use sha2::{Digest as _, Sha256};
 use ssz::Uint256;
 use typenum::Unsigned as _;
 use types::{
-    eip7594::{ColumnIndex, NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT},
+    eip7594::{CustodyIndex, NumberOfColumns, NUMBER_OF_CUSTODY_GROUPS},
     phase0::primitives::NodeId,
 };
 
 #[must_use]
-pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<ColumnIndex> {
-    assert!(custody_subnet_count <= DATA_COLUMN_SIDECAR_SUBNET_COUNT);
+pub fn get_custody_groups(node_id: NodeId, custody_group_count: u64) -> Vec<CustodyIndex> {
+    assert!(custody_group_count <= NUMBER_OF_CUSTODY_GROUPS);
 
-    let mut subnet_ids = vec![];
+    let mut custody_groups = vec![];
     let mut current_id = node_id;
 
-    while (subnet_ids.len() as u64) < custody_subnet_count {
+    while (custody_groups.len() as u64) < custody_group_count {
         let mut hasher = Sha256::new();
         let mut bytes: [u8; 32] = [0; 32];
 
@@ -28,10 +28,10 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
         ];
 
         let output_prefix_u64 = u64::from_le_bytes(output_prefix);
-        let subnet_id = output_prefix_u64 % DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+        let custody_group = output_prefix_u64 % NUMBER_OF_CUSTODY_GROUPS;
 
-        if !subnet_ids.contains(&subnet_id) {
-            subnet_ids.push(subnet_id);
+        if !custody_groups.contains(&custody_group) {
+            custody_groups.push(custody_group);
         }
 
         if current_id == Uint256::MAX {
@@ -41,11 +41,11 @@ pub fn get_custody_columns(node_id: NodeId, custody_subnet_count: u64) -> Vec<Co
         current_id = current_id + Uint256::one();
     }
 
-    let columns_per_subnet = NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+    let columns_per_custody_group = NumberOfColumns::U64 / NUMBER_OF_CUSTODY_GROUPS;
     let mut result = Vec::new();
-    for i in 0..columns_per_subnet {
-        for &subnet_id in &subnet_ids {
-            result.push(DATA_COLUMN_SIDECAR_SUBNET_COUNT * i + subnet_id);
+    for i in 0..columns_per_custody_group {
+        for &custody_group in &custody_groups {
+            result.push(NUMBER_OF_CUSTODY_GROUPS * i + custody_group);
         }
     }
 
@@ -60,25 +60,26 @@ mod tests {
     use spec_test_utils::Case;
     use test_generator::test_resources;
     use types::{
+        eip7594::CustodyIndex,
         phase0::primitives::NodeId,
         preset::{Mainnet, Minimal, Preset},
     };
 
-    use crate::{get_custody_columns, ColumnIndex};
+    use crate::get_custody_groups;
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Meta {
         description: Option<String>,
         node_id: NodeId,
-        custody_subnet_count: u64,
-        result: Vec<ColumnIndex>,
+        custody_group_count: u64,
+        result: Vec<CustodyIndex>,
     }
 
     #[duplicate_item(
         glob                                                                              function_name                 preset;
-        ["consensus-spec-tests/tests/mainnet/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_mainnet] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/eip7594/networking/get_custody_columns/*/*"] [get_custody_columns_minimal] [Minimal];
+        ["consensus-spec-tests/tests/mainnet/fulu/networking/get_custody_columns/*/*"] [get_custody_groups_mainnet] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/fulu/networking/get_custody_columns/*/*"] [get_custody_groups_minimal] [Minimal];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -90,10 +91,10 @@ mod tests {
         let Meta {
             description: _description,
             node_id,
-            custody_subnet_count,
+            custody_group_count,
             result,
         } = case.yaml::<Meta>("meta");
 
-        assert_eq!(get_custody_columns(node_id, custody_subnet_count), result);
+        assert_eq!(get_custody_groups(node_id, custody_group_count), result);
     }
 }

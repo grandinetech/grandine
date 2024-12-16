@@ -17,6 +17,7 @@ type FieldElementsPerCell = U64;
 type BytesPerCell = Prod<BytesPerFieldElement, FieldElementsPerCell>;
 
 pub type ColumnIndex = u64;
+pub type CustodyIndex = u64;
 pub type Cell = Box<ByteVector<BytesPerCell>>;
 pub type NumberOfColumns = U128;
 
@@ -28,6 +29,7 @@ pub type BlobCommitmentsInclusionProof = ContiguousVector<H256, KzgCommitmentsIn
 
 pub const CUSTODY_REQUIREMENT: u64 = 4;
 pub const DATA_COLUMN_SIDECAR_SUBNET_COUNT: u64 = 128;
+pub const NUMBER_OF_CUSTODY_GROUPS: u64 = 128;
 pub const SAMPLES_PER_SLOT: u64 = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
@@ -132,13 +134,13 @@ mod tests {
 
     tests_for_type! {
         DataColumnIdentifier,
-        "consensus-spec-tests/tests/mainnet/eip7594/ssz_static/DataColumnIdentifier/*/*",
-        "consensus-spec-tests/tests/minimal/eip7594/ssz_static/DataColumnIdentifier/*/*",
+        "consensus-spec-tests/tests/mainnet/fulu/ssz_static/DataColumnIdentifier/*/*",
+        "consensus-spec-tests/tests/minimal/fulu/ssz_static/DataColumnIdentifier/*/*",
     }
 
     tests_for_type! {
         DataColumnSidecar<_>,
-        "consensus-spec-tests/tests/mainnet/eip7594/ssz_static/DataColumnSidecar/*/*",
-        "consensus-spec-tests/tests/minimal/eip7594/ssz_static/DataColumnSidecar/*/*",
+        "consensus-spec-tests/tests/mainnet/fulu/ssz_static/DataColumnSidecar/*/*",
+        "consensus-spec-tests/tests/minimal/fulu/ssz_static/DataColumnSidecar/*/*",
     }
 }

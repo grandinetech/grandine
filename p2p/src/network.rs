@@ -1741,10 +1741,8 @@ impl<P: Preset> Network<P> {
             return;
         }
 
-        let request = BlobsByRootRequest::new(
-            self.controller.chain_config(),
-            blob_identifiers.into_iter(),
-        );
+        let request =
+            BlobsByRootRequest::new(self.controller.chain_config(), blob_identifiers.into_iter());
 
         debug!(
             "sending BlobSidecarsByRoot request (request_id: {request_id}, peer_id: {peer_id}, \

@@ -34,7 +34,7 @@ use types::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
         primitives::{
-            CommitteeIndex, DomainType, Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H256,
+            CommitteeIndex, DomainType, Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H128, H256,
         },
     },
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
@@ -554,6 +554,16 @@ pub fn get_or_init_total_active_balance<P: Preset>(
 fn get_next_sync_committee_indices<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
 ) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
+    if state.is_post_electra() {
+        get_next_sync_committee_indices_post_electra(state)
+    } else {
+        get_next_sync_committee_indices_pre_electra(state)
+    }
+}
+
+fn get_next_sync_committee_indices_pre_electra<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
     let next_epoch = get_next_epoch(state);
     let indices = get_active_validator_indices_by_epoch(state, next_epoch).collect_vec();
 
@@ -591,9 +601,57 @@ fn get_next_sync_committee_indices<P: Preset>(
                 .expect("candidate_index was produced by enumerating active validators")
                 .effective_balance;
 
-            // > [Modified in Electra:EIP7251]
-            (effective_balance * max_random_byte
-                >= misc::get_state_max_effective_balance(state) * random_byte)
+            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE * random_byte)
+                .then_some(candidate_index)
+        })
+        .take(P::SyncCommitteeSize::USIZE)
+        .pipe(ContiguousVector::try_from_iter)
+        .map_err(Into::into)
+}
+
+fn get_next_sync_committee_indices_post_electra<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
+    let next_epoch = get_next_epoch(state);
+    let indices = get_active_validator_indices_by_epoch(state, next_epoch).collect_vec();
+
+    let total = indices
+        .len()
+        .try_conv::<u64>()?
+        .pipe(NonZeroU64::new)
+        .ok_or(Error::NoActiveValidators)?;
+
+    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
+    let max_random_value = u64::from(u16::MAX);
+
+    (0..u64::MAX / H128::len_bytes() as u64)
+        .flat_map(|quotient| {
+            hashing::hash_256_64(seed, quotient)
+                .to_fixed_bytes()
+                .into_iter()
+                .tuples()
+                .map(|bytes: (u8, u8)| u64::from(u16::from_le_bytes(bytes.into())))
+        })
+        .zip(0..)
+        .filter_map(move |(random_value, attempt)| {
+            let shuffled_index_of_index = misc::compute_shuffled_index::<P>(
+                attempt % total,
+                total,
+                seed,
+            )
+            .try_conv::<usize>()
+            .expect("shuffled_index_of_index fits in usize because it is less than indices.len()");
+
+            let candidate_index = indices[shuffled_index_of_index];
+
+            let effective_balance = state
+                .validators()
+                .get(candidate_index)
+                .expect("candidate_index was produced by enumerating active validators")
+                .effective_balance;
+
+            (effective_balance * max_random_value
+                >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value)
                 .then_some(candidate_index)
         })
         .take(P::SyncCommitteeSize::USIZE)
@@ -835,7 +893,7 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
     state
         .pending_partial_withdrawals()
         .into_iter()
-        .filter(|withdrawal| withdrawal.index == validator_index)
+        .filter(|withdrawal| withdrawal.validator_index == validator_index)
         .map(|withdrawal| withdrawal.amount)
         .sum()
 }

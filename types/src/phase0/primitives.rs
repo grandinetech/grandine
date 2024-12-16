@@ -1,4 +1,4 @@
-pub use ethereum_types::{H160, H256, H32};
+pub use ethereum_types::{H128, H160, H256, H32};
 pub use ssz::Uint256;
 
 pub type ChainId = u64;
