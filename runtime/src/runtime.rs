@@ -25,6 +25,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
+use http_api_utils::EventChannels;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use log::{info, warn};
@@ -50,11 +51,22 @@ use crate::misc::{MetricsConfig, StorageConfig};
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
 
+#[expect(clippy::module_name_repetitions)]
+#[expect(clippy::struct_excessive_bools)]
+pub struct RuntimeConfig {
+    pub back_sync_enabled: bool,
+    pub detect_doppelgangers: bool,
+    pub max_events: usize,
+    pub slashing_protection_history_limit: u64,
+    pub track_liveness: bool,
+    pub validator_enabled: bool,
+}
+
 #[expect(clippy::too_many_arguments)]
 #[expect(clippy::too_many_lines)]
-#[expect(clippy::fn_params_excessive_bools)]
 pub async fn run_after_genesis<P: Preset>(
     chain_config: Arc<ChainConfig>,
+    runtime_config: RuntimeConfig,
     store_config: StoreConfig,
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
@@ -68,15 +80,19 @@ pub async fn run_after_genesis<P: Preset>(
     signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     http_api_config: HttpApiConfig,
-    back_sync_enabled: bool,
     metrics_config: MetricsConfig,
-    track_liveness: bool,
-    detect_doppelgangers: bool,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
-    slashing_protection_history_limit: u64,
-    validator_enabled: bool,
 ) -> Result<()> {
+    let RuntimeConfig {
+        back_sync_enabled,
+        detect_doppelgangers,
+        max_events,
+        slashing_protection_history_limit,
+        track_liveness,
+        validator_enabled,
+    } = runtime_config;
+
     let MetricsConfig {
         metrics,
         metrics_server_config,
@@ -112,10 +128,7 @@ pub async fn run_after_genesis<P: Preset>(
     let (validator_to_p2p_tx, validator_to_p2p_rx) = mpsc::unbounded();
     let (api_to_p2p_tx, api_to_p2p_rx) = mpsc::unbounded();
     let (sync_to_api_tx, sync_to_api_rx) = mpsc::unbounded();
-    let (fc_to_api_tx, fc_to_api_rx) = mpsc::unbounded();
     let (api_to_validator_tx, api_to_validator_rx) = mpsc::unbounded();
-    let (validator_to_api_tx, validator_to_api_rx) = mpsc::unbounded();
-    let (pool_to_api_tx, pool_to_api_rx) = mpsc::unbounded();
     let (pool_to_p2p_tx, pool_to_p2p_rx) = mpsc::unbounded();
     let (subnet_service_to_p2p_tx, subnet_service_to_p2p_rx) = mpsc::unbounded();
     let (subnet_service_tx, subnet_service_rx) = mpsc::unbounded();
@@ -192,15 +205,17 @@ pub async fn run_after_genesis<P: Preset>(
 
     let current_tick = Tick::current(&chain_config, anchor_state.genesis_time())?;
 
+    let event_channels = Arc::new(EventChannels::new(max_events));
+
     let (controller, mutator_handle) = Controller::new(
         chain_config.clone_arc(),
         store_config,
         anchor_block,
         anchor_state.clone_arc(),
         current_tick,
+        event_channels.clone_arc(),
         execution_engine.clone_arc(),
         metrics.clone(),
-        fc_to_api_tx,
         fork_choice_to_attestation_verifier_tx,
         fork_choice_to_p2p_tx,
         fork_choice_to_pool_tx,
@@ -480,7 +495,7 @@ pub async fn run_after_genesis<P: Preset>(
     let (bls_to_execution_change_pool, bls_to_execution_change_pool_service) =
         BlsToExecutionChangePool::new(
             controller.clone_arc(),
-            pool_to_api_tx,
+            event_channels.clone_arc(),
             pool_to_p2p_tx,
             metrics.clone(),
         );
@@ -513,7 +528,6 @@ pub async fn run_after_genesis<P: Preset>(
         p2p_to_validator_rx,
         slasher_to_validator_rx,
         subnet_service_tx: subnet_service_tx.clone(),
-        validator_to_api_tx,
         validator_to_liveness_tx,
         validator_to_slasher_tx,
     };
@@ -525,6 +539,7 @@ pub async fn run_after_genesis<P: Preset>(
         attestation_agg_pool.clone_arc(),
         builder_api,
         doppelganger_protection,
+        event_channels.clone_arc(),
         keymanager.proposer_configs().clone_arc(),
         signer.clone_arc(),
         slashing_protector,
@@ -578,11 +593,8 @@ pub async fn run_after_genesis<P: Preset>(
         api_to_metrics_tx,
         api_to_p2p_tx,
         api_to_validator_tx,
-        fc_to_api_rx,
-        pool_to_api_rx,
         subnet_service_tx,
         sync_to_api_rx,
-        validator_to_api_rx,
     };
 
     let http_api = HttpApi {
@@ -590,6 +602,7 @@ pub async fn run_after_genesis<P: Preset>(
         controller: controller.clone_arc(),
         anchor_checkpoint_provider,
         eth1_api,
+        event_channels,
         validator_keys,
         validator_config,
         network_config,

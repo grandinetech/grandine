@@ -35,7 +35,7 @@ pub struct GrandineConfig {
     pub genesis_state_download_url: Option<RedactingUrl>,
     pub checkpoint_sync_url: Option<RedactingUrl>,
     pub force_checkpoint_sync: bool,
-    pub back_sync: bool,
+    pub back_sync_enabled: bool,
     pub eth1_rpc_urls: Vec<RedactingUrl>,
     pub data_dir: PathBuf,
     pub validators: Option<Validators>,
@@ -58,6 +58,7 @@ pub struct GrandineConfig {
     pub builder_config: Option<BuilderConfig>,
     pub web3signer_config: Web3SignerConfig,
     pub http_api_config: HttpApiConfig,
+    pub max_events: usize,
     pub metrics_config: MetricsConfig,
     pub track_liveness: bool,
     pub detect_doppelgangers: bool,
@@ -73,7 +74,7 @@ impl GrandineConfig {
         let Self {
             predefined_network,
             chain_config,
-            back_sync,
+            back_sync_enabled,
             eth1_rpc_urls,
             data_dir,
             graffiti,
@@ -161,7 +162,7 @@ impl GrandineConfig {
         }
 
         info!("suggested fee recipient: {suggested_fee_recipient}");
-        info!("back sync enabled: {back_sync}");
+        info!("back sync enabled: {back_sync_enabled}");
 
         if *use_validator_key_cache {
             info!("using validator key cache");

@@ -1518,50 +1518,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             )
     }
 
-    pub async fn prepare_execution_payload_for_slot(
+    pub async fn prepare_execution_payload_attributes(
         &self,
-        slot: Slot,
-        safe_execution_payload_hash: ExecutionBlockHash,
-        finalized_execution_payload_hash: ExecutionBlockHash,
-    ) {
-        let head_root = self.head_block_root;
-
-        let payload_id = self
-            .prepare_execution_payload(
-                safe_execution_payload_hash,
-                finalized_execution_payload_hash,
-            )
-            .await;
-
-        match payload_id {
-            Ok(payload_id_option) => {
-                match payload_id_option {
-                    Some(payload_id) => {
-                        info!(
-                            "started work on execution payload with id {payload_id:?} \
-                             for head {head_root:?} at slot {slot}",
-                        );
-
-                        self.producer_context.payload_id_cache.lock().await.cache_set((head_root, slot), payload_id);
-                    }
-                    // If we have no block at 4th-second mark, we preprocess new state without the block.
-                    // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
-                    // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
-                    None => warn!(
-                        "could not prepare execution payload: payload_id is None; \
-                         ensure that multiple consensus clients are not driving the same execution client",
-                    ),
-                }
-            }
-            Err(error) => warn!("error while preparing execution payload: {error:?}"),
-        }
-    }
-
-    async fn prepare_execution_payload(
-        &self,
-        safe_block_hash: ExecutionBlockHash,
-        finalized_block_hash: ExecutionBlockHash,
-    ) -> Result<Option<PayloadId>> {
+    ) -> Result<Option<PayloadAttributes<P>>> {
         let chain_config = &self.producer_context.chain_config;
         let state = self.beacon_state.as_ref();
 
@@ -1572,46 +1531,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let epoch = accessors::get_current_epoch(state);
         let timestamp = misc::compute_timestamp_at_slot(chain_config, state, state.slot());
         let suggested_fee_recipient = self.fee_recipient().await?;
-
-        // > [Modified in Capella] Removed `is_merge_transition_complete` check in Capella
-        //
-        // See <https://github.com/ethereum/consensus-specs/pull/3350>.
-        let parent_hash = if let Some(state) = state.post_capella() {
-            state.latest_execution_payload_header().block_hash()
-        } else if let Some(state) = post_merge_state(state) {
-            state.latest_execution_payload_header().block_hash()
-        } else {
-            let is_terminal_block_hash_set = !chain_config.terminal_block_hash.is_zero();
-            let is_activation_epoch_reached =
-                epoch >= chain_config.terminal_block_hash_activation_epoch;
-
-            if is_terminal_block_hash_set && !is_activation_epoch_reached {
-                return Ok(None);
-            }
-
-            let Some(terminal_pow_block) = self
-                .producer_context
-                .execution_engine
-                .get_terminal_pow_block()
-                .await?
-            else {
-                return Ok(None);
-            };
-
-            // If the terminal PoW block was found by difficulty, ensure that
-            // `terminal_pow_block.timestamp < timestamp` to avoid making the payload invalid. See:
-            // - <https://github.com/ethereum/hive/pull/569>
-            // - <https://github.com/sigp/lighthouse/issues/3316>
-            // - <https://github.com/prysmaticlabs/prysm/issues/11069>
-            // The root cause of this is a conflict between execution and consensus specifications.
-            if chain_config.terminal_block_hash.is_zero()
-                && terminal_pow_block.timestamp >= timestamp
-            {
-                return Ok(None);
-            }
-
-            terminal_pow_block.pow_block.block_hash
-        };
 
         let prev_randao = accessors::get_randao_mix(state, epoch);
 
@@ -1692,7 +1611,102 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
+        Ok(Some(payload_attributes))
+    }
+
+    pub async fn prepare_execution_payload_for_slot(
+        &self,
+        slot: Slot,
+        safe_execution_payload_hash: ExecutionBlockHash,
+        finalized_execution_payload_hash: ExecutionBlockHash,
+        payload_attributes: PayloadAttributes<P>,
+    ) {
+        let head_root = self.head_block_root;
+
+        let payload_id = self
+            .prepare_execution_payload(
+                safe_execution_payload_hash,
+                finalized_execution_payload_hash,
+                payload_attributes,
+            )
+            .await;
+
+        match payload_id {
+            Ok(payload_id_option) => {
+                match payload_id_option {
+                    Some(payload_id) => {
+                        info!(
+                            "started work on execution payload with id {payload_id:?} \
+                             for head {head_root:?} at slot {slot}",
+                        );
+
+                        self.producer_context.payload_id_cache.lock().await.cache_set((head_root, slot), payload_id);
+                    }
+                    // If we have no block at 4th-second mark, we preprocess new state without the block.
+                    // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
+                    // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
+                    None => warn!(
+                        "could not prepare execution payload: payload_id is None; \
+                         ensure that multiple consensus clients are not driving the same execution client",
+                    ),
+                }
+            }
+            Err(error) => warn!("error while preparing execution payload: {error:?}"),
+        }
+    }
+
+    async fn prepare_execution_payload(
+        &self,
+        safe_block_hash: ExecutionBlockHash,
+        finalized_block_hash: ExecutionBlockHash,
+        payload_attributes: PayloadAttributes<P>,
+    ) -> Result<Option<PayloadId>> {
+        let chain_config = &self.producer_context.chain_config;
+        let state = self.beacon_state.as_ref();
+        let epoch = accessors::get_current_epoch(state);
+        let timestamp = misc::compute_timestamp_at_slot(chain_config, state, state.slot());
+
         let (sender, receiver) = futures::channel::oneshot::channel();
+
+        // > [Modified in Capella] Removed `is_merge_transition_complete` check in Capella
+        //
+        // See <https://github.com/ethereum/consensus-specs/pull/3350>.
+        let parent_hash = if let Some(state) = state.post_capella() {
+            state.latest_execution_payload_header().block_hash()
+        } else if let Some(state) = post_merge_state(state) {
+            state.latest_execution_payload_header().block_hash()
+        } else {
+            let is_terminal_block_hash_set = !chain_config.terminal_block_hash.is_zero();
+            let is_activation_epoch_reached =
+                epoch >= chain_config.terminal_block_hash_activation_epoch;
+
+            if is_terminal_block_hash_set && !is_activation_epoch_reached {
+                return Ok(None);
+            }
+
+            let Some(terminal_pow_block) = self
+                .producer_context
+                .execution_engine
+                .get_terminal_pow_block()
+                .await?
+            else {
+                return Ok(None);
+            };
+
+            // If the terminal PoW block was found by difficulty, ensure that
+            // `terminal_pow_block.timestamp < timestamp` to avoid making the payload invalid. See:
+            // - <https://github.com/ethereum/hive/pull/569>
+            // - <https://github.com/sigp/lighthouse/issues/3316>
+            // - <https://github.com/prysmaticlabs/prysm/issues/11069>
+            // The root cause of this is a conflict between execution and consensus specifications.
+            if chain_config.terminal_block_hash.is_zero()
+                && terminal_pow_block.timestamp >= timestamp
+            {
+                return Ok(None);
+            }
+
+            terminal_pow_block.pow_block.block_hash
+        };
 
         self.producer_context
             .execution_engine
@@ -1778,13 +1792,16 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 self.head_block_root
             );
 
-            payload_id = self
-                .prepare_execution_payload(
-                    snapshot.safe_execution_payload_hash(),
-                    snapshot.finalized_execution_payload_hash(),
-                )
-                .await?
-                .map(PayloadIdEntry::Live)
+            if let Some(payload_attributes) = self.prepare_execution_payload_attributes().await? {
+                payload_id = self
+                    .prepare_execution_payload(
+                        snapshot.safe_execution_payload_hash(),
+                        snapshot.finalized_execution_payload_hash(),
+                        payload_attributes,
+                    )
+                    .await?
+                    .map(PayloadIdEntry::Live)
+            }
         };
 
         let Some(payload_id) = payload_id else {
@@ -1807,12 +1824,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 match payload_id {
                     PayloadIdEntry::Cached(_) => {
-                        let payload_id = self
-                            .prepare_execution_payload(
-                                snapshot.safe_execution_payload_hash(),
-                                snapshot.finalized_execution_payload_hash(),
-                            )
-                            .await?;
+                        let mut payload_id = None;
+
+                        if let Some(payload_attributes) =
+                            self.prepare_execution_payload_attributes().await?
+                        {
+                            payload_id = self
+                                .prepare_execution_payload(
+                                    snapshot.safe_execution_payload_hash(),
+                                    snapshot.finalized_execution_payload_hash(),
+                                    payload_attributes,
+                                )
+                                .await?;
+                        }
 
                         if let Some(payload_id) = payload_id {
                             info!("successfully retrieved non-cached payload_id: {payload_id:?}");

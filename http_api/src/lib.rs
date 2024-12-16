@@ -5,7 +5,6 @@ pub use crate::{
 
 mod block_id;
 mod error;
-mod events;
 mod extractors;
 mod full_config;
 mod global;

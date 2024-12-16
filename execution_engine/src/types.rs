@@ -381,7 +381,7 @@ pub struct ForkChoiceStateV1 {
 }
 
 /// [`PayloadAttributesV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#payloadattributesv1)
-#[derive(Serialize)]
+#[derive(Copy, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV1 {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -391,7 +391,7 @@ pub struct PayloadAttributesV1 {
 }
 
 /// [`PayloadAttributesV2`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#payloadattributesv2)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV2<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -402,7 +402,7 @@ pub struct PayloadAttributesV2<P: Preset> {
 }
 
 /// [`PayloadAttributesV3`](https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#payloadattributesv3)
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributesV3<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
@@ -532,7 +532,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(untagged, bound = "")]
 pub enum PayloadAttributes<P: Preset> {
     Bellatrix(PayloadAttributesV1),
@@ -566,7 +566,7 @@ pub struct PayloadStatusV1 {
 }
 
 /// [`WithdrawalV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#withdrawalv1)
-#[derive(Deserialize, Serialize)]
+#[derive(Copy, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalV1 {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]

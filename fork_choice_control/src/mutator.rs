@@ -38,6 +38,7 @@ use fork_choice_store::{
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
+use http_api_utils::{DependentRootsBundle, EventChannels};
 use itertools::{Either, Itertools as _};
 use log::{debug, error, info, warn};
 use num_traits::identities::Zero as _;
@@ -59,8 +60,8 @@ use types::{
 use crate::{
     block_processor::BlockProcessor,
     messages::{
-        AttestationVerifierMessage, BlobSidecarEvent, MutatorMessage, P2pMessage, PoolMessage,
-        SubnetMessage, SyncMessage, ValidatorMessage,
+        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
+        SyncMessage, ValidatorMessage,
     },
     misc::{
         Delayed, MutatorRejectionReason, PendingAggregateAndProof, PendingAttestation,
@@ -75,15 +76,15 @@ use crate::{
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
     wait::Wait,
-    ApiMessage, BlockEvent, ChainReorgEvent, FinalizedCheckpointEvent, HeadEvent,
 };
 
 #[expect(clippy::struct_field_names)]
-pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
+pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     store: Arc<Store<P>>,
     store_snapshot: Arc<ArcSwap<Store<P>>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     block_processor: Arc<BlockProcessor<P>>,
+    event_channels: Arc<EventChannels>,
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
@@ -113,7 +114,6 @@ pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     metrics: Option<Arc<Metrics>>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
-    api_tx: AS,
     attestation_verifier_tx: TS,
     p2p_tx: PS,
     pool_tx: LS,
@@ -122,12 +122,11 @@ pub struct Mutator<P: Preset, E, W, AS, TS, PS, LS, NS, SS, VS> {
     validator_tx: VS,
 }
 
-impl<P, E, W, AS, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, AS, TS, PS, LS, NS, SS, VS>
+impl<P, E, W, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, TS, PS, LS, NS, SS, VS>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
     W: Wait,
-    AS: UnboundedSink<ApiMessage<P>>,
     TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
     LS: UnboundedSink<PoolMessage>,
@@ -140,13 +139,13 @@ where
         store_snapshot: Arc<ArcSwap<Store<P>>>,
         state_cache: Arc<StateCacheProcessor<P>>,
         block_processor: Arc<BlockProcessor<P>>,
+        event_channels: Arc<EventChannels>,
         execution_engine: E,
         storage: Arc<Storage<P>>,
         thread_pool: ThreadPool<P, E, W>,
         metrics: Option<Arc<Metrics>>,
         mutator_tx: Sender<MutatorMessage<P, W>>,
         mutator_rx: Receiver<MutatorMessage<P, W>>,
-        api_tx: AS,
         attestation_verifier_tx: TS,
         p2p_tx: PS,
         pool_tx: LS,
@@ -159,6 +158,7 @@ where
             store_snapshot,
             state_cache,
             block_processor,
+            event_channels,
             execution_engine,
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
@@ -170,7 +170,6 @@ where
             metrics,
             mutator_tx,
             mutator_rx,
-            api_tx,
             attestation_verifier_tx,
             p2p_tx,
             pool_tx,
@@ -815,7 +814,8 @@ where
                 debug!("attestation accepted (attestation: {attestation:?})");
 
                 if attestation.origin.should_generate_event() {
-                    ApiMessage::AttestationEvent(attestation.item.clone_arc()).send(&self.api_tx);
+                    self.event_channels
+                        .send_attestation_event(&attestation.item);
                 }
 
                 if attestation.origin.send_to_validator() {
@@ -1291,12 +1291,11 @@ where
             .unfinalized_chain_link_by_execution_block_hash(execution_block_hash)
         {
             if chain_link.is_valid() {
-                ApiMessage::BlockEvent(BlockEvent {
-                    slot: chain_link.slot(),
-                    block: chain_link.block_root,
-                    execution_optimistic: false,
-                })
-                .send(&self.api_tx);
+                self.event_channels.send_block_event(
+                    chain_link.slot(),
+                    chain_link.block_root,
+                    false,
+                );
             }
         }
 
@@ -1315,10 +1314,8 @@ where
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if (head_changed || head_was_optimistic) && head.is_valid() {
-            match HeadEvent::new(&self.storage, &self.store, head) {
-                Ok(event) => ApiMessage::Head(event).send(&self.api_tx),
-                Err(error) => warn!("{error:#}"),
-            }
+            self.event_channels
+                .send_head_event(head, |head| self.calculate_dependent_roots(head));
 
             if !head_changed {
                 // The call to `Store::notify_about_reorganization` below sends
@@ -1459,12 +1456,8 @@ where
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if is_valid {
-            ApiMessage::BlockEvent(BlockEvent {
-                slot: block_slot,
-                block: block_root,
-                execution_optimistic: false,
-            })
-            .send(&self.api_tx);
+            self.event_channels
+                .send_block_event(block_slot, block_root, false);
         }
 
         // TODO(Grandine Team): Performing the validation here results in the block being added to the
@@ -1577,10 +1570,8 @@ where
                 // Do not send API events about optimistic blocks.
                 // Vouch treats all head events as non-optimistic.
                 if new_head.is_valid() {
-                    match HeadEvent::new(&self.storage, &self.store, &new_head) {
-                        Ok(event) => ApiMessage::Head(event).send(&self.api_tx),
-                        Err(error) => warn!("{error:#}"),
-                    }
+                    self.event_channels
+                        .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
 
                     ValidatorMessage::Head(wait_group.clone(), new_head.clone())
                         .send(&self.validator_tx);
@@ -1626,8 +1617,8 @@ where
             self.retry_block(wait_group.clone(), pending_block);
         }
 
-        ApiMessage::BlobSidecarEvent(BlobSidecarEvent::new(block_root, blob_sidecar))
-            .send(&self.api_tx);
+        self.event_channels
+            .send_blob_sidecar_event(block_root, blob_sidecar);
 
         self.spawn(PersistBlobSidecarsTask {
             store_snapshot: self.owned_store(),
@@ -1673,20 +1664,18 @@ where
         )
         .send(&self.validator_tx);
 
-        ApiMessage::FinalizedCheckpoint(FinalizedCheckpointEvent {
-            block: head.block_root,
-            state: finalized_checkpoint.root,
-            epoch: finalized_checkpoint.epoch,
-            execution_optimistic: head.is_optimistic(),
-        })
-        .send(&self.api_tx);
+        self.event_channels.send_finalized_checkpoint_event(
+            head.block_root,
+            finalized_checkpoint,
+            head.is_optimistic(),
+        );
     }
 
     fn notify_about_reorganization(&self, wait_group: W, old_head: &ChainLink<P>) {
         let new_head = self.store.head().clone();
-        let event = ChainReorgEvent::new(&self.store, old_head);
 
-        ApiMessage::ChainReorgEvent(event).send(&self.api_tx);
+        self.event_channels
+            .send_chain_reorg_event(&self.store, old_head);
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.beacon_reorgs_total.inc();
@@ -1735,6 +1724,27 @@ where
             Either::Left(new_head.block.phase()),
             None,
         );
+    }
+
+    // This may even involve a DB lookup so it would be best
+    // if we can avoid making it if no event listeners are present
+    fn calculate_dependent_roots(&self, head: &ChainLink<P>) -> Result<DependentRootsBundle> {
+        let state = head.state(&self.store);
+        let current_epoch = accessors::get_current_epoch(&state);
+        let previous_epoch = accessors::get_previous_epoch(&state);
+
+        let current_duty_dependent_root =
+            self.storage
+                .dependent_root(&self.store, &state, current_epoch)?;
+
+        let previous_duty_dependent_root =
+            self.storage
+                .dependent_root(&self.store, &state, previous_epoch)?;
+
+        Ok(DependentRootsBundle {
+            current_duty_dependent_root,
+            previous_duty_dependent_root,
+        })
     }
 
     fn delay_block_until_blobs(&mut self, beacon_block_root: H256, pending_block: PendingBlock<P>) {

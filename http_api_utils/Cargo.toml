@@ -9,18 +9,27 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }
+execution_engine = { workspace = true }
 features = { workspace = true }
+fork_choice_store = { workspace = true }
+helper_functions = { workspace = true }
 http-body-util = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 mime = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+tap = { workspace = true }
 thiserror = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 types = { workspace = true }
+tokio = { workspace = true }
+strum = { workspace = true }
 
 [dev-dependencies]
 hex-literal = { workspace = true }

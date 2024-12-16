@@ -20,6 +20,7 @@ fork_choice_control = { workspace = true }
 futures = { workspace = true }
 good_lp = { workspace = true }
 helper_functions = { workspace = true }
+http_api_utils = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 prometheus_metrics = { workspace = true }

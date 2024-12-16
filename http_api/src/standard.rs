@@ -27,7 +27,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use http_api_utils::{BlockId, StateId};
+use http_api_utils::{BlockId, EventChannels, StateId, Topic};
 use itertools::{izip, Either, Itertools as _};
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
@@ -87,7 +87,6 @@ use validator::{ApiToValidator, ValidatorConfig};
 use crate::{
     block_id,
     error::{Error, IndexedError},
-    events::{EventChannels, Topic},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
@@ -1258,10 +1257,7 @@ pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        if let Err(error) = send_proposer_slashing_event(*proposer_slashing, &event_channels) {
-            warn!("unable to send proposer slashing event: {error}");
-        }
-
+        event_channels.send_proposer_slashing_event(&proposer_slashing);
         ApiToP2p::PublishProposerSlashing(proposer_slashing).send(&api_to_p2p_tx);
     }
 
@@ -1293,10 +1289,7 @@ pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        if let Err(error) = send_voluntary_exit_event(*signed_voluntary_exit, &event_channels) {
-            warn!("unable to send voluntary exit event: {error}");
-        }
-
+        event_channels.send_voluntary_exit_event(&signed_voluntary_exit);
         ApiToP2p::PublishVoluntaryExit(signed_voluntary_exit).send(&api_to_p2p_tx);
     }
 
@@ -1328,12 +1321,7 @@ pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        if let Err(error) =
-            send_attester_slashing_event(*attester_slashing.clone(), &event_channels)
-        {
-            warn!("unable to send attester slashing event: {error}");
-        }
-
+        event_channels.send_attester_slashing_event(&attester_slashing);
         ApiToP2p::PublishAttesterSlashing(attester_slashing).send(&api_to_p2p_tx);
     }
 
@@ -2796,36 +2784,6 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
         }
         Err(error) => return Err(Error::InvalidBlock(error)),
     }
-
-    Ok(())
-}
-
-fn send_attester_slashing_event<P: Preset>(
-    attester_slashing: AttesterSlashing<P>,
-    event_channels: &EventChannels,
-) -> Result<()> {
-    let event = Topic::AttesterSlashing.build(attester_slashing)?;
-    event_channels.attester_slashings.send(event)?;
-
-    Ok(())
-}
-
-fn send_proposer_slashing_event(
-    proposer_slashing: ProposerSlashing,
-    event_channels: &EventChannels,
-) -> Result<()> {
-    let event = Topic::ProposerSlashing.build(proposer_slashing)?;
-    event_channels.proposer_slashings.send(event)?;
-
-    Ok(())
-}
-
-fn send_voluntary_exit_event(
-    voluntary_exit: SignedVoluntaryExit,
-    event_channels: &EventChannels,
-) -> Result<()> {
-    let event = Topic::VoluntaryExit.build(voluntary_exit)?;
-    event_channels.voluntary_exits.send(event)?;
 
     Ok(())
 }
