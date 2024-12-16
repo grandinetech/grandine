@@ -216,13 +216,13 @@ fn process_execution_payload_for_gossip<P: Preset>(
         Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
     );
 
-    // > [New in Deneb:EIP4844] Verify commitments are under limit
-    let maximum = P::MaxBlobsPerBlock::USIZE;
+    // > [Modified in Electra:EIP7691] Verify commitments are under limit
+    let maximum = P::MaxBlobsPerBlockElectra::USIZE;
     let in_block = body.blob_kzg_commitments.len();
 
     ensure!(
         in_block <= maximum,
-        Error::<P>::TooManyBlockKzgCommitments { in_block },
+        Error::<P>::TooManyBlockKzgCommitments { in_block, maximum },
     );
 
     Ok(())

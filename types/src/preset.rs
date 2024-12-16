@@ -176,6 +176,13 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
+    type MaxBlobsPerBlockElectra: MerkleElements<Blob<Self>>
+        + MerkleElements<KzgCommitment>
+        + MerkleElements<KzgProof>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
 
     // Derived type-level variables
     type MaxAggregatorsPerSlot: MerkleElements<ValidatorIndex>
@@ -297,6 +304,7 @@ impl Preset for Mainnet {
     type PendingDepositsLimit = U134217728;
     type PendingConsolidationsLimit = U262144;
     type PendingPartialWithdrawalsLimit = U134217728;
+    type MaxBlobsPerBlockElectra = U9;
 
     // Derived type-level variables
     type MaxAggregatorsPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -361,6 +369,7 @@ impl Preset for Minimal {
         type MaxAttesterSlashingsElectra;
         type MaxConsolidationRequestsPerPayload;
         type PendingDepositsLimit;
+        type MaxBlobsPerBlockElectra;
     }
 
     // Phase 0
@@ -463,6 +472,7 @@ impl Preset for Medalla {
         type PendingDepositsLimit;
         type PendingConsolidationsLimit;
         type PendingPartialWithdrawalsLimit;
+        type MaxBlobsPerBlockElectra;
 
         // Derived type-level variables
         type MaxAggregatorsPerSlot;
@@ -885,6 +895,8 @@ pub struct ElectraPreset {
     pending_partial_withdrawals_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     whistleblower_reward_quotient_electra: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_blobs_per_block_electra: u64,
 }
 
 impl ElectraPreset {
@@ -905,6 +917,7 @@ impl ElectraPreset {
             pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
             pending_partial_withdrawals_limit: P::PendingPartialWithdrawalsLimit::U64,
             whistleblower_reward_quotient_electra: P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,
+            max_blobs_per_block_electra: P::MaxBlobsPerBlockElectra::U64,
         }
     }
 }
