@@ -293,6 +293,25 @@ pub fn compute_subscribed_subnets<P: Preset>(
     Ok((permutated_prefix..cutoff).map(|index| index % AttestationSubnetCount::U64))
 }
 
+pub fn next_subnet_subscription_epoch<P: Preset>(
+    node_id: NodeId,
+    config: &Config,
+    current_epoch: Epoch,
+) -> Result<Epoch> {
+    let current_subscribed_subnets =
+        compute_subscribed_subnets::<P>(node_id, config, current_epoch)?.collect_vec();
+
+    let mut epoch = current_epoch + 1;
+
+    while compute_subscribed_subnets::<P>(node_id, config, epoch)?.collect_vec()
+        == current_subscribed_subnets
+    {
+        epoch += 1;
+    }
+
+    Ok(epoch)
+}
+
 /// [`compute_time_at_slot`] and [`compute_timestamp_at_slot`].
 ///
 /// The two functions do the same thing as long as [`GENESIS_SLOT`] is 0.
@@ -578,7 +597,7 @@ mod tests {
             consts::{DOMAIN_BEACON_ATTESTER, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
             containers::Validator,
         },
-        preset::Minimal,
+        preset::{Mainnet, Minimal},
     };
 
     use super::*;
@@ -690,5 +709,37 @@ mod tests {
         for (node_id, config, epoch) in iproduct!(node_ids, configs, epochs) {
             compute_subscribed_subnets::<Minimal>(node_id, &config, epoch).ok();
         }
+    }
+
+    #[test]
+    fn test_next_subnet_subscription_epoch() -> Result<()> {
+        let node_id = NodeId::from_u64(123_456);
+        let config = Config::mainnet();
+
+        for epoch in [100_000, 200_000, 300_000] {
+            let current_subscribed_subnets =
+                compute_subscribed_subnets::<Mainnet>(node_id, &config, epoch)?.collect_vec();
+
+            let next_subscription_epoch =
+                next_subnet_subscription_epoch::<Mainnet>(node_id, &config, epoch)?;
+
+            assert_eq!(
+                current_subscribed_subnets,
+                compute_subscribed_subnets::<Mainnet>(
+                    node_id,
+                    &config,
+                    next_subscription_epoch - 1
+                )?
+                .collect_vec(),
+            );
+
+            assert_ne!(
+                current_subscribed_subnets,
+                compute_subscribed_subnets::<Mainnet>(node_id, &config, next_subscription_epoch)?
+                    .collect_vec(),
+            );
+        }
+
+        Ok(())
     }
 }
