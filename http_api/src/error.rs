@@ -9,7 +9,7 @@ use axum::{
     Extension, Json,
 };
 use axum_extra::extract::QueryRejection;
-use bls::SignatureBytes;
+use bls::{traits::SignatureBytes as _, SignatureBytes};
 use futures::channel::oneshot::Canceled;
 use http_api_utils::ApiError;
 use serde::{Serialize, Serializer};

@@ -241,6 +241,7 @@ fn slot_index_from_slot(slot: Slot) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use bls::traits::SecretKey as _;
     use reqwest::Client;
     use signer::{KeyOrigin, Web3SignerConfig};
     use types::preset::Minimal;

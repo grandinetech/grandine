@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use arc_swap::{ArcSwap, Guard};
-use bls::{PublicKeyBytes, SecretKey, Signature};
+use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, Signature};
 use doppelganger_protection::DoppelgangerProtection;
 use futures::{
     lock::Mutex,

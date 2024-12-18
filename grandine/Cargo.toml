@@ -73,6 +73,7 @@ tempfile = { workspace = true }
 test-case = { workspace = true }
 
 [features]
+default = ["bls/blst"]
 logger-always-write-style = []
 
 # `preset-any` and `network-any` should not be passed to Cargo.

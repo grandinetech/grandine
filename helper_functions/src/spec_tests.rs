@@ -1,6 +1,8 @@
 use bls::{
+    error::Error,
+    traits::{PublicKey as _, SecretKey as _, Signature as _},
     AggregatePublicKey, AggregatePublicKeyBytes, AggregateSignature, AggregateSignatureBytes,
-    Error, PublicKey, PublicKeyBytes, SecretKey, SecretKeyBytes, Signature, SignatureBytes,
+    PublicKey, PublicKeyBytes, SecretKey, SecretKeyBytes, Signature, SignatureBytes,
 };
 use serde::Deserialize;
 use spec_test_utils::Case;

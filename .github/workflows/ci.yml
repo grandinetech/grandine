@@ -37,7 +37,7 @@ jobs:
       run: cargo test --release --no-fail-fast -- --skip behaviour --skip common
     - name: Run tests
       if: runner.os != 'Macos'
-      run: cargo test --release --no-fail-fast
+      run: cargo test --release --no-fail-fast --no-default-features --features bls/zkcrypto
     - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb
