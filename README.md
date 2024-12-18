@@ -6,7 +6,7 @@ The documentation is available [here](https://docs.grandine.io/). Feel free to r
 
 ## Performance
 
-Grandine is a optimised and parallelised client. There aren't many published performance comparisions, but a previous [research](https://arxiv.org/abs/2311.05252) by MigaLabs may give some insight. We run 50,000 Holesky validators on one of our developer's machine.
+Grandine is a optimized and parallelised client. There aren't many published performance comparisions, but a previous [research](https://arxiv.org/abs/2311.05252) by MigaLabs may give some insight. We run 50,000 Holesky validators on one of our developer's machine.
 
 ## Memory Usage
 
