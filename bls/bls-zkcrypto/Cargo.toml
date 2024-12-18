@@ -1,0 +1,23 @@
+[package]
+name = "bls-zkcrypto"
+edition = { workspace = true }
+
+[dependencies]
+bls-core = { workspace = true }
+bls12_381 = { workspace = true, features = ["default", "experimental"] }
+derivative = { workspace = true }
+derive_more = { workspace = true }
+hex = { workspace = true }
+once_cell = { workspace = true }
+ff = { workspace = true }
+fixed-hash = { workspace = true }
+itertools = { workspace = true }
+impl-serde = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+sha2 = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+typenum = { workspace = true }
+zeroize = { workspace = true }

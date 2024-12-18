@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
+use bls::traits::Signature as _;
 use helper_functions::accessors;
 use itertools::Itertools as _;
 use log::debug;

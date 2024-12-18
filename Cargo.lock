@@ -921,6 +921,16 @@ dependencies = [
 name = "bls"
 version = "0.0.0"
 dependencies = [
+ "bls-blst",
+ "bls-core",
+ "bls-zkcrypto",
+]
+
+[[package]]
+name = "bls-blst"
+version = "0.0.0"
+dependencies = [
+ "bls-core",
  "blst",
  "derivative",
  "derive_more 1.0.0",
@@ -936,9 +946,60 @@ dependencies = [
  "static_assertions",
  "std_ext",
  "tap",
+ "typenum",
+ "zeroize",
+]
+
+[[package]]
+name = "bls-core"
+version = "0.0.0"
+dependencies = [
+ "derivative",
+ "hex",
+ "once_cell",
+ "serde",
+ "ssz",
+ "static_assertions",
  "thiserror 1.0.69",
  "typenum",
  "zeroize",
+]
+
+[[package]]
+name = "bls-zkcrypto"
+version = "0.0.0"
+dependencies = [
+ "bls-core",
+ "bls12_381",
+ "derivative",
+ "derive_more 1.0.0",
+ "ff",
+ "fixed-hash",
+ "hex",
+ "impl-serde",
+ "itertools 0.13.0",
+ "once_cell",
+ "rand",
+ "serde",
+ "serde_utils",
+ "sha2 0.10.8",
+ "ssz",
+ "static_assertions",
+ "typenum",
+ "zeroize",
+]
+
+[[package]]
+name = "bls12_381"
+version = "0.8.0"
+source = "git+https://github.com/zkcrypto/bls12_381.git#9ea427c0eb1a7e2ac16902a322aea156c496ddb0"
+dependencies = [
+ "digest 0.10.7",
+ "ff",
+ "group",
+ "pairing",
+ "rand_core",
+ "subtle",
 ]
 
 [[package]]
@@ -2529,6 +2590,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
+ "bitvec",
  "rand_core",
  "subtle",
 ]
@@ -5600,6 +5662,15 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2 0.10.8",
+]
+
+[[package]]
+name = "pairing"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
+dependencies = [
+ "group",
 ]
 
 [[package]]

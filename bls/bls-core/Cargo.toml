@@ -1,0 +1,14 @@
+[package]
+name = "bls-core"
+edition = { workspace = true }
+
+[dependencies]
+derivative = { workspace = true }
+hex = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
+typenum = { workspace = true }
+zeroize = { workspace = true }

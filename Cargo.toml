@@ -8,6 +8,9 @@ members = [
     'binary_utils',
     'block_producer',
     'bls',
+    'bls/bls-blst',
+    'bls/bls-core',
+    'bls/bls-zkcrypto',
     'builder_api',
     'clock',
     'database',
@@ -291,6 +294,7 @@ base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
+bls12_381 = { git = "https://github.com/zkcrypto/bls12_381.git" }
 blst = { version = '0.3', features = ['portable'] }
 bstr = '1'
 build-time = '0.1'
@@ -323,6 +327,7 @@ enum-map = '2'
 enumset = '1'
 env_logger = '0.11'
 ethereum-types = '0.14'
+ff = "0.13.0"
 fixed-hash = '0.8.0'
 fnv = '1'
 fs-err = { version = '2', features = ['tokio'] }
@@ -457,6 +462,9 @@ attestation_verifier = { path = 'attestation_verifier' }
 binary_utils = { path = 'binary_utils' }
 block_producer = { path = 'block_producer' }
 bls = { path = 'bls' }
+bls-blst = { path = 'bls/bls-blst' }
+bls-core = { path = 'bls/bls-core' }
+bls-zkcrypto = { path = 'bls/bls-zkcrypto' }
 builder_api = { path = 'builder_api' }
 clock = { path = 'clock' }
 database = { path = 'database' }

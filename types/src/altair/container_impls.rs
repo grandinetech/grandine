@@ -1,4 +1,4 @@
-use bls::AggregateSignatureBytes;
+use bls::{traits::SignatureBytes as _, AggregateSignatureBytes};
 
 use crate::{altair::containers::SyncAggregate, preset::Preset};
 

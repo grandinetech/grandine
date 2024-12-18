@@ -24,7 +24,7 @@ jobs:
     # Running `rustc` or Cargo should automatically install the toolchain specified in `rust-toolchain.toml`.
     - uses: Swatinem/rust-cache@v2
     - name: Run cargo build
-      run: cargo build --release --features default-networks
+      run: cargo build --release --features default-networks --features blst
     - name: Check if code is formatted (Linux)
       if: runner.os == 'Linux'
       run: cargo fmt --check
@@ -34,10 +34,10 @@ jobs:
     # It's a known issue that networking tests randomly fails on Macos
     - name: Run tests
       if: runner.os == 'Macos'
-      run: cargo test --release --no-fail-fast -- --skip behaviour --skip common
+      run: cargo test --release --no-fail-fast --features blst -- --skip behaviour --skip common
     - name: Run tests
       if: runner.os != 'Macos'
-      run: cargo test --release --no-fail-fast
+      run: cargo test --release --no-fail-fast --features zkcrypto
     - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb

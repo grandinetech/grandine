@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use allocator as _;
+use bls::traits::CachedPublicKey as _;
 use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconState};
