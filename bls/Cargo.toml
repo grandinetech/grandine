@@ -6,24 +6,11 @@ authors = ["Grandine <info@grandine.io>"]
 [lints]
 workspace = true
 
-[dependencies]
-blst = { workspace = true }
-derivative = { workspace = true }
-derive_more = { workspace = true }
-fixed-hash = { workspace = true }
-hex = { workspace = true }
-impl-serde = { workspace = true }
-itertools = { workspace = true }
-once_cell = { workspace = true }
-rand = { workspace = true }
-serde = { workspace = true }
-serde_utils = { workspace = true }
-ssz = { workspace = true }
-static_assertions = { workspace = true }
-thiserror = { workspace = true }
-typenum = { workspace = true }
-zeroize = { workspace = true }
+[features]
+blst = ["dep:bls-blst"]
+zkcrypto = ["dep:bls-zkcrypto"]
 
-[dev-dependencies]
-std_ext = { workspace = true }
-tap = { workspace = true }
+[dependencies]
+bls-core = { workspace = true }
+bls-blst = { workspace = true, optional = true }
+bls-zkcrypto = { workspace = true, optional = true }

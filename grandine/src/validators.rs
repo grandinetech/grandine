@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Error, Result};
-use bls::{PublicKeyBytes, SecretKey};
+use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
 use log::{info, warn};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};

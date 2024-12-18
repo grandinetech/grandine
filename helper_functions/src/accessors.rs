@@ -8,7 +8,10 @@ use std::sync::Arc;
 use anyhow::{bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{AggregatePublicKey, CachedPublicKey, PublicKeyBytes};
+use bls::{
+    traits::{CachedPublicKey as _, PublicKey as _},
+    AggregatePublicKey, CachedPublicKey, PublicKeyBytes,
+};
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;

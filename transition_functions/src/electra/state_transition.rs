@@ -1,6 +1,7 @@
 use core::ops::Not as _;
 
 use anyhow::{Error as AnyhowError, Result};
+use bls::traits::CachedPublicKey as _;
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors, electra,

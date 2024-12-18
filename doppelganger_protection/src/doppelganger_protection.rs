@@ -261,6 +261,7 @@ impl LivenessChecker {
 
 #[cfg(test)]
 mod tests {
+    use bls::traits::CachedPublicKey as _;
     use types::{config::Config, preset::Minimal};
 
     use super::*;
