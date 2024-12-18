@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Error as AnyhowError, Result};
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::RealController;
@@ -37,6 +37,7 @@ use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
 use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
+use ssz::{BitList, BitVector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
@@ -45,6 +46,7 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    electra::containers::{Attestation as ElectraAttestation, SingleAttestation},
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -574,7 +576,28 @@ impl<P: Preset> Network<P> {
             "publishing singular attestation (attestation: {attestation:?}, subnet_id: {subnet_id})",
         );
 
-        self.publish(PubsubMessage::Attestation(subnet_id, attestation));
+        match attestation.as_ref() {
+            Attestation::Phase0(_) => {
+                self.publish(PubsubMessage::Attestation(subnet_id, attestation));
+            }
+            Attestation::Electra(attestation) => {
+                let single_attestation =
+                    match try_convert_to_single_attestation(&self.controller, attestation) {
+                        Ok(single_attestation) => single_attestation,
+                        Err(error) => {
+                            warn!(
+                            "cannot convert electra attestation to single attestation: {error:?}"
+                        );
+                            return;
+                        }
+                    };
+
+                self.publish(PubsubMessage::SingleAttestation(
+                    subnet_id,
+                    single_attestation,
+                ));
+            }
+        }
     }
 
     fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
@@ -1479,6 +1502,34 @@ impl<P: Preset> Network<P> {
                 self.controller
                     .on_gossip_singular_attestation(attestation, subnet_id, gossip_id);
             }
+            PubsubMessage::SingleAttestation(subnet_id, single_attestation) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["attestation"]);
+                }
+
+                trace!(
+                    "received single attestation as gossip in subnet {subnet_id}: \
+                    {single_attestation:?} from {source}",
+                );
+
+                let attestation =
+                    match try_convert_to_attestation(&self.controller, single_attestation) {
+                        Ok(attestation) => Arc::new(attestation),
+                        Err(error) => {
+                            warn!("cannot convert single attestation to attestation: {error:?}");
+                            return;
+                        }
+                    };
+
+                if let Some(network_to_slasher_tx) = &self.channels.network_to_slasher_tx {
+                    P2pToSlasher::Attestation(attestation.clone_arc()).send(network_to_slasher_tx);
+                }
+
+                let gossip_id = GossipId { source, message_id };
+
+                self.controller
+                    .on_gossip_singular_attestation(attestation, subnet_id, gossip_id);
+            }
             PubsubMessage::VoluntaryExit(signed_voluntary_exit) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_gossip_object(&["voluntary_exit"]);
@@ -2029,6 +2080,82 @@ fn run_network_service<P: Preset>(
             }
         }
     });
+}
+
+// TODO(feature/electra): properly refactor attestations
+fn try_convert_to_single_attestation<P: Preset>(
+    controller: &RealController<P>,
+    attestation: &ElectraAttestation<P>,
+) -> Result<SingleAttestation> {
+    let ElectraAttestation {
+        aggregation_bits,
+        data,
+        signature,
+        committee_bits,
+    } = attestation;
+
+    let committee_index = misc::get_committee_indices::<P>(*committee_bits)
+        .next()
+        .unwrap_or_default();
+
+    let state = controller
+        .state_at_slot(data.slot)?
+        .ok_or_else(|| AnyhowError::msg("state not available at slot: {slot}"))?
+        .value;
+
+    let committee = accessors::beacon_committee(&state, data.slot, committee_index)?;
+
+    let attester_index = aggregation_bits
+        .iter()
+        .zip(committee)
+        .find_map(|(participated, validator_index)| (*participated).then_some(validator_index))
+        .ok_or_else(|| AnyhowError::msg("attester_index not available"))?;
+
+    Ok(SingleAttestation {
+        committee_index,
+        attester_index,
+        data: *data,
+        signature: *signature,
+    })
+}
+
+fn try_convert_to_attestation<P: Preset>(
+    controller: &RealController<P>,
+    single_attestation: SingleAttestation,
+) -> Result<Attestation<P>> {
+    let SingleAttestation {
+        committee_index,
+        attester_index,
+        data,
+        signature,
+    } = single_attestation;
+
+    let mut committee_bits = BitVector::default();
+    let index = committee_index.try_into()?;
+    committee_bits.set(index, true);
+
+    let state = controller
+        .state_at_slot(data.slot)?
+        .ok_or_else(|| AnyhowError::msg("state not available at slot: {slot}"))?
+        .value;
+
+    let committee = accessors::beacon_committee(&state, data.slot, committee_index)?;
+
+    let mut aggregation_bits = BitList::with_length(committee.len());
+
+    let position = committee
+        .into_iter()
+        .position(|index| index == attester_index)
+        .ok_or_else(|| AnyhowError::msg("{attester_index} not in committee"))?;
+
+    aggregation_bits.set(position, true);
+
+    Ok(Attestation::Electra(ElectraAttestation {
+        aggregation_bits,
+        data,
+        signature,
+        committee_bits,
+    }))
 }
 
 #[cfg(test)]
