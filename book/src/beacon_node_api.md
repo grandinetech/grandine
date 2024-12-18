@@ -18,4 +18,4 @@ docker run                                                          \
 
 * `--http-port` - sets API listen port (default: `5052`);
 * `--http-address` - sets API listen address (default: `127.0.0.1`);
-* `--timeout` - sets API timeout in miliseconds (default: `10000`).
+* `--timeout` - sets API timeout in milliseconds (default: `10000`).
