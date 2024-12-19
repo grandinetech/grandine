@@ -11,6 +11,8 @@ anyhow = { workspace = true }
 either = { workspace = true }
 ethereum-types = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true }
+hex_fmt = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
