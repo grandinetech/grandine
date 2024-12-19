@@ -547,10 +547,8 @@ impl<P: Preset> Network<P> {
     }
 
     fn publish_blob_sidecar(&self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        let subnet_id = misc::compute_subnet_for_blob_sidecar(
-            self.controller.chain_config(),
-            blob_sidecar.index,
-        );
+        let subnet_id =
+            misc::compute_subnet_for_blob_sidecar(self.controller.chain_config(), &blob_sidecar);
 
         let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 

@@ -255,7 +255,7 @@ impl<P: Preset> Context<P> {
     }
 
     pub fn on_blob_sidecar(&mut self, blob_sidecar: BlobSidecar<P>) -> Option<P2pMessage<P>> {
-        let subnet_id = misc::compute_subnet_for_blob_sidecar(self.config(), blob_sidecar.index);
+        let subnet_id = misc::compute_subnet_for_blob_sidecar(self.config(), &blob_sidecar);
 
         self.controller().on_gossip_blob_sidecar(
             Arc::new(blob_sidecar),

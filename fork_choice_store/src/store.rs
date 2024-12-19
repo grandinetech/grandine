@@ -1700,7 +1700,7 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
         let max_blobs_per_block =
-            if self.chain_config().phase_at_slot::<P>(block_header.slot) == Phase::Electra {
+            if self.chain_config().phase_at_slot::<P>(block_header.slot) >= Phase::Electra {
                 P::MaxBlobsPerBlockElectra::U64
             } else {
                 P::MaxBlobsPerBlock::U64
@@ -1713,8 +1713,7 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected =
-                misc::compute_subnet_for_blob_sidecar(&self.chain_config, blob_sidecar.index);
+            let expected = misc::compute_subnet_for_blob_sidecar(&self.chain_config, &blob_sidecar);
 
             ensure!(
                 actual == expected,
