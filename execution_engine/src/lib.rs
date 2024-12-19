@@ -10,5 +10,4 @@ pub use crate::{
 };
 
 mod execution_engine;
-mod ssz_as_prefixed_hex_or_bytes;
 mod types;
