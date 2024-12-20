@@ -15,7 +15,6 @@ use helper_functions::{accessors, predicates};
 use log::warn;
 use p2p::metrics::{PEERS_CONNECTED, RPC_RECV_BYTES, RPC_SENT_BYTES};
 use prometheus::{IntCounter, IntGauge};
-use psutil::{cpu::CpuTimes, process::Process};
 use serde::Serialize;
 use sysinfo::{Disks, System};
 use types::{preset::Preset, traits::BeaconState};
@@ -88,29 +87,13 @@ pub struct ProcessMetrics {
 
 impl ProcessMetrics {
     pub fn get() -> Self {
-        let mut cpu_process_seconds_total = 0;
-        let mut memory_process_bytes = 0;
-
-        match Process::current() {
-            Ok(process) => {
-                match process.cpu_times() {
-                    Ok(cpu_times) => {
-                        cpu_process_seconds_total = cpu_times.busy().as_secs()
-                            + cpu_times.children_system().as_secs()
-                            + cpu_times.children_system().as_secs();
-                    }
-                    Err(error) => warn!("unable to get current process CPU usage: {error:?}"),
-                }
-
-                match process.memory_info() {
-                    Ok(mem_info) => {
-                        memory_process_bytes = mem_info.rss();
-                    }
-                    Err(error) => warn!("unable to get process memory usage: {error:?}"),
-                }
-            }
-            Err(error) => warn!("unable to get current process: {error:?}"),
-        }
+        let Ok(crate::metric_sys::ProcessCpuMetric {
+            cpu_process_seconds_total,
+            memory_process_bytes,
+        }) = crate::metric_sys::get_process_cpu_metric()
+        else {
+            panic!("unable to get current process's cpu metric");
+        };
 
         let client_build = DateTime::parse_from_rfc3339(build_time_utc!())
             .expect("unable to parse build time")
@@ -284,12 +267,16 @@ struct PlatformSpecificSystemMetrics {
 
 impl PlatformSpecificSystemMetrics {
     #[cfg(not(target_os = "linux"))]
-    fn new(_cpu: Option<&CpuTimes>) -> Self {
+    fn new() -> Self {
         Self::default()
     }
 
     #[cfg(target_os = "linux")]
-    fn new(cpu: Option<&CpuTimes>) -> Self {
+    fn new() -> Self {
+        let cpu_times = psutil::cpu::cpu_times()
+            .map_err(|error| warn!("unable to get CPU times information: {error:?}"))
+            .ok();
+        let cpu = cpu_times.as_ref();
         let mem = psutil::memory::virtual_memory()
             .map_err(|error| warn!("unable to get virtual memory information: {error:?}"))
             .ok();
@@ -323,19 +310,17 @@ impl SystemMetrics {
         let (network_node_bytes_total_receive, network_node_bytes_total_transmit) =
             helpers::get_network_bytes();
 
-        let cpu_times = psutil::cpu::cpu_times()
-            .map_err(|error| warn!("unable to get CPU times information: {error:?}"))
-            .ok();
-
-        let cpu = cpu_times.as_ref();
+        let Ok(cpu_metric) = crate::metric_sys::get_cpu_metric() else {
+            panic!("unable to get current system's cpu metric");
+        };
 
         Self {
             // CPU
             cpu_cores: system.physical_core_count().unwrap_or_default(),
             cpu_threads: system.cpus().len(),
-            cpu_node_system_seconds_total: cpu.map(CpuTimes::total).unwrap_or_default().as_secs(),
-            cpu_node_user_seconds_total: cpu.map(CpuTimes::user).unwrap_or_default().as_secs(),
-            cpu_node_idle_seconds_total: cpu.map(CpuTimes::idle).unwrap_or_default().as_secs(),
+            cpu_node_system_seconds_total: cpu_metric.system_seconds,
+            cpu_node_user_seconds_total: cpu_metric.user_seconds,
+            cpu_node_idle_seconds_total: cpu_metric.idle_seconds,
 
             // memory
             memory_node_bytes_total: system.total_memory(),
@@ -357,7 +342,7 @@ impl SystemMetrics {
             misc_os: metrics_os(),
 
             // platform specific metrics
-            platform_specific_metrics: PlatformSpecificSystemMetrics::new(cpu),
+            platform_specific_metrics: PlatformSpecificSystemMetrics::new(),
         }
     }
 }

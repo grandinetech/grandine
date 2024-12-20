@@ -5055,6 +5055,7 @@ dependencies = [
  "tower-http",
  "transition_functions",
  "types",
+ "winsafe",
 ]
 
 [[package]]
@@ -8975,6 +8976,11 @@ dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.22"
+source = "git+https://github.com/rodrigocfd/winsafe#960806f6498b0ca81fe57e8f2a274aeb089efef5"
 
 [[package]]
 name = "write16"

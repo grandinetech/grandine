@@ -5,5 +5,6 @@ pub use crate::{
 
 mod beaconchain;
 mod helpers;
+mod metric_sys;
 mod server;
 mod service;

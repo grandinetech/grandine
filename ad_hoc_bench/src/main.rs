@@ -2,13 +2,11 @@ use core::ops::RangeInclusive;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use allocator as _;
-use anyhow::{Error, Result};
-use bytesize::ByteSize;
+use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdrawal_devnet_4};
 use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
-use jemalloc_ctl::Result as JemallocResult;
 use log::info;
 use rand::seq::SliceRandom as _;
 use types::{
@@ -247,7 +245,7 @@ impl From<Blocks> for BlockParameters {
 fn main() -> Result<()> {
     binary_utils::initialize_logger(module_path!(), false)?;
     binary_utils::initialize_rayon()?;
-
+    #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
 
     let options = Options::parse();
@@ -296,7 +294,7 @@ fn main() -> Result<()> {
             |_, _| BTreeMap::new(),
         ),
     }?;
-
+    #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
 
     Ok(())
@@ -311,6 +309,7 @@ fn run<P: Preset>(
     beacon_blocks: impl FnOnce(RangeInclusive<Slot>, usize) -> Vec<Arc<SignedBeaconBlock<P>>>,
     blob_sidecars: impl FnOnce(RangeInclusive<Slot>, usize) -> BTreeMap<Slot, Vec<Arc<BlobSidecar<P>>>>,
 ) -> Result<()> {
+    #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
 
     let Options {
@@ -421,11 +420,15 @@ fn run<P: Preset>(
     info!("average block throughput: {block_throughput:.3} blocks/s");
     info!("average slot throughput:  {slot_throughput:.3} slots/s");
 
-    print_jemalloc_stats()
+    #[cfg(not(target_os = "windows"))]
+    print_jemalloc_stats()?;
+
+    Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 fn print_jemalloc_stats() -> Result<()> {
-    jemalloc_ctl::epoch::advance().map_err(Error::msg)?;
+    jemalloc_ctl::epoch::advance().map_err(anyhow::Error::msg)?;
 
     info!(
         "allocated: {}, \
@@ -444,9 +447,9 @@ fn print_jemalloc_stats() -> Result<()> {
 
     Ok(())
 }
-
-fn human_readable_size(result: JemallocResult<usize>) -> Result<String> {
-    let size = result.map_err(Error::msg)?;
+#[cfg(not(target_os = "windows"))]
+fn human_readable_size(result: jemalloc_ctl::Result<usize>) -> Result<String> {
+    let size = result.map_err(anyhow::Error::msg)?;
     let size = size.try_into()?;
-    Ok(ByteSize(size).to_string_as(true))
+    Ok(bytesize::ByteSize(size).to_string_as(true))
 }

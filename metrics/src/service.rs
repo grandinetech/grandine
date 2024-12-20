@@ -163,6 +163,7 @@ impl<P: Preset> MetricsService<P> {
                             .unwrap_or_default(),
                     );
 
+                    #[cfg(not(target_os = "windows"))]
                     if let Err(error) = update_jemalloc_metrics(&self.metrics) {
                         warn!("unable to update jemalloc metrics: {error:?}");
                     }
@@ -302,6 +303,7 @@ impl<P: Preset> MetricsService<P> {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn update_jemalloc_metrics(metrics: &Arc<Metrics>) -> Result<()> {
     jemalloc_ctl::epoch::advance().map_err(Error::msg)?;
 
