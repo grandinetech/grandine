@@ -7,6 +7,7 @@ use prometheus_metrics::Metrics;
 #[derive(Clone, Copy)]
 enum ApiType {
     Http,
+    Metrics,
     Validator,
 }
 
@@ -26,6 +27,14 @@ impl ApiMetrics {
     }
 
     #[must_use]
+    pub const fn metrics(prometheus_metrics: Arc<Metrics>) -> Self {
+        Self {
+            api_type: ApiType::Metrics,
+            prometheus_metrics,
+        }
+    }
+
+    #[must_use]
     pub const fn validator(prometheus_metrics: Arc<Metrics>) -> Self {
         Self {
             api_type: ApiType::Validator,
@@ -38,6 +47,9 @@ impl ApiMetrics {
             ApiType::Http => self
                 .prometheus_metrics
                 .set_http_api_response_time(labels, response_duration),
+            ApiType::Metrics => self
+                .prometheus_metrics
+                .set_metrics_api_response_time(labels, response_duration),
             ApiType::Validator => self
                 .prometheus_metrics
                 .set_validator_api_response_time(labels, response_duration),

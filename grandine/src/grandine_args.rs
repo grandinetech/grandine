@@ -44,8 +44,8 @@ use reqwest::header::HeaderValue;
 use runtime::{
     MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
     DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
-    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_REQUEST_TIMEOUT,
-    DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
+    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -343,8 +343,8 @@ struct BeaconNodeOptions {
     back_sync_enabled: bool,
 
     /// Collect Prometheus metrics
-    #[clap(long)]
-    metrics: bool,
+    #[clap(long = "metrics")]
+    metrics_enabled: bool,
 
     /// Metrics address for metrics endpoint
     #[clap(long, default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
@@ -353,6 +353,10 @@ struct BeaconNodeOptions {
     /// Listen port for metrics endpoint
     #[clap(long, default_value_t = DEFAULT_METRICS_PORT)]
     metrics_port: u16,
+
+    /// Update system metrics every n seconds
+    #[clap(long, default_value_t = DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS)]
+    metrics_update_interval: u64,
 
     /// Optional remote metrics URL that Grandine will periodically send metrics to
     #[clap(long)]
@@ -499,7 +503,7 @@ impl NetworkConfigOptions {
         self,
         network: Network,
         network_dir: PathBuf,
-        metrics: bool,
+        metrics_enabled: bool,
         in_memory: bool,
     ) -> NetworkConfig {
         let Self {
@@ -542,7 +546,7 @@ impl NetworkConfigOptions {
         network_config.discv5_config.enr_update = !disable_enr_auto_update;
         network_config.upnp_enabled = !disable_upnp;
         network_config.network_dir = in_memory.not().then_some(network_dir);
-        network_config.metrics_enabled = metrics;
+        network_config.metrics_enabled = metrics_enabled;
         network_config.target_peers = target_peers;
         network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
@@ -900,9 +904,10 @@ impl GrandineArgs {
             jwt_secret,
             jwt_version,
             back_sync_enabled,
-            metrics,
+            metrics_enabled,
             metrics_address,
             metrics_port,
+            metrics_update_interval,
             remote_metrics_url,
             track_liveness,
             detect_doppelgangers,
@@ -949,9 +954,10 @@ impl GrandineArgs {
             warn!("both --configuration-file and --verify-configuration-file specified");
         }
 
-        if remote_metrics_url.is_some() && !metrics {
+        if remote_metrics_url.is_some() && !metrics_enabled {
             warn!(
-                "Remote metrics enabled without ---metrics. Network metrics will not be available"
+                "remote metrics enabled without ---metrics. \
+                 Network, system and process metrics will not be available"
             );
         }
 
@@ -1100,7 +1106,7 @@ impl GrandineArgs {
         );
 
         // enable global feature for easier checking
-        if metrics {
+        if metrics_enabled {
             features.push(Feature::PrometheusMetrics);
         }
 
@@ -1112,15 +1118,15 @@ impl GrandineArgs {
             || features.contains(&Feature::PrometheusMetrics)
             || features.contains(&Feature::ServeLeakyEndpoints))
         .then(|| MetricsServiceConfig {
-            remote_metrics_url,
             directories: directories.clone_arc(),
+            metrics_update_interval: Duration::from_secs(metrics_update_interval),
+            remote_metrics_url,
         });
 
-        let metrics_server_config = metrics.then_some(MetricsServerConfig {
+        let metrics_server_config = metrics_enabled.then_some(MetricsServerConfig {
             metrics_address,
             metrics_port,
             timeout: request_timeout,
-            directories: directories.clone_arc(),
         });
 
         let http_api_config = HttpApiConfig::from(http_api_options);
@@ -1147,8 +1153,7 @@ impl GrandineArgs {
             );
         }
 
-        let metrics_enabled = metrics;
-        let metrics = if metrics {
+        let metrics = if metrics_enabled {
             let metrics = Metrics::new()?;
             metrics.register_with_default_metrics()?;
             let metrics = Arc::new(metrics);

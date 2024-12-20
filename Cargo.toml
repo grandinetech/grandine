@@ -423,7 +423,7 @@ snap = '1'
 static_assertions = '1'
 strum = { version = '0.26', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
-sysinfo = '0.31'
+sysinfo = '0.33'
 tap = '1'
 tempfile = '3'
 test-case = '3'

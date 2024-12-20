@@ -30,13 +30,13 @@
         "x": 0,
         "y": 0
       },
-      "id": 6,
+      "id": 10,
       "panels": [],
-      "title": "Validator API",
+      "title": "Metrics API",
       "type": "row"
     },
     {
-      "description": "99th percentile Validator API response times",
+      "description": "99th percentile Metrics API response times",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -115,7 +115,7 @@
         {
           "editorMode": "code",
           "exemplar": true,
-          "expr": "histogram_quantile(0.99, (rate(VALIDATOR_API_RESPONSE_TIMES_bucket{instance=~\"$Instance\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, (rate(METRICS_API_RESPONSE_TIMES_bucket{instance=~\"$Instance\"}[$__rate_interval])))",
           "interval": "",
           "legendFormat": "{{request_path}} ({{instance}})",
           "range": true,
@@ -204,7 +204,7 @@
         {
           "editorMode": "code",
           "exemplar": true,
-          "expr": "(rate(VALIDATOR_API_RESPONSE_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval])) /  (rate(VALIDATOR_API_RESPONSE_TIMES_count{instance=~\"$Instance\"}[$__rate_interval]))",
+          "expr": "(rate(METRICS_API_RESPONSE_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval])) /  (rate(METRICS_API_RESPONSE_TIMES_count{instance=~\"$Instance\"}[$__rate_interval]))",
           "interval": "",
           "legendFormat": "{{request_path}} ({{instance}})",
           "range": true,
@@ -274,6 +274,283 @@
         "x": 0,
         "y": 35
       },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "rate(METRICS_API_RESPONSE_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
+          "legendFormat": "{{request_path}} ({{instance}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Average request counts",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 6,
+      "panels": [],
+      "title": "Validator API",
+      "type": "row"
+    },
+    {
+      "description": "99th percentile Validator API response times",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "series",
+            "axisGridShow": true,
+            "axisLabel": "",
+            "axisPlacement": "left",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 11,
+      "maxDataPoints": 1000,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "histogram_quantile(0.99, (rate(VALIDATOR_API_RESPONSE_TIMES_bucket{instance=~\"$Instance\"}[$__rate_interval])))",
+          "interval": "",
+          "legendFormat": "{{request_path}} ({{instance}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Longest response times ",
+      "type": "timeseries"
+    },
+    {
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "(rate(VALIDATOR_API_RESPONSE_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval])) /  (rate(VALIDATOR_API_RESPONSE_TIMES_count{instance=~\"$Instance\"}[$__rate_interval]))",
+          "interval": "",
+          "legendFormat": "{{request_path}} ({{instance}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Average response times",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 78
+      },
       "id": 4,
       "options": {
         "legend": {
@@ -305,7 +582,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 86
       },
       "id": 5,
       "panels": [],
@@ -372,7 +649,7 @@
         "h": 17,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 87
       },
       "id": 7,
       "maxDataPoints": 1000,
@@ -462,7 +739,7 @@
         "h": 17,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 104
       },
       "id": 8,
       "options": {
@@ -533,8 +810,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -549,7 +825,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 78
+        "y": 121
       },
       "id": 9,
       "options": {
@@ -617,8 +893,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Grandine HTTP API Response times",
+  "title": "Grandine API Response times",
   "uid": "GRANDINEHTTPAPI",
-  "version": 7,
+  "version": 12,
   "weekStart": ""
 }

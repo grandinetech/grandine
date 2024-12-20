@@ -335,7 +335,6 @@ impl<P: Preset> Context<P> {
 
         let channels = Channels {
             api_to_liveness_tx: Some(api_to_liveness_tx),
-            api_to_metrics_tx: None,
             api_to_p2p_tx,
             api_to_validator_tx,
             subnet_service_tx,

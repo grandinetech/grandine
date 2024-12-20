@@ -1480,7 +1480,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1565,7 +1566,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1651,7 +1653,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1741,7 +1744,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1836,7 +1840,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1927,7 +1932,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2036,7 +2042,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -2123,7 +2130,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2183,7 +2191,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2293,7 +2302,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "light-orange",
@@ -2387,7 +2397,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           }
@@ -2472,7 +2483,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2557,7 +2569,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           }
@@ -2640,7 +2653,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2735,13 +2749,12 @@
             }
           },
           "mappings": [],
-          "max": 12,
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "semi-dark-blue"
+                "color": "semi-dark-blue",
+                "value": null
               },
               {
                 "color": "semi-dark-blue",
@@ -2797,11 +2810,48 @@
       "targets": [
         {
           "editorMode": "code",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", instance=~\"$Instance\"})",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"})",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"})",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"})",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
           "exemplar": true,
           "expr": "gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", instance=~\"$Instance\"}",
+          "hide": false,
           "instant": false,
           "interval": "",
-          "legendFormat": "{{hash}}",
+          "legendFormat": "{{hash}} for {{instance}}",
           "refId": "A"
         }
       ],
@@ -2837,7 +2887,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "#EAB839",
@@ -2898,7 +2949,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "#EAB839",
@@ -2963,7 +3015,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3024,7 +3077,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3083,7 +3137,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           }
@@ -3143,7 +3198,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -3235,7 +3291,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           }
@@ -3319,7 +3376,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3355,8 +3413,45 @@
       "targets": [
         {
           "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_topic_iwant_msgs_total{instance=~\"$Instance\", hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_topic_iwant_msgs_total{instance=~\"$Instance\", hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_topic_iwant_msgs_total{instance=~\"$Instance\", hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_topic_iwant_msgs_total{instance=~\"$Instance\", hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
           "exemplar": true,
           "expr": "increase(gossipsub_topic_iwant_msgs_total{instance=~\"$Instance\", hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\"}[$__rate_interval])",
+          "hide": false,
           "instant": false,
           "interval": "",
           "legendFormat": "{{hash}}",
@@ -3460,7 +3555,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3494,6 +3590,42 @@
       },
       "pluginVersion": "8.1.3",
       "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_msg_recv_counts_unfiltered_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval])*12 - rate(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval])*12)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_msg_recv_counts_unfiltered_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[$__rate_interval])*12 - rate(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[$__rate_interval])*12)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_msg_recv_counts_unfiltered_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[$__rate_interval])*12 - rate(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[$__rate_interval])*12)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_msg_recv_counts_unfiltered_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"}[$__rate_interval])*12 - rate(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"}[$__rate_interval])*12)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
         {
           "editorMode": "code",
           "exemplar": true,
@@ -3574,7 +3706,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3664,7 +3797,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3751,7 +3885,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3839,7 +3974,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3849,63 +3985,7 @@
           },
           "unit": "Bps"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "total for 192.168.2.14:5055",
-                  "total for 192.168.2.14:5061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "total for 192.168.2.14:5061"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "dark-green",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "total for 192.168.2.14:5055"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "super-light-purple",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -3930,18 +4010,9 @@
       },
       "targets": [
         {
-          "editorMode": "code",
-          "exemplar": true,
-          "expr": "rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval])",
-          "interval": "",
-          "legendFormat": "{{hash}} {{instance}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3950,6 +4021,42 @@
           "range": true,
           "refId": "B",
           "useBackend": false
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval])",
+          "interval": "",
+          "legendFormat": "{{hash}} {{instance}}",
+          "range": true,
+          "refId": "A"
         }
       ],
       "title": "Recv Bytes per Topic",
@@ -4166,7 +4273,8 @@
             "mode": "percentage",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           }
@@ -4249,7 +4357,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue"
+                "color": "blue",
+                "value": null
               }
             ]
           }
@@ -4333,7 +4442,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4368,7 +4478,43 @@
       },
       "targets": [
         {
-          "editorMode": "builder",
+          "editorMode": "code",
+          "expr": "sum by(instance) (changes(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (changes(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[$__interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (changes(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[$__interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (changes(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"}[$__interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
           "exemplar": true,
           "expr": "changes(gossipsub_topic_msg_recv_counts_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__interval])",
           "interval": "",
@@ -4440,7 +4586,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4476,6 +4623,42 @@
       "targets": [
         {
           "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_sent_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (rate(gossipsub_topic_msg_recv_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\",  instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
           "exemplar": true,
           "expr": "rate(gossipsub_topic_msg_sent_bytes_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[$__rate_interval])",
           "hide": false,
@@ -4483,15 +4666,6 @@
           "legendFormat": "{{hash}}",
           "range": true,
           "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "sum by(instance) (rate(gossipsub_topic_msg_sent_bytes_total{hash=~\"/eth2/$Fork/.*\", instance=~\"$Instance\"}[$__rate_interval]))",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "total for {{instance}}",
-          "range": true,
-          "refId": "B"
         }
       ],
       "title": "Sent Bytes per Topic",
@@ -4557,7 +4731,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4566,32 +4741,7 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "beacon_aggregate_and_proof"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -4616,8 +4766,44 @@
       },
       "targets": [
         {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_accepted_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_accepted_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_accepted_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_accepted_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "exemplar": true,
           "expr": "increase(gossipsub_accepted_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[12s])",
           "fullMetaSearch": false,
@@ -4692,7 +4878,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4802,7 +4989,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4835,6 +5023,42 @@
         }
       },
       "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_ignored_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*$Topic.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_ignored_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_ignored_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "blob sidecar total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(instance) (increase(gossipsub_ignored_messages_per_topic_total{hash=~\"/eth2/$Fork/.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"}[12s]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
         {
           "disableTextWrap": false,
           "editorMode": "code",
@@ -4912,7 +5136,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5022,7 +5247,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5128,7 +5354,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5234,7 +5461,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5683,7 +5911,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5717,9 +5946,37 @@
       "targets": [
         {
           "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_peers_counts{hash!~\".*attester_slashing.*|.*beacon_aggregate_and_proof.*|.*beacon_block.*|.*proposer_slashing.*|.*voluntary_exit.*|.*sync_committee_contribution_and_proof.*|.*bls_to_execution.*|.*light_client.*|.*blob_sidecar.*|\", hash=~\"/eth2/$Fork/.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "total for {{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_peers_counts{hash=~\".*beacon_attestation.*\", hash=~\"/eth2/$Fork/.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "beacon attestation total for {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance) (rate(gossipsub_topic_peers_counts{hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", hash=~\"/eth2/$Fork/.*\", instance=~\"$Instance\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "sync committee total for {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
           "exemplar": false,
           "expr": "gossipsub_topic_peers_counts{hash!~\".*attester_slashing.*|.*beacon_aggregate_and_proof.*|.*beacon_block.*|.*proposer_slashing.*|.*voluntary_exit.*|.*sync_committee_contribution_and_proof.*|.*bls_to_execution.*|.*light_client.*|.*blob_sidecar.*|\", hash=~\"/eth2/$Fork/.*\", instance=~\"$Instance\"}",
           "format": "time_series",
+          "hide": false,
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
@@ -5799,7 +6056,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5888,7 +6146,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5967,9 +6226,13 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "definition": "label_values(gossipsub_mesh_peer_counts,hash)",
         "hide": 0,
@@ -5990,9 +6253,13 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "definition": "label_values(hash)",
         "hide": 0,
@@ -6013,13 +6280,13 @@
     ]
   },
   "time": {
-    "from": "now-3h",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Network",
   "uid": "QCrwGdI7ka",
-  "version": 16,
+  "version": 35,
   "weekStart": ""
 }

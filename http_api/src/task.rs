@@ -17,7 +17,6 @@ use genesis::AnchorCheckpointProvider;
 use http_api_utils::{ApiMetrics, EventChannels};
 use liveness_tracker::ApiToLiveness;
 use log::info;
-use metrics::ApiToMetrics;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{ApiToP2p, NetworkConfig, SyncToApi, ToSubnetService};
 use prometheus_metrics::Metrics;
@@ -35,7 +34,6 @@ use crate::{
 
 pub struct Channels<P: Preset> {
     pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
-    pub api_to_metrics_tx: Option<UnboundedSender<ApiToMetrics>>,
     pub api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
     pub api_to_validator_tx: UnboundedSender<ApiToValidator<P>>,
     pub subnet_service_tx: UnboundedSender<ToSubnetService>,
@@ -100,7 +98,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
 
         let Channels {
             api_to_liveness_tx,
-            api_to_metrics_tx,
             api_to_p2p_tx,
             api_to_validator_tx,
             subnet_service_tx,
@@ -127,7 +124,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             is_back_synced: is_back_synced.clone_arc(),
             event_channels,
             api_to_liveness_tx,
-            api_to_metrics_tx,
             api_to_p2p_tx,
             api_to_validator_tx,
             subnet_service_tx,

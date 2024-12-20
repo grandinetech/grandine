@@ -117,8 +117,15 @@ impl GrandineConfig {
 
         if let Some(metrics_server_config) = &metrics_config.metrics_server_config {
             info!(
-                "Metrics server address: {}",
+                "metrics server address: {}",
                 SocketAddr::from(metrics_server_config),
+            );
+        }
+
+        if let Some(metrics_service_config) = &metrics_config.metrics_service_config {
+            info!(
+                "metrics service configured with {:?} update interval",
+                metrics_service_config.metrics_update_interval,
             );
         }
 

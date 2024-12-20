@@ -8,7 +8,10 @@ use prometheus::{
     histogram_opts, opts, Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec,
 };
-use types::phase0::primitives::{Epoch, Gwei, Slot, UnixSeconds};
+use types::{
+    nonstandard::SystemStats,
+    phase0::primitives::{Epoch, Gwei, Slot, UnixSeconds},
+};
 
 use crate::helpers;
 
@@ -18,6 +21,7 @@ pub static METRICS: OnceCell<Arc<Metrics>> = OnceCell::new();
 pub struct Metrics {
     // Overview
     live: IntGauge,
+    pub metrics_requests_since_last_update: IntCounter,
 
     // System stats
     cores: IntGauge,
@@ -37,6 +41,9 @@ pub struct Metrics {
 
     // HTTP API metrics
     http_api_response_times: HistogramVec,
+
+    // Metrics server metrics
+    metrics_api_response_times: HistogramVec,
 
     // Validator API metrics
     validator_api_response_times: HistogramVec,
@@ -185,6 +192,11 @@ impl Metrics {
             // Overview
             live: IntGauge::new("IS_LIVE", "Grandine status")?,
 
+            metrics_requests_since_last_update: IntCounter::new(
+                "METRICS_REQUESTS_SINCE_LAST_UPDATE",
+                "Number of requests to get metrics since last metrics update",
+            )?,
+
             // System stats
             cores: IntGauge::new("CORE_COUNT", "Number of core in the node")?,
             disk_usage: IntGauge::new("GRANDINE_DISK_USAGE", "Grandine disk usage")?,
@@ -222,6 +234,15 @@ impl Metrics {
                 histogram_opts!(
                     "HTTP_API_RESPONSE_TIMES",
                     "Response times for HTTP API responses"
+                ),
+                &["request_path"],
+            )?,
+
+            // Metrics server metrics
+            metrics_api_response_times: HistogramVec::new(
+                histogram_opts!(
+                    "METRICS_API_RESPONSE_TIMES",
+                    "Response times for metrics server responses"
                 ),
                 &["request_path"],
             )?,
@@ -267,13 +288,15 @@ impl Metrics {
 
             received_aggregated_attestation_subsets: IntCounter::new(
                 "RECEIVED_AGGREGATED_ATTESTATION_SUBSETS",
-                "Number of received aggregated attestations that are subsets of already known aggregates"
+                "Number of received aggregated attestations that are subsets of \
+                 already known aggregates"
             )?,
 
             // Extra Network stats
             gossip_block_slot_start_delay_time: Histogram::with_opts(histogram_opts!(
                 "beacon_block_gossip_slot_start_delay_time",
-                "Duration between when the block is received and the start of the slot it belongs to.",
+                "Duration between when the block is received and the \
+                 start of the slot it belongs to.",
             ))?,
 
             // Mutator
@@ -711,7 +734,8 @@ impl Metrics {
 
             jemalloc_bytes_retained: IntGauge::new(
                 "JEMALLOC_BYTES_RETAINED",
-                "Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system",
+                "Total number of bytes in virtual memory mappings that were retained \
+                 rather than being returned to the operating system",
             )?,
 
             // Tick delay metrics
@@ -739,6 +763,7 @@ impl Metrics {
         default_registry.register(Box::new(self.grandine_thread_count.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
         default_registry.register(Box::new(self.http_api_response_times.clone()))?;
+        default_registry.register(Box::new(self.metrics_api_response_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_task_count.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_thread_count.clone()))?;
@@ -871,6 +896,19 @@ impl Metrics {
         Ok(())
     }
 
+    pub fn system_stats(&self) -> SystemStats {
+        SystemStats {
+            core_count: self.cores.get() as usize,
+            grandine_used_memory: self.used_memory.get() as u64,
+            grandine_total_cpu_percentage: self.total_cpu_percentage.get() as f32,
+            rx_bytes: self.rx_bytes.get() as u64,
+            tx_bytes: self.tx_bytes.get() as u64,
+            system_cpu_percentage: self.system_cpu_percentage.get() as f32,
+            system_used_memory: self.system_used_memory.get() as u64,
+            system_total_memory: self.system_total_memory.get() as u64,
+        }
+    }
+
     // Overview
     pub fn set_live(&self) {
         self.live.set(1)
@@ -946,6 +984,19 @@ impl Metrics {
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
             Err(error) => warn!("unable to track HTTP API response time for {labels:?}: {error:?}"),
+        }
+    }
+
+    // Metrics server metrics
+    pub fn set_metrics_api_response_time(&self, labels: &[&str], response_duration: Duration) {
+        match self
+            .metrics_api_response_times
+            .get_metric_with_label_values(labels)
+        {
+            Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
+            Err(error) => {
+                warn!("unable to track metrics server response time for {labels:?}: {error:?}")
+            }
         }
     }
 

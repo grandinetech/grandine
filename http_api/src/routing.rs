@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
+use anyhow::Error as AnyhowError;
 use axum::{
     extract::{DefaultBodyLimit, FromRef, State},
     routing::{get, post},
@@ -14,7 +15,6 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::EventChannels;
 use liveness_tracker::ApiToLiveness;
-use metrics::ApiToMetrics;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{ApiToP2p, NetworkConfig, ToSubnetService};
 use prometheus_metrics::Metrics;
@@ -25,7 +25,6 @@ use validator::{ApiToValidator, ValidatorConfig};
 
 use crate::{
     error::Error,
-    global::{self},
     gui, middleware,
     misc::{BackSyncedStatus, SyncedStatus},
     standard::{
@@ -80,7 +79,6 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub is_back_synced: Arc<BackSyncedStatus>,
     pub event_channels: Arc<EventChannels>,
     pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
-    pub api_to_metrics_tx: Option<UnboundedSender<ApiToMetrics>>,
     pub api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
     pub api_to_validator_tx: UnboundedSender<ApiToValidator<P>>,
     pub subnet_service_tx: UnboundedSender<ToSubnetService>,
@@ -175,12 +173,6 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<EventChannels> {
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Option<UnboundedSender<ApiToLiveness>> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.api_to_liveness_tx.clone()
-    }
-}
-
-impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Option<UnboundedSender<ApiToMetrics>> {
-    fn from_ref(state: &NormalState<P, W>) -> Self {
-        state.api_to_metrics_tx.clone()
     }
 }
 
@@ -302,11 +294,12 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route(
             "/system/stats",
             get(|extracted| async {
-                let State(api_to_metrics_tx) = extracted;
+                let State::<Option<Arc<Metrics>>>(metrics) = extracted;
 
-                global::get_system_stats(api_to_metrics_tx)
-                    .await
+                metrics
+                    .map(|metrics| metrics.system_stats())
                     .map(Json)
+                    .ok_or_else(|| AnyhowError::msg("metrics service is not configured"))
                     .map_err(Error::Internal)
             })
             .route_layer(axum::middleware::map_request_with_state(

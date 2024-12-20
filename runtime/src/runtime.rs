@@ -137,8 +137,6 @@ pub async fn run_after_genesis<P: Preset>(
         back_sync_enabled.then(mpsc::unbounded).unzip();
 
     let mut api_to_liveness_tx = None;
-    let mut api_to_metrics_tx = None;
-    let mut metrics_to_metrics_tx = None;
     let mut network_to_slasher_tx = None;
     let mut pool_to_liveness_tx = None;
     let mut slasher_to_validator_rx = None;
@@ -258,13 +256,9 @@ pub async fn run_after_genesis<P: Preset>(
     );
 
     let metrics_service = metrics_service_config.map(|metrics_config| {
-        let (api_tx, api_to_metrics_rx) = mpsc::unbounded();
         let (sync_tx, sync_to_metrics_rx) = mpsc::unbounded();
-        let (metrics_tx, metrics_to_metrics_rx) = mpsc::unbounded();
 
-        api_to_metrics_tx = Some(api_tx);
         sync_to_metrics_tx = Some(sync_tx);
-        metrics_to_metrics_tx = Some(metrics_tx);
 
         let eth1_connection_data = Eth1ConnectionData {
             sync_eth1_connected: !eth1_config.eth1_rpc_urls.is_empty(),
@@ -277,9 +271,7 @@ pub async fn run_after_genesis<P: Preset>(
         };
 
         let channels = MetricsChannels {
-            api_to_metrics_rx,
             eth1_api_to_metrics_rx,
-            metrics_to_metrics_rx,
             sync_to_metrics_rx,
         };
 
@@ -287,6 +279,9 @@ pub async fn run_after_genesis<P: Preset>(
             metrics_config,
             controller.clone_arc(),
             eth1_metrics,
+            metrics
+                .clone()
+                .expect("metrics registry must be present for metrics service"),
             slasher_config.is_some(),
             validator_keys.clone_arc(),
             channels,
@@ -590,7 +585,6 @@ pub async fn run_after_genesis<P: Preset>(
 
     let http_api_channels = HttpApiChannels {
         api_to_liveness_tx,
-        api_to_metrics_tx,
         api_to_p2p_tx,
         api_to_validator_tx,
         subnet_service_tx,
@@ -625,12 +619,10 @@ pub async fn run_after_genesis<P: Preset>(
     let run_metrics_server = match metrics_server_config {
         Some(config) => Either::Left(run_metrics_server(
             config,
-            controller.clone_arc(),
             registry.take(),
             metrics
                 .clone()
-                .expect("Metrics registry must be present for metrics server"),
-            metrics_to_metrics_tx,
+                .expect("metrics registry must be present for metrics server"),
         )),
         None => Either::Right(core::future::pending()),
     };

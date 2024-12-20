@@ -28,7 +28,6 @@ itertools = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }
 mediatype = { workspace = true }
-metrics = { workspace = true }
 mime = { workspace = true }
 operation_pools = { workspace = true }
 p2p = { workspace = true }

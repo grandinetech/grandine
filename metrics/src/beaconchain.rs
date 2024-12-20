@@ -13,8 +13,8 @@ use eth1_api::{Eth1ConnectionData, Eth1Metrics};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::{accessors, predicates};
 use log::warn;
-use p2p::metrics::PEERS_CONNECTED;
-use prometheus::IntGauge;
+use p2p::metrics::{PEERS_CONNECTED, RPC_RECV_BYTES, RPC_SENT_BYTES};
+use prometheus::{IntCounter, IntGauge};
 use psutil::{cpu::CpuTimes, process::Process};
 use serde::Serialize;
 use sysinfo::{Disks, System};
@@ -139,8 +139,8 @@ impl ProcessMetrics {
 #[derive(Serialize)]
 pub struct BeaconNodeMetrics {
     disk_beaconchain_bytes_total: u64,
-    network_libp2p_bytes_total_receive: i64,
-    network_libp2p_bytes_total_transmit: i64,
+    network_libp2p_bytes_total_receive: u64,
+    network_libp2p_bytes_total_transmit: u64,
     network_peers_connected: i64,
     sync_eth1_connected: bool,
     sync_eth2_synced: bool,
@@ -176,19 +176,15 @@ impl BeaconNodeMetrics {
             .map(IntGauge::get)
             .unwrap_or_default();
 
-        // TODO(feature/metrics): figure this out with prometheus_client
-        // let network_libp2p_bytes_total_receive = INBOUND_LIBP2P_BYTES
-        //     .as_ref()
-        //     .map(IntGauge::get)
-        //     .unwrap_or_default();
+        let network_libp2p_bytes_total_receive = RPC_RECV_BYTES
+            .as_ref()
+            .map(IntCounter::get)
+            .unwrap_or_default();
 
-        // let network_libp2p_bytes_total_transmit = OUTBOUND_LIBP2P_BYTES
-        //     .as_ref()
-        //     .map(IntGauge::get)
-        //     .unwrap_or_default();
-
-        let network_libp2p_bytes_total_receive = 0;
-        let network_libp2p_bytes_total_transmit = 0;
+        let network_libp2p_bytes_total_transmit = RPC_SENT_BYTES
+            .as_ref()
+            .map(IntCounter::get)
+            .unwrap_or_default();
 
         let disk_beaconchain_bytes_total = config.directories.disk_usage().unwrap_or_default();
 
