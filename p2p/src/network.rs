@@ -1631,8 +1631,8 @@ impl<P: Preset> Network<P> {
         if let Some(root) = local_finalized_root_at_remote_finalized_epoch {
             if root != remote.finalized_root {
                 warn!(
-                    "peer {} has different block finalized at epoch {} ({:?} != {:?})",
-                    peer_id, remote.finalized_epoch, root, remote.finalized_root,
+                    "peer {peer_id} has different block finalized at epoch {} ({root:?} != {:?})",
+                    remote.finalized_epoch, remote.finalized_root,
                 );
 
                 P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
@@ -1645,6 +1645,22 @@ impl<P: Preset> Network<P> {
 
                 return;
             }
+        } else if matches!(sync_status, SyncStatus::Behind { .. }) {
+            debug!(
+                "disconnecting peer {peer_id} due to missing historical data \
+                 required to validate finalized root {:?} at epoch {}",
+                remote.finalized_root, remote.finalized_epoch,
+            );
+
+            P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
+            ServiceInboundMessage::GoodbyePeer(
+                peer_id,
+                GoodbyeReason::IrrelevantNetwork,
+                ReportSource::SyncService,
+            )
+            .send(&self.network_to_service_tx);
+
+            return;
         }
 
         // Update status
