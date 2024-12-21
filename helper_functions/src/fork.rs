@@ -546,19 +546,17 @@ pub fn upgrade_to_electra<P: Preset>(
         epoch,
     };
 
-    let mut earliest_exit_epoch = misc::compute_activation_exit_epoch::<P>(epoch);
+    // initial value of `earliest_exit_epoch`
+    let earliest_activation_epoch = misc::compute_activation_exit_epoch::<P>(epoch);
 
-    for exit_epoch in validators
+    let earliest_exit_epoch = validators
         .into_iter()
         .map(|validator| validator.exit_epoch)
         .filter(|exit_epoch| *exit_epoch != FAR_FUTURE_EPOCH)
-    {
-        if exit_epoch > earliest_exit_epoch {
-            earliest_exit_epoch = exit_epoch;
-        }
-    }
-
-    earliest_exit_epoch += 1;
+        .fold(earliest_activation_epoch, |earliest, exit_epoch| {
+            earliest.max(exit_epoch)
+        })
+        + 1;
 
     let mut post = ElectraBeaconState {
         // > Versioning
@@ -607,7 +605,7 @@ pub fn upgrade_to_electra<P: Preset>(
         exit_balance_to_consume: 0,
         earliest_exit_epoch,
         consolidation_balance_to_consume: 0,
-        earliest_consolidation_epoch: misc::compute_activation_exit_epoch::<P>(epoch),
+        earliest_consolidation_epoch: earliest_activation_epoch,
         pending_deposits: PersistentList::default(),
         pending_partial_withdrawals: PersistentList::default(),
         pending_consolidations: PersistentList::default(),
