@@ -235,7 +235,7 @@ fn process_withdrawals<P: Preset>(
 where
     P::MaxWithdrawalsPerPayload: NonZero,
 {
-    let (expected_withdrawals, partial_withdrawals_count) = get_expected_withdrawals(state)?;
+    let (expected_withdrawals, processed_partial_withdrawals_count) = get_expected_withdrawals(state)?;
     let computed = expected_withdrawals.len();
     let in_block = execution_payload.withdrawals().len();
 
@@ -268,7 +268,7 @@ where
             .pending_partial_withdrawals()
             .into_iter()
             .copied()
-            .skip(partial_withdrawals_count),
+            .skip(processed_partial_withdrawals_count),
     )?;
 
     // > Update the next withdrawal index if this block contained withdrawals
@@ -316,7 +316,7 @@ pub fn get_expected_withdrawals<P: Preset>(
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut validator_index = state.next_withdrawal_validator_index();
     let mut withdrawals = vec![];
-    let mut partial_withdrawals_count = 0;
+    let mut processed_partial_withdrawals_count = 0;
 
     // > [New in Electra:EIP7251] Consume pending partial withdrawals
     for withdrawal in &state.pending_partial_withdrawals().clone() {
@@ -354,13 +354,24 @@ pub fn get_expected_withdrawals<P: Preset>(
             withdrawal_index += 1;
         }
 
-        partial_withdrawals_count += 1;
+        processed_partial_withdrawals_count += 1;
     }
 
     // > Sweep for remaining
     for _ in 0..bound {
-        let balance = state.balances().get(validator_index).copied()?;
         let validator = state.validators().get(validator_index)?;
+
+        // > [Modified in Electra:EIP7251]
+        let partially_withdrawn_balance = withdrawals
+            .iter()
+            .filter(|withdrawal| withdrawal.validator_index == validator_index)
+            .map(|withdrawal| withdrawal.amount)
+            .sum::<Gwei>();
+
+        let validator_balance = state.balances().get(validator_index).copied()?;
+        let balance = validator_balance
+            .checked_sub(partially_withdrawn_balance)
+            .expect("withdrawal amounts must not excess balance");
 
         let address = validator
             .withdrawal_credentials
@@ -408,7 +419,7 @@ pub fn get_expected_withdrawals<P: Preset>(
             .expect("total_validators being 0 should prevent the loop from being executed");
     }
 
-    Ok((withdrawals, partial_withdrawals_count))
+    Ok((withdrawals, processed_partial_withdrawals_count))
 }
 
 fn process_execution_payload<P: Preset>(
