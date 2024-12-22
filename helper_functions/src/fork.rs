@@ -2,7 +2,10 @@ use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::SignatureBytes;
+use bls::{
+    traits::{BlsCachedPublicKey, BlsSignatureBytes},
+    SignatureBytes,
+};
 use itertools::Itertools as _;
 use ssz::PersistentList;
 use std_ext::ArcExt as _;

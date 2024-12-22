@@ -6,7 +6,7 @@ use core::{
 use anyhow::{ensure, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::SignatureBytes;
+use bls::{traits::BlsCachedPublicKey, SignatureBytes};
 use itertools::Itertools as _;
 use ssz::SszHash as _;
 use tap::TryConv as _;

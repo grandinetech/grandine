@@ -1,6 +1,7 @@
 use core::ops::Not as _;
 
 use anyhow::{anyhow, Error as AnyhowError, Result};
+use bls::traits::BlsCachedPublicKey;
 use helper_functions::{
     accessors,
     error::SignatureKind,

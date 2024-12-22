@@ -5,7 +5,10 @@ use std::{
 };
 
 use anyhow::{Context as _, Error as AnyhowError, Result};
-use bls::{AggregateSignature, PublicKeyBytes, SignatureBytes};
+use bls::{
+    traits::{BlsCachedPublicKey, BlsSignature},
+    AggregateSignature, PublicKeyBytes, SignatureBytes,
+};
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};

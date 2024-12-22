@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use bls::{PublicKeyBytes, SecretKey, SecretKeyBytes};
+use bls::{traits::BlsSecretKey, PublicKeyBytes, SecretKey, SecretKeyBytes};
 use eip_2335::Crypto;
 use log::info;
 use sha2::{Digest as _, Sha256};

@@ -2,6 +2,7 @@
 
 use anyhow::{ensure, Result};
 use bls::{
+    traits::{BlsCachedPublicKey, BlsPublicKey, BlsSignature, BlsSignatureBytes},
     AggregatePublicKey, AggregateSignature, CachedPublicKey, PublicKey, Signature, SignatureBytes,
 };
 use derive_more::Constructor;
@@ -227,7 +228,7 @@ impl Verifier for SingleVerifier {
             let signature = Signature::try_from(signature_bytes)?;
 
             ensure!(
-                signature.verify(message, public_key),
+                signature.verify(message, &public_key),
                 Error::SignatureInvalid(signature_kind),
             );
         }
@@ -437,7 +438,7 @@ pub enum VerifierOption {
 
 #[cfg(test)]
 mod tests {
-    use bls::{SecretKey, SecretKeyBytes};
+    use bls::{traits::BlsSecretKey, SecretKey, SecretKeyBytes};
     use std_ext::CopyExt as _;
     use tap::{Conv as _, TryConv as _};
 

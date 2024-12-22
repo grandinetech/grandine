@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 
 use anyhow::Result;
-use bls::{SecretKey, SecretKeyBytes};
+use bls::{traits::BlsSecretKey, SecretKey, SecretKeyBytes};
 use deposit_tree::DepositTree;
 use genesis::Incremental;
 use helper_functions::{misc, signing::SignForAllForks};

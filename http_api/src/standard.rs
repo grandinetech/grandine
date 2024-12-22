@@ -15,7 +15,10 @@ use axum::{
     Json,
 };
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
-use bls::{PublicKeyBytes, SignatureBytes};
+use bls::{
+    traits::{BlsCachedPublicKey, BlsSignatureBytes},
+    PublicKeyBytes, SignatureBytes,
+};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, Eth1Api};

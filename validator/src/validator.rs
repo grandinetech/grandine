@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Error as AnyhowError, Result};
 use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
-use bls::{PublicKeyBytes, Signature, SignatureBytes};
+use bls::{traits::BlsCachedPublicKey, PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},

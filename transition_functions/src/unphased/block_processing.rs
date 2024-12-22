@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use bls::{CachedPublicKey, SignatureBytes};
+use bls::{traits::BlsCachedPublicKey, CachedPublicKey, SignatureBytes};
 use helper_functions::{
     accessors::{
         attestation_epoch, get_beacon_proposer_index, get_current_epoch, get_randao_mix,

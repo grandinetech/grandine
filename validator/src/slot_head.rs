@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{CachedPublicKey, PublicKeyBytes, SignatureBytes};
+use bls::{traits::BlsCachedPublicKey, CachedPublicKey, PublicKeyBytes, SignatureBytes};
 use futures::lock::Mutex;
 use helper_functions::{
     accessors, misc, predicates,

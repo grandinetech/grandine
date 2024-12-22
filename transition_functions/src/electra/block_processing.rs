@@ -3,7 +3,7 @@ use core::ops::{Add as _, Index as _, Rem as _};
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::CachedPublicKey;
+use bls::{traits::BlsCachedPublicKey, CachedPublicKey};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{

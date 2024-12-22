@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
+use bls::traits::BlsCachedPublicKey;
 use helper_functions::{
     accessors::{
         self, attestation_epoch, get_beacon_proposer_index, index_of_public_key,
