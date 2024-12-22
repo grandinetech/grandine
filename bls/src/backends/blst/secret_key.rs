@@ -11,7 +11,13 @@ use serde::Serialize;
 use ssz::{SszHash, SszWrite};
 use static_assertions::assert_not_impl_any;
 
-use crate::{consts::DOMAIN_SEPARATION_TAG, Error, PublicKey, SecretKeyBytes, Signature};
+use crate::{consts::DOMAIN_SEPARATION_TAG, error::Error, traits::BlsSecretKey};
+
+use super::{
+    public_key::PublicKey,
+    secret_key_bytes::{SecretKeyBytes, SIZE},
+    signature::Signature,
+};
 
 // `RawSecretKey` already implements `Zeroize` (with `zeroize(drop)`):
 // <https://github.com/supranational/blst/blob/v0.3.10/bindings/rust/src/lib.rs#L458-L460>
@@ -70,16 +76,20 @@ impl Hash for SecretKey {
     }
 }
 
-impl SecretKey {
+impl BlsSecretKey<SIZE> for SecretKey {
+    type SecretKeyBytes = SecretKeyBytes;
+    type PublicKey = PublicKey;
+    type Signature = Signature;
+
     #[inline]
     #[must_use]
-    pub fn to_public_key(&self) -> PublicKey {
+    fn to_public_key(&self) -> PublicKey {
         self.as_raw().sk_to_pk().into()
     }
 
     #[inline]
     #[must_use]
-    pub fn sign(&self, message: impl AsRef<[u8]>) -> Signature {
+    fn sign(&self, message: impl AsRef<[u8]>) -> Signature {
         self.as_raw()
             .sign(message.as_ref(), DOMAIN_SEPARATION_TAG, &[])
             .into()
@@ -87,11 +97,13 @@ impl SecretKey {
 
     #[inline]
     #[must_use]
-    pub fn to_bytes(&self) -> SecretKeyBytes {
+    fn to_bytes(&self) -> SecretKeyBytes {
         let bytes = self.as_raw().to_bytes();
         SecretKeyBytes { bytes }
     }
+}
 
+impl SecretKey {
     const fn as_raw(&self) -> &RawSecretKey {
         &self.0
     }

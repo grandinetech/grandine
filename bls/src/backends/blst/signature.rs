@@ -9,7 +9,13 @@ use derive_more::From;
 use itertools::Itertools as _;
 use rand::Rng as _;
 
-use crate::{consts::DOMAIN_SEPARATION_TAG, Error, PublicKey, SignatureBytes};
+use crate::{
+    consts::DOMAIN_SEPARATION_TAG,
+    error::Error,
+    traits::{BlsSignature, BlsSignatureBytes},
+};
+
+use super::{public_key::PublicKey, signature_bytes::SignatureBytes};
 
 const MULTI_VERIFY_RANDOM_BYTES: usize = size_of::<NonZeroU64>();
 const MULTI_VERIFY_RANDOM_BITS: usize = MULTI_VERIFY_RANDOM_BYTES * 8;
@@ -26,13 +32,6 @@ impl Default for Signature {
     }
 }
 
-impl From<Signature> for SignatureBytes {
-    #[inline]
-    fn from(signature: Signature) -> Self {
-        Self(signature.as_raw().compress())
-    }
-}
-
 impl TryFrom<SignatureBytes> for Signature {
     type Error = Error;
 
@@ -44,9 +43,12 @@ impl TryFrom<SignatureBytes> for Signature {
     }
 }
 
-impl Signature {
+impl BlsSignature for Signature {
+    type SignatureBytes = SignatureBytes;
+    type PublicKey = PublicKey;
+
     #[must_use]
-    pub fn verify(self, message: impl AsRef<[u8]>, public_key: PublicKey) -> bool {
+    fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool {
         let result = self.as_raw().verify(
             true,
             message.as_ref(),
@@ -61,13 +63,13 @@ impl Signature {
 
     #[inline]
     #[must_use]
-    pub fn aggregate(mut self, other: Self) -> Self {
+    fn aggregate(mut self, other: Self) -> Self {
         self.aggregate_in_place(other);
         self
     }
 
     #[inline]
-    pub fn aggregate_in_place(&mut self, other: Self) {
+    fn aggregate_in_place(&mut self, other: Self) {
         let mut self_aggregate = RawAggregateSignature::from_signature(self.as_raw());
         let other_aggregate = RawAggregateSignature::from_signature(other.as_raw());
         self_aggregate.add_aggregate(&other_aggregate);
@@ -75,7 +77,7 @@ impl Signature {
     }
 
     #[must_use]
-    pub fn fast_aggregate_verify<'keys>(
+    fn fast_aggregate_verify<'keys>(
         &self,
         message: impl AsRef<[u8]>,
         public_keys: impl IntoIterator<Item = &'keys PublicKey>,
@@ -93,7 +95,7 @@ impl Signature {
     }
 
     #[must_use]
-    pub fn multi_verify<'all>(
+    fn multi_verify<'all>(
         messages: impl IntoIterator<Item = &'all [u8]>,
         signatures: impl IntoIterator<Item = &'all Self>,
         public_keys: impl IntoIterator<Item = &'all PublicKey>,
@@ -127,8 +129,10 @@ impl Signature {
 
         result == BLST_ERROR::BLST_SUCCESS
     }
+}
 
-    const fn as_raw(&self) -> &RawSignature {
+impl Signature {
+    pub const fn as_raw(&self) -> &RawSignature {
         &self.0
     }
 }
@@ -138,7 +142,10 @@ mod tests {
     use std_ext::CopyExt as _;
     use tap::{Conv as _, TryConv as _};
 
-    use crate::{SecretKey, SecretKeyBytes};
+    use crate::{
+        backends::blst::{secret_key::SecretKey, secret_key_bytes::SecretKeyBytes},
+        traits::BlsSecretKey,
+    };
 
     use super::*;
 
@@ -147,28 +154,28 @@ mod tests {
     #[test]
     fn signature_verify_succeeds_on_correct_triple() {
         let secret_key = secret_key();
-        let public_key = secret_key.to_public_key();
-        let signature = secret_key.sign(MESSAGE);
+        let public_key = SecretKey::to_public_key(&secret_key);
+        let signature = SecretKey::sign(&secret_key, MESSAGE);
 
-        assert!(signature.verify(MESSAGE, public_key));
+        assert!(Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     #[test]
     fn signature_verify_fails_on_incorrect_public_key() {
         let secret_key = secret_key();
         let public_key = PublicKey::default();
-        let signature = secret_key.sign(MESSAGE);
+        let signature = SecretKey::sign(&secret_key, MESSAGE);
 
-        assert!(!signature.verify(MESSAGE, public_key));
+        assert!(!Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     #[test]
     fn signature_verify_fails_on_incorrect_signature() {
         let secret_key = secret_key();
-        let public_key = secret_key.to_public_key();
+        let public_key = SecretKey::to_public_key(&secret_key);
         let signature = Signature::default();
 
-        assert!(!signature.verify(MESSAGE, public_key));
+        assert!(!Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     fn secret_key() -> SecretKey {

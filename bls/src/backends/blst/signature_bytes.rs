@@ -4,6 +4,10 @@ use impl_serde::impl_fixed_hash_serde;
 use ssz::{BytesToDepth, MerkleTree, ReadError, Size, SszHash, SszRead, SszSize, SszWrite, H256};
 use typenum::{Unsigned as _, U1, U96};
 
+use crate::traits::BlsSignatureBytes;
+
+use super::signature::Signature;
+
 type CompressedSize = U96;
 
 construct_fixed_hash! {
@@ -12,6 +16,13 @@ construct_fixed_hash! {
 }
 
 impl_fixed_hash_serde!(SignatureBytes, CompressedSize::USIZE);
+
+impl From<Signature> for SignatureBytes {
+    #[inline]
+    fn from(signature: Signature) -> Self {
+        Self(signature.as_raw().compress())
+    }
+}
 
 impl SszSize for SignatureBytes {
     const SIZE: Size = Size::Fixed {
@@ -42,10 +53,10 @@ impl SszHash for SignatureBytes {
     }
 }
 
-impl SignatureBytes {
+impl BlsSignatureBytes for SignatureBytes {
     #[inline]
     #[must_use]
-    pub fn empty() -> Self {
+    fn empty() -> Self {
         let mut bytes = Self::zero();
 
         // The first byte of an empty signature must be 0xc0.
@@ -56,7 +67,7 @@ impl SignatureBytes {
 
     #[inline]
     #[must_use]
-    pub fn is_empty(self) -> bool {
+    fn is_empty(self) -> bool {
         self == Self::empty()
     }
 }

@@ -1,17 +1,14 @@
-use super::{PublicKey as PublicKeyTrait, SignatureBytes as SignatureBytesTrait};
-use crate::Error;
 use core::fmt::Debug;
 
-pub trait Signature<C, const N: usize>:
-    Clone + Copy + PartialEq + Eq + Debug + Default + 'static
+use super::{BlsPublicKey, BlsSignatureBytes};
+
+pub trait BlsSignature: Clone + Copy + PartialEq + Eq + Debug + Default + 'static
 where
     Self::PublicKey: 'static,
 {
-    type SignatureBytes: SignatureBytesTrait<C, N>;
-    type PublicKey: PublicKeyTrait<C>;
+    type SignatureBytes: BlsSignatureBytes;
+    type PublicKey: BlsPublicKey;
 
-    fn try_from(bytes: Self::SignatureBytes) -> Result<Self, Error>;
-    fn into(self) -> Self::SignatureBytes;
     fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool;
     fn aggregate(self, other: Self) -> Self;
     fn aggregate_in_place(&mut self, other: Self);

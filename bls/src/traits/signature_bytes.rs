@@ -1,8 +1,7 @@
 use core::{fmt::Debug, str::FromStr};
-use hex::FromHex;
 use ssz::{SszHash, SszRead, SszSize, SszWrite};
 
-pub trait SignatureBytes<C, const N: usize>:
+pub trait BlsSignatureBytes<C = ()>:
     AsRef<[u8]>
     + AsMut<[u8]>
     + Copy
@@ -14,7 +13,6 @@ pub trait SignatureBytes<C, const N: usize>:
     + Eq
     + Debug
     + FromStr
-    + FromHex
     + SszSize
     + SszRead<C>
     + SszWrite

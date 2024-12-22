@@ -3,7 +3,9 @@ use once_cell::race::OnceBox;
 use serde::{Deserialize, Serialize};
 use ssz::{ReadError, Size, SszHash, SszRead, SszReadDefault as _, SszSize, SszWrite, H256};
 
-use crate::{Error, PublicKey, PublicKeyBytes};
+use crate::{error::Error, traits::BlsCachedPublicKey};
+
+use super::{public_key::PublicKey, public_key_bytes::PublicKeyBytes};
 
 #[derive(Default, Debug, Derivative, Deserialize, Serialize)]
 #[derivative(PartialEq, Eq)]
@@ -22,7 +24,6 @@ impl Clone for CachedPublicKey {
             bytes,
             ref decompressed,
         } = *self;
-
         match decompressed.get().copied() {
             Some(public_key) => Self::new(bytes, public_key),
             None => bytes.into(),
@@ -77,7 +78,10 @@ impl SszHash for CachedPublicKey {
     }
 }
 
-impl CachedPublicKey {
+impl BlsCachedPublicKey for CachedPublicKey {
+    type PublicKeyBytes = PublicKeyBytes;
+    type PublicKey = PublicKey;
+
     fn new(bytes: PublicKeyBytes, public_key: PublicKey) -> Self {
         let decompressed = OnceBox::new();
 
@@ -92,17 +96,17 @@ impl CachedPublicKey {
     }
 
     #[inline]
-    pub const fn as_bytes(&self) -> &PublicKeyBytes {
+    fn as_bytes(&self) -> &PublicKeyBytes {
         &self.bytes
     }
 
     #[inline]
-    pub const fn to_bytes(&self) -> PublicKeyBytes {
+    fn to_bytes(&self) -> PublicKeyBytes {
         self.bytes
     }
 
     #[inline]
-    pub fn decompress(&self) -> Result<&PublicKey, Error> {
+    fn decompress(&self) -> Result<&PublicKey, Error> {
         self.decompressed
             .get_or_try_init(|| self.bytes.try_into().map(Box::new))
     }

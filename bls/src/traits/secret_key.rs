@@ -1,7 +1,6 @@
-use super::{
-    PublicKey as PublicKeyTrait, PublicKeyBytes as PublicKeyBytesTrait, Signature as SignatureTrait,
-};
 use core::{fmt::Debug, hash::Hash};
+
+use super::{BlsPublicKey, BlsSecretKeyBytes, BlsSignature};
 
 /// Secret key trait.
 ///
@@ -18,12 +17,12 @@ use core::{fmt::Debug, hash::Hash};
 ///    #[derive(Debug)]
 ///    #[debug("[REDACTED]")]
 ///    ```
-pub trait SecretKey<C, const N: usize>: PartialEq + Eq + Hash + Debug {
-    type PublicKeyBytes: PublicKeyBytesTrait<C>;
-    type PublicKey: PublicKeyTrait<C>;
-    type Signature: SignatureTrait<C, N>;
+pub trait BlsSecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
+    type SecretKeyBytes: BlsSecretKeyBytes<N>;
+    type PublicKey: BlsPublicKey;
+    type Signature: BlsSignature;
 
     fn to_public_key(&self) -> Self::PublicKey;
     fn sign(&self, message: impl AsRef<[u8]>) -> Self::Signature;
-    fn to_bytes(&self) -> Self::PublicKeyBytes;
+    fn to_bytes(&self) -> Self::SecretKeyBytes;
 }

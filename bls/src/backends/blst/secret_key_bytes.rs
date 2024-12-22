@@ -10,10 +10,12 @@ use ssz::{ReadError, Size, SszHash, SszRead, SszSize, SszWrite};
 use static_assertions::assert_not_impl_any;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::SecretKey;
+use crate::traits::BlsSecretKeyBytes;
+
+use super::secret_key::SecretKey;
 
 // Unlike public keys and signatures, secret keys are not compressed.
-const SIZE: usize = size_of::<SecretKey>();
+pub const SIZE: usize = size_of::<SecretKey>();
 
 #[derive(Default, AsRef, AsMut, From, Zeroize, ZeroizeOnDrop, Deserialize)]
 #[as_ref(forward)]
@@ -76,3 +78,5 @@ impl SszWrite for SecretKeyBytes {
         bytes.copy_from_slice(&self.bytes);
     }
 }
+
+impl BlsSecretKeyBytes<SIZE> for SecretKeyBytes {}

@@ -3,11 +3,15 @@ name = 'bls'
 edition = { workspace = true }
 authors = ["Grandine <info@grandine.io>"]
 
+[features]
+default = ["blst"]
+blst = ["dep:blst"]
+
 [lints]
 workspace = true
 
 [dependencies]
-blst = { workspace = true }
+blst = { workspace = true, optional = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 fixed-hash = { workspace = true }

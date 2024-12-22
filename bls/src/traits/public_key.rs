@@ -1,12 +1,14 @@
-use super::PublicKeyBytes as PublicKeyBytesTrait;
-use crate::Error;
 use core::fmt::Debug;
 
-pub trait PublicKey<C>: Clone + Copy + PartialEq + Eq + Default + Debug {
-    type PublicKeyBytes: PublicKeyBytesTrait<C>;
+use crate::error::Error;
 
-    fn try_from(bytes: Self::PublicKeyBytes) -> Result<Self, Error>;
-    fn into(self) -> Self::PublicKeyBytes;
+use super::BlsPublicKeyBytes;
+
+pub trait BlsPublicKey:
+    Clone + Copy + PartialEq + Eq + Default + Debug + TryFrom<Self::PublicKeyBytes>
+{
+    type PublicKeyBytes: BlsPublicKeyBytes;
+
     fn aggregate(self, other: Self) -> Self;
     fn aggregate_in_place(&mut self, other: Self);
     fn aggregate_nonempty(keys: impl IntoIterator<Item = Self>) -> Result<Self, Error>;

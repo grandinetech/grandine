@@ -5,6 +5,10 @@ use impl_serde::impl_fixed_hash_serde;
 use ssz::{BytesToDepth, MerkleTree, ReadError, Size, SszHash, SszRead, SszSize, SszWrite, H256};
 use typenum::{Unsigned as _, U1, U48};
 
+use crate::traits::BlsPublicKeyBytes;
+
+use super::public_key::PublicKey;
+
 type CompressedSize = U48;
 
 construct_fixed_hash! {
@@ -13,6 +17,13 @@ construct_fixed_hash! {
 }
 
 impl_fixed_hash_serde!(PublicKeyBytes, CompressedSize::USIZE);
+
+impl From<PublicKey> for PublicKeyBytes {
+    #[inline]
+    fn from(public_key: PublicKey) -> Self {
+        Self(public_key.as_raw().compress())
+    }
+}
 
 impl FromHex for PublicKeyBytes {
     type Error = <[u8; CompressedSize::USIZE] as FromHex>::Error;
@@ -49,4 +60,8 @@ impl SszHash for PublicKeyBytes {
     fn hash_tree_root(&self) -> H256 {
         MerkleTree::<BytesToDepth<CompressedSize>>::merkleize_bytes(self)
     }
+}
+
+impl BlsPublicKeyBytes for PublicKeyBytes {
+    type PublicKey = PublicKey;
 }
