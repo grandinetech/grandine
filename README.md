@@ -99,7 +99,7 @@ We also involve academia in the early stages of new ideas, however, the optimize
 
 ## Audits
 
-Grandine is used in production, however, a full audit is not completed. The client was tested by [Antithesis](https://antithesis.com/) team and no serious issues were found. The Antithesis team was impressed by Grandine performance because the client never crashed or got stuck during testing. However, always secure your keys with the approach you trust - ([Web3Signer](https://docs.web3signer.consensys.io), [Vouch](https://github.com/attestantio/vouch), etc.). Use it at your risk.
+Grandine is used in production and the [audits](/audit) have been completed by [Matter Labs](https://matter-labs.io/) and [X41 D-Sec](https://x41-dsec.de/). The client was also tested by [Antithesis](https://antithesis.com/) team. No serious issues were found. However, always secure your keys with the approach you trust ([Web3Signer](https://docs.web3signer.consensys.io), [Vouch](https://github.com/attestantio/vouch), etc.). Use it at your risk.
 
 ## Contact
 
