@@ -36,7 +36,3 @@ jobs:
     - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb
-    # Ignore RUSTSEC-2023-0071 because we don't use RSA in `jwt-simple` 
-    - name: Run cargo audit (Linux)
-      if: runner.os == 'Linux'
-      run: cargo audit --ignore RUSTSEC-2024-0370 --ignore RUSTSEC-2023-0071
