@@ -1,5 +1,5 @@
 use anyhow::Result;
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 use {
     anyhow::bail,
     psutil::{cpu, process::Process},
@@ -15,7 +15,7 @@ pub struct ProcessCpuMetric {
     pub memory_process_bytes: u64,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
     #[expect(unused_assignments)]
     let mut cpu_process_seconds_total = 0;
@@ -78,7 +78,7 @@ pub struct CpuMetric {
 }
 
 // TODO maybe work for MacOS or wider Unix?
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 pub fn get_cpu_metric() -> Result<CpuMetric> {
     let cpu = cpu::cpu_times()?;
     let system_seconds = cpu.total().as_secs();
