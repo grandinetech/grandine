@@ -10,7 +10,7 @@ use ssz::{ReadError, Size, SszHash, SszRead, SszSize, SszWrite};
 use static_assertions::assert_not_impl_any;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::traits::BlsSecretKeyBytes;
+use crate::traits::SecretKeyBytes as SecretKeyBytesTrait;
 
 use super::secret_key::SecretKey;
 
@@ -79,4 +79,4 @@ impl SszWrite for SecretKeyBytes {
     }
 }
 
-impl BlsSecretKeyBytes<SIZE> for SecretKeyBytes {}
+impl SecretKeyBytesTrait<SIZE> for SecretKeyBytes {}

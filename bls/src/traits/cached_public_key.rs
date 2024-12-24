@@ -4,9 +4,9 @@ use ssz::{SszHash, SszRead, SszSize, SszWrite};
 
 use crate::error::Error;
 
-use super::{BlsPublicKey, BlsPublicKeyBytes};
+use super::{PublicKey as PublicKeyTrait, PublicKeyBytes as PublicKeyBytesTrait};
 
-pub trait BlsCachedPublicKey<C = ()>:
+pub trait CachedPublicKey<C = ()>:
     Default
     + Debug
     + Deserialize<'static>
@@ -21,8 +21,8 @@ pub trait BlsCachedPublicKey<C = ()>:
     + SszWrite
     + SszHash
 {
-    type PublicKeyBytes: BlsPublicKeyBytes;
-    type PublicKey: BlsPublicKey;
+    type PublicKeyBytes: PublicKeyBytesTrait;
+    type PublicKey: PublicKeyTrait;
 
     fn new(bytes: Self::PublicKeyBytes, public_key: Self::PublicKey) -> Self;
     fn as_bytes(&self) -> &Self::PublicKeyBytes;

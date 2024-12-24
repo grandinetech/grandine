@@ -18,7 +18,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 ///    - `#[as_mut(forward)]`
 ///    - `#[serde(transparent)]`
 ///
-pub trait BlsSecretKeyBytes<const N: usize, C = ()>:
+pub trait SecretKeyBytes<const N: usize, C = ()>:
     Default
     + AsRef<[u8]>
     + AsMut<[u8]>

@@ -3,7 +3,7 @@ use once_cell::race::OnceBox;
 use serde::{Deserialize, Serialize};
 use ssz::{ReadError, Size, SszHash, SszRead, SszReadDefault as _, SszSize, SszWrite, H256};
 
-use crate::{error::Error, traits::BlsCachedPublicKey};
+use crate::{error::Error, traits::CachedPublicKey as CachedPublicKeyTrait};
 
 use super::{public_key::PublicKey, public_key_bytes::PublicKeyBytes};
 
@@ -78,7 +78,7 @@ impl SszHash for CachedPublicKey {
     }
 }
 
-impl BlsCachedPublicKey for CachedPublicKey {
+impl CachedPublicKeyTrait for CachedPublicKey {
     type PublicKeyBytes = PublicKeyBytes;
     type PublicKey = PublicKey;
 

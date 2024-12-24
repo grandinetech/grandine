@@ -2,12 +2,12 @@ use core::fmt::Debug;
 
 use crate::error::Error;
 
-use super::BlsPublicKeyBytes;
+use super::PublicKeyBytes as PublicKeyBytesTrait;
 
-pub trait BlsPublicKey:
+pub trait PublicKey:
     Clone + Copy + PartialEq + Eq + Default + Debug + TryFrom<Self::PublicKeyBytes>
 {
-    type PublicKeyBytes: BlsPublicKeyBytes;
+    type PublicKeyBytes: PublicKeyBytesTrait;
 
     fn aggregate(self, other: Self) -> Self;
     fn aggregate_in_place(&mut self, other: Self);

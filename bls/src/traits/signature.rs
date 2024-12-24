@@ -1,13 +1,13 @@
 use core::fmt::Debug;
 
-use super::{BlsPublicKey, BlsSignatureBytes};
+use super::{PublicKey as PublicKeyTrait, SignatureBytes as SignatureBytesTrait};
 
-pub trait BlsSignature: Clone + Copy + PartialEq + Eq + Debug + Default + 'static
+pub trait Signature: Clone + Copy + PartialEq + Eq + Debug + Default + 'static
 where
     Self::PublicKey: 'static,
 {
-    type SignatureBytes: BlsSignatureBytes;
-    type PublicKey: BlsPublicKey;
+    type SignatureBytes: SignatureBytesTrait;
+    type PublicKey: PublicKeyTrait;
 
     fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool;
     fn aggregate(self, other: Self) -> Self;

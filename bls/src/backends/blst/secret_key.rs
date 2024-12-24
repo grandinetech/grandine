@@ -11,7 +11,7 @@ use serde::Serialize;
 use ssz::{SszHash, SszWrite};
 use static_assertions::assert_not_impl_any;
 
-use crate::{consts::DOMAIN_SEPARATION_TAG, error::Error, traits::BlsSecretKey};
+use crate::{consts::DOMAIN_SEPARATION_TAG, error::Error, traits::SecretKey as SecretKeyTrait};
 
 use super::{
     public_key::PublicKey,
@@ -76,7 +76,7 @@ impl Hash for SecretKey {
     }
 }
 
-impl BlsSecretKey<SIZE> for SecretKey {
+impl SecretKeyTrait<SIZE> for SecretKey {
     type SecretKeyBytes = SecretKeyBytes;
     type PublicKey = PublicKey;
     type Signature = Signature;

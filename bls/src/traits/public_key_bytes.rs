@@ -2,9 +2,9 @@ use core::{fmt::Debug, str::FromStr};
 use hex::FromHex;
 use ssz::{SszHash, SszRead, SszSize, SszWrite};
 
-use super::BlsPublicKey;
+use super::PublicKey as PublicKeyTrait;
 
-pub trait BlsPublicKeyBytes<C = ()>:
+pub trait PublicKeyBytes<C = ()>:
     AsRef<[u8]>
     + AsMut<[u8]>
     + Copy
@@ -23,5 +23,5 @@ pub trait BlsPublicKeyBytes<C = ()>:
     + SszWrite
     + SszHash
 {
-    type PublicKey: BlsPublicKey;
+    type PublicKey: PublicKeyTrait;
 }

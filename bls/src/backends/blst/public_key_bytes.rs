@@ -5,7 +5,7 @@ use impl_serde::impl_fixed_hash_serde;
 use ssz::{BytesToDepth, MerkleTree, ReadError, Size, SszHash, SszRead, SszSize, SszWrite, H256};
 use typenum::{Unsigned as _, U1, U48};
 
-use crate::traits::BlsPublicKeyBytes;
+use crate::traits::PublicKeyBytes as PublicKeyBytesTrait;
 
 use super::public_key::PublicKey;
 
@@ -62,6 +62,6 @@ impl SszHash for PublicKeyBytes {
     }
 }
 
-impl BlsPublicKeyBytes for PublicKeyBytes {
+impl PublicKeyBytesTrait for PublicKeyBytes {
     type PublicKey = PublicKey;
 }

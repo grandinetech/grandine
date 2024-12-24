@@ -1,6 +1,8 @@
 use core::{fmt::Debug, hash::Hash};
 
-use super::{BlsPublicKey, BlsSecretKeyBytes, BlsSignature};
+use super::{
+    PublicKey as PublicKeyTrait, SecretKeyBytes as SecretKeyBytesTrait, Signature as SignatureTrait,
+};
 
 /// Secret key trait.
 ///
@@ -14,13 +16,20 @@ use super::{BlsPublicKey, BlsSecretKeyBytes, BlsSignature};
 ///
 /// 2. Implement Debug to only show "[REDACTED]":
 ///    ```rust
-///    #[derive(Debug)]
-///    #[debug("[REDACTED]")]
+///    use core::fmt::Debug;
+///
+///    struct SecretKeyImpl;
+///
+///    impl Debug for SecretKeyImpl {
+///        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///            write!(f, "[REDACTED]")
+///        }
+///    }
 ///    ```
-pub trait BlsSecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
-    type SecretKeyBytes: BlsSecretKeyBytes<N>;
-    type PublicKey: BlsPublicKey;
-    type Signature: BlsSignature;
+pub trait SecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
+    type SecretKeyBytes: SecretKeyBytesTrait<N>;
+    type PublicKey: PublicKeyTrait;
+    type Signature: SignatureTrait;
 
     fn to_public_key(&self) -> Self::PublicKey;
     fn sign(&self, message: impl AsRef<[u8]>) -> Self::Signature;

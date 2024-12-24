@@ -12,7 +12,7 @@ use rand::Rng as _;
 use crate::{
     consts::DOMAIN_SEPARATION_TAG,
     error::Error,
-    traits::{BlsSignature, BlsSignatureBytes},
+    traits::{Signature as SignatureTrait, SignatureBytes as SignatureBytesTrait},
 };
 
 use super::{public_key::PublicKey, signature_bytes::SignatureBytes};
@@ -43,7 +43,7 @@ impl TryFrom<SignatureBytes> for Signature {
     }
 }
 
-impl BlsSignature for Signature {
+impl SignatureTrait for Signature {
     type SignatureBytes = SignatureBytes;
     type PublicKey = PublicKey;
 
@@ -144,7 +144,7 @@ mod tests {
 
     use crate::{
         backends::blst::{secret_key::SecretKey, secret_key_bytes::SecretKeyBytes},
-        traits::BlsSecretKey,
+        traits::SecretKey as _,
     };
 
     use super::*;

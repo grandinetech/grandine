@@ -1,7 +1,7 @@
 use blst::min_pk::{AggregatePublicKey as RawAggregatePublicKey, PublicKey as RawPublicKey};
 use derive_more::From;
 
-use crate::{error::Error, traits::BlsPublicKey};
+use crate::{error::Error, traits::PublicKey as PublicKeyTrait};
 
 use super::public_key_bytes::PublicKeyBytes;
 
@@ -25,7 +25,7 @@ impl TryFrom<PublicKeyBytes> for PublicKey {
     }
 }
 
-impl BlsPublicKey for PublicKey {
+impl PublicKeyTrait for PublicKey {
     type PublicKeyBytes = PublicKeyBytes;
 
     /// [`eth_aggregate_pubkeys`](https://github.com/ethereum/consensus-specs/blob/86fb82b221474cc89387fa6436806507b3849d88/specs/altair/bls.md#eth_aggregate_pubkeys)

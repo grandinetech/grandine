@@ -4,7 +4,7 @@ use impl_serde::impl_fixed_hash_serde;
 use ssz::{BytesToDepth, MerkleTree, ReadError, Size, SszHash, SszRead, SszSize, SszWrite, H256};
 use typenum::{Unsigned as _, U1, U96};
 
-use crate::traits::BlsSignatureBytes;
+use crate::traits::SignatureBytes as SignatureBytesTrait;
 
 use super::signature::Signature;
 
@@ -53,7 +53,7 @@ impl SszHash for SignatureBytes {
     }
 }
 
-impl BlsSignatureBytes for SignatureBytes {
+impl SignatureBytesTrait for SignatureBytes {
     #[inline]
     #[must_use]
     fn empty() -> Self {
