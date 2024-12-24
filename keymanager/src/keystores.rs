@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, ensure, Result};
-use bls::{traits::BlsSecretKey, PublicKeyBytes, SecretKey};
+use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use itertools::Itertools as _;
@@ -169,7 +169,7 @@ impl KeystoreManager {
     ) -> Result<Vec<OperationStatus>> {
         ensure!(
             keystores.len() == passwords.len(),
-            Error::PasswordCountMismatch,
+            Error::PasswordCountMismatch
         );
 
         self.persistence_config
@@ -252,7 +252,7 @@ impl KeystoreManager {
         info!(
             "slashing protection data imported (imported records: {}, failed records: {})",
             import_report.imported_records(),
-            import_report.failed_records(),
+            import_report.failed_records()
         );
 
         Ok(())
@@ -310,7 +310,9 @@ impl KeystoreManager {
                 .as_ref()
                 .ok_or(Error::StoragePasswordNotProvided)?
                 .clone(),
-            PersistenceConfig::InMemory => return Ok(()),
+            PersistenceConfig::InMemory => {
+                return Ok(());
+            }
         };
 
         let key_storage = key_storage.clone();
@@ -360,7 +362,7 @@ pub fn load_key_storage_password(
     let password = match fs_err::read(keystore_storage_password_path) {
         Ok(password) => Zeroizing::new(password),
         Err(error) => bail!(Error::CannotLoadPassword {
-            error: error.into()
+            error: error.into(),
         }),
     };
 
@@ -552,7 +554,9 @@ mod tests {
         }
     "#;
     const KEYSTORE_PASSWORD: &str = "𝔱𝔢𝔰𝔱𝔭𝔞𝔰𝔰𝔴𝔬𝔯𝔡🔑";
-    const PUBKEY_BYTES: [u8; 48] = hex!("9612d7a727c9d0a22e185a1c768478dfe919cada9266988cb32359c11f2b7b27f4ae4040902382ae2910c15e2b420d07");
+    const PUBKEY_BYTES: [u8; 48] = hex!(
+        "9612d7a727c9d0a22e185a1c768478dfe919cada9266988cb32359c11f2b7b27f4ae4040902382ae2910c15e2b420d07"
+    );
 
     fn build_keystore_manager(
         storage_dir: Option<PathBuf>,
@@ -619,21 +623,21 @@ mod tests {
             import_statuses,
             vec![OperationStatus {
                 status: Status::Imported,
-                message: None
-            }],
+                message: None,
+            }]
         );
 
         assert_eq!(
             manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                readonly: false
-            }],
+                readonly: false,
+            }]
         );
 
         assert_eq!(
             signer.load().keys().copied().collect_vec(),
-            vec![expected_pubkey],
+            vec![expected_pubkey]
         );
 
         // Test duplicate import
@@ -651,15 +655,15 @@ mod tests {
             vec![OperationStatus {
                 status: Status::Error,
                 message: Some("key already exists".into()),
-            }],
+            }]
         );
 
         assert_eq!(
             manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                readonly: false
-            }],
+                readonly: false,
+            }]
         );
 
         // Test invalid password
@@ -677,7 +681,7 @@ mod tests {
             vec![OperationStatus {
                 status: Status::Error,
                 message: Some("derived key does not match checksum".into()),
-            }],
+            }]
         );
 
         // Test load from storage file
@@ -686,13 +690,15 @@ mod tests {
 
         assert_eq!(
             storage.keypairs().map(|(pubkey, _)| pubkey).collect_vec(),
-            vec![expected_pubkey],
+            vec![expected_pubkey]
         );
 
         // Test successful delete
 
         let pubkey_2 = PublicKeyBytes::from(
-            hex!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            hex!(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            )
         );
 
         let (delete_statuses, exported_interchange) =
@@ -707,9 +713,9 @@ mod tests {
                 },
                 OperationStatus {
                     status: Status::Error,
-                    message: Some("key not found".into())
-                },
-            ],
+                    message: Some("key not found".into()),
+                }
+            ]
         );
 
         let exported_interchange =
@@ -720,7 +726,7 @@ mod tests {
         assert_eq!(exported_interchange.metadata, expected_interchange.metadata);
         assert_eq!(
             exported_interchange.data.iter().sorted().collect_vec(),
-            expected_interchange.data.iter().sorted().collect_vec(),
+            expected_interchange.data.iter().sorted().collect_vec()
         );
 
         let storage = load_key_storage(&normalized_password, storage_tempdir.path().to_path_buf())?;
@@ -753,21 +759,21 @@ mod tests {
             import_statuses,
             vec![OperationStatus {
                 status: Status::Imported,
-                message: None
-            }],
+                message: None,
+            }]
         );
 
         assert_eq!(
             manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                readonly: false
-            }],
+                readonly: false,
+            }]
         );
 
         assert_eq!(
             signer.load().keys().copied().collect_vec(),
-            vec![expected_pubkey],
+            vec![expected_pubkey]
         );
 
         // Test duplicate import
@@ -785,15 +791,15 @@ mod tests {
             vec![OperationStatus {
                 status: Status::Error,
                 message: Some("key already exists".into()),
-            }],
+            }]
         );
 
         assert_eq!(
             manager.list_validating_pubkeys(),
             vec![ValidatingPubkey {
                 validating_pubkey: expected_pubkey,
-                readonly: false
-            }],
+                readonly: false,
+            }]
         );
 
         // Test invalid password
@@ -811,13 +817,15 @@ mod tests {
             vec![OperationStatus {
                 status: Status::Error,
                 message: Some("derived key does not match checksum".into()),
-            }],
+            }]
         );
 
         // Test successful delete
 
         let pubkey_2 = PublicKeyBytes::from(
-            hex!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            hex!(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            )
         );
 
         let (delete_statuses, exported_interchange) =
@@ -832,9 +840,9 @@ mod tests {
                 },
                 OperationStatus {
                     status: Status::Error,
-                    message: Some("key not found".into())
-                },
-            ],
+                    message: Some("key not found".into()),
+                }
+            ]
         );
 
         let exported_interchange =
@@ -845,7 +853,7 @@ mod tests {
         assert_eq!(exported_interchange.metadata, expected_interchange.metadata);
         assert_eq!(
             exported_interchange.data.iter().sorted().collect_vec(),
-            expected_interchange.data.iter().sorted().collect_vec(),
+            expected_interchange.data.iter().sorted().collect_vec()
         );
 
         Ok(())

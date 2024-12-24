@@ -3,7 +3,7 @@ use core::ops::{Add as _, Index as _, Rem as _};
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{traits::BlsCachedPublicKey, CachedPublicKey};
+use bls::{traits::CachedPublicKey as _, CachedPublicKey};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
@@ -213,7 +213,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
 
     ensure!(
         computed == in_block,
-        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
+        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block }
     );
 
     // > [New in Deneb:EIP4844] Verify commitments are under limit
@@ -222,7 +222,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
 
     ensure!(
         in_block <= maximum,
-        Error::<P>::TooManyBlockKzgCommitments { in_block },
+        Error::<P>::TooManyBlockKzgCommitments { in_block }
     );
 
     Ok(())
@@ -241,16 +241,16 @@ where
 
     ensure!(
         computed == in_block,
-        Error::<P>::WithdrawalCountMismatch { computed, in_block },
+        Error::<P>::WithdrawalCountMismatch { computed, in_block }
     );
 
     for (computed, in_block) in izip!(
         expected_withdrawals.iter().copied(),
-        execution_payload.withdrawals().iter().copied(),
+        execution_payload.withdrawals().iter().copied()
     ) {
         ensure!(
             computed == in_block,
-            Error::<P>::WithdrawalMismatch { computed, in_block },
+            Error::<P>::WithdrawalMismatch { computed, in_block }
         );
 
         let Withdrawal {
@@ -427,7 +427,7 @@ fn process_execution_payload<P: Preset>(
 
     ensure!(
         in_state == in_block,
-        Error::<P>::ExecutionPayloadParentHashMismatch { in_state, in_block },
+        Error::<P>::ExecutionPayloadParentHashMismatch { in_state, in_block }
     );
 
     // > Verify prev_randao
@@ -436,7 +436,7 @@ fn process_execution_payload<P: Preset>(
 
     ensure!(
         in_state == in_block,
-        Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
+        Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block }
     );
 
     process_execution_payload_for_gossip(config, state, body)?;
@@ -490,15 +490,15 @@ pub fn process_operations<P: Preset, V: Verifier>(
 
         ensure!(
             computed == in_block,
-            Error::<P>::DepositCountMismatch { computed, in_block },
+            Error::<P>::DepositCountMismatch { computed, in_block }
         );
     } else {
         ensure!(
             in_block == 0,
             Error::<P>::DepositCountMismatch {
                 computed: 0,
-                in_block
-            },
+                in_block,
+            }
         );
     }
 
@@ -677,7 +677,7 @@ pub fn apply_attestation<P: Preset>(
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(state)?;
     let proposer_reward_denominator =
-        (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get() / PROPOSER_WEIGHT;
+        ((WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get()) / PROPOSER_WEIGHT;
     let proposer_reward = proposer_reward_numerator / proposer_reward_denominator;
 
     increase_balance(balance(state, proposer_index)?, proposer_reward);
@@ -718,7 +718,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
         target.epoch == compute_epoch_at_slot::<P>(attestation_slot),
         Error::AttestationTargetsWrongEpoch {
             attestation: attestation.clone().into(),
-        },
+        }
     );
 
     ensure!(
@@ -726,14 +726,14 @@ pub fn validate_attestation_with_verifier<P: Preset>(
         Error::<P>::AttestationOutsideInclusionRange {
             state_slot: state.slot(),
             attestation_slot,
-        },
+        }
     );
 
     ensure!(
         index == 0,
         Error::<P>::AttestationWithNonZeroCommitteeIndex {
             attestation: attestation.clone().into(),
-        },
+        }
     );
 
     // Don't check the length of `attestation.aggregation_bits`.
@@ -747,7 +747,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
 
     ensure!(
         in_state == in_block,
-        Error::<P>::AttestationSourceMismatch { in_state, in_block },
+        Error::<P>::AttestationSourceMismatch { in_state, in_block }
     );
 
     let indexed_attestation = get_indexed_attestation(state, attestation)?;
@@ -970,7 +970,7 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
     // > [New in Electra:EIP7251] Only exit validator if it has no pending withdrawals in the queue
     ensure!(
         get_pending_balance_to_withdraw(state, signed_voluntary_exit.message.validator_index) == 0,
-        Error::<P>::VoluntaryExitWithPendingWithdrawals,
+        Error::<P>::VoluntaryExitWithPendingWithdrawals
     );
 
     Ok(())
@@ -1279,11 +1279,11 @@ mod spec_tests {
 
     macro_rules! processing_tests {
         (
-            $module_name: ident,
-            $processing_function: expr,
-            $operation_name: literal,
-            $mainnet_glob: literal,
-            $minimal_glob: literal,
+            $module_name:ident,
+            $processing_function:expr,
+            $operation_name:literal,
+            $mainnet_glob:literal,
+            $minimal_glob:literal,
         ) => {
             mod $module_name {
                 use super::*;
@@ -1307,11 +1307,11 @@ mod spec_tests {
 
     macro_rules! validation_tests {
         (
-            $module_name: ident,
-            $validation_function: expr,
-            $operation_name: literal,
-            $mainnet_glob: literal,
-            $minimal_glob: literal,
+            $module_name:ident,
+            $validation_function:expr,
+            $operation_name:literal,
+            $mainnet_glob:literal,
+            $minimal_glob:literal,
         ) => {
             mod $module_name {
                 use super::*;
@@ -1334,23 +1334,27 @@ mod spec_tests {
     }
 
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
-    processing_tests! {
+    processing_tests!(
         process_block_header,
         |_, state, block: BeaconBlock<_>, _| unphased::process_block_header(state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/electra/operations/block_header/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/block_header/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/block_header/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_consolidation_request,
-        |config, state, consolidation_request, _| process_consolidation_request(config, state, consolidation_request),
+        |config, state, consolidation_request, _| process_consolidation_request(
+            config,
+            state,
+            consolidation_request
+        ),
         "consolidation_request",
         "consensus-spec-tests/tests/mainnet/electra/operations/consolidation_request/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/consolidation_request/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/consolidation_request/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_proposer_slashing,
         |config, state, proposer_slashing, _| {
             process_proposer_slashing(
@@ -1363,10 +1367,10 @@ mod spec_tests {
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/electra/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/proposer_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/proposer_slashing/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_attester_slashing,
         |config, state, attester_slashing: AttesterSlashing<P>, _| {
             process_attester_slashing(
@@ -1379,25 +1383,20 @@ mod spec_tests {
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/electra/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/attester_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/attester_slashing/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_attestation,
         |config, state, attestation, bls_setting| {
-            process_attestation(
-                config,
-                state,
-                &attestation,
-                bls_setting,
-            )
+            process_attestation(config, state, &attestation, bls_setting)
         },
         "attestation",
         "consensus-spec-tests/tests/mainnet/electra/operations/attestation/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/attestation/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/attestation/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_bls_to_execution_change,
         |config, state, bls_to_execution_change, _| {
             capella::process_bls_to_execution_change(
@@ -1409,20 +1408,20 @@ mod spec_tests {
         },
         "address_change",
         "consensus-spec-tests/tests/mainnet/electra/operations/bls_to_execution_change/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/bls_to_execution_change/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/bls_to_execution_change/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_deposit,
         |config, state, deposit, _| process_deposit(config, state, deposit),
         "deposit",
         "consensus-spec-tests/tests/mainnet/electra/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/deposit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/deposit/*/*"
+    );
 
     // `process_deposit_data` reimplements deposit validation differently for performance reasons,
     // so we need to test it separately.
-    processing_tests! {
+    processing_tests!(
         process_deposit_data,
         |config, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
@@ -1431,25 +1430,20 @@ mod spec_tests {
         },
         "deposit",
         "consensus-spec-tests/tests/mainnet/electra/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/deposit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/deposit/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_voluntary_exit,
         |config, state, voluntary_exit, _| {
-            process_voluntary_exit(
-                config,
-                state,
-                voluntary_exit,
-                SingleVerifier,
-            )
+            process_voluntary_exit(config, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/electra/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/voluntary_exit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/voluntary_exit/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_sync_aggregate,
         |config, state, sync_aggregate, _| {
             altair::process_sync_aggregate(
@@ -1462,65 +1456,69 @@ mod spec_tests {
         },
         "sync_aggregate",
         "consensus-spec-tests/tests/mainnet/electra/operations/sync_aggregate/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/sync_aggregate/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/sync_aggregate/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_deposit_request,
         |_, state, deposit_request, _| process_deposit_request(state, deposit_request),
         "deposit_request",
         "consensus-spec-tests/tests/mainnet/electra/operations/deposit_request/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/deposit_request/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/deposit_request/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_withdrawal_request,
-        |config, state, withdrawal_request, _| process_withdrawal_request(config, state, withdrawal_request),
+        |config, state, withdrawal_request, _| process_withdrawal_request(
+            config,
+            state,
+            withdrawal_request
+        ),
         "withdrawal_request",
         "consensus-spec-tests/tests/mainnet/electra/operations/withdrawal_request/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/withdrawal_request/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/withdrawal_request/*/*"
+    );
 
-    validation_tests! {
+    validation_tests!(
         validate_proposer_slashing,
         |config, state, proposer_slashing| {
             unphased::validate_proposer_slashing(config, state, proposer_slashing)
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/electra/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/proposer_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/proposer_slashing/*/*"
+    );
 
-    validation_tests! {
+    validation_tests!(
         validate_attester_slashing,
         |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/electra/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/attester_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/attester_slashing/*/*"
+    );
 
-    validation_tests! {
+    validation_tests!(
         validate_voluntary_exit,
         |config, state, voluntary_exit| {
             validate_voluntary_exit_with_verifier(config, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/electra/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/voluntary_exit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/voluntary_exit/*/*"
+    );
 
     // TODO(feature/electra): comment this & run missing test script
-    validation_tests! {
+    validation_tests!(
         validate_bls_to_execution_change,
         |config, state, bls_to_execution_change| {
             capella::validate_bls_to_execution_change(config, state, bls_to_execution_change)
         },
         "address_change",
         "consensus-spec-tests/tests/mainnet/electra/operations/bls_to_execution_change/*/*",
-        "consensus-spec-tests/tests/minimal/electra/operations/bls_to_execution_change/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/electra/operations/bls_to_execution_change/*/*"
+    );
 
     #[test_resources("consensus-spec-tests/tests/mainnet/electra/operations/execution_payload/*/*")]
     fn mainnet_execution_payload(case: Case) {
@@ -1633,10 +1631,10 @@ mod spec_tests {
     ) -> Result<()> {
         match bls_setting {
             BlsSetting::Optional | BlsSetting::Required => {
-                validate_attestation_with_verifier(config, state, attestation, SingleVerifier)?
+                validate_attestation_with_verifier(config, state, attestation, SingleVerifier)?;
             }
             BlsSetting::Ignored => {
-                validate_attestation_with_verifier(config, state, attestation, NullVerifier)?
+                validate_attestation_with_verifier(config, state, attestation, NullVerifier)?;
             }
         }
 

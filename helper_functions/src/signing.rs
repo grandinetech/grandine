@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bls::{traits::BlsSecretKey, CachedPublicKey, SecretKey, Signature, SignatureBytes};
+use bls::{traits::SecretKey as _, CachedPublicKey, SecretKey, Signature, SignatureBytes};
 use derive_more::From;
 use ssz::{Ssz, SszHash};
 use types::{

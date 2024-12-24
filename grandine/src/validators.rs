@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Error, Result};
-use bls::{traits::BlsSecretKey, PublicKeyBytes, SecretKey};
+use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
 use log::{info, warn};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
@@ -103,7 +103,7 @@ impl Validators {
             if let Err(error) = cache.load(passwords) {
                 warn!(
                     "Unable to load validator key cache: {error:?}; \
-                     Validator key cache will be reset",
+                     Validator key cache will be reset"
                 );
             }
         }

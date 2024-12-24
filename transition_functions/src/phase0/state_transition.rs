@@ -1,7 +1,7 @@
 use core::ops::Not as _;
 
 use anyhow::{anyhow, Error as AnyhowError, Result};
-use bls::traits::BlsCachedPublicKey;
+use bls::traits::CachedPublicKey as _;
 use helper_functions::{
     accessors,
     error::SignatureKind,
@@ -158,7 +158,7 @@ pub fn verify_signatures<P: Preset>(
                         SignatureKind::Attestation,
                     )
                 },
-            )??
+            )??;
         }
     }
 

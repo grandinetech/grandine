@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, ensure, Result};
 use bls::{
-    traits::{BlsCachedPublicKey, BlsSecretKey, BlsSignature},
+    traits::{CachedPublicKey as _, SecretKey as _, Signature as _},
     AggregateSignature,
 };
 use deposit_tree::DepositTree;
@@ -240,7 +240,7 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
         let advanced_state = advance_state(config, pre_state, slot)?;
         let eth1_data = advanced_state.eth1_data();
         let graffiti = H256::zero();
-        let attestations = full_block_attestations(config, &advanced_state, (slot - 1)..slot)?;
+        let attestations = full_block_attestations(config, &advanced_state, slot - 1..slot)?;
         let deposits = ContiguousList::default();
         let sync_aggregate = full_sync_aggregate(config, &advanced_state);
         let execution_payload = None;
@@ -363,31 +363,31 @@ pub fn execution_payload<P: Preset>(
 
     let execution_payload = match config.phase_at_slot::<P>(slot) {
         Phase::Phase0 | Phase::Altair => bail!("slot should be post-Bellatrix"),
-        Phase::Bellatrix => BellatrixExecutionPayload {
+        Phase::Bellatrix => (BellatrixExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
             block_hash,
             ..BellatrixExecutionPayload::default()
-        }
+        })
         .into(),
-        Phase::Capella => CapellaExecutionPayload {
+        Phase::Capella => (CapellaExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
             block_hash,
             withdrawals,
             ..CapellaExecutionPayload::default()
-        }
+        })
         .into(),
-        Phase::Deneb | Phase::Electra => DenebExecutionPayload {
+        Phase::Deneb | Phase::Electra => (DenebExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
             block_hash,
             withdrawals,
             ..DenebExecutionPayload::default()
-        }
+        })
         .into(),
     };
 
@@ -424,11 +424,11 @@ fn block<P: Preset>(
 
     ensure!(
         phase0_attestations.is_empty() || advanced_state.phase() < Phase::Electra,
-        "post-Electra block cannot contain Phase 0 attestations",
+        "post-Electra block cannot contain Phase 0 attestations"
     );
     ensure!(
         electra_attestations.is_empty() || advanced_state.phase() >= Phase::Electra,
-        "pre-Electra block cannot contain Electra attestations",
+        "pre-Electra block cannot contain Electra attestations"
     );
 
     // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
@@ -441,7 +441,7 @@ fn block<P: Preset>(
         )?);
     }
 
-    let without_state_root = match advanced_state.phase() {
+    let without_state_root = (match advanced_state.phase() {
         Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
             slot,
             proposer_index,
@@ -531,7 +531,7 @@ fn block<P: Preset>(
                 ..ElectraBeaconBlockBody::default()
             },
         }),
-    }
+    })
     .with_execution_payload(execution_payload)?;
 
     let mut post_state = advanced_state;
@@ -628,8 +628,8 @@ fn full_block_attestations<P: Preset>(
             let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
             let committees_before_slot = slots_since_epoch_start * committees_per_slot;
             let committees_including_slot = committees_before_slot + committees_per_slot - 1;
-            let start = validator_count * committees_before_slot / committees_in_epoch;
-            let end = validator_count * (committees_including_slot + 1) / committees_in_epoch;
+            let start = (validator_count * committees_before_slot) / committees_in_epoch;
+            let end = (validator_count * (committees_including_slot + 1)) / committees_in_epoch;
             let active_validators_in_slot = (end - start).try_into()?;
 
             let aggregation_bits = BitList::new(true, active_validators_in_slot);

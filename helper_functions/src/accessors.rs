@@ -9,7 +9,7 @@ use anyhow::{bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::{
-    traits::{BlsCachedPublicKey, BlsPublicKey},
+    traits::{CachedPublicKey as _, PublicKey as _},
     AggregatePublicKey, CachedPublicKey, PublicKeyBytes,
 };
 use im::HashMap;
@@ -129,7 +129,7 @@ pub fn get_block_root_at_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot
 
     ensure!(
         state.slot() <= slot + SlotsPerHistoricalRoot::<P>::U64,
-        Error::SlotOutOfRange,
+        Error::SlotOutOfRange
     );
 
     Ok(state.block_roots().mod_index(slot).copy())
@@ -426,7 +426,7 @@ pub fn beacon_committee<P: Preset>(
 
     ensure!(
         committee_index < committees_per_slot,
-        Error::CommitteeIndexOutOfBounds,
+        Error::CommitteeIndexOutOfBounds
     );
 
     let indices = active_validator_indices_shuffled(state, relative_epoch);
@@ -434,8 +434,8 @@ pub fn beacon_committee<P: Preset>(
     let committees_in_epoch = committees_per_slot * P::SlotsPerEpoch::U64;
     let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
     let index_in_epoch = slots_since_epoch_start * committees_per_slot + committee_index;
-    let start = (validator_count * index_in_epoch / committees_in_epoch).try_into()?;
-    let end = (validator_count * (index_in_epoch + 1) / committees_in_epoch).try_into()?;
+    let start = ((validator_count * index_in_epoch) / committees_in_epoch).try_into()?;
+    let end = ((validator_count * (index_in_epoch + 1)) / committees_in_epoch).try_into()?;
 
     Ok(indices.slice(start..end))
 }
@@ -569,7 +569,7 @@ fn get_next_sync_committee_indices<P: Preset>(
     let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
     let max_random_byte = u64::from(u8::MAX);
 
-    (0..u64::MAX / H256::len_bytes() as u64)
+    (0..u64::MAX / (H256::len_bytes() as u64))
         .flat_map(move |quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -772,8 +772,12 @@ pub fn initialize_shuffled_indices<'attestations, P: Preset>(
 
     for attestation in attestations {
         match attestation_epoch(state, attestation.data().target.epoch)? {
-            AttestationEpoch::Previous => need_previous = true,
-            AttestationEpoch::Current => need_current = true,
+            AttestationEpoch::Previous => {
+                need_previous = true;
+            }
+            AttestationEpoch::Current => {
+                need_current = true;
+            }
         }
     }
 
@@ -903,7 +907,7 @@ mod tests {
         assert_eq!(
             get_block_root(&state, AttestationEpoch::Previous)
                 .expect("slot is within allowed range"),
-            H256::repeat_byte(<Minimal as Preset>::SlotsPerEpoch::U8),
+            H256::repeat_byte(<Minimal as Preset>::SlotsPerEpoch::U8)
         );
     }
 
@@ -918,7 +922,7 @@ mod tests {
 
         assert_eq!(
             get_block_root_at_slot(&state, 1).expect("slot is within allowed range"),
-            H256::repeat_byte(1),
+            H256::repeat_byte(1)
         );
     }
 
@@ -939,7 +943,7 @@ mod tests {
 
         assert_eq!(
             get_validator_churn_limit(&config, &state),
-            config.min_per_epoch_churn_limit,
+            config.min_per_epoch_churn_limit
         );
     }
 

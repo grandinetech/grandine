@@ -2,7 +2,7 @@ use core::cmp::Ordering;
 
 use anyhow::Result;
 use bls::{
-    traits::{BlsCachedPublicKey, BlsSignatureBytes},
+    traits::{CachedPublicKey as _, SignatureBytes as _},
     SignatureBytes,
 };
 use types::{
@@ -78,7 +78,9 @@ pub fn initiate_validator_exit<P: Preset>(
 
         match exit_epoch.cmp(&exit_queue_epoch) {
             Ordering::Less => {}
-            Ordering::Equal => exit_queue_churn += 1,
+            Ordering::Equal => {
+                exit_queue_churn += 1;
+            }
             Ordering::Greater => {
                 exit_queue_epoch = exit_epoch;
                 exit_queue_churn = 1;

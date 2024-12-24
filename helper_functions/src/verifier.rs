@@ -2,7 +2,7 @@
 
 use anyhow::{ensure, Result};
 use bls::{
-    traits::{BlsCachedPublicKey, BlsPublicKey, BlsSignature, BlsSignatureBytes},
+    traits::{CachedPublicKey as _, PublicKey as _, Signature as _, SignatureBytes as _},
     AggregatePublicKey, AggregateSignature, CachedPublicKey, PublicKey, Signature, SignatureBytes,
 };
 use derive_more::Constructor;
@@ -49,7 +49,7 @@ pub trait Verifier {
         if signature_bytes.is_empty() {
             ensure!(
                 public_keys.into_iter().next().is_none(),
-                Error::SignatureInvalid(signature_kind),
+                Error::SignatureInvalid(signature_kind)
             );
 
             return Ok(());
@@ -206,7 +206,7 @@ impl Verifier for SingleVerifier {
             signature_bytes
                 .try_conv::<AggregateSignature>()?
                 .fast_aggregate_verify(message, public_keys.into_iter()),
-            Error::SignatureInvalid(signature_kind),
+            Error::SignatureInvalid(signature_kind)
         );
 
         Ok(())
@@ -229,7 +229,7 @@ impl Verifier for SingleVerifier {
 
             ensure!(
                 signature.verify(message, &public_key),
-                Error::SignatureInvalid(signature_kind),
+                Error::SignatureInvalid(signature_kind)
             );
         }
 
@@ -317,7 +317,7 @@ impl Verifier for MultiVerifier {
 
         ensure!(
             Signature::multi_verify(messages, signatures.iter(), public_keys),
-            Error::SignatureInvalid(SignatureKind::Multi),
+            Error::SignatureInvalid(SignatureKind::Multi)
         );
 
         Ok(())
@@ -438,7 +438,7 @@ pub enum VerifierOption {
 
 #[cfg(test)]
 mod tests {
-    use bls::{traits::BlsSecretKey, SecretKey, SecretKeyBytes};
+    use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
     use std_ext::CopyExt as _;
     use tap::{Conv as _, TryConv as _};
 

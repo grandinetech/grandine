@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{ensure, Result};
-use bls::traits::BlsCachedPublicKey;
+use bls::traits::CachedPublicKey as _;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
@@ -66,7 +66,7 @@ impl<P: Preset> PoolTask for AddOwnContributionTask<P> {
             .await
         {
             warn!(
-                "failed to add own contribution to sync committee pool ({error}, contribution: {contribution:?}",
+                "failed to add own contribution to sync committee pool ({error}, contribution: {contribution:?}"
             );
         }
 
@@ -106,7 +106,7 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
         {
             warn!(
                 "failed to aggregate subcommittee {} sync committee messages: {error}",
-                contribution_data.subcommittee_index,
+                contribution_data.subcommittee_index
             );
         }
 
@@ -155,7 +155,7 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalContributionTask<P, W> {
                 Err(error) => {
                     debug!(
                         "gossip contribution and proof rejected \
-                        (error: {error}, contribution and proof: {signed_contribution_and_proof:?})",
+                        (error: {error}, contribution and proof: {signed_contribution_and_proof:?})"
                     );
                     PoolToP2pMessage::Reject(
                         gossip_id,
@@ -266,7 +266,7 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalMessageTask<P, W> {
                 Err(error) => {
                     debug!(
                         "gossip sync committee message rejected \
-                         (error: {error}, message: {message:?}, subnet_id: {subnet_id})",
+                         (error: {error}, message: {message:?}, subnet_id: {subnet_id})"
                     );
                     PoolToP2pMessage::Reject(
                         gossip_id,
@@ -366,7 +366,7 @@ fn validate_external_contribution_and_proof<P: Preset>(
             "sync committee contribution received during a Phase 0 slot \
              (signed_contribution_and_proof: {:?}, slot: {})",
             signed_contribution_and_proof,
-            beacon_state.slot(),
+            beacon_state.slot()
         );
 
         return Ok(false);
@@ -377,17 +377,17 @@ fn validate_external_contribution_and_proof<P: Preset>(
 
     ensure!(
         contribution.subcommittee_index < SyncCommitteeSubnetCount::U64,
-        "subcommittee index is not in allowed range",
+        "subcommittee index is not in allowed range"
     );
 
     ensure!(
         contribution.aggregation_bits.any(),
-        "contribution does not have participants",
+        "contribution does not have participants"
     );
 
     ensure!(
         predicates::is_sync_committee_aggregator::<P>(contribution_and_proof.selection_proof),
-        "validator is not an aggregator for the slot",
+        "validator is not an aggregator for the slot"
     );
 
     let aggregator_index = contribution_and_proof.aggregator_index;
@@ -397,16 +397,16 @@ fn validate_external_contribution_and_proof<P: Preset>(
 
     ensure!(
         subcommittee_pubkeys.contains(&aggregator.pubkey),
-        "aggregator is not in the declared subcommittee",
+        "aggregator is not in the declared subcommittee"
     );
 
     let mut verifier = MultiVerifier::default();
 
     verifier.verify_singular(
-        SyncAggregatorSelectionData {
+        (SyncAggregatorSelectionData {
             slot: contribution.slot,
             subcommittee_index: contribution.subcommittee_index,
-        }
+        })
         .signing_root(config, beacon_state),
         contribution_and_proof.selection_proof,
         &aggregator.pubkey,
@@ -462,7 +462,7 @@ fn validate_external_message<P: Preset>(
         warn!(
             "sync committee message received during a Phase 0 slot \
              (message: {message:?}, slot: {})",
-            beacon_state.slot(),
+            beacon_state.slot()
         );
 
         return Ok(false);
@@ -473,7 +473,7 @@ fn validate_external_message<P: Preset>(
 
     ensure!(
         subnets.get(subnet_id.try_into()?).unwrap_or_default(),
-        "subnet ID is invalid",
+        "subnet ID is invalid"
     );
 
     let validator_pubkey = &state.validators().get(validator_index)?.pubkey;

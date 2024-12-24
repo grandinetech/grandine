@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
-use bls::traits::BlsSignature;
+use bls::traits::Signature as _;
 use helper_functions::accessors;
 use itertools::Itertools as _;
 use log::debug;
@@ -208,7 +208,7 @@ impl<P: Preset> Pool<P> {
                     if aggregate.aggregation_bits[position_in_subcommittee] {
                         debug!(
                             "duplicate sync committee message from the same validator \
-                            (message: {message:?}, position_in_subcommittee: {position_in_subcommittee})",
+                            (message: {message:?}, position_in_subcommittee: {position_in_subcommittee})"
                         );
 
                         continue;

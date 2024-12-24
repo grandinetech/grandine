@@ -9,7 +9,7 @@ use axum::{
     Extension, Json,
 };
 use axum_extra::extract::QueryRejection;
-use bls::{traits::BlsSignatureBytes, SignatureBytes};
+use bls::{traits::SignatureBytes as _, SignatureBytes};
 use futures::channel::oneshot::Canceled;
 use http_api_utils::ApiError;
 use serde::{Serialize, Serializer};
@@ -291,10 +291,12 @@ mod tests {
         })
     )]
     #[test_case(
-        Error::InvalidAttestations(vec![IndexedError {
-            index: 0,
-            error: Error::TargetStateNotFound.into(),
-        }]),
+        Error::InvalidAttestations(
+            vec![IndexedError {
+                index: 0,
+                error: Error::TargetStateNotFound.into(),
+            }]
+        ),
         json!({
             "code": 400,
             "message": "invalid attestations",
@@ -324,7 +326,7 @@ mod tests {
             [
                 "invalid JSON body",
                 "Expected request with `Content-Type: application/json`",
-            ],
+            ]
         );
     }
 
@@ -338,7 +340,7 @@ mod tests {
 
         assert_eq!(
             error.sources().map(ToString::to_string).collect_vec(),
-            ["invalid query string", "error"],
+            ["invalid query string", "error",]
         );
     }
 }

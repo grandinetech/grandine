@@ -6,7 +6,7 @@ use core::{
 use anyhow::{ensure, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{traits::BlsCachedPublicKey, SignatureBytes};
+use bls::{traits::CachedPublicKey as _, SignatureBytes};
 use itertools::Itertools as _;
 use ssz::SszHash as _;
 use tap::TryConv as _;
@@ -51,9 +51,9 @@ pub fn is_eligible_for_activation<P: Preset>(
     validator: &Validator,
 ) -> bool {
     // > Placement in queue is finalized
-    validator.activation_eligibility_epoch <= state.finalized_checkpoint().epoch
+    validator.activation_eligibility_epoch <= state.finalized_checkpoint().epoch &&
         // > Has not yet been activated
-        && validator.activation_epoch == FAR_FUTURE_EPOCH
+        validator.activation_epoch == FAR_FUTURE_EPOCH
 }
 
 #[inline]
@@ -119,7 +119,7 @@ fn validate_indexed_attestation<P: Preset>(
                 .attesting_indices()
                 .tuple_windows()
                 .all(|(a, b)| a < b),
-            Error::AttestingIndicesNotSortedAndUnique,
+            Error::AttestingIndicesNotSortedAndUnique
         );
     }
 
@@ -453,7 +453,7 @@ mod spec_tests {
             leaf,
             branch.iter().copied(),
             index_at_commitment_depth,
-            block_body.hash_tree_root(),
+            block_body.hash_tree_root()
         ));
 
         // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
@@ -499,7 +499,7 @@ mod spec_tests {
             leaf,
             branch.iter().copied(),
             index_at_commitment_depth,
-            block_body.hash_tree_root(),
+            block_body.hash_tree_root()
         ));
 
         // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
@@ -535,7 +535,7 @@ mod spec_tests {
             leaf,
             branch,
             index_at_leaf_depth,
-            root,
+            root
         ));
 
         // We do not implement the following assertion:
@@ -761,28 +761,28 @@ mod extra_tests {
             leaf_00,
             [leaf_01, internal_1x],
             0,
-            root,
+            root
         ));
 
         assert!(is_valid_merkle_branch(
             leaf_01,
             [leaf_00, internal_1x],
             1,
-            root,
+            root
         ));
 
         assert!(is_valid_merkle_branch(
             leaf_10,
             [leaf_11, internal_0x],
             2,
-            root,
+            root
         ));
 
         assert!(is_valid_merkle_branch(
             leaf_11,
             [leaf_10, internal_0x],
             3,
-            root,
+            root
         ));
     }
 
@@ -803,7 +803,7 @@ mod extra_tests {
             // This should be `[leaf_01, internal_1x]`.
             [leaf_01, internal_0x],
             0,
-            root,
+            root
         ));
 
         assert!(!is_valid_merkle_branch(
@@ -811,7 +811,7 @@ mod extra_tests {
             [leaf_10, internal_0x],
             3,
             // This should be `root`.
-            H256::repeat_byte(0xff),
+            H256::repeat_byte(0xff)
         ));
 
         assert!(!is_valid_merkle_branch(
@@ -819,7 +819,7 @@ mod extra_tests {
             [leaf_10, internal_0x],
             // This should be `3`.
             0,
-            root,
+            root
         ));
     }
 

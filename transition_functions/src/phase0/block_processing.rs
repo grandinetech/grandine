@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
-use bls::traits::BlsCachedPublicKey;
+use bls::traits::CachedPublicKey as _;
 use helper_functions::{
     accessors::{
         self, attestation_epoch, get_beacon_proposer_index, index_of_public_key,
@@ -123,7 +123,7 @@ fn process_operations<P: Preset, V: Verifier>(
 
     ensure!(
         computed == in_block,
-        Error::<P>::DepositCountMismatch { computed, in_block },
+        Error::<P>::DepositCountMismatch { computed, in_block }
     );
 
     for proposer_slashing in body.proposer_slashings.iter().copied() {
@@ -431,11 +431,11 @@ mod spec_tests {
 
     macro_rules! processing_tests {
         (
-            $module_name: ident,
-            $processing_function: expr,
-            $operation_name: literal,
-            $mainnet_glob: literal,
-            $minimal_glob: literal,
+            $module_name:ident,
+            $processing_function:expr,
+            $operation_name:literal,
+            $mainnet_glob:literal,
+            $minimal_glob:literal,
         ) => {
             mod $module_name {
                 use super::*;
@@ -459,11 +459,11 @@ mod spec_tests {
 
     macro_rules! validation_tests {
         (
-            $module_name: ident,
-            $validation_function: expr,
-            $operation_name: literal,
-            $mainnet_glob: literal,
-            $minimal_glob: literal,
+            $module_name:ident,
+            $validation_function:expr,
+            $operation_name:literal,
+            $mainnet_glob:literal,
+            $minimal_glob:literal,
         ) => {
             mod $module_name {
                 use super::*;
@@ -486,15 +486,15 @@ mod spec_tests {
     }
 
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
-    processing_tests! {
+    processing_tests!(
         process_block_header,
         |_, state, block: Phase0BeaconBlock<_>, _| unphased::process_block_header(state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/phase0/operations/block_header/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/block_header/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/block_header/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_proposer_slashing,
         |config, state, proposer_slashing, _| {
             process_proposer_slashing(
@@ -507,10 +507,10 @@ mod spec_tests {
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/phase0/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/proposer_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/proposer_slashing/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_attester_slashing,
         |config, state, attester_slashing, _| {
             process_attester_slashing(
@@ -523,30 +523,30 @@ mod spec_tests {
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/phase0/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/attester_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/attester_slashing/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_attestation,
         |config, state, attestation, bls_setting| {
             process_attestation(config, state, &attestation, bls_setting)
         },
         "attestation",
         "consensus-spec-tests/tests/mainnet/phase0/operations/attestation/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/attestation/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/attestation/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_deposit,
         |config, state, deposit, _| process_deposit(config, state, deposit),
         "deposit",
         "consensus-spec-tests/tests/mainnet/phase0/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/deposit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/deposit/*/*"
+    );
 
     // `process_deposit_data` reimplements deposit validation differently for performance reasons,
     // so we need to test it separately.
-    processing_tests! {
+    processing_tests!(
         process_deposit_data,
         |config, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
@@ -555,48 +555,48 @@ mod spec_tests {
         },
         "deposit",
         "consensus-spec-tests/tests/mainnet/phase0/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/deposit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/deposit/*/*"
+    );
 
-    processing_tests! {
+    processing_tests!(
         process_voluntary_exit,
         |config, state, voluntary_exit, _| {
             unphased::process_voluntary_exit(config, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/phase0/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/voluntary_exit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/voluntary_exit/*/*"
+    );
 
-    validation_tests! {
+    validation_tests!(
         validate_proposer_slashing,
         |config, state, proposer_slashing| {
             unphased::validate_proposer_slashing(config, state, proposer_slashing)
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/phase0/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/proposer_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/proposer_slashing/*/*"
+    );
 
-    validation_tests! {
+    validation_tests!(
         validate_attester_slashing,
         |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/phase0/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/attester_slashing/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/attester_slashing/*/*"
+    );
 
-    validation_tests! {
+    validation_tests!(
         validate_voluntary_exit,
         |config, state, voluntary_exit| {
             unphased::validate_voluntary_exit(config, state, voluntary_exit)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/phase0/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/phase0/operations/voluntary_exit/*/*",
-    }
+        "consensus-spec-tests/tests/minimal/phase0/operations/voluntary_exit/*/*"
+    );
 
     fn run_processing_case<P: Preset, O: SszReadDefault>(
         case: Case,
@@ -650,7 +650,7 @@ mod spec_tests {
                     state,
                     attestation,
                     SingleVerifier,
-                )?
+                )?;
             }
             BlsSetting::Ignored => unphased::validate_attestation_with_verifier(
                 config,

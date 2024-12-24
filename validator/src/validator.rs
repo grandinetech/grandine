@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Error as AnyhowError, Result};
 use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
-use bls::{traits::BlsCachedPublicKey, PublicKeyBytes, Signature, SignatureBytes};
+use bls::{traits::CachedPublicKey as _, PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},
@@ -490,7 +490,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             } else {
                 Level::Info
             },
-            "{kind:?} tick in slot {slot}",
+            "{kind:?} tick in slot {slot}"
         );
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
@@ -683,7 +683,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if slot_head.optimistic {
             warn!(
                 "validator cannot produce a block because \
-                 chain head has not been fully verified by an execution engine",
+                 chain head has not been fully verified by an execution engine"
             );
             return Ok(());
         }
@@ -709,7 +709,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                      no doppelganger validators participating on network. \
                      Validator will start performing duties on slot {}.",
                     slot_head.slot(),
-                    doppelganger_protection.tracking_end_slot::<P>(public_key.to_bytes()),
+                    doppelganger_protection.tracking_end_slot::<P>(public_key.to_bytes())
                 );
                 return Ok(());
             }
@@ -758,7 +758,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     "failed to sign RANDAO reveal (epoch: {}, public_key: {}): {:?}",
                     epoch,
                     public_key.to_bytes(),
-                    error,
+                    error
                 );
                 return Ok(());
             }
@@ -785,7 +785,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             warn!(
                 "validator {} skipping beacon block proposal in slot {}",
                 proposer_index,
-                slot_head.slot(),
+                slot_head.slot()
             );
             return Ok(());
         };
@@ -854,7 +854,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .await
                 {
                     Some(signature) => block.with_signature(signature),
-                    None => return Ok(()),
+                    None => {
+                        return Ok(());
+                    }
                 }
             }
         };
@@ -863,7 +865,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             "validator {} proposing beacon block with root {:?} in slot {}",
             proposer_index,
             beacon_block.message().hash_tree_root(),
-            slot_head.slot(),
+            slot_head.slot()
         );
 
         debug!("beacon block: {beacon_block:?}");
@@ -912,7 +914,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if slot_head.optimistic {
             warn!(
                 "validator cannot participate in attestation because \
-                 chain head has not been fully verified by an execution engine",
+                 chain head has not been fully verified by an execution engine"
             );
             return Ok(());
         }
@@ -959,7 +961,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .iter()
                 .map(|a| a.validator_index)
                 .format(", "),
-            slot_head.slot(),
+            slot_head.slot()
         );
 
         for own_attestation in own_singular_attestations {
@@ -979,7 +981,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .beacon_committee(committee_index)
                     .expect("committee was already used to construct attestation"),
                 slot_head.slot(),
-                attestation,
+                attestation
             );
 
             let attestation = Arc::new(attestation.clone());
@@ -1162,7 +1164,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .iter()
                 .map(SignedAggregateAndProof::aggregator_index)
                 .format(", "),
-            aggregate_and_proof.slot(),
+            aggregate_and_proof.slot()
         );
 
         for aggregate_and_proof in aggregates_and_proofs {
@@ -1195,7 +1197,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if slot_head.optimistic {
             warn!(
                 "validator cannot participate in sync committees because \
-                 chain head has not been fully verified by an execution engine",
+                 chain head has not been fully verified by an execution engine"
             );
             return Ok(());
         }
@@ -1208,7 +1210,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             for sync_committee_message in &messages {
                 debug!(
                     "validator {} publishing sync committee message (subnet_id: {}): {:?}",
-                    sync_committee_message.validator_index, sync_subnet_id, sync_committee_message,
+                    sync_committee_message.validator_index, sync_subnet_id, sync_committee_message
                 );
 
                 ValidatorToP2p::PublishSyncCommitteeMessage(Box::new((
@@ -1238,7 +1240,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if slot_head.optimistic {
             warn!(
                 "validator cannot participate in sync committees because \
-                 chain head has not been fully verified by an execution engine",
+                 chain head has not been fully verified by an execution engine"
             );
             return;
         }
@@ -1254,7 +1256,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         for contribution_and_proof in contributions {
             debug!(
                 "validator {} publishing sync committee contribution and proof: {:?}",
-                contribution_and_proof.message.aggregator_index, contribution_and_proof,
+                contribution_and_proof.message.aggregator_index, contribution_and_proof
             );
 
             ValidatorToP2p::PublishContributionAndProof(Box::new(contribution_and_proof))
@@ -1359,7 +1361,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                  Validator will start performing duties on slot {}.",
                                 member.public_key,
                                 slot_head.slot(),
-                                doppelganger_protection.tracking_end_slot::<P>(member.public_key),
+                                doppelganger_protection.tracking_end_slot::<P>(member.public_key)
                             );
                             return None;
                         }
@@ -1529,7 +1531,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 warn!(
                     "failed to sign sync committee messages (slot: {}): {:?}",
                     slot_head.slot(),
-                    error,
+                    error
                 );
                 return Ok(BTreeMap::new());
             }
@@ -1649,7 +1651,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 warn!(
                     "failed to sign sync aggregator selection data for sync committee selection proofs (slot: {}): {:?}",
                     slot_head.slot(),
-                    error,
+                    error
                 );
                 return Ok(BTreeMap::new());
             }
@@ -1790,7 +1792,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                     debug!(
                         "{total_correct} of {total} validators \
-                         voted correctly in epoch {epoch_to_check}",
+                         voted correctly in epoch {epoch_to_check}"
                     );
                 }
                 VoteSummary::MissingBlock {
@@ -1799,7 +1801,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 } => {
                     warn!(
                         "cannot find beacon block that validators {validator_indices:?} voted for \
-                         at slot {voted_slot} (voted for block {voted_root:?})",
+                         at slot {voted_slot} (voted for block {voted_root:?})"
                     );
                 }
                 VoteSummary::NonCanonical {
@@ -1810,7 +1812,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     warn!(
                         "validators {validator_indices:?} voted for \
                          non-canonical block {voted_root:?} at slot {voted_slot} \
-                         (expected to vote for block {canonical_root:?})",
+                         (expected to vote for block {canonical_root:?})"
                     );
                 }
                 VoteSummary::Outdated {
@@ -1822,7 +1824,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     warn!(
                         "validators {validator_indices:?} voted for \
                          outdated head {voted_root:?} (by {slot_diff} slots) at slot {voted_slot} \
-                         (expected to vote for block {canonical_root:?})",
+                         (expected to vote for block {canonical_root:?})"
                     );
                 }
             }
@@ -1857,10 +1859,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     {
                         Ok(with_status) => with_status.value,
                         Err(error) => {
-                            warn!("failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}");
+                            warn!(
+                                "failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}"
+                            );
                             break;
                         }
-                    }
+                    };
                 }
 
                 if own_members.needs_to_compute_members_at_slot(slot).await {

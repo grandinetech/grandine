@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use bls::{traits::BlsCachedPublicKey, PublicKeyBytes};
+use bls::{traits::CachedPublicKey as _, PublicKeyBytes};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use p2p::SyncCommitteeSubscription;

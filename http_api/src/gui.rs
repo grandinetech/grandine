@@ -2,7 +2,7 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Result;
-use bls::{traits::BlsCachedPublicKey, PublicKeyBytes};
+use bls::{traits::CachedPublicKey as _, PublicKeyBytes};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
@@ -342,7 +342,7 @@ impl IndividualSlotDeltas {
             self.attestation_rewards.iter().copied(),
             self.deposits.iter().copied(),
             self.sync_committee_delta.and_then(Delta::reward),
-            self.sync_aggregate_rewards.map(SyncAggregateRewards::total),
+            self.sync_aggregate_rewards.map(SyncAggregateRewards::total)
         )
         .sum()
     }
@@ -350,7 +350,7 @@ impl IndividualSlotDeltas {
     fn combined_penalty(&self) -> Gwei {
         chain!(
             self.slashing_penalty,
-            self.sync_committee_delta.and_then(Delta::penalty),
+            self.sync_committee_delta.and_then(Delta::penalty)
         )
         .sum()
     }
@@ -435,7 +435,9 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             .map(WithStatus::value)
         {
             Some(state) => state,
-            None => return Ok(None),
+            None => {
+                return Ok(None);
+            }
         };
 
         assert_eq!(state.slot(), slot_before_previous_epoch);
@@ -544,7 +546,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     summaries,
                     performance,
                     epoch_deltas,
-                    post_balances,
+                    post_balances
                 ) {
                     if skip_validator(validator) {
                         continue;
@@ -612,7 +614,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     state.validators(),
                     summaries,
                     epoch_deltas,
-                    post_balances,
+                    post_balances
                 ) {
                     if skip_validator(validator) {
                         continue;
@@ -746,7 +748,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     summaries,
                     performance,
                     epoch_deltas,
-                    post_balances,
+                    post_balances
                 ) {
                     if skip_validator(validator) {
                         continue;
@@ -814,7 +816,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     state.validators(),
                     summaries,
                     epoch_deltas,
-                    post_balances,
+                    post_balances
                 ) {
                     if skip_validator(validator) {
                         continue;
@@ -1190,7 +1192,7 @@ mod tests {
 
         assert_eq!(
             proposal_assignments_before_exit,
-            proposal_assignments_after_exit,
+            proposal_assignments_after_exit
         );
 
         Ok(())

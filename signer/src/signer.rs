@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use arc_swap::{ArcSwap, Guard};
-use bls::{traits::BlsSecretKey, PublicKeyBytes, SecretKey, Signature};
+use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, Signature};
 use doppelganger_protection::DoppelgangerProtection;
 use futures::{
     lock::Mutex,
@@ -110,14 +110,11 @@ impl Signer {
                     info!(
                         "loaded {} validator key(s) from Web3Signer at {}",
                         keys.len(),
-                        url,
+                        url
                     );
                 }
                 None => {
-                    warn!(
-                        "Web3Signer at {} did not return any validator keys. It will retry to fetch keys again in the next epoch.",
-                        url,
-                    );
+                    warn!("Web3Signer at {} did not return any validator keys. It will retry to fetch keys again in the next epoch.", url);
                 }
             }
         }
@@ -304,7 +301,7 @@ impl Snapshot {
                 if !doppelganger_protection.is_validator_active(public_key) {
                     warn!(
                         "Doppelganger protection prevented validator {public_key:?} from signing a message \
-                         since not enough time has passed to ensure there are no duplicate validators participating on network",
+                         since not enough time has passed to ensure there are no duplicate validators participating on network"
                     );
                     continue;
                 }
@@ -432,7 +429,7 @@ impl Snapshot {
                     sign_locally.push((index, signing_root, secret_key.clone_arc()));
                 }
                 SignMethod::Web3Signer(_) => {
-                    sign_remotely.push((index, message, signing_root, public_key))
+                    sign_remotely.push((index, message, signing_root, public_key));
                 }
             }
         }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bls::{
-    traits::{BlsCachedPublicKey, BlsSignatureBytes},
+    traits::{CachedPublicKey as _, SignatureBytes as _},
     SignatureBytes,
 };
 use itertools::Itertools as _;
