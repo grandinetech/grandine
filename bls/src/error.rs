@@ -1,14 +1,26 @@
+#[cfg(feature = "blst")]
 use blst::BLST_ERROR;
-use derive_more::From;
-use static_assertions::assert_eq_size;
-use thiserror::Error;
 
-#[derive(Debug, From, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("decompression failed: {0:?}")]
-    DecompressionFailed(BLST_ERROR),
+    #[error("invalid public key")]
+    InvalidPublicKey,
+    #[error("invalid secret key")]
+    InvalidSecretKey,
+    #[error("invalid signature")]
+    InvalidSignature,
     #[error("no public keys to aggregate")]
     NoPublicKeysToAggregate,
+    #[error("failed to decompress point")]
+    DecompressionFailed,
+    #[cfg(feature = "blst")]
+    #[error("blst error: {0:?}")]
+    BlstError(BLST_ERROR),
 }
 
-assert_eq_size!(Error, u32);
+#[cfg(feature = "blst")]
+impl From<BLST_ERROR> for Error {
+    fn from(err: BLST_ERROR) -> Self {
+        Error::BlstError(err)
+    }
+}

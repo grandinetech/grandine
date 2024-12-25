@@ -291,6 +291,7 @@ base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
+bls12_381 = { git = "https://github.com/zkcrypto/bls12_381.git" }
 blst = { version = '0.3', features = ['portable'] }
 bstr = '1'
 build-time = '0.1'
@@ -323,6 +324,7 @@ enum-map = '2'
 enumset = '1'
 env_logger = '0.11'
 ethereum-types = '0.14'
+ff = "0.13.0"
 fixed-hash = '0.8.0'
 fnv = '1'
 fs-err = { version = '2', features = ['tokio'] }

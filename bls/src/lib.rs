@@ -10,6 +10,13 @@ pub use crate::backends::blst::{
     signature_bytes::SignatureBytes,
 };
 
+#[cfg(feature = "bls12_381")]
+pub use crate::backends::bls12_381::{
+    cached_public_key::CachedPublicKey, public_key::PublicKey, public_key_bytes::PublicKeyBytes,
+    secret_key::SecretKey, secret_key_bytes::SecretKeyBytes, signature::Signature,
+    signature_bytes::SignatureBytes,
+};
+
 pub type AggregatePublicKey = PublicKey;
 pub type AggregatePublicKeyBytes = PublicKeyBytes;
 pub type AggregateSignature = Signature;
