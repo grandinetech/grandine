@@ -34,20 +34,6 @@ impl TryFrom<PublicKeyBytes> for PublicKey {
 impl PublicKeyTrait for PublicKey {
     type PublicKeyBytes = PublicKeyBytes;
 
-    fn aggregate_nonempty(public_keys: impl IntoIterator<Item = Self>) -> Result<Self, Error> {
-        public_keys
-            .into_iter()
-            .reduce(Self::aggregate)
-            .ok_or(Error::NoPublicKeysToAggregate)
-    }
-
-    #[inline]
-    #[must_use]
-    fn aggregate(mut self, other: Self) -> Self {
-        self.aggregate_in_place(other);
-        self
-    }
-
     #[inline]
     fn aggregate_in_place(&mut self, other: Self) {
         self.as_raw().add(other.as_raw());

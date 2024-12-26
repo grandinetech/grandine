@@ -10,7 +10,12 @@ where
     type PublicKey: PublicKeyTrait;
 
     fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool;
-    fn aggregate(self, other: Self) -> Self;
+
+    fn aggregate(mut self, other: Self) -> Self {
+        self.aggregate_in_place(other);
+        self
+    }
+
     fn aggregate_in_place(&mut self, other: Self);
     fn fast_aggregate_verify<'keys>(
         &self,

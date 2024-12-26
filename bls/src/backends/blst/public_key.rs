@@ -28,21 +28,6 @@ impl TryFrom<PublicKeyBytes> for PublicKey {
 impl PublicKeyTrait for PublicKey {
     type PublicKeyBytes = PublicKeyBytes;
 
-    /// [`eth_aggregate_pubkeys`](https://github.com/ethereum/consensus-specs/blob/86fb82b221474cc89387fa6436806507b3849d88/specs/altair/bls.md#eth_aggregate_pubkeys)
-    fn aggregate_nonempty(public_keys: impl IntoIterator<Item = Self>) -> Result<Self, Error> {
-        public_keys
-            .into_iter()
-            .reduce(Self::aggregate)
-            .ok_or(Error::NoPublicKeysToAggregate)
-    }
-
-    #[inline]
-    #[must_use]
-    fn aggregate(mut self, other: Self) -> Self {
-        self.aggregate_in_place(other);
-        self
-    }
-
     #[inline]
     fn aggregate_in_place(&mut self, other: Self) {
         let mut self_aggregate = RawAggregatePublicKey::from_public_key(self.as_raw());

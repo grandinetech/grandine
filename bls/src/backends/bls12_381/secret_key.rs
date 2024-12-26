@@ -1,61 +1,27 @@
-use core::ops::Deref;
-use core::{
-    fmt::{Binary, Display, LowerExp, LowerHex, Octal, Pointer, UpperExp, UpperHex},
-    hash::{Hash, Hasher},
+use crate::{
+    consts::DOMAIN_SEPARATION_TAG, error::Error, impl_secret_key,
+    traits::SecretKey as SecretKeyTrait,
 };
-use std::borrow::ToOwned;
-
 use bls12_381::{
     hash_to_curve::{ExpandMsgXmd, HashToCurve},
     G1Projective, G2Projective, Scalar,
 };
-use derive_more::Debug;
-use serde::Serialize;
 use sha2::Sha256;
-use ssz::{SszHash, SszWrite};
-use static_assertions::assert_not_impl_any;
 
 use super::{
     public_key::PublicKey,
     secret_key_bytes::{SecretKeyBytes, SIZE},
     signature::Signature,
 };
-use crate::{consts::DOMAIN_SEPARATION_TAG, error::Error, traits::SecretKey as SecretKeyTrait};
 
-#[derive(Debug)]
-#[debug("[REDACTED]")]
-pub struct SecretKey(Scalar);
-
-assert_not_impl_any! {
-    SecretKey:
-
-    Clone,
-    Copy,
-    Deref,
-    ToOwned,
-
-    Binary,
-    Display,
-    LowerExp,
-    LowerHex,
-    Octal,
-    Pointer,
-    UpperExp,
-    UpperHex,
-
-    Serialize,
-    SszHash,
-    SszWrite,
-}
-
-impl PartialEq for SecretKey {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.as_raw().to_bytes() == other.as_raw().to_bytes()
-    }
-}
-
-impl Eq for SecretKey {}
+impl_secret_key!(
+    SecretKeyTrait<SIZE>,
+    SecretKey,
+    Scalar,
+    SecretKeyBytes,
+    PublicKey,
+    Signature
+);
 
 impl TryFrom<SecretKeyBytes> for SecretKey {
     type Error = Error;
@@ -74,16 +40,18 @@ impl TryFrom<SecretKeyBytes> for SecretKey {
     }
 }
 
-impl Hash for SecretKey {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        self.as_raw().to_bytes().hash(hasher)
-    }
-}
-
 impl SecretKeyTrait<SIZE> for SecretKey {
     type SecretKeyBytes = SecretKeyBytes;
     type PublicKey = PublicKey;
     type Signature = Signature;
+
+    #[inline]
+    #[must_use]
+    fn to_bytes(&self) -> SecretKeyBytes {
+        SecretKeyBytes {
+            bytes: self.as_raw().to_bytes(),
+        }
+    }
 
     #[inline]
     #[must_use]
@@ -99,21 +67,8 @@ impl SecretKeyTrait<SIZE> for SecretKey {
             &[message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
-        let signature = h * self.0;
+        let signature = h * self.as_raw();
 
         Signature::from(signature)
-    }
-
-    #[inline]
-    #[must_use]
-    fn to_bytes(&self) -> SecretKeyBytes {
-        let bytes = self.as_raw().to_bytes();
-        SecretKeyBytes { bytes }
-    }
-}
-
-impl SecretKey {
-    const fn as_raw(&self) -> &Scalar {
-        &self.0
     }
 }

@@ -4,28 +4,6 @@ use super::{
     PublicKey as PublicKeyTrait, SecretKeyBytes as SecretKeyBytesTrait, Signature as SignatureTrait,
 };
 
-/// Secret key trait.
-///
-/// # Safety
-/// Implementors MUST:
-/// 1. NOT implement:
-///    - Clone, Copy, Deref, ToOwned
-///    - Display and other formatting traits
-///    - Serialize, SszHash, SszWrite
-///    Use `assert_not_impl_any!` macro to enforce this
-///
-/// 2. Implement Debug to only show "[REDACTED]":
-///    ```rust
-///    use core::fmt::Debug;
-///
-///    struct SecretKeyImpl;
-///
-///    impl Debug for SecretKeyImpl {
-///        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-///            write!(f, "[REDACTED]")
-///        }
-///    }
-///    ```
 pub trait SecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
     type SecretKeyBytes: SecretKeyBytesTrait<N>;
     type PublicKey: PublicKeyTrait;
@@ -34,4 +12,42 @@ pub trait SecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
     fn to_public_key(&self) -> Self::PublicKey;
     fn sign(&self, message: impl AsRef<[u8]>) -> Self::Signature;
     fn to_bytes(&self) -> Self::SecretKeyBytes;
+}
+
+#[macro_export]
+macro_rules! impl_secret_key {
+    ($trait:ty, $name:ident, $raw:ty, $skb:ty, $pk:ty, $sig:ty) => {
+        #[derive(derive_more::Debug)]
+        #[debug("[REDACTED]")]
+        pub struct $name($raw);
+
+        static_assertions::assert_not_impl_any! {
+            $name:
+            Clone, Copy, core::ops::Deref, ToOwned,
+            core::fmt::Binary, core::fmt::Display, core::fmt::LowerExp, core::fmt::LowerHex, core::fmt::Octal,
+            core::fmt::Pointer, core::fmt::UpperExp, core::fmt::UpperHex,
+            serde::Serialize, ssz::SszHash, ssz::SszWrite,
+        }
+
+        impl PartialEq for $name {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                self.as_raw().to_bytes() == other.as_raw().to_bytes()
+            }
+        }
+
+        impl Eq for $name  {}
+
+        impl core::hash::Hash for $name {
+            fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
+                self.as_raw().to_bytes().hash(hasher)
+            }
+        }
+
+        impl $name {
+            const fn as_raw(&self) -> &$raw {
+                &self.0
+            }
+        }
+    };
 }

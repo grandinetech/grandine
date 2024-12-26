@@ -62,13 +62,6 @@ impl SignatureTrait for Signature {
     }
 
     #[inline]
-    #[must_use]
-    fn aggregate(mut self, other: Self) -> Self {
-        self.aggregate_in_place(other);
-        self
-    }
-
-    #[inline]
     fn aggregate_in_place(&mut self, other: Self) {
         let mut self_aggregate = RawAggregateSignature::from_signature(self.as_raw());
         let other_aggregate = RawAggregateSignature::from_signature(other.as_raw());

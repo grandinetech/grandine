@@ -9,7 +9,16 @@ pub trait PublicKey:
 {
     type PublicKeyBytes: PublicKeyBytesTrait;
 
-    fn aggregate(self, other: Self) -> Self;
+    fn aggregate_nonempty(keys: impl IntoIterator<Item = Self>) -> Result<Self, Error> {
+        keys.into_iter()
+            .reduce(Self::aggregate)
+            .ok_or(Error::NoPublicKeysToAggregate)
+    }
+
+    fn aggregate(mut self, other: Self) -> Self {
+        self.aggregate_in_place(other);
+        self
+    }
+
     fn aggregate_in_place(&mut self, other: Self);
-    fn aggregate_nonempty(keys: impl IntoIterator<Item = Self>) -> Result<Self, Error>;
 }
