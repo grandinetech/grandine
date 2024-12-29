@@ -6,7 +6,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 
@@ -31,7 +31,12 @@ jobs:
     - name: Run Clippy (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/clippy.bash --deny warnings
+    # It's a known issue that networking tests randomly fails on Macos
     - name: Run tests
+      if: runner.os == 'Macos'
+      run: cargo test --release --no-fail-fast -- --skip behaviour --skip common
+    - name: Run tests
+      if: runner.os != 'Macos'
       run: cargo test --release --no-fail-fast
     - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
