@@ -14,6 +14,7 @@ pub trait SecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
     fn to_bytes(&self) -> Self::SecretKeyBytes;
 }
 
+#[expect(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! impl_secret_key {
     ($trait:ty, $name:ident, $raw:ty, $skb:ty, $pk:ty, $sig:ty) => {

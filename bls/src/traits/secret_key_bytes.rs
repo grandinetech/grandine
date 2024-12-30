@@ -18,6 +18,7 @@ pub trait SecretKeyBytes<const N: usize, C = ()>:
 {
 }
 
+#[expect(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! impl_secret_key_bytes {
     ($name:ident, $size:expr) => {
@@ -40,10 +41,10 @@ macro_rules! impl_secret_key_bytes {
 
         static_assertions::assert_not_impl_any! {
             $name:
-            Clone, Copy, std::ops::Deref, std::borrow::ToOwned,
-            std::fmt::Debug, std::fmt::Binary, std::fmt::Display,
-            std::fmt::LowerExp, std::fmt::LowerHex, std::fmt::Octal,
-            std::fmt::Pointer, std::fmt::UpperExp, std::fmt::UpperHex,
+            Clone, Copy, core::ops::Deref, std::borrow::ToOwned,
+            core::fmt::Debug, core::fmt::Binary, core::fmt::Display,
+            core::fmt::LowerExp, core::fmt::LowerHex, core::fmt::Octal,
+            core::fmt::Pointer, core::fmt::UpperExp, core::fmt::UpperHex,
             serde::Serialize, ssz::SszHash,
         }
 

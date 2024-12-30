@@ -125,6 +125,7 @@ impl SignatureTrait for Signature {
 }
 
 impl Signature {
+    #[must_use]
     pub const fn as_raw(&self) -> &RawSignature {
         &self.0
     }

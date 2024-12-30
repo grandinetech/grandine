@@ -15,6 +15,7 @@ pub trait PublicKey:
             .ok_or(Error::NoPublicKeysToAggregate)
     }
 
+    #[must_use]
     fn aggregate(mut self, other: Self) -> Self {
         self.aggregate_in_place(other);
         self

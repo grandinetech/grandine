@@ -28,6 +28,7 @@ pub trait PublicKeyBytes<C = ()>:
     type PublicKey: PublicKeyTrait;
 }
 
+#[expect(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! impl_public_key_bytes {
     ($name:ident) => {

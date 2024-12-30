@@ -15,12 +15,12 @@ pub enum Error {
     DecompressionFailed,
     #[cfg(feature = "blst")]
     #[error("blst error: {0:?}")]
-    BlstError(BLST_ERROR),
+    Blst(BLST_ERROR),
 }
 
 #[cfg(feature = "blst")]
 impl From<BLST_ERROR> for Error {
     fn from(err: BLST_ERROR) -> Self {
-        Error::BlstError(err)
+        Self::Blst(err)
     }
 }

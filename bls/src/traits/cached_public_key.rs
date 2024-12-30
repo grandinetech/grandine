@@ -30,6 +30,7 @@ pub trait CachedPublicKey<C = ()>:
     fn decompress(&self) -> Result<&Self::PublicKey, Error>;
 }
 
+#[expect(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! impl_cached_public_key {
     ($trait:ty, $name:ident, $pkb:ty, $pk:ty) => {

@@ -25,6 +25,7 @@ pub trait SignatureBytes<C = ()>:
     fn is_empty(self) -> bool;
 }
 
+#[expect(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! impl_signature_bytes {
     ($trait:ident, $name:ident, $size:expr) => {
