@@ -109,7 +109,7 @@ mod tests {
     fn curve_order_matches_standard() {
         assert_eq!(
             BigUint::from_bytes_be(CURVE_ORDER).to_string(),
-            "52435875175126190479447740508185965837690552500527637822603658699938581184513"
+            "52435875175126190479447740508185965837690552500527637822603658699938581184513",
         );
     }
 
@@ -121,63 +121,43 @@ mod tests {
         let expected_keypairs = [
             (
                 hex!("25295f0d1d592a90b333e26e85149708208e9f8e8bc18f6c77bd62f8ad7a6866"),
-                hex!(
-                    "a99a76ed7796f7be22d5b7e85deeb7c5677e88e511e0b337618f8c4eb61349b4bf2d153f649f7b53359fe8b94a38e44c"
-                ),
+                hex!("a99a76ed7796f7be22d5b7e85deeb7c5677e88e511e0b337618f8c4eb61349b4bf2d153f649f7b53359fe8b94a38e44c"),
             ),
             (
                 hex!("51d0b65185db6989ab0b560d6deed19c7ead0e24b9b6372cbecb1f26bdfad000"),
-                hex!(
-                    "b89bebc699769726a318c8e9971bd3171297c61aea4a6578a7a4f94b547dcba5bac16a89108b6b6a1fe3695d1a874a0b"
-                ),
+                hex!("b89bebc699769726a318c8e9971bd3171297c61aea4a6578a7a4f94b547dcba5bac16a89108b6b6a1fe3695d1a874a0b"),
             ),
             (
                 hex!("315ed405fafe339603932eebe8dbfd650ce5dafa561f6928664c75db85f97857"),
-                hex!(
-                    "a3a32b0f8b4ddb83f1a0a853d81dd725dfe577d4f4c3db8ece52ce2b026eca84815c1a7e8e92a4de3d755733bf7e4a9b"
-                ),
+                hex!("a3a32b0f8b4ddb83f1a0a853d81dd725dfe577d4f4c3db8ece52ce2b026eca84815c1a7e8e92a4de3d755733bf7e4a9b"),
             ),
             (
                 hex!("25b1166a43c109cb330af8945d364722757c65ed2bfed5444b5a2f057f82d391"),
-                hex!(
-                    "88c141df77cd9d8d7a71a75c826c41a9c9f03c6ee1b180f3e7852f6a280099ded351b58d66e653af8e42816a4d8f532e"
-                ),
+                hex!("88c141df77cd9d8d7a71a75c826c41a9c9f03c6ee1b180f3e7852f6a280099ded351b58d66e653af8e42816a4d8f532e"),
             ),
             (
                 hex!("3f5615898238c4c4f906b507ee917e9ea1bb69b93f1dbd11a34d229c3b06784b"),
-                hex!(
-                    "81283b7a20e1ca460ebd9bbd77005d557370cabb1f9a44f530c4c4c66230f675f8df8b4c2818851aa7d77a80ca5a4a5e"
-                ),
+                hex!("81283b7a20e1ca460ebd9bbd77005d557370cabb1f9a44f530c4c4c66230f675f8df8b4c2818851aa7d77a80ca5a4a5e"),
             ),
             (
                 hex!("055794614bc85ed5436c1f5cab586aab6ca84835788621091f4f3b813761e7a8"),
-                hex!(
-                    "ab0bdda0f85f842f431beaccf1250bf1fd7ba51b4100fd64364b6401fda85bb0069b3e715b58819684e7fc0b10a72a34"
-                ),
+                hex!("ab0bdda0f85f842f431beaccf1250bf1fd7ba51b4100fd64364b6401fda85bb0069b3e715b58819684e7fc0b10a72a34"),
             ),
             (
                 hex!("1023c68852075965e0f7352dee3f76a84a83e7582c181c10179936c6d6348893"),
-                hex!(
-                    "9977f1c8b731a8d5558146bfb86caea26434f3c5878b589bf280a42c9159e700e9df0e4086296c20b011d2e78c27d373"
-                ),
+                hex!("9977f1c8b731a8d5558146bfb86caea26434f3c5878b589bf280a42c9159e700e9df0e4086296c20b011d2e78c27d373"),
             ),
             (
                 hex!("3a941600dc41e5d20e818473b817a28507c23cdfdb4b659c15461ee5c71e41f5"),
-                hex!(
-                    "a8d4c7c27795a725961317ef5953a7032ed6d83739db8b0e8a72353d1b8b4439427f7efa2c89caa03cc9f28f8cbab8ac"
-                ),
+                hex!("a8d4c7c27795a725961317ef5953a7032ed6d83739db8b0e8a72353d1b8b4439427f7efa2c89caa03cc9f28f8cbab8ac"),
             ),
             (
                 hex!("066e3bdc0415530e5c7fed6382d5c822c192b620203cf669903e1810a8c67d06"),
-                hex!(
-                    "a6d310dbbfab9a22450f59993f87a4ce5db6223f3b5f1f30d2c4ec718922d400e0b3c7741de8e59960f72411a0ee10a7"
-                ),
+                hex!("a6d310dbbfab9a22450f59993f87a4ce5db6223f3b5f1f30d2c4ec718922d400e0b3c7741de8e59960f72411a0ee10a7"),
             ),
             (
                 hex!("2b3b88a041168a1c4cd04bdd8de7964fd35238f95442dc678514f9dadb81ec34"),
-                hex!(
-                    "9893413c00283a3f9ed9fd9845dda1cea38228d22567f9541dccc357e54a2d6a6e204103c92564cbc05f4905ac7c493a"
-                ),
+                hex!("9893413c00283a3f9ed9fd9845dda1cea38228d22567f9541dccc357e54a2d6a6e204103c92564cbc05f4905ac7c493a"),
             ),
         ];
 

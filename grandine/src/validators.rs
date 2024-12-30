@@ -103,7 +103,7 @@ impl Validators {
             if let Err(error) = cache.load(passwords) {
                 warn!(
                     "Unable to load validator key cache: {error:?}; \
-                     Validator key cache will be reset"
+                     Validator key cache will be reset",
                 );
             }
         }

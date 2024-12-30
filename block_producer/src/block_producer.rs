@@ -387,7 +387,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             }
             Err(error) => {
                 log_with_feature(format_args!(
-                    "external attester slashing rejected (error: {error}, slashing: {slashing:?})"
+                    "external attester slashing rejected (error: {error}, slashing: {slashing:?})",
                 ));
                 PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidAttesterSlashing, error)
             }
@@ -427,7 +427,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             }
             Err(error) => {
                 warn!(
-                    "external proposer slashing rejected (error: {error}, slashing: {slashing:?})"
+                    "external proposer slashing rejected (error: {error}, slashing: {slashing:?})",
                 );
                 PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidProposerSlashing, error)
             }
@@ -684,7 +684,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         info!(
                             "using more profitable local payload: \
                              local MEV: {local_mev}, builder MEV: {builder_mev}, \
-                             boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}"
+                             boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
                         );
 
                         return Ok(Some((
@@ -753,7 +753,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // we fill all fields when constructing a block.
         let state_root = H256::zero();
 
-        (match self.beacon_state.phase() {
+        match self.beacon_state.phase() {
             Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
                 slot,
                 proposer_index,
@@ -885,7 +885,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 electra_attestation.data,
                                 HashSet::from([committee_index]),
                                 vec![electra_attestation],
-                            ));
+                            ))
                         }
                     }
 
@@ -927,7 +927,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     },
                 })
             }
-        })
+        }
         .pipe(Ok)
     }
 
@@ -1009,7 +1009,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Err(error) => {
                 warn!(
                     "constructed invalid blinded beacon block \
-                     (error: {error:?}, without_state_root: {without_state_root:?})"
+                     (error: {error:?}, without_state_root: {without_state_root:?})",
                 );
                 return None;
             }
@@ -1045,7 +1045,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Err(error) => {
                 warn!(
                     "constructed invalid beacon block \
-                     (error: {error:?}, without_state_root: {without_state_root:?})"
+                     (error: {error:?}, without_state_root: {without_state_root:?})",
                 );
                 return None;
             }
@@ -1204,7 +1204,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut slashings = self.producer_context.attester_slashings.lock().await;
 
         let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
-            (match slashing {
+            match slashing {
                 AttesterSlashing::Phase0(attester_slashing) => {
                     unphased::validate_attester_slashing(
                         &self.producer_context.chain_config,
@@ -1219,7 +1219,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         attester_slashing,
                     )
                 }
-            })
+            }
             .is_ok()
         });
 
@@ -1252,7 +1252,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut slashings = self.producer_context.attester_slashings.lock().await;
 
         let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
-            (match slashing {
+            match slashing {
                 AttesterSlashing::Phase0(attester_slashing) => {
                     unphased::validate_attester_slashing(
                         &self.producer_context.chain_config,
@@ -1267,7 +1267,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         attester_slashing,
                     )
                 }
-            })
+            }
             .is_ok()
         });
 
@@ -1453,9 +1453,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let prev_randao = accessors::get_randao_mix(state, epoch);
 
         let payload_attributes = match state {
-            BeaconState::Phase0(_) | BeaconState::Altair(_) => {
-                return Ok(None);
-            }
+            BeaconState::Phase0(_) | BeaconState::Altair(_) => return Ok(None),
             BeaconState::Bellatrix(_) => PayloadAttributes::Bellatrix(PayloadAttributesV1 {
                 timestamp,
                 prev_randao,
@@ -1538,21 +1536,18 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     Some(payload_id) => {
                         info!(
                             "started work on execution payload with id {payload_id:?} \
-                             for head {head_root:?} at slot {slot}"
+                             for head {head_root:?} at slot {slot}",
                         );
 
-                        self.producer_context.payload_id_cache
-                            .lock().await
-                            .cache_set((head_root, slot), payload_id);
+                        self.producer_context.payload_id_cache.lock().await.cache_set((head_root, slot), payload_id);
                     }
                     // If we have no block at 4th-second mark, we preprocess new state without the block.
                     // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
                     // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
-                    None =>
-                        warn!(
-                            "could not prepare execution payload: payload_id is None; \
-                         ensure that multiple consensus clients are not driving the same execution client"
-                        ),
+                    None => warn!(
+                        "could not prepare execution payload: payload_id is None; \
+                         ensure that multiple consensus clients are not driving the same execution client",
+                    ),
                 }
             }
             Err(error) => warn!("error while preparing execution payload: {error:?}"),
@@ -1660,7 +1655,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 return Some(handle);
             }
-        }
+        };
 
         None
     }
@@ -1704,9 +1699,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         payload_attributes,
                     )
                     .await?
-                    .map(PayloadIdEntry::Live);
+                    .map(PayloadIdEntry::Live)
             }
-        }
+        };
 
         let Some(payload_id) = payload_id else {
             error!(
@@ -1757,9 +1752,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             return Ok(None);
                         }
                     }
-                    PayloadIdEntry::Live(_) => {
-                        return Err(error);
-                    }
+                    PayloadIdEntry::Live(_) => return Err(error),
                 }
             }
         };
@@ -1798,11 +1791,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 );
 
                 match execution_payload {
-                    Ok(payload) => {
-                        return Some(WithBlobsAndMev::with_default(payload));
-                    }
+                    Ok(payload) => return Some(WithBlobsAndMev::with_default(payload)),
                     Err(error) => panic!("failed to produce fake payload: {error:?}"),
-                }
+                };
             }
         }
 

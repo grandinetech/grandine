@@ -49,7 +49,7 @@ pub trait Verifier {
         if signature_bytes.is_empty() {
             ensure!(
                 public_keys.into_iter().next().is_none(),
-                Error::SignatureInvalid(signature_kind)
+                Error::SignatureInvalid(signature_kind),
             );
 
             return Ok(());
@@ -206,7 +206,7 @@ impl Verifier for SingleVerifier {
             signature_bytes
                 .try_conv::<AggregateSignature>()?
                 .fast_aggregate_verify(message, public_keys.into_iter()),
-            Error::SignatureInvalid(signature_kind)
+            Error::SignatureInvalid(signature_kind),
         );
 
         Ok(())
@@ -229,7 +229,7 @@ impl Verifier for SingleVerifier {
 
             ensure!(
                 signature.verify(message, &public_key),
-                Error::SignatureInvalid(signature_kind)
+                Error::SignatureInvalid(signature_kind),
             );
         }
 
@@ -317,7 +317,7 @@ impl Verifier for MultiVerifier {
 
         ensure!(
             Signature::multi_verify(messages, signatures.iter(), public_keys),
-            Error::SignatureInvalid(SignatureKind::Multi)
+            Error::SignatureInvalid(SignatureKind::Multi),
         );
 
         Ok(())

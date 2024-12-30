@@ -153,7 +153,7 @@ pub fn verify_signatures<P: Preset>(
                             SignatureKind::Attestation,
                         )
                     },
-                )??;
+                )??
             }
         }
 

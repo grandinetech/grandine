@@ -82,7 +82,7 @@ pub fn process_block_header_for_gossip<P: Preset>(
         Error::<P>::SlotMismatch {
             state_slot: state.slot(),
             block_slot: block.slot(),
-        }
+        },
     );
 
     // > Verify that the block is newer than latest block header
@@ -91,7 +91,7 @@ pub fn process_block_header_for_gossip<P: Preset>(
         Error::<P>::BlockNotNewerThanLatestBlockHeader {
             block_slot: block.slot(),
             block_header_slot: state.latest_block_header().slot,
-        }
+        },
     );
 
     // > Verify that proposer index is the correct index
@@ -100,7 +100,7 @@ pub fn process_block_header_for_gossip<P: Preset>(
 
     ensure!(
         computed == in_block,
-        Error::<P>::ProposerIndexMismatch { computed, in_block }
+        Error::<P>::ProposerIndexMismatch { computed, in_block },
     );
 
     // > Verify that the parent matches
@@ -109,7 +109,7 @@ pub fn process_block_header_for_gossip<P: Preset>(
 
     ensure!(
         computed == in_block,
-        Error::<P>::ParentRootMismatch { computed, in_block }
+        Error::<P>::ParentRootMismatch { computed, in_block },
     );
 
     Ok(())
@@ -223,7 +223,7 @@ pub fn validate_proposer_slashing_with_verifier<P: Preset>(
         Error::<P>::ProposerSlashingSlotMismatch {
             slot_1: header_1.slot,
             slot_2: header_2.slot,
-        }
+        },
     );
 
     // > Verify header proposer indices match
@@ -232,13 +232,13 @@ pub fn validate_proposer_slashing_with_verifier<P: Preset>(
         Error::<P>::ProposerSlashingProposerMismatch {
             proposer_index_1: header_1.proposer_index,
             proposer_index_2: header_2.proposer_index,
-        }
+        },
     );
 
     // > Verify the headers are different
     ensure!(
         header_1 != header_2,
-        Error::<P>::ProposerSlashingHeadersIdentical { header: header_1 }
+        Error::<P>::ProposerSlashingHeadersIdentical { header: header_1 },
     );
 
     // > Verify the proposer is slashable
@@ -250,7 +250,7 @@ pub fn validate_proposer_slashing_with_verifier<P: Preset>(
         Error::<P>::ProposerNotSlashable {
             index,
             proposer: proposer.clone(),
-        }
+        },
     );
 
     // > Verify signatures
@@ -291,7 +291,7 @@ pub fn validate_attester_slashing_with_verifier<P: Preset>(
 
     ensure!(
         is_slashable_attestation_data(data_1, data_2),
-        Error::<P>::AttestationDataNotSlashable { data_1, data_2 }
+        Error::<P>::AttestationDataNotSlashable { data_1, data_2 },
     );
 
     validate_received_indexed_attestation(config, state, attestation_1, &mut verifier)?;
@@ -312,7 +312,7 @@ pub fn validate_attester_slashing_with_verifier<P: Preset>(
 
     ensure!(
         !slashable_indices.is_empty(),
-        Error::<P>::NoAttestersSlashed
+        Error::<P>::NoAttestersSlashed,
     );
 
     Ok(slashable_indices)
@@ -351,7 +351,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
         target.epoch == compute_epoch_at_slot::<P>(attestation_slot),
         Error::AttestationTargetsWrongEpoch {
             attestation: attestation.clone().into(),
-        }
+        },
     );
 
     let low_slot = attestation.data.slot + P::MIN_ATTESTATION_INCLUSION_DELAY.get();
@@ -362,7 +362,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
         Error::<P>::AttestationOutsideInclusionRange {
             state_slot: state.slot(),
             attestation_slot,
-        }
+        },
     );
 
     // Don't check the length of `attestation.aggregation_bits`.
@@ -376,7 +376,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
 
     ensure!(
         in_state == in_block,
-        Error::<P>::AttestationSourceMismatch { in_state, in_block }
+        Error::<P>::AttestationSourceMismatch { in_state, in_block },
     );
 
     let indexed_attestation = get_indexed_attestation(state, attestation)?;
@@ -537,11 +537,11 @@ pub fn verify_deposit_merkle_branch<P: Preset>(
             deposit.data.hash_tree_root(),
             deposit.proof,
             eth1_deposit_index,
-            state.eth1_data().deposit_root
+            state.eth1_data().deposit_root,
         ),
         Error::<P>::DepositProofInvalid {
             deposit: Box::new(deposit),
-        }
+        },
     );
 
     Ok(())
@@ -585,7 +585,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
             index,
             validator: validator.clone(),
             current_epoch,
-        }
+        },
     );
 
     // > Verify exit has not been initiated
@@ -594,7 +594,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
         Error::<P>::ValidatorAlreadyExited {
             index,
             exit_epoch: validator.exit_epoch,
-        }
+        },
     );
 
     // > Exits must specify an epoch when they become valid; they are not valid before then
@@ -603,7 +603,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
         Error::<P>::VoluntaryExitIsExpired {
             current_epoch,
             epoch: voluntary_exit.epoch,
-        }
+        },
     );
 
     // > Verify the validator has been active long enough
@@ -613,7 +613,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
             index,
             activation_epoch: validator.activation_epoch,
             current_epoch,
-        }
+        },
     );
 
     // > Verify signature

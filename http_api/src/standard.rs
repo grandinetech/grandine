@@ -601,7 +601,7 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
     let balances = izip!(
         0..,
         state.validators(),
-        state.balances().into_iter().copied()
+        state.balances().into_iter().copied(),
     )
     .filter(|(index, validator, _)| {
         query.id.is_empty()
@@ -764,7 +764,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
 
     if difference > P::EpochsPerHistoricalVector::U64 {
         return Err(Error::EpochOutOfRangeForStateRandao);
-    }
+    };
 
     let randao = accessors::get_randao_mix(&state, epoch);
     let response = StateRandaoResponse { randao };
@@ -1181,7 +1181,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
     )?
     .sync_committee_deltas;
 
-    let response = (if validator_ids.is_empty() {
+    let response = if validator_ids.is_empty() {
         sync_committee_deltas.into_iter().pipe(Either::Left)
     } else {
         validator_ids
@@ -1192,7 +1192,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
                 Some((validator_index, delta))
             })
             .pipe(Either::Right)
-    })
+    }
     .map(|(validator_index, delta)| {
         Ok(SyncCommitteeRewardsResponse {
             validator_index,
@@ -1474,7 +1474,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
             Err(error) => {
                 debug!(
                     "external sync committee message rejected \
-                     (error: {error}, message: {message:?}, subnet_id: {subnet_id})"
+                     (error: {error}, message: {message:?}, subnet_id: {subnet_id})",
                 );
                 failures.push(IndexedError { index, error });
             }
@@ -2121,7 +2121,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         .or_else(|| {
             warn!(
                 "unable to calculate block rewards for validator block {:?} at slot {slot}",
-                signed_beacon_block.message().hash_tree_root()
+                signed_beacon_block.message().hash_tree_root(),
             );
             None
         });
@@ -2191,7 +2191,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         block_root = head.block_root;
         state = controller.state_by_chain_link(&head);
         is_optimistic = optimistic;
-    }
+    };
 
     if is_optimistic {
         return Err(Error::HeadIsOptimistic);
@@ -2203,7 +2203,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         })
         .await?
         .map_err(Error::UnableToProduceAttestation)?;
-    }
+    };
 
     let target = Checkpoint {
         epoch: requested_epoch,
@@ -2247,7 +2247,7 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
             Error::CommitteesAtSlotMismatch {
                 requested,
                 computed,
-            }
+            },
         );
 
         // TODO(Grandine Team): Some API clients do not set `validator_index`.
@@ -2483,7 +2483,7 @@ fn state_validators<P: Preset, W: Wait>(
     let validators = izip!(
         0..,
         state.validators(),
-        state.balances().into_iter().copied()
+        state.balances().into_iter().copied(),
     )
     .filter(|(index, validator, _)| {
         if !ids.is_empty() {
@@ -2601,9 +2601,7 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
 
             return Err(Error::UnableToPublishBlock);
         }
-        Err(error) => {
-            return Err(Error::InvalidBlock(error));
-        }
+        Err(error) => return Err(Error::InvalidBlock(error)),
     }
 
     Ok(None)
@@ -2728,7 +2726,7 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
 
         ensure!(
             controller.block_by_root(beacon_block_root)?.is_some(),
-            Error::MatchingAttestationHeadBlockNotFound
+            Error::MatchingAttestationHeadBlockNotFound,
         );
 
         let target_state = target_state.ok_or(Error::TargetStateNotFound)?;
@@ -2787,9 +2785,7 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
                 return Err(Error::UnableToPublishBlock);
             }
         }
-        Err(error) => {
-            return Err(Error::InvalidBlock(error));
-        }
+        Err(error) => return Err(Error::InvalidBlock(error)),
     }
 
     Ok(())
@@ -2822,7 +2818,7 @@ mod tests {
 
         assert_eq!(
             extract_body::<Vec<Phase0Attestation<Mainnet>>>(&attestations).await?,
-            attestations
+            attestations,
         );
 
         let mut attestations = serde_json::to_value(attestations)?;
@@ -2838,7 +2834,7 @@ mod tests {
             extract_body::<Vec<Phase0Attestation<Mainnet>>>(&attestations).await?[0]
                 .aggregation_bits
                 .count_ones(),
-            1
+            1,
         );
 
         Ok(())
@@ -2846,16 +2842,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_deserialize_for_state_validators_query() -> Result<()> {
-        let pubkey1 = PublicKeyBytes(
-            hex!(
-                "a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7e"
-            )
-        );
-        let pubkey2 = PublicKeyBytes(
-            hex!(
-                "a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7a"
-            )
-        );
+        let pubkey1 = PublicKeyBytes(hex!("a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7e"));
+        let pubkey2 = PublicKeyBytes(hex!("a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7a"));
 
         let index1 = 123;
         let index2 = 456;
@@ -2868,7 +2856,7 @@ mod tests {
             ValidatorIdsAndStatusesQuery {
                 id: vec![],
                 status: vec![],
-            }
+            },
         );
 
         assert_eq!(
@@ -2877,15 +2865,15 @@ mod tests {
             ValidatorIdsAndStatusesQuery {
                 id: vec![
                     ValidatorId::PublicKey(pubkey1),
-                    ValidatorId::PublicKey(pubkey2)
+                    ValidatorId::PublicKey(pubkey2),
                 ],
                 status: vec![],
-            }
+            },
         );
 
         assert_eq!(
             extract_query::<ValidatorIdsAndStatusesQuery>(format!(
-                "id={pubkey1:?},{pubkey2:?},{index1},{index2}&status={status1},{status2}"
+                "id={pubkey1:?},{pubkey2:?},{index1},{index2}&status={status1},{status2}",
             ))
             .await?,
             ValidatorIdsAndStatusesQuery {
@@ -2893,11 +2881,11 @@ mod tests {
                     ValidatorId::PublicKey(pubkey1),
                     ValidatorId::PublicKey(pubkey2),
                     ValidatorId::ValidatorIndex(index1),
-                    ValidatorId::ValidatorIndex(index2)
+                    ValidatorId::ValidatorIndex(index2),
                 ],
                 status: vec![
                     ValidatorStatus::PendingInitialized,
-                    ValidatorStatus::ActiveOngoing
+                    ValidatorStatus::ActiveOngoing,
                 ],
             }
         );
@@ -2915,7 +2903,7 @@ mod tests {
 
         assert_eq!(
             extract_body::<Vec<SyncCommitteeSubscription>>(&subscriptions).await?,
-            subscriptions
+            subscriptions,
         );
 
         let mut invalid_subscriptions = serde_json::to_value(subscriptions)?;

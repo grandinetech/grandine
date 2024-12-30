@@ -140,7 +140,7 @@ fn process_operations<P: Preset, V: Verifier>(
 
     ensure!(
         computed == in_block,
-        Error::<P>::DepositCountMismatch { computed, in_block }
+        Error::<P>::DepositCountMismatch { computed, in_block },
     );
 
     for proposer_slashing in body.proposer_slashings.iter().copied() {
@@ -317,7 +317,7 @@ pub fn apply_attestation<P: Preset>(
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(state)?;
     let proposer_reward_denominator =
-        ((WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get()) / PROPOSER_WEIGHT;
+        (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get() / PROPOSER_WEIGHT;
     let proposer_reward = proposer_reward_numerator / proposer_reward_denominator;
 
     increase_balance(balance(state, proposer_index)?, proposer_reward);
@@ -486,11 +486,11 @@ pub fn process_sync_aggregate<P: Preset>(
     // > Compute participant and proposer rewards
     let total_active_increments = total_active_balance(state) / P::EFFECTIVE_BALANCE_INCREMENT;
     let total_base_rewards = get_base_reward_per_increment(state) * total_active_increments;
-    let max_participant_rewards = ((total_base_rewards * SYNC_REWARD_WEIGHT) / WEIGHT_DENOMINATOR)
+    let max_participant_rewards = (total_base_rewards * SYNC_REWARD_WEIGHT / WEIGHT_DENOMINATOR)
         .div_typenum::<P::SlotsPerEpoch>();
     let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
     let proposer_reward =
-        (participant_reward * PROPOSER_WEIGHT) / (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT);
+        participant_reward * PROPOSER_WEIGHT / (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT);
 
     // > Apply participant and proposer rewards
     let proposer_index = get_beacon_proposer_index(state)?;
@@ -603,11 +603,11 @@ mod spec_tests {
 
     macro_rules! processing_tests {
         (
-            $module_name:ident,
-            $processing_function:expr,
-            $operation_name:literal,
-            $mainnet_glob:literal,
-            $minimal_glob:literal,
+            $module_name: ident,
+            $processing_function: expr,
+            $operation_name: literal,
+            $mainnet_glob: literal,
+            $minimal_glob: literal,
         ) => {
             mod $module_name {
                 use super::*;
@@ -631,11 +631,11 @@ mod spec_tests {
 
     macro_rules! validation_tests {
         (
-            $module_name:ident,
-            $validation_function:expr,
-            $operation_name:literal,
-            $mainnet_glob:literal,
-            $minimal_glob:literal,
+            $module_name: ident,
+            $validation_function: expr,
+            $operation_name: literal,
+            $mainnet_glob: literal,
+            $minimal_glob: literal,
         ) => {
             mod $module_name {
                 use super::*;
@@ -658,15 +658,15 @@ mod spec_tests {
     }
 
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
-    processing_tests!(
+    processing_tests! {
         process_block_header,
         |_, state, block: AltairBeaconBlock<_>, _| unphased::process_block_header(state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/altair/operations/block_header/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/block_header/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/block_header/*/*",
+    }
 
-    processing_tests!(
+    processing_tests! {
         process_proposer_slashing,
         |config, state, proposer_slashing, _| {
             process_proposer_slashing(
@@ -679,10 +679,10 @@ mod spec_tests {
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/altair/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/proposer_slashing/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/proposer_slashing/*/*",
+    }
 
-    processing_tests!(
+    processing_tests! {
         process_attester_slashing,
         |config, state, attester_slashing, _| {
             process_attester_slashing(
@@ -695,30 +695,35 @@ mod spec_tests {
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/altair/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/attester_slashing/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/attester_slashing/*/*",
+    }
 
-    processing_tests!(
+    processing_tests! {
         process_attestation,
         |config, state, attestation: Attestation<P>, bls_setting| {
-            process_attestation(config, state, &attestation, bls_setting)
+            process_attestation(
+                config,
+                state,
+                &attestation,
+                bls_setting,
+            )
         },
         "attestation",
         "consensus-spec-tests/tests/mainnet/altair/operations/attestation/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/attestation/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/attestation/*/*",
+    }
 
-    processing_tests!(
+    processing_tests! {
         process_deposit,
         |config, state, deposit, _| process_deposit(config, state, deposit),
         "deposit",
         "consensus-spec-tests/tests/mainnet/altair/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/deposit/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/deposit/*/*",
+    }
 
     // `process_deposit_data` reimplements deposit validation differently for performance reasons,
     // so we need to test it separately.
-    processing_tests!(
+    processing_tests! {
         process_deposit_data,
         |config, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
@@ -727,20 +732,25 @@ mod spec_tests {
         },
         "deposit",
         "consensus-spec-tests/tests/mainnet/altair/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/deposit/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/deposit/*/*",
+    }
 
-    processing_tests!(
+    processing_tests! {
         process_voluntary_exit,
         |config, state, voluntary_exit, _| {
-            unphased::process_voluntary_exit(config, state, voluntary_exit, SingleVerifier)
+            unphased::process_voluntary_exit(
+                config,
+                state,
+                voluntary_exit,
+                SingleVerifier,
+            )
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/altair/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/voluntary_exit/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/voluntary_exit/*/*",
+    }
 
-    processing_tests!(
+    processing_tests! {
         process_sync_aggregate,
         |config, state, sync_aggregate, _| {
             process_sync_aggregate(
@@ -753,38 +763,38 @@ mod spec_tests {
         },
         "sync_aggregate",
         "consensus-spec-tests/tests/mainnet/altair/operations/sync_aggregate/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/sync_aggregate/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/sync_aggregate/*/*",
+    }
 
-    validation_tests!(
+    validation_tests! {
         validate_proposer_slashing,
         |config, state, proposer_slashing| {
             unphased::validate_proposer_slashing(config, state, proposer_slashing)
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/altair/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/proposer_slashing/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/proposer_slashing/*/*",
+    }
 
-    validation_tests!(
+    validation_tests! {
         validate_attester_slashing,
         |config, state, attester_slashing: AttesterSlashing<P>| {
             unphased::validate_attester_slashing(config, state, &attester_slashing)
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/altair/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/attester_slashing/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/attester_slashing/*/*",
+    }
 
-    validation_tests!(
+    validation_tests! {
         validate_voluntary_exit,
         |config, state, voluntary_exit| {
             unphased::validate_voluntary_exit(config, state, voluntary_exit)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/altair/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/altair/operations/voluntary_exit/*/*"
-    );
+        "consensus-spec-tests/tests/minimal/altair/operations/voluntary_exit/*/*",
+    }
 
     fn run_processing_case<P: Preset, O: SszReadDefault>(
         case: Case,
@@ -838,7 +848,7 @@ mod spec_tests {
                     state,
                     attestation,
                     SingleVerifier,
-                )?;
+                )?
             }
             BlsSetting::Ignored => unphased::validate_attestation_with_verifier(
                 config,

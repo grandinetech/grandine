@@ -188,28 +188,28 @@ impl<P: Preset> SlotHead<P> {
             )
             .await
         {
-            Ok(signatures) => match signatures.into_iter().exactly_one() {
-                Ok(signature_option) => match signature_option {
-                    Some(signature) => Some(signature.into()),
-                    None => {
-                        warn!(
-                            "failed to sign beacon block due to slashing protection \
-                                (block: {block:?}, public_key: {public_key:?})"
-                        );
+            Ok(signatures) => {
+                match signatures.into_iter().exactly_one() {
+                    Ok(signature_option) => match signature_option {
+                        Some(signature) => Some(signature.into()),
+                        None => {
+                            warn!(
+                                "failed to sign beacon block due to slashing protection \
+                                (block: {block:?}, public_key: {public_key:?})",
+                            );
+                            None
+                        }
+                    },
+                    Err(_) => {
+                        warn!("Slashing protection returned iterator with different number of elements",);
                         None
                     }
-                },
-                Err(_) => {
-                    warn!(
-                        "Slashing protection returned iterator with different number of elements"
-                    );
-                    None
                 }
-            },
+            }
             Err(error) => {
                 warn!(
                     "error while signing beacon block \
-                     (error: {error:?}, block: {block:?}, public_key: {public_key:?})"
+                     (error: {error:?}, block: {block:?}, public_key: {public_key:?})",
                 );
                 None
             }
