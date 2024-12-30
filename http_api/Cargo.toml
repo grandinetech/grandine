@@ -48,7 +48,6 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
 transition_functions = { workspace = true }
-try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }

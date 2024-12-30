@@ -30,7 +30,6 @@ use transition_functions::{
     combined,
     unphased::{self, ProcessSlots, StateRootPolicy},
 };
-use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, AttestingIndices, BeaconState, SignedAggregateAndProof,
@@ -1699,12 +1698,11 @@ impl<P: Preset> Store<P> {
         let block_header = blob_sidecar.signed_block_header.message;
 
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
-        let max_blobs_per_block =
-            if self.chain_config().phase_at_slot::<P>(block_header.slot) >= Phase::Electra {
-                P::MaxBlobsPerBlockElectra::U64
-            } else {
-                P::MaxBlobsPerBlock::U64
-            };
+        let max_blobs_per_block = self
+            .chain_config()
+            .phase_at_slot::<P>(block_header.slot)
+            .max_blobs_per_block::<P>()
+            .unwrap_or_default();
 
         ensure!(
             blob_sidecar.index < max_blobs_per_block,
@@ -1713,7 +1711,8 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected = misc::compute_subnet_for_blob_sidecar(&self.chain_config, &blob_sidecar);
+            let expected =
+                misc::compute_subnet_for_blob_sidecar(&self.chain_config, &blob_sidecar)?;
 
             ensure!(
                 actual == expected,

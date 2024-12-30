@@ -34,6 +34,5 @@ tap = { workspace = true }
 thiserror = { workspace = true }
 transition_functions = { workspace = true }
 tynm = { workspace = true }
-typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }

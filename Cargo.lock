@@ -2667,7 +2667,6 @@ dependencies = [
  "thiserror 1.0.69",
  "transition_functions",
  "tynm",
- "typenum",
  "types",
  "unwrap_none",
 ]
@@ -3544,7 +3543,6 @@ dependencies = [
  "tokio-stream",
  "tower-http",
  "transition_functions",
- "try_from_iterator",
  "typenum",
  "types",
  "unwrap_none",

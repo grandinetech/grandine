@@ -43,11 +43,10 @@ use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
-use ssz::{ContiguousList, SszHash as _};
+use ssz::{DynamicList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
-use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
@@ -941,34 +940,38 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
     EthPath(block_id): EthPath<BlockId>,
     EthQuery(query): EthQuery<BlobSidecarsQuery>,
     headers: HeaderMap,
-) -> Result<
-    EthResponse<ContiguousList<Arc<BlobSidecar<P>>, P::MaxBlobsPerBlock>, (), JsonOrSsz>,
-    Error,
-> {
-    let block_root =
-        block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?.value;
+) -> Result<EthResponse<DynamicList<Arc<BlobSidecar<P>>>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: block,
+        optimistic,
+        finalized,
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
-    // TODO(feature/electra): support P::MaxBlobsPerBlockElectra
+    let version = block.phase();
+    let block_root = block.message().hash_tree_root();
+    let max_blobs_per_block = version.max_blobs_per_block::<P>().unwrap_or_default();
 
     let blob_identifiers = query
         .indices
-        .unwrap_or_else(|| (0..P::MaxBlobsPerBlock::U64).collect())
+        .unwrap_or_else(|| (0..max_blobs_per_block).collect())
         .into_iter()
         .map(|index| {
-            ensure!(
-                index < P::MaxBlobsPerBlock::U64,
-                Error::InvalidBlobIndex(index)
-            );
-
+            ensure!(index < max_blobs_per_block, Error::InvalidBlobIndex(index));
             Ok(BlobIdentifier { block_root, index })
         })
         .collect::<Result<Vec<_>>>()?;
 
     let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
-    let blob_sidecars =
-        ContiguousList::try_from_iter(blob_sidecars.into_iter()).map_err(AnyhowError::new)?;
+    let blob_sidecars = DynamicList::try_from_iter_with_maximum(
+        blob_sidecars.into_iter(),
+        usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+    )
+    .map_err(AnyhowError::new)?;
 
-    Ok(EthResponse::json_or_ssz(blob_sidecars, &headers)?)
+    Ok(EthResponse::json_or_ssz(blob_sidecars, &headers)?
+        .execution_optimistic(optimistic)
+        .finalized(finalized)
+        .version(version))
 }
 
 /// `POST /eth/v1/beacon/blocks`

@@ -392,7 +392,7 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
-                    }
+                    };
                 },
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {
@@ -550,14 +550,19 @@ impl<P: Preset> Network<P> {
         let subnet_id =
             misc::compute_subnet_for_blob_sidecar(self.controller.chain_config(), &blob_sidecar);
 
-        let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
+        match subnet_id {
+            Ok(subnet_id) => {
+                let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-        debug!("publishing blob sidecar: {blob_identifier:?}, subnet_id: {subnet_id}");
+                debug!("publishing blob sidecar: {blob_identifier:?}, subnet_id: {subnet_id}");
 
-        self.publish(PubsubMessage::BlobSidecar(Box::new((
-            subnet_id,
-            blob_sidecar,
-        ))));
+                self.publish(PubsubMessage::BlobSidecar(Box::new((
+                    subnet_id,
+                    blob_sidecar,
+                ))));
+            }
+            Err(error) => warn!("unable to publish blob sidecar: {error:?}"),
+        }
     }
 
     fn publish_singular_attestation(&self, attestation: Arc<Attestation<P>>, subnet_id: SubnetId) {

@@ -12,6 +12,7 @@ use smallvec::SmallVec;
 use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
+use typenum::Unsigned as _;
 
 use crate::{
     altair::{
@@ -60,6 +61,17 @@ pub enum Phase {
     Capella,
     Deneb,
     Electra,
+}
+
+impl Phase {
+    #[must_use]
+    pub const fn max_blobs_per_block<P: Preset>(self) -> Option<u64> {
+        match self {
+            Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella => None,
+            Self::Deneb => Some(P::MaxBlobsPerBlock::U64),
+            Self::Electra => Some(P::MaxBlobsPerBlockElectra::U64),
+        }
+    }
 }
 
 /// Like [`Option`], but with [`None`] greater than any [`Some`].

@@ -737,6 +737,15 @@ impl Config {
         }
     }
 
+    #[must_use]
+    pub const fn blob_sidecar_subnet_count(&self, phase: Phase) -> Option<NonZeroU64> {
+        match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => None,
+            Phase::Deneb => Some(self.blob_sidecar_subnet_count),
+            Phase::Electra => Some(self.blob_sidecar_subnet_count_electra),
+        }
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }

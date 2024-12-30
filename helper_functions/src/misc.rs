@@ -23,7 +23,6 @@ use types::{
             Blob, BlobCommitmentInclusionProof, BlobIndex, KzgCommitment, KzgProof, VersionedHash,
         },
     },
-    nonstandard::Phase,
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
@@ -279,16 +278,16 @@ pub fn compute_subnet_for_attestation<P: Preset>(
 }
 
 /// [`compute_subnet_for_blob_sidecar`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.1/specs/deneb/validator.md#sidecar)
-#[must_use]
 pub fn compute_subnet_for_blob_sidecar<P: Preset>(
     config: &Config,
     blob_sidecar: &BlobSidecar<P>,
-) -> SubnetId {
-    if config.phase_at_slot::<P>(blob_sidecar.signed_block_header.message.slot) >= Phase::Electra {
-        blob_sidecar.index % config.blob_sidecar_subnet_count_electra
-    } else {
-        blob_sidecar.index % config.blob_sidecar_subnet_count
-    }
+) -> Result<SubnetId> {
+    let phase = config.phase_at_slot::<P>(blob_sidecar.signed_block_header.message.slot);
+
+    Ok(blob_sidecar.index
+        % config
+            .blob_sidecar_subnet_count(phase)
+            .ok_or(Error::BlobSidecarSubnetNotAvailable)?)
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#broadcast-sync-committee-message>
