@@ -6,6 +6,7 @@ use crate::error::Error;
 
 use super::{PublicKey as PublicKeyTrait, PublicKeyBytes as PublicKeyBytesTrait};
 
+#[expect(clippy::trait_duplication_in_bounds)]
 pub trait CachedPublicKey<C = ()>:
     Default
     + Debug
