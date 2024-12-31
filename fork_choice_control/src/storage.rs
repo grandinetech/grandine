@@ -711,7 +711,10 @@ impl<P: Preset> Storage<P> {
 
         itertools::process_results(results, |pairs| {
             pairs
-                .take_while(|(key_bytes, _)| FinalizedBlockByRoot::has_prefix(key_bytes))
+                .take_while(|(key_bytes, _)| {
+                    FinalizedBlockByRoot::has_prefix(key_bytes)
+                        && !UnfinalizedBlockByRoot::has_prefix(key_bytes)
+                })
                 .count()
         })
     }
