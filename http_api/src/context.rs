@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
-use bls::{PublicKeyBytes, SecretKey};
+use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use clock::Tick;
 use database::Database;
 use dedicated_executor::DedicatedExecutor;

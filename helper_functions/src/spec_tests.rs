@@ -1,6 +1,8 @@
 use bls::{
+    error::Error,
+    traits::{PublicKey as _, SecretKey as _, Signature as _},
     AggregatePublicKey, AggregatePublicKeyBytes, AggregateSignature, AggregateSignatureBytes,
-    Error, PublicKey, PublicKeyBytes, SecretKey, SecretKeyBytes, Signature, SignatureBytes,
+    PublicKey, PublicKeyBytes, SecretKey, SecretKeyBytes, Signature, SignatureBytes,
 };
 use serde::Deserialize;
 use spec_test_utils::Case;
@@ -218,7 +220,7 @@ fn verify(case: Case) {
     let run = || -> Result<_, Error> {
         let public_key = PublicKey::try_from(pubkey)?;
         let signature = Signature::try_from(signature)?;
-        Ok(signature.verify(message, public_key))
+        Ok(signature.verify(message, &public_key))
     };
 
     if output {

@@ -586,7 +586,10 @@ mod spec_tests {
 
 #[cfg(test)]
 mod extra_tests {
-    use bls::{SecretKey, SecretKeyBytes};
+    use bls::{
+        traits::{SecretKey as _, Signature as _},
+        SecretKey, SecretKeyBytes,
+    };
     use std_ext::CopyExt as _;
     use tap::Conv as _;
     use types::{
