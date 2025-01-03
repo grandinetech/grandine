@@ -1,4 +1,4 @@
-#[cfg(feature = "blst")]
+#[cfg(feature = "bls-blst")]
 use blst::BLST_ERROR;
 
 #[derive(Debug, thiserror::Error)]
@@ -13,12 +13,12 @@ pub enum Error {
     NoPublicKeysToAggregate,
     #[error("failed to decompress point")]
     DecompressionFailed,
-    #[cfg(feature = "blst")]
+    #[cfg(feature = "bls-blst")]
     #[error("blst error: {0:?}")]
     Blst(BLST_ERROR),
 }
 
-#[cfg(feature = "blst")]
+#[cfg(feature = "bls-blst")]
 impl From<BLST_ERROR> for Error {
     fn from(err: BLST_ERROR) -> Self {
         Self::Blst(err)

@@ -1,5 +1,5 @@
-#[cfg(feature = "blst")]
+#[cfg(feature = "bls-blst")]
 pub mod blst;
 
-#[cfg(feature = "bls12_381")]
-pub mod bls12_381;
+#[cfg(feature = "bls-zkcrypto")]
+pub mod zkcrypto;

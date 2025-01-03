@@ -4,12 +4,12 @@ edition = { workspace = true }
 authors = ["Grandine <info@grandine.io>"]
 
 [features]
-default = ["blst"]
-blst = [
+default = ["bls-blst"]
+bls-blst = [
     "dep:blst", 
     "dep:itertools"
 ]
-bls12_381 = [
+bls-zkcrypto = [
     "dep:bls12_381",
     "dep:ff",
     "dep:sha2",
