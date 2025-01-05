@@ -127,7 +127,7 @@ impl Signature {
 mod tests {
     use super::*;
     use crate::{
-        backends::bls12_381::{secret_key::SecretKey, secret_key_bytes::SecretKeyBytes},
+        backends::zkcrypto::{secret_key::SecretKey, secret_key_bytes::SecretKeyBytes},
         traits::SecretKey as _,
     };
 
