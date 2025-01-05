@@ -11,7 +11,21 @@ allocator = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
-runtime = { workspace = true }
+runtime = { workspace = true, features = ["network-holesky"] }
+directories = { workspace = true }
+grandine_version = { workspace = true }
+validator = { workspace = true }
+fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
+eth1_api = { workspace = true }
+signer = { workspace = true }
+slashing_protection = { workspace = true }
+http_api = { workspace = true }
+slasher = { workspace = true }
+types = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+jni = "0.21.1"
 
 [dev-dependencies]
 dirs = { workspace = true }

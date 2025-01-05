@@ -489,6 +489,7 @@ impl Eth1Api {
                     return Ok(result);
                 }
                 Err(error) => {
+                    println!("wtd kodel neprintina pries tai");
                     if let Some(metrics) = self.metrics.as_ref() {
                         metrics.eth1_api_errors_count.inc();
                     }

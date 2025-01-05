@@ -49,7 +49,7 @@ pub extern "system" fn Java_io_grandine_Grandine_run() {
         predefined_network: Some(
             runtime::PredefinedNetwork::Holesky
         ),
-        chain_config: Arc::new(chain_config),
+        chain_config: Arc::new(chain_config), // reikia
         deposit_contract_starting_block: None,
         genesis_state_file: None,
         genesis_state_download_url: None,
@@ -59,18 +59,18 @@ pub extern "system" fn Java_io_grandine_Grandine_run() {
         eth1_rpc_urls: vec![
             Url::parse("http://0.0.0.0:8783").unwrap()
         ],
-        data_dir,
+        data_dir, // reikia
         validators: None,
         keystore_storage_password_file: None,
-        graffiti: vec![graffiti],
+        graffiti: vec![graffiti], // reikia
         max_empty_slots: ValidatorConfig::default().max_empty_slots,
         suggested_fee_recipient: GRANDINE_DONATION_ADDRESS,
-        network_config: PredefinedNetwork::Holesky.network_config(),
+        network_config: PredefinedNetwork::Holesky.network_config(), // reikia
         storage_config: StorageConfig {
             in_memory: false,
             db_size: DEFAULT_ETH2_DB_SIZE,
             eth1_db_size: DEFAULT_ETH1_DB_SIZE,
-            directories: dirs.clone(),
+            directories: dirs.clone(),  // same kaip ir dirs
             archival_epoch_interval: DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             prune_storage: false,
         },
@@ -83,7 +83,7 @@ pub extern "system" fn Java_io_grandine_Grandine_run() {
         features: Vec::new(),
         state_slot: None,
         auth_options: AuthOptions {
-            secrets_path: Some(PathBuf::from("/jwtsecret")),
+            secrets_path: Some(PathBuf::from("/jwtsecret")),// ?????
             id: None,
             version: None,
         },
