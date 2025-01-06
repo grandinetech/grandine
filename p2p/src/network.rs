@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{bail, Error as AnyhowError, Result};
+use anyhow::{bail, ensure, Error as AnyhowError, Result};
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::RealController;
@@ -41,6 +41,7 @@ use ssz::{BitList, BitVector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
+use typenum::Unsigned as _;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
@@ -2132,6 +2133,11 @@ fn try_convert_to_attestation<P: Preset>(
         data,
         signature,
     } = single_attestation;
+
+    ensure!(
+        committee_index < P::MaxCommitteesPerSlot::U64,
+        AnyhowError::msg("invalid committee_index: {committee_index}")
+    );
 
     let mut committee_bits = BitVector::default();
     let index = committee_index.try_into()?;
