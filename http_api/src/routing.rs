@@ -314,50 +314,50 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
 #[expect(clippy::too_many_lines)]
 fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<NormalState<P, W>> {
     let state_routes = Router::new()
-        .route("/eth/v1/beacon/states/:state_id/root", get(state_root))
-        .route("/eth/v1/beacon/states/:state_id/fork", get(state_fork))
+        .route("/eth/v1/beacon/states/{state_id}/root", get(state_root))
+        .route("/eth/v1/beacon/states/{state_id}/fork", get(state_fork))
         .route(
-            "/eth/v1/beacon/states/:state_id/finality_checkpoints",
+            "/eth/v1/beacon/states/{state_id}/finality_checkpoints",
             get(state_finality_checkpoints),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/validators",
+            "/eth/v1/beacon/states/{state_id}/validators",
             get(get_state_validators),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/validators",
+            "/eth/v1/beacon/states/{state_id}/validators",
             post(post_state_validators),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/validator_identities",
+            "/eth/v1/beacon/states/{state_id}/validator_identities",
             post(state_validator_identities),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/validators/:validator_id",
+            "/eth/v1/beacon/states/{state_id}/validators/{validator_id}",
             get(state_validator),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/validator_balances",
+            "/eth/v1/beacon/states/{state_id}/validator_balances",
             get(state_validator_balances),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/committees",
+            "/eth/v1/beacon/states/{state_id}/committees",
             get(state_committees),
         )
         .route(
-            "/eth/v1/beacon/states/:state_id/sync_committees",
+            "/eth/v1/beacon/states/{state_id}/sync_committees",
             get(state_sync_committees),
         )
-        .route("/eth/v1/beacon/states/:state_id/randao", get(state_randao));
+        .route("/eth/v1/beacon/states/{state_id}/randao", get(state_randao));
 
     let header_routes = Router::new()
         .route("/eth/v1/beacon/headers", get(block_headers))
-        .route("/eth/v1/beacon/headers/:block_id", get(block_id_headers));
+        .route("/eth/v1/beacon/headers/{block_id}", get(block_id_headers));
 
     let block_v1_routes = Router::new()
-        .route("/eth/v1/beacon/blocks/:block_id/root", get(block_root))
+        .route("/eth/v1/beacon/blocks/{block_id}/root", get(block_root))
         .route(
-            "/eth/v1/beacon/blocks/:block_id/attestations",
+            "/eth/v1/beacon/blocks/{block_id}/attestations",
             get(block_attestations),
         )
         .route(
@@ -369,7 +369,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         );
 
     let block_v2_routes = Router::new().route(
-        "/eth/v2/beacon/blocks/:block_id/attestations",
+        "/eth/v2/beacon/blocks/{block_id}/attestations",
         get(block_attestations_v2),
     );
 
@@ -411,11 +411,11 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
 
     let reward_routes = Router::new()
         .route(
-            "/eth/v1/beacon/rewards/blocks/:block_id",
+            "/eth/v1/beacon/rewards/blocks/{block_id}",
             get(block_rewards),
         )
         .route(
-            "/eth/v1/beacon/rewards/sync_committee/:block_id",
+            "/eth/v1/beacon/rewards/sync_committee/{block_id}",
             post(sync_committee_rewards),
         );
 
@@ -427,7 +427,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
                 middleware::is_synced,
             )),
         )
-        .route("/eth/v1/beacon/blob_sidecars/:block_id", get(blob_sidecars))
+        .route(
+            "/eth/v1/beacon/blob_sidecars/{block_id}",
+            get(blob_sidecars),
+        )
         .route("/eth/v1/beacon/genesis", get(genesis))
         .merge(state_routes)
         .merge(header_routes)
@@ -440,7 +443,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
 
 fn eth_v2_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<NormalState<P, W>> {
     Router::new()
-        .route("/eth/v2/beacon/blocks/:block_id", get(block))
+        .route("/eth/v2/beacon/blocks/{block_id}", get(block))
         .route(
             "/eth/v2/beacon/blocks",
             post(publish_block_v2).route_layer(axum::middleware::map_request_with_state(
@@ -459,7 +462,7 @@ fn eth_v2_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
 
 fn eth_v1_builder_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     Router::new().route(
-        "/eth/v1/builder/states/:state_id/expected_withdrawals",
+        "/eth/v1/builder/states/{state_id}/expected_withdrawals",
         get(expected_withdrawals),
     )
 }
@@ -477,7 +480,7 @@ fn eth_v1_debug_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
 
 fn eth_v2_debug_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     Router::new()
-        .route("/eth/v2/debug/beacon/states/:state_id", get(beacon_state))
+        .route("/eth/v2/debug/beacon/states/{state_id}", get(beacon_state))
         .route("/eth/v2/debug/beacon/heads", get(beacon_heads))
 }
 
@@ -485,7 +488,7 @@ fn eth_v1_node_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     Router::new()
         .route("/eth/v1/node/identity", get(node_identity))
         .route("/eth/v1/node/peers", get(node_peers))
-        .route("/eth/v1/node/peers/:peer_id", get(node_peer))
+        .route("/eth/v1/node/peers/{peer_id}", get(node_peer))
         .route("/eth/v1/node/peer_count", get(node_peer_count))
         .route("/eth/v1/node/version", get(node_version))
         .route("/eth/v1/node/syncing", get(node_syncing_status))
@@ -497,19 +500,19 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
 ) -> Router<NormalState<P, W>> {
     Router::new()
         .route(
-            "/eth/v1/validator/duties/attester/:epoch",
+            "/eth/v1/validator/duties/attester/{epoch}",
             post(validator_attester_duties),
         )
         .route(
-            "/eth/v1/validator/duties/proposer/:epoch",
+            "/eth/v1/validator/duties/proposer/{epoch}",
             get(validator_proposer_duties),
         )
         .route(
-            "/eth/v1/validator/duties/sync/:epoch",
+            "/eth/v1/validator/duties/sync/{epoch}",
             post(validator_sync_committee_duties),
         )
         .route(
-            "/eth/v1/validator/blinded_blocks/:slot",
+            "/eth/v1/validator/blinded_blocks/{slot}",
             get(validator_blinded_block),
         )
         .route(
@@ -549,7 +552,7 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             post(validator_register_validator),
         )
         .route(
-            "/eth/v1/validator/liveness/:epoch",
+            "/eth/v1/validator/liveness/{epoch}",
             post(validator_liveness),
         )
         .route(
@@ -578,7 +581,7 @@ fn eth_v2_validator_routes<P: Preset, W: Wait>(
             "/eth/v2/validator/aggregate_and_proofs",
             post(validator_publish_aggregate_and_proofs),
         )
-        .route("/eth/v2/validator/blocks/:slot", get(validator_block))
+        .route("/eth/v2/validator/blocks/{slot}", get(validator_block))
         .layer(axum::middleware::map_request_with_state(
             state,
             middleware::is_synced,
@@ -589,7 +592,7 @@ fn eth_v3_validator_routes<P: Preset, W: Wait>(
     state: NormalState<P, W>,
 ) -> Router<NormalState<P, W>> {
     Router::new()
-        .route("/eth/v3/validator/blocks/:slot", get(validator_block_v3))
+        .route("/eth/v3/validator/blocks/{slot}", get(validator_block_v3))
         .layer(axum::middleware::map_request_with_state(
             state,
             middleware::is_synced,

@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::{ensure, Error as AnyhowError, Result};
 use axum::{
-    async_trait,
     body::Body,
     extract::{
         rejection::JsonRejection, FromRef, FromRequest, FromRequestParts, Path as RequestPath,
@@ -213,8 +212,7 @@ impl<T: Serialize> IntoResponse for EthResponse<T> {
 // This has multiple `FromRequest` impls to make error messages more specific.
 struct EthJson<T>(pub T);
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<SetFeeRecipientQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<SetFeeRecipientQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -226,8 +224,7 @@ impl<S> FromRequest<S, Body> for EthJson<SetFeeRecipientQuery> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<SetGasLimitQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<SetGasLimitQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -239,8 +236,7 @@ impl<S> FromRequest<S, Body> for EthJson<SetGasLimitQuery> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<SetGraffitiQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<SetGraffitiQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -252,8 +248,7 @@ impl<S> FromRequest<S, Body> for EthJson<SetGraffitiQuery> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<KeystoreImportQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<KeystoreImportQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -265,8 +260,7 @@ impl<S> FromRequest<S, Body> for EthJson<KeystoreImportQuery> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<KeystoreDeleteQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<KeystoreDeleteQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -278,8 +272,7 @@ impl<S> FromRequest<S, Body> for EthJson<KeystoreDeleteQuery> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<RemoteKeysImportQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<RemoteKeysImportQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -291,8 +284,7 @@ impl<S> FromRequest<S, Body> for EthJson<RemoteKeysImportQuery> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<RemoteKeysDeleteQuery> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<RemoteKeysDeleteQuery> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -307,8 +299,7 @@ impl<S> FromRequest<S, Body> for EthJson<RemoteKeysDeleteQuery> {
 // This may have multiple `FromRequest` impls to make error messages more specific.
 struct EthPath<T>(pub T);
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<PublicKeyBytes> {
+impl<S: Sync> FromRequestParts<S> for EthPath<PublicKeyBytes> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -325,8 +316,7 @@ impl<S> FromRequestParts<S> for EthPath<PublicKeyBytes> {
 
 struct EthQuery<T>(pub T);
 
-#[async_trait]
-impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
+impl<S: Sync, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -751,43 +741,43 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
 fn eth_v1_keymanager_routes<P: Preset, W: Wait>() -> Router<ValidatorApiState<P, W>> {
     Router::new()
         .route(
-            "/eth/v1/validator/:pubkey/feerecipient",
+            "/eth/v1/validator/{pubkey}/feerecipient",
             get(keymanager_list_fee_recipient),
         )
         .route(
-            "/eth/v1/validator/:pubkey/feerecipient",
+            "/eth/v1/validator/{pubkey}/feerecipient",
             post(keymanager_set_fee_recipient),
         )
         .route(
-            "/eth/v1/validator/:pubkey/feerecipient",
+            "/eth/v1/validator/{pubkey}/feerecipient",
             delete(keymanager_delete_fee_recipient),
         )
         .route(
-            "/eth/v1/validator/:pubkey/gas_limit",
+            "/eth/v1/validator/{pubkey}/gas_limit",
             get(keymanager_get_gas_limit),
         )
         .route(
-            "/eth/v1/validator/:pubkey/gas_limit",
+            "/eth/v1/validator/{pubkey}/gas_limit",
             post(keymanager_set_gas_limit),
         )
         .route(
-            "/eth/v1/validator/:pubkey/gas_limit",
+            "/eth/v1/validator/{pubkey}/gas_limit",
             delete(keymanager_delete_gas_limit),
         )
         .route(
-            "/eth/v1/validator/:pubkey/graffiti",
+            "/eth/v1/validator/{pubkey}/graffiti",
             get(keymanager_get_graffiti),
         )
         .route(
-            "/eth/v1/validator/:pubkey/graffiti",
+            "/eth/v1/validator/{pubkey}/graffiti",
             post(keymanager_set_graffiti),
         )
         .route(
-            "/eth/v1/validator/:pubkey/graffiti",
+            "/eth/v1/validator/{pubkey}/graffiti",
             delete(keymanager_delete_graffiti),
         )
         .route(
-            "/eth/v1/validator/:pubkey/voluntary_exit",
+            "/eth/v1/validator/{pubkey}/voluntary_exit",
             post(keymanager_create_voluntary_exit),
         )
         .route("/eth/v1/keystores", get(keymanager_list_validating_pubkeys))
@@ -885,7 +875,7 @@ impl ApiToken {
 #[cfg(test)]
 mod tests {
     use anyhow::Result as AnyhowResult;
-    use axum::{extract::rejection::MissingJsonContentType, Error as AxumError};
+    use axum::extract::rejection::MissingJsonContentType;
     use itertools::Itertools as _;
     use serde_json::{json, Result, Value};
     use tempfile::{Builder, NamedTempFile};
@@ -975,20 +965,6 @@ mod tests {
                 "invalid JSON body",
                 "Expected request with `Content-Type: application/json`",
             ],
-        );
-    }
-
-    // `axum_extra::extract::QueryRejection` and `axum::Error` duplicate error sources.
-    // `axum::Error` has not been fixed in any version yet.
-    // `axum::extract::rejection::QueryRejection` is even worse and harder to work around.
-    #[test]
-    fn error_sources_does_not_yield_triplicates_from_query_rejection() {
-        let axum_error = AxumError::new("error");
-        let error = Error::InvalidQuery(QueryRejection::FailedToDeserializeQueryString(axum_error));
-
-        assert_eq!(
-            error.sources().map(ToString::to_string).collect_vec(),
-            ["invalid query string", "error"],
         );
     }
 

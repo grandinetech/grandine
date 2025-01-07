@@ -280,7 +280,7 @@ struct EthErrorResponse<'error> {
 )]
 #[cfg(test)]
 mod tests {
-    use axum::{extract::rejection::MissingJsonContentType, Error as AxumError};
+    use axum::extract::rejection::MissingJsonContentType;
     use itertools::Itertools as _;
     use serde_json::{json, Result, Value};
     use test_case::test_case;
@@ -329,20 +329,6 @@ mod tests {
                 "invalid JSON body",
                 "Expected request with `Content-Type: application/json`",
             ],
-        );
-    }
-
-    // `axum_extra::extract::QueryRejection` and `axum::Error` duplicate error sources.
-    // `axum::Error` has not been fixed in any version yet.
-    // `axum::extract::rejection::QueryRejection` is even worse and harder to work around.
-    #[test]
-    fn error_sources_does_not_yield_triplicates_from_query_rejection() {
-        let axum_error = AxumError::new("error");
-        let error = Error::InvalidQuery(QueryRejection::FailedToDeserializeQueryString(axum_error));
-
-        assert_eq!(
-            error.sources().map(ToString::to_string).collect_vec(),
-            ["invalid query string", "error"],
         );
     }
 }
