@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
 use axum::{
-    async_trait,
     body::{Body, Bytes},
     extract::{FromRef, FromRequest, FromRequestParts, Path},
     http::{request::Parts, Request},
@@ -49,8 +48,7 @@ use crate::{
 // They all use `FromStr`, whereas the one for `Path` uses `DeserializeOwned`.
 pub struct EthPath<T>(pub T);
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<BlockId> {
+impl<S: Sync> FromRequestParts<S> for EthPath<BlockId> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -65,8 +63,7 @@ impl<S> FromRequestParts<S> for EthPath<BlockId> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<StateId> {
+impl<S: Sync> FromRequestParts<S> for EthPath<StateId> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -81,8 +78,7 @@ impl<S> FromRequestParts<S> for EthPath<StateId> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<PeerId> {
+impl<S: Sync> FromRequestParts<S> for EthPath<PeerId> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -97,8 +93,7 @@ impl<S> FromRequestParts<S> for EthPath<PeerId> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<ValidatorId> {
+impl<S: Sync> FromRequestParts<S> for EthPath<ValidatorId> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -113,8 +108,7 @@ impl<S> FromRequestParts<S> for EthPath<ValidatorId> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<Epoch> {
+impl<S: Sync> FromRequestParts<S> for EthPath<Epoch> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -129,8 +123,7 @@ impl<S> FromRequestParts<S> for EthPath<Epoch> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequestParts<S> for EthPath<(StateId, ValidatorId)> {
+impl<S: Sync> FromRequestParts<S> for EthPath<(StateId, ValidatorId)> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -155,8 +148,7 @@ impl<S> FromRequestParts<S> for EthPath<(StateId, ValidatorId)> {
 
 pub struct EthQuery<T>(pub T);
 
-#[async_trait]
-impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
+impl<S: Sync, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
     type Rejection = Error;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -171,8 +163,7 @@ impl<S, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T> {
 // This has multiple `FromRequest` impls to make error messages more specific.
 pub struct EthJson<T>(pub T);
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Box<ProposerSlashing>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Box<ProposerSlashing>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -184,8 +175,7 @@ impl<S> FromRequest<S, Body> for EthJson<Box<ProposerSlashing>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Box<SignedVoluntaryExit>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Box<SignedVoluntaryExit>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -197,8 +187,7 @@ impl<S> FromRequest<S, Body> for EthJson<Box<SignedVoluntaryExit>> {
     }
 }
 
-#[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<Phase0AttesterSlashing<P>>> {
+impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Box<Phase0AttesterSlashing<P>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -210,8 +199,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<Phase0AttesterSlashing<P
     }
 }
 
-#[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
+impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -231,8 +219,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
     }
 }
 
-#[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<Attestation<P>>>> {
+impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<Attestation<P>>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -244,8 +231,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<Attestation<P>>>> {
     }
 }
 
-#[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SingleAttestation<P>>> {
+impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Vec<SingleAttestation<P>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -257,8 +243,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SingleAttestation<P>>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<Value>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<Value>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -270,8 +255,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<Value>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorIndex>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<ValidatorIndex>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -286,8 +270,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorIndex>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -299,8 +282,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -312,8 +294,7 @@ impl<S> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<SyncCommitteeSubscription>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<SyncCommitteeSubscription>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -325,8 +306,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<SyncCommitteeSubscription>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<BeaconCommitteeSubscription>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<BeaconCommitteeSubscription>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -338,8 +318,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<BeaconCommitteeSubscription>> {
     }
 }
 
-#[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<SignedAggregateAndProof<P>>>> {
+impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<SignedAggregateAndProof<P>>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -351,8 +330,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<SignedAggregateAndPr
     }
 }
 
-#[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SignedContributionAndProof<P>>> {
+impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Vec<SignedContributionAndProof<P>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -364,8 +342,7 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SignedContributionAndPro
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<ProposerData>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<ProposerData>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -377,8 +354,7 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<ProposerData>> {
     }
 }
 
-#[async_trait]
-impl<S> FromRequest<S, Body> for EthJson<Vec<SignedValidatorRegistrationV1>> {
+impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<SignedValidatorRegistrationV1>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -392,7 +368,6 @@ impl<S> FromRequest<S, Body> for EthJson<Vec<SignedValidatorRegistrationV1>> {
 
 pub struct EthJsonOrSsz<T>(pub T);
 
-#[async_trait]
 impl<S, T> FromRequest<S, Body> for EthJsonOrSsz<T>
 where
     Arc<Config>: FromRef<S>,
