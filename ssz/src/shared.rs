@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 // <https://notes.ethereum.org/ruKvDXl6QOW3gnqVYb8ezA> describes some of the validations that SSZ
 // decoders need to perform.
 //
@@ -15,6 +17,18 @@ use crate::{
     porcelain::{SszRead, SszReadDefault as _, SszWrite},
     size::Size,
 };
+
+// TODO(32-bit support): Rethink the new code.
+//                       Try to avoid referring to `Unsigned::U64` or `Unsigned::U128`.
+// The associated constants in `typenum::Unsigned` are computed using the `<<` operator,
+// which silently discards set bits that are shifted out of range.
+pub const fn saturating_usize<N: Unsigned>() -> usize {
+    if N::U64 > usize::MAX as u64 {
+        usize::MAX
+    } else {
+        N::USIZE
+    }
+}
 
 #[inline]
 pub fn subslice(bytes: &[u8], range: Range<usize>) -> Result<&[u8], ReadError> {

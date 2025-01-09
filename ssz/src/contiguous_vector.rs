@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 #![expect(
     clippy::allow_attributes,
     reason = "clippy::allow_attributes lint triggers from some derive macros. \

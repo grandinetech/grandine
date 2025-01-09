@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 #![expect(
     clippy::allow_attributes,
     reason = "clippy::allow_attributes lint triggers from some derive macros. \
@@ -151,7 +153,7 @@ impl<T, N> ContiguousList<T, N> {
     where
         N: Unsigned,
     {
-        let maximum = N::USIZE;
+        let maximum = shared::saturating_usize::<N>();
 
         if actual > maximum {
             return Err(ReadError::ListTooLong { maximum, actual });
