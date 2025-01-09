@@ -19,9 +19,13 @@ pub fn settings() -> &'static KZGSettings {
 fn load_settings() -> Result<KZGSettings> {
     let contents = include_str!("trusted_setup.txt");
 
-    let (g1_bytes, g2_bytes) =
+    let (g1_monomial_bytes, g1_lagrange_bytes, g2_monomial_bytes) =
         load_trusted_setup_string(contents).map_err(|error| anyhow!(error))?;
 
-    load_trusted_setup_rust(g1_bytes.as_slice(), g2_bytes.as_slice())
-        .map_err(|error| anyhow!(error))
+    load_trusted_setup_rust(
+        g1_monomial_bytes.as_slice(),
+        g1_lagrange_bytes.as_slice(),
+        g2_monomial_bytes.as_slice(),
+    )
+    .map_err(|error| anyhow!(error))
 }
