@@ -4297,10 +4297,11 @@ dependencies = [
 [[package]]
 name = "kzg"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git?branch=integration-raw#5e4383c71e8c6d4266a1b4573e3d2ff4c972fe06"
+source = "git+https://github.com/grandinetech/rust-kzg.git#cb71d62a55e015758fd0277e67246fce2850340b"
 dependencies = [
  "blst",
  "sha2 0.10.8",
+ "siphasher 1.0.1",
 ]
 
 [[package]]
@@ -4384,7 +4385,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6643,7 +6644,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-blst"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git?branch=integration-raw#5e4383c71e8c6d4266a1b4573e3d2ff4c972fe06"
+source = "git+https://github.com/grandinetech/rust-kzg.git#cb71d62a55e015758fd0277e67246fce2850340b"
 dependencies = [
  "blst",
  "hex",
@@ -6651,7 +6652,6 @@ dependencies = [
  "libc",
  "once_cell",
  "rand",
- "siphasher 1.0.1",
  "smallvec",
 ]
 
