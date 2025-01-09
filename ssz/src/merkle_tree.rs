@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 // Here's a visual aid to help understand the algorithms used here:
 // ```text
 //                                                  ┊
@@ -118,7 +120,9 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
     }
 
     pub fn push(&mut self, index: usize, chunk: H256) -> (usize, H256) {
-        assert!(index < 1 << D::USIZE);
+        // TODO(32-bit support): either remove `assert!` or change index type to `u64`
+        let index_u64: u64 = index.try_into().expect("usize should fit in u64");
+        assert!(index_u64 < 1 << D::U64);
 
         let sibling_to_update = binary_carry_sequence(index);
 

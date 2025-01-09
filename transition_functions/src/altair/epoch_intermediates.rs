@@ -8,7 +8,6 @@ use helper_functions::{
 };
 use itertools::izip;
 use serde::Serialize;
-use static_assertions::assert_eq_size;
 use types::{
     altair::{
         beacon_state::BeaconState,
@@ -27,6 +26,9 @@ use types::{
 };
 
 use crate::unphased::{EpochDeltas, ValidatorSummary};
+
+#[cfg(target_arch = "x86_64")]
+use static_assertions::assert_eq_size;
 
 pub trait AltairEpochDeltas: Default {
     fn add_source_reward(&mut self, value: Gwei);
@@ -49,6 +51,7 @@ pub struct AltairValidatorSummary {
     pub eligible_for_penalties: bool,
 }
 
+#[cfg(target_arch = "x86_64")]
 assert_eq_size!(AltairValidatorSummary, [u64; 3]);
 
 impl ValidatorSummary for AltairValidatorSummary {

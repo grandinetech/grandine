@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 use core::{
     fmt::{Debug, Formatter, Result as FmtResult},
     iter::{Flatten, FusedIterator},

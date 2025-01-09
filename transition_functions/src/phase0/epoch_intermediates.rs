@@ -14,6 +14,7 @@ use helper_functions::{
 use itertools::{izip, Itertools as _};
 use num_integer::Roots as _;
 use serde::Serialize;
+#[cfg(target_arch = "x86_64")]
 use static_assertions::assert_eq_size;
 use types::{
     nonstandard::{AttestationEpoch, AttestationOutcome, Outcome},
@@ -88,6 +89,7 @@ pub struct Phase0ValidatorSummary {
     pub eligible_for_penalties: bool,
 }
 
+#[cfg(target_arch = "x86_64")]
 assert_eq_size!(Phase0ValidatorSummary, [u64; 3]);
 
 impl ValidatorSummary for Phase0ValidatorSummary {

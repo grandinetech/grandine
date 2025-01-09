@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 // Having `#[expect(clippy::wrong_self_convention)]` declared directly on violating attributes
 // results in `unfulfilled_lint_expectations` false positive warning.
 // Declaring this for the whole module as a temporary workaround.
@@ -92,6 +94,15 @@ pub impl u64 {
     #[must_use]
     fn prev_power_of_two(self) -> Self {
         1 << self.ilog2()
+    }
+
+    #[inline]
+    #[must_use]
+    fn ilog2_ceil(self) -> u8 {
+        self.checked_next_power_of_two()
+            .map_or(Self::BITS, Self::trailing_zeros)
+            .try_into()
+            .expect("number of bits in u64 should fit in u8")
     }
 }
 

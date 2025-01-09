@@ -1,3 +1,5 @@
+// TODO(32-bit support): Review all uses of `typenum::Unsigned::USIZE`.
+
 // This implementation is optimized for random access. Some of the lists in `BeaconState` are only
 // ever appended to or cleared. An implementation specialized for append-only usage could use less
 // memory by taking advantage of the fact that intermediate hashes don't need to be retained for
@@ -10,7 +12,7 @@ use core::{
     marker::PhantomData,
 };
 
-use arithmetic::NonZeroExt as _;
+use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bit_field::BitField as _;
 use derivative::Derivative;
 use ethereum_types::H256;
@@ -47,6 +49,16 @@ use crate::{
 )]
 pub struct PersistentList<T, N, B = MinimumBundleSize<T>> {
     root: Option<Arc<Hc<Node<T, B>>>>,
+    // TODO(32-bit support): Consider changing the type of `length` to `u64`.
+    //
+    //                       Persistent lists could have more than `usize::MAX` elements due to
+    //                       structural sharing, but changing the type of `PersistentList.length`
+    //                       may necessitate intrusive changes to the rest of this crate.
+    //
+    //                       `VALIDATOR_REGISTRY_LIMIT` is 2 ** 40 in the mainnet preset,
+    //                       but the number of validators will likely stay far below the maximum.
+    //                       Also, `Validator` containers do not benefit from structural sharing,
+    //                       so that many validators would not fit in memory on 32 bit machines.
     length: usize,
     phantom: PhantomData<N>,
 }
@@ -198,7 +210,11 @@ where
             type Value = PersistentList<T, N, B>;
 
             fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
-                write!(formatter, "a list of length up to {}", N::USIZE)
+                write!(
+                    formatter,
+                    "a list of length up to {}",
+                    shared::saturating_usize::<N>(),
+                )
             }
 
             fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
@@ -396,7 +412,13 @@ impl<T, N, B> PersistentList<T, N, B> {
         N: Unsigned,
         B: BundleSize<T>,
     {
-        match self.length.cmp(&N::USIZE) {
+        // TODO(32-bit support): Review change.
+        let length_u64: u64 = self
+            .length
+            .try_into()
+            .expect("PersistentList length counter should fit to u64");
+
+        match length_u64.cmp(&N::U64) {
             Ordering::Less => {}
             Ordering::Equal => return Err(PushError::ListFull),
             Ordering::Greater => unreachable!("case above prevents list from being overfilled"),
@@ -462,14 +484,17 @@ impl<T, N, B> PersistentList<T, N, B> {
         N: Unsigned,
         B: BundleSize<T>,
     {
-        B::depth_of_length(N::USIZE)
+        // TODO(32-bit support): Rethink the new code.
+        //                       Try to avoid referring to `Unsigned::U64` or `Unsigned::U128`.
+        //                       Try to redesign `BundleSize::depth_of_length` to be usable again.
+        N::U64.ilog2_ceil().saturating_sub(B::ilog2())
     }
 
     const fn validate_length(actual: usize) -> Result<(), ReadError>
     where
         N: Unsigned,
     {
-        let maximum = N::USIZE;
+        let maximum = shared::saturating_usize::<N>();
 
         if actual > maximum {
             return Err(ReadError::ListTooLong { maximum, actual });
