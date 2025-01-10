@@ -29,7 +29,7 @@ pub fn deserialize<'de, D: Deserializer<'de>, const N: usize>(
             let digits = shared::strip_hex_prefix(string)?;
 
             let mut bytes = [0; N];
-            hex::decode_to_slice(digits, &mut bytes).map_err(E::custom)?;
+            const_hex::decode_to_slice(digits, &mut bytes).map_err(E::custom)?;
 
             Ok(bytes)
         }
