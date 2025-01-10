@@ -15,6 +15,7 @@ use types::{
     nonstandard::{FinalizedCheckpoint, WithOrigin},
     preset::Preset,
     redacting_url::RedactingUrl,
+    traits::BeaconState as _,
 };
 
 #[cfg(any(feature = "network-mainnet", test))]
@@ -307,6 +308,8 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
 
     let state = Arc::from_ssz(config, ssz_bytes)?;
     let block = Arc::new(genesis::beacon_block(&state));
+
+    info!("genesis state loaded at slot: {}", state.slot());
 
     Ok(WithOrigin::new_from_genesis(FinalizedCheckpoint {
         block,

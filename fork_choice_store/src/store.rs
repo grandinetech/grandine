@@ -207,6 +207,7 @@ pub struct Store<P: Preset> {
     state_cache: Arc<StateCacheProcessor<P>>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
+    finished_back_sync: bool,
 }
 
 impl<P: Preset> Store<P> {
@@ -218,6 +219,7 @@ impl<P: Preset> Store<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         finished_initial_forward_sync: bool,
+        finished_back_sync: bool,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -279,6 +281,7 @@ impl<P: Preset> Store<P> {
             )),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
+            finished_back_sync,
         }
     }
 
@@ -1696,11 +1699,13 @@ impl<P: Preset> Store<P> {
     }
 
     // TODO(feature/deneb): Format quotes and log message like everything else.
-    pub fn validate_blob_sidecar(
+    pub fn validate_blob_sidecar_with_state(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
+        parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Result<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
 
@@ -1732,7 +1737,7 @@ impl<P: Preset> Store<P> {
         }
 
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
-        if block_header.slot <= self.finalized_slot() {
+        if !origin.is_from_back_sync() && block_header.slot <= self.finalized_slot() {
             return Ok(BlobSidecarAction::Ignore(false));
         }
 
@@ -1747,15 +1752,7 @@ impl<P: Preset> Store<P> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
-        let state = self
-            .state_cache
-            .try_state_at_slot(self, block_header.parent_root, block_header.slot)?
-            .unwrap_or_else(|| {
-                self.chain_link(block_header.parent_root)
-                    .or_else(|| self.chain_link_before_or_at(block_header.slot))
-                    .map(|chain_link| chain_link.state(self))
-                    .unwrap_or_else(|| self.head().state(self))
-            });
+        let state = state_fn()?;
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         SingleVerifier.verify_singular(
@@ -1781,19 +1778,19 @@ impl<P: Preset> Store<P> {
 
         // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources)
         // (a client MAY queue sidecars for processing once the parent block is retrieved).
-        let Some(parent) = self.chain_link(block_header.parent_root) else {
+        let Some((parent, parent_payload_status)) = parent_info() else {
             return Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar));
         };
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 2/2:
         ensure!(
-            !parent.is_invalid(),
+            !parent_payload_status.is_invalid(),
             Error::BlobSidecarInvalidParentOfBlock { blob_sidecar },
         );
 
         // [REJECT] The sidecar is from a higher slot than the sidecar's block's parent (defined by block_header.parent_root).
-        let parent_slot = parent.slot();
+        let parent_slot = parent.message().slot();
 
         ensure!(
             block_header.slot > parent_slot,
@@ -1803,16 +1800,20 @@ impl<P: Preset> Store<P> {
             }
         );
 
-        // [REJECT] The current finalized_checkpoint is an ancestor of the sidecar's block
-        // -- i.e. get_checkpoint_block(store, block_header.parent_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root.
-        let ancestor_at_finalized_slot = self
-            .ancestor(block_header.parent_root, self.finalized_slot())
-            .expect("every block in the store should have an ancestor at the last finalized slot");
+        if !origin.is_from_back_sync() {
+            // [REJECT] The current finalized_checkpoint is an ancestor of the sidecar's block
+            // -- i.e. get_checkpoint_block(store, block_header.parent_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root.
+            let ancestor_at_finalized_slot = self
+                .ancestor(block_header.parent_root, self.finalized_slot())
+                .expect(
+                    "every block in the store should have an ancestor at the last finalized slot",
+                );
 
-        ensure!(
-            ancestor_at_finalized_slot == self.finalized_checkpoint.root,
-            Error::BlobSidecarBlockNotADescendantOfFinalized { blob_sidecar },
-        );
+            ensure!(
+                ancestor_at_finalized_slot == self.finalized_checkpoint.root,
+                Error::BlobSidecarBlockNotADescendantOfFinalized { blob_sidecar },
+            );
+        }
 
         // > _[REJECT]_ The sidecar's inclusion proof is valid as
         // > verified by `verify_blob_sidecar_inclusion_proof(blob_sidecar)`.
@@ -1832,22 +1833,54 @@ impl<P: Preset> Store<P> {
             Error::BlobSidecarInvalid { blob_sidecar }
         );
 
-        // [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the current shuffling
-        // (defined by block_header.parent_root/block_header.slot).
-        // If the proposer_index cannot immediately be verified against the expected shuffling,
-        // the sidecar MAY be queued for later processing while proposers for the block's branch are calculated --
-        // in such a case do not REJECT, instead IGNORE this message.
-        let computed = accessors::get_beacon_proposer_index(&state)?;
+        if !origin.is_from_back_sync() {
+            // [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the current shuffling
+            // (defined by block_header.parent_root/block_header.slot).
+            // If the proposer_index cannot immediately be verified against the expected shuffling,
+            // the sidecar MAY be queued for later processing while proposers for the block's branch are calculated --
+            // in such a case do not REJECT, instead IGNORE this message.
+            let computed = accessors::get_beacon_proposer_index(&state)?;
 
-        ensure!(
-            block_header.proposer_index == computed,
-            Error::BlobSidecarProposerIndexMismatch {
-                blob_sidecar,
-                computed,
-            }
-        );
+            ensure!(
+                block_header.proposer_index == computed,
+                Error::BlobSidecarProposerIndexMismatch {
+                    blob_sidecar,
+                    computed,
+                }
+            );
+        }
 
         Ok(BlobSidecarAction::Accept(blob_sidecar))
+    }
+
+    pub fn validate_blob_sidecar(
+        &self,
+        blob_sidecar: Arc<BlobSidecar<P>>,
+        block_seen: bool,
+        origin: &BlobSidecarOrigin,
+    ) -> Result<BlobSidecarAction<P>> {
+        let block_header = blob_sidecar.signed_block_header.message;
+
+        self.validate_blob_sidecar_with_state(
+            blob_sidecar,
+            block_seen,
+            origin,
+            || {
+                self.chain_link(block_header.parent_root)
+                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+            },
+            || {
+                Ok(self
+                    .state_cache
+                    .try_state_at_slot(self, block_header.parent_root, block_header.slot)?
+                    .unwrap_or_else(|| {
+                        self.chain_link(block_header.parent_root)
+                            .or_else(|| self.chain_link_before_or_at(block_header.slot))
+                            .map(|chain_link| chain_link.state(self))
+                            .unwrap_or_else(|| self.head().state(self))
+                    }))
+            },
+        )
     }
 
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)
@@ -2874,6 +2907,15 @@ impl<P: Preset> Store<P> {
     pub fn is_forward_synced(&self) -> bool {
         self.head().slot() + self.store_config.max_empty_slots >= self.slot()
             && self.finished_initial_forward_sync
+    }
+
+    #[must_use]
+    pub const fn is_back_synced(&self) -> bool {
+        self.finished_back_sync
+    }
+
+    pub fn set_back_synced(&mut self, finished_back_sync: bool) {
+        self.finished_back_sync = finished_back_sync;
     }
 
     fn set_block_payload_status(

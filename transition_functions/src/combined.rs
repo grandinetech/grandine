@@ -3,9 +3,11 @@ use derive_more::From;
 use enum_iterator::Sequence as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
-    accessors, fork, misc,
+    accessors,
+    error::SignatureKind,
+    fork, misc,
     slot_report::{NullSlotReport, RealSlotReport, SlotReport},
-    verifier::{MultiVerifier, NullVerifier, Verifier, VerifierOption},
+    verifier::{MultiVerifier, NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
 use static_assertions::const_assert_eq;
 use thiserror::Error;
@@ -14,6 +16,7 @@ use types::{
     config::Config,
     nonstandard::{Phase, Toption},
     phase0::{
+        consts::DOMAIN_BEACON_PROPOSER,
         containers::DepositData,
         primitives::{Slot, ValidatorIndex},
     },
@@ -191,6 +194,32 @@ pub fn custom_state_transition<P: Preset>(
             unreachable!("successful slot processing ensures that phases match")
         }
     }
+}
+
+pub fn verify_base_signature_with_head_state<P: Preset>(
+    config: &Config,
+    head_state: &BeaconState<P>,
+    block: &SignedBeaconBlock<P>,
+) -> Result<()> {
+    let phase = config.phase_at_slot::<P>(block.message().slot());
+    let fork_version = config.version(phase);
+
+    // Block signature
+    let domain = misc::compute_domain(
+        config,
+        DOMAIN_BEACON_PROPOSER,
+        Some(fork_version),
+        Some(head_state.genesis_validators_root()),
+    );
+
+    let signing_root = misc::compute_signing_root(block.message(), domain);
+
+    SingleVerifier.verify_singular(
+        signing_root,
+        block.signature(),
+        accessors::public_key(head_state, block.message().proposer_index())?,
+        SignatureKind::Block,
+    )
 }
 
 pub fn verify_signatures<P: Preset>(

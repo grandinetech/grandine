@@ -1,13 +1,24 @@
-use core::{fmt::Display, hash::Hash, ops::Range, time::Duration};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+#![allow(
+    clippy::multiple_inherent_impl,
+    reason = "https://github.com/rust-lang/rust-clippy/issues/13040"
+)]
+
+use core::{fmt::Display, hash::Hash, num::NonZeroUsize, ops::Range, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
+use eth1_api::RealController;
 use eth2_libp2p::{rpc::StatusMessage, PeerId};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use log::{log, Level};
+use lru::LruCache;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
 use typenum::Unsigned as _;
@@ -53,13 +64,15 @@ pub enum SyncTarget {
     Block,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SyncBatch {
     pub target: SyncTarget,
     pub direction: SyncDirection,
     pub peer_id: PeerId,
     pub start_slot: Slot,
     pub count: u64,
+    pub retry_count: usize,
+    pub response_received: bool,
 }
 
 pub struct SyncManager {
@@ -72,10 +85,13 @@ pub struct SyncManager {
     status_updates_cache: TimedSizedCache<Epoch, ()>,
     not_enough_peers_message_shown_at: Option<Instant>,
     sync_from_finalized: bool,
+    // store peers that don't serve blocks prior to `MIN_EPOCHS_FOR_BLOCK_REQUESTS`
+    // so that we can filter them when back-syncing
+    back_sync_black_list: LruCache<PeerId, ()>,
 }
 
-impl Default for SyncManager {
-    fn default() -> Self {
+impl SyncManager {
+    pub fn new(target_peers: usize) -> Self {
         Self {
             peers: HashMap::new(),
             blob_requests: RangeAndRootRequests::<BlobIdentifier>::default(),
@@ -89,13 +105,36 @@ impl Default for SyncManager {
             ),
             not_enough_peers_message_shown_at: None,
             sync_from_finalized: false,
+            back_sync_black_list: LruCache::new(
+                NonZeroUsize::new(target_peers).expect("target_peers must be be a nonzero"),
+            ),
         }
     }
-}
 
-impl SyncManager {
+    pub fn record_received_blob_sidecar_response(
+        &mut self,
+        blob_identifier: BlobIdentifier,
+        peer_id: PeerId,
+        request_id: RequestId,
+    ) {
+        self.blob_requests
+            .record_received_response(&blob_identifier, &peer_id, request_id);
+    }
+
+    pub fn record_received_block_response(
+        &mut self,
+        block_root: H256,
+        peer_id: PeerId,
+        request_id: RequestId,
+    ) {
+        self.block_requests
+            .record_received_response(&block_root, &peer_id, request_id);
+    }
+
     pub fn request_direction(&mut self, request_id: RequestId) -> Option<SyncDirection> {
-        self.block_requests.request_direction(request_id)
+        self.block_requests
+            .request_direction(request_id)
+            .or_else(|| self.blob_requests.request_direction(request_id))
     }
 
     pub fn add_peer(&mut self, peer_id: PeerId, status: StatusMessage) {
@@ -107,6 +146,18 @@ impl SyncManager {
         self.peers.insert(peer_id, status);
     }
 
+    pub fn add_peer_to_back_sync_black_list(&mut self, peer_id: PeerId) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "adding peer to a back-sync blacklist: {peer_id}, black-listed peers: {}",
+                self.back_sync_black_list.len()
+            ),
+        );
+
+        self.back_sync_black_list.put(peer_id, ());
+    }
+
     pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch> {
         self.log(
             Level::Debug,
@@ -114,6 +165,7 @@ impl SyncManager {
         );
 
         self.peers.remove(peer_id);
+        self.back_sync_black_list.pop(peer_id);
 
         self.block_requests
             .remove_peer(peer_id)
@@ -121,8 +173,13 @@ impl SyncManager {
             .collect_vec()
     }
 
-    pub fn retry_batch(&mut self, request_id: RequestId, batch: &SyncBatch) -> Option<PeerId> {
-        let peer = self.random_peer();
+    pub fn retry_batch(
+        &mut self,
+        request_id: RequestId,
+        batch: SyncBatch,
+        use_black_list: bool,
+    ) -> Option<PeerId> {
+        let peer = self.random_peer(use_black_list);
 
         self.log(
             Level::Debug,
@@ -137,6 +194,8 @@ impl SyncManager {
                     peer_id,
                     start_slot: batch.start_slot,
                     count: batch.count,
+                    retry_count: batch.retry_count + 1,
+                    response_received: false,
                 };
 
                 match batch.target {
@@ -152,7 +211,7 @@ impl SyncManager {
                 {
                     self.log(
                         Level::Warn,
-                        format_args!("not enough peers to retry batch: {batch:?}"),
+                        format_args!("not enough non-busy peers to retry batch: {batch:?}"),
                     );
                     self.not_enough_peers_message_shown_at = Some(Instant::now());
                 }
@@ -164,53 +223,97 @@ impl SyncManager {
 
     pub fn build_back_sync_batches<P: Preset>(
         &mut self,
-        state_slot: Slot,
+        blob_serve_range_slot: Slot,
+        mut current_back_sync_slot: Slot,
         low_slot: Slot,
     ) -> Vec<SyncBatch> {
-        let Some(peers_to_sync) = self.find_peers_to_sync() else {
+        let Some(peers_to_sync) = self.find_peers_to_sync(true) else {
             return vec![];
         };
 
-        let slots_per_request = P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST;
-
+        // Use half of the available peers for back-sync batches.
+        let max_sync_batches = peers_to_sync.len() / 2;
+        let mut peers = peers_to_sync.iter();
         let mut sync_batches = vec![];
 
-        for (peer_id, index) in Self::peer_sync_batch_assignments(&peers_to_sync).zip(0..) {
-            let start_slot = state_slot
-                .saturating_sub(slots_per_request * (index + 1))
-                .max(low_slot);
+        while let Some(peer) = peers.next() {
+            let should_batch_blobs = current_back_sync_slot > blob_serve_range_slot;
 
-            let end_slot = state_slot.saturating_sub(slots_per_request * index);
-
-            let count = if start_slot == low_slot {
-                end_slot - low_slot
+            let count = if should_batch_blobs {
+                P::SlotsPerEpoch::non_zero().get()
             } else {
-                slots_per_request
+                P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST
             };
+
+            let start_slot = current_back_sync_slot.saturating_sub(count);
+
+            if should_batch_blobs {
+                match peers.next() {
+                    Some(next_peer) => {
+                        // test if there is enough space for both blobs and blocks batches
+                        if sync_batches.len() + 2 > max_sync_batches {
+                            break;
+                        }
+
+                        let mut start_slot = start_slot;
+                        let mut count = count;
+
+                        if start_slot < blob_serve_range_slot {
+                            count = (start_slot + count)
+                                .checked_sub(blob_serve_range_slot)
+                                .unwrap_or(1);
+
+                            start_slot = blob_serve_range_slot;
+                        };
+
+                        let batch = SyncBatch {
+                            target: SyncTarget::BlobSidecar,
+                            direction: SyncDirection::Back,
+                            peer_id: *next_peer,
+                            start_slot,
+                            count,
+                            response_received: false,
+                            retry_count: 0,
+                        };
+
+                        self.log(
+                            Level::Debug,
+                            format_args!("back-sync batch built: {batch:?})"),
+                        );
+
+                        sync_batches.push(batch);
+                    }
+                    None => break,
+                }
+            }
 
             let batch = SyncBatch {
                 target: SyncTarget::Block,
                 direction: SyncDirection::Back,
-                peer_id,
+                peer_id: *peer,
                 start_slot,
                 count,
+                response_received: false,
+                retry_count: 0,
             };
 
             self.log(
                 Level::Debug,
-                format_args!("back sync batch built: {batch:?})"),
+                format_args!("back-sync batch built: {batch:?})"),
             );
 
             sync_batches.push(batch);
 
-            if start_slot == low_slot {
+            if start_slot <= low_slot || sync_batches.len() >= max_sync_batches {
                 break;
             }
+
+            current_back_sync_slot = start_slot;
         }
 
         self.log(
             Level::Debug,
-            format_args!("new back sync batches count: {}", sync_batches.len(),),
+            format_args!("new back-sync batches count: {}", sync_batches.len(),),
         );
 
         sync_batches
@@ -224,7 +327,7 @@ impl SyncManager {
         local_head_slot: Slot,
         local_finalized_slot: Slot,
     ) -> Result<Vec<SyncBatch>> {
-        let Some(peers_to_sync) = self.find_peers_to_sync() else {
+        let Some(peers_to_sync) = self.find_peers_to_sync(false) else {
             return Ok(vec![]);
         };
 
@@ -337,6 +440,8 @@ impl SyncManager {
                     peer_id,
                     start_slot,
                     count,
+                    response_received: false,
+                    retry_count: 0,
                 });
             }
 
@@ -346,6 +451,8 @@ impl SyncManager {
                 peer_id,
                 start_slot,
                 count,
+                response_received: false,
+                retry_count: 0,
             });
         }
 
@@ -377,10 +484,11 @@ impl SyncManager {
         self.log(
             Level::Debug,
             format_args!(
-                "add blob request by range (request_id: {}, peer_id: {}, range: {:?})",
+                "add blob request by range (request_id: {}, peer_id: {}, range: {:?}, retries: {})",
                 request_id,
                 batch.peer_id,
                 (batch.start_slot..(batch.start_slot + batch.count)),
+                batch.retry_count,
             ),
         );
 
@@ -406,10 +514,11 @@ impl SyncManager {
         self.log(
             Level::Debug,
             format_args!(
-                "add block request by range (request_id: {}, peer_id: {}, range: {:?})",
+                "add block request by range (request_id: {}, peer_id: {}, range: {:?}, retries: {})",
                 request_id,
                 batch.peer_id,
                 (batch.start_slot..(batch.start_slot + batch.count)),
+                batch.retry_count,
             ),
         );
 
@@ -427,57 +536,81 @@ impl SyncManager {
         self.block_requests.add_request_by_root(block_root, peer_id)
     }
 
-    pub fn random_peer(&self) -> Option<PeerId> {
-        let chain_id = self.chain_with_max_peer_count()?;
+    pub fn random_peer(&self, use_black_list: bool) -> Option<PeerId> {
+        let chain_id = self.chain_with_max_peer_count(use_black_list)?;
 
-        self.peers
-            .iter()
-            .filter(|(_, status)| ChainId::from(*status) == chain_id)
+        let busy_peers = self
+            .blob_requests
+            .busy_peers()
+            .chain(self.block_requests.busy_peers())
+            .collect::<HashSet<PeerId>>();
+
+        self.peers(use_black_list)
+            .filter(|(peer_id, status)| {
+                ChainId::from(*status) == chain_id && !busy_peers.contains(peer_id)
+            })
             .map(|(&peer_id, _)| peer_id)
             .choose(&mut thread_rng())
     }
 
-    pub fn blobs_by_range_request_finished(&mut self, request_id: RequestId) {
+    pub fn blobs_by_range_request_finished(
+        &mut self,
+        request_id: RequestId,
+        request_direction: Option<SyncDirection>,
+    ) {
         self.log(
             Level::Debug,
             format_args!("request blob sidecars by range finished (request_id: {request_id})",),
         );
 
-        self.blob_requests.request_by_range_finished(request_id)
+        if let Some((sync_batch, _)) = self.blob_requests.request_by_range_finished(request_id) {
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "blob sidecars by range request stats: responses received: {}, count: {}, \
+                    direction {request_direction:?}, retries: {}",
+                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                ),
+            );
+
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+                self.retry_batch(request_id, sync_batch, true);
+            }
+        }
     }
 
-    pub fn received_blob_sidecar_chunk(
+    pub fn blocks_by_range_request_finished<P: Preset>(
         &mut self,
-        blob_identifier: BlobIdentifier,
+        controller: &RealController<P>,
         peer_id: PeerId,
         request_id: RequestId,
+        request_direction: Option<SyncDirection>,
     ) {
-        self.log(
-            Level::Debug,
-            format_args!(
-                "received blob sidecar by root (blob_identifier: {blob_identifier:?}, \
-            request_id: {request_id}, peer_id: {peer_id})",
-            ),
-        );
-
-        self.blob_requests
-            .chunk_by_root_received(&blob_identifier, &peer_id)
-    }
-
-    pub fn blocks_by_range_request_finished(&mut self, request_id: RequestId) {
         self.log(
             Level::Debug,
             format_args!("request blocks by range finished (request_id: {request_id})"),
         );
 
-        self.block_requests.request_by_range_finished(request_id)
-    }
+        if let Some((sync_batch, _)) = self.block_requests.request_by_range_finished(request_id) {
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "blocks by range request stats: responses received: {}, count: {}, \
+                    direction {request_direction:?}, retries: {}",
+                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                ),
+            );
 
-    pub fn block_by_root_request_finished(&self, block_root: H256) {
-        self.log(
-            Level::Debug,
-            format_args!("request block by root finished (block_root: {block_root:?})"),
-        );
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+                if misc::compute_epoch_at_slot::<P>(sync_batch.start_slot + sync_batch.count)
+                    < controller.min_checked_block_availability_epoch()
+                {
+                    self.add_peer_to_back_sync_black_list(peer_id);
+                }
+
+                self.retry_batch(request_id, sync_batch, true);
+            }
+        }
     }
 
     /// Log a message with peer count information.
@@ -485,15 +618,27 @@ impl SyncManager {
         log!(
             level,
             "[Sync Peers: {}/{}] {}",
-            self.most_peers(),
+            self.most_peers(false),
             self.total_peers(),
             message
         );
     }
 
-    fn find_peers_to_sync(&mut self) -> Option<Vec<PeerId>> {
-        self.find_chain_to_sync().map(|chain_id| {
-            let peers_to_sync = self.chain_peers_shuffled(&chain_id);
+    fn find_peers_to_sync(&mut self, use_black_list: bool) -> Option<Vec<PeerId>> {
+        self.find_chain_to_sync(use_black_list).map(|chain_id| {
+            let peers_to_sync = self.chain_peers_shuffled(&chain_id, use_black_list);
+
+            let busy_peers = self
+                .blob_requests
+                .busy_peers()
+                .chain(self.block_requests.busy_peers())
+                .collect::<HashSet<PeerId>>();
+
+            let peers_to_sync = peers_to_sync
+                .iter()
+                .filter(|peer_id| !busy_peers.contains(peer_id))
+                .copied()
+                .collect::<Vec<_>>();
 
             self.log(
                 Level::Debug,
@@ -504,8 +649,8 @@ impl SyncManager {
         })
     }
 
-    fn find_chain_to_sync(&mut self) -> Option<ChainId> {
-        match self.chain_with_max_peer_count() {
+    fn find_chain_to_sync(&mut self, use_black_list: bool) -> Option<ChainId> {
+        match self.chain_with_max_peer_count(use_black_list) {
             Some(chain_id) => {
                 self.log(
                     Level::Debug,
@@ -532,33 +677,41 @@ impl SyncManager {
         }
     }
 
-    fn chain_peers(&self, chain_id: &ChainId) -> Vec<PeerId> {
-        self.peers
-            .iter()
+    fn chain_peers(&self, chain_id: &ChainId, use_black_list: bool) -> Vec<PeerId> {
+        self.peers(use_black_list)
             .filter(|(_, status)| &ChainId::from(*status) == chain_id)
             .map(|(&peer_id, _)| peer_id)
             .collect()
     }
 
-    fn chain_peers_shuffled(&self, chain_id: &ChainId) -> Vec<PeerId> {
-        let mut peers = self.chain_peers(chain_id);
+    fn chain_peers_shuffled(&self, chain_id: &ChainId, use_black_list: bool) -> Vec<PeerId> {
+        let mut peers = self.chain_peers(chain_id, use_black_list);
         peers.shuffle(&mut thread_rng());
         peers
     }
 
-    fn chain_with_max_peer_count(&self) -> Option<ChainId> {
-        self.chains_with_peer_counts()
+    fn chain_with_max_peer_count(&self, use_black_list: bool) -> Option<ChainId> {
+        self.chains_with_peer_counts(use_black_list)
             .into_iter()
             .max_by_key(|(_, peer_count)| *peer_count)
             .map(|(chain_id, _)| chain_id)
     }
 
-    fn chains_with_peer_counts(&self) -> HashMap<ChainId, usize> {
-        self.peers.iter().counts_by(|(_, status)| status.into())
+    fn peers(&self, use_black_list: bool) -> impl Iterator<Item = (&PeerId, &StatusMessage)> {
+        self.peers.iter().filter(move |(&peer_id, _)| {
+            use_black_list
+                .then(|| !self.back_sync_black_list.contains(&peer_id))
+                .unwrap_or(true)
+        })
     }
 
-    fn most_peers(&self) -> usize {
-        self.chains_with_peer_counts()
+    fn chains_with_peer_counts(&self, use_black_list: bool) -> HashMap<ChainId, usize> {
+        self.peers(use_black_list)
+            .counts_by(|(_, status)| status.into())
+    }
+
+    fn most_peers(&self, use_black_list: bool) -> usize {
+        self.chains_with_peer_counts(use_black_list)
             .values()
             .max()
             .copied()
@@ -625,6 +778,54 @@ impl SyncManager {
 }
 
 #[cfg(test)]
+impl SyncManager {
+    pub fn add_blobs_by_range_busy_peer(&mut self, peer_id: PeerId) {
+        self.blob_requests.add_request_by_range(
+            1,
+            SyncBatch {
+                target: SyncTarget::BlobSidecar,
+                direction: SyncDirection::Back,
+                peer_id,
+                start_slot: 0,
+                count: 64,
+                retry_count: 0,
+                response_received: false,
+            },
+        );
+    }
+
+    pub fn add_blobs_by_root_busy_peer(&mut self, peer_id: PeerId) {
+        self.blob_requests.add_request_by_root(
+            BlobIdentifier {
+                block_root: H256::zero(),
+                index: 0,
+            },
+            peer_id,
+        );
+    }
+
+    pub fn add_blocks_by_range_busy_peer(&mut self, peer_id: PeerId) {
+        self.block_requests.add_request_by_range(
+            2,
+            SyncBatch {
+                target: SyncTarget::Block,
+                direction: SyncDirection::Back,
+                peer_id,
+                start_slot: 0,
+                count: 64,
+                retry_count: 0,
+                response_received: false,
+            },
+        );
+    }
+
+    pub fn add_blocks_by_root_busy_peer(&mut self, peer_id: PeerId) {
+        self.block_requests
+            .add_request_by_root(H256::zero(), peer_id);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use test_case::test_case;
     use types::{
@@ -634,62 +835,117 @@ mod tests {
 
     use super::*;
 
-    // `SyncBatch.count` is 16 because the test cases use `Minimal`.
+    // `SyncBatch.count` is either 2 (blocks & blobs) or 16 (blocks only) because the test cases use `Minimal`.
     // `Minimal::SlotsPerEpoch::U64` × `EPOCHS_PER_REQUEST` = 8 × 2 = 16.
+    // `Minimal::SlotsPerEpoch::U64` = 8
     #[test_case(
-        0,
+        Slot::MAX,
         128,
         [
-            (112, 16),
-            (96, 16),
-            (80, 16),
-            (64, 16),
-            (48, 16),
-            (32, 16),
+            (112, 16, SyncTarget::Block),
+            (96, 16, SyncTarget::Block),
+            (80, 16, SyncTarget::Block),
+            (64, 16, SyncTarget::Block),
+            (48, 16, SyncTarget::Block),
+        ]
+    )]
+    #[test_case(
+        Slot::MAX,
+        64,
+        [
+            (48, 16, SyncTarget::Block),
+            (32, 16, SyncTarget::Block),
+            (16, 16, SyncTarget::Block),
+            (0, 16, SyncTarget::Block),
+        ]
+    )]
+    #[test_case(
+        Slot::MAX,
+        30,
+        [
+            (14, 16, SyncTarget::Block),
+            (0, 16, SyncTarget::Block),
         ]
     )]
     #[test_case(
         0,
         64,
         [
-            (48, 16),
-            (32, 16),
-            (16, 16),
-            (0, 16),
+            (56, 8, SyncTarget::BlobSidecar),
+            (56, 8, SyncTarget::Block),
+            (48, 8, SyncTarget::BlobSidecar),
+            (48, 8, SyncTarget::Block),
         ]
     )]
     #[test_case(
-        2,
-        30,
+        62,
+        64,
         [
-            (14, 16),
-            (2, 12),
+            (62, 2, SyncTarget::BlobSidecar),
+            (56, 8, SyncTarget::Block),
+            (40, 16, SyncTarget::Block),
+            (24, 16, SyncTarget::Block),
+            (8, 16, SyncTarget::Block),
+        ]
+    )]
+    #[test_case(
+        59,
+        68,
+        [
+            (60, 8, SyncTarget::BlobSidecar),
+            (60, 8, SyncTarget::Block),
+            (59, 1, SyncTarget::BlobSidecar),
+            (52, 8, SyncTarget::Block),
+            (36, 16, SyncTarget::Block),
+        ]
+    )]
+    #[test_case(
+        0,
+        9,
+        [
+            (1, 8, SyncTarget::BlobSidecar),
+            (1, 8, SyncTarget::Block),
+            (0, 8, SyncTarget::BlobSidecar),
+            (0, 8, SyncTarget::Block),
         ]
     )]
     fn build_back_sync_batches(
-        low_slot: Slot,
-        state_slot: Slot,
-        resulting_batches: impl IntoIterator<Item = (Slot, u64)>,
+        blob_serve_start_slot: Slot,
+        head_slot: Slot,
+        resulting_batches: impl IntoIterator<Item = (Slot, u64, SyncTarget)>,
     ) {
         let peer_status = StatusMessage {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
-            finalized_epoch: 6,
+            finalized_epoch: 0,
             head_root: H256::default(),
-            head_slot: 8 * 32,
+            head_slot,
         };
 
-        let mut sync_manager = SyncManager::default();
+        let mut sync_manager = SyncManager::new(100);
 
-        sync_manager.add_peer(PeerId::random(), peer_status);
-        sync_manager.add_peer(PeerId::random(), peer_status);
+        // Add 10 valid peers.
+        // This will indirectly test that half of them are used for back-syncing (5 batches).
+        for _ in 0..10 {
+            sync_manager.add_peer(PeerId::random(), peer_status);
+        }
 
-        let batches = sync_manager.build_back_sync_batches::<Minimal>(state_slot, low_slot);
+        // Add one peer to a blacklist
+        sync_manager.add_peer_to_back_sync_black_list(PeerId::random());
+
+        // Have some peers busy
+        sync_manager.add_blobs_by_range_busy_peer(PeerId::random());
+        sync_manager.add_blobs_by_root_busy_peer(PeerId::random());
+        sync_manager.add_blocks_by_range_busy_peer(PeerId::random());
+        sync_manager.add_blocks_by_root_busy_peer(PeerId::random());
+
+        let batches =
+            sync_manager.build_back_sync_batches::<Minimal>(blob_serve_start_slot, head_slot, 0);
 
         itertools::assert_equal(
             batches
                 .into_iter()
-                .map(|batch| (batch.start_slot, batch.count)),
+                .map(|batch| (batch.start_slot, batch.count, batch.target)),
             resulting_batches,
         );
     }
@@ -709,7 +965,7 @@ mod tests {
             head_slot: 20_000,
         };
 
-        let mut sync_manager = SyncManager::default();
+        let mut sync_manager = SyncManager::new(100);
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 
@@ -761,7 +1017,7 @@ mod tests {
             head_slot: 20_000,
         };
 
-        let mut sync_manager = SyncManager::default();
+        let mut sync_manager = SyncManager::new(100);
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 

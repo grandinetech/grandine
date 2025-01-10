@@ -108,6 +108,7 @@ impl GrandineConfig {
             ),
         }
 
+        info!("storage mode: {:?}", storage_config.storage_mode);
         info!("data directory: {data_dir:?}");
 
         self.storage_config.print_db_sizes();
@@ -170,7 +171,7 @@ impl GrandineConfig {
         }
 
         info!("suggested fee recipient: {suggested_fee_recipient}");
-        info!("back sync enabled: {back_sync_enabled}");
+        info!("back-sync enabled: {back_sync_enabled}");
 
         if *use_validator_key_cache {
             info!("using validator key cache");

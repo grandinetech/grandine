@@ -188,6 +188,17 @@ pub struct BlobSidecarWithId<P: Preset> {
     pub blob_id: BlobIdentifier,
 }
 
+impl<P: Preset> From<Arc<BlobSidecar<P>>> for BlobSidecarWithId<P> {
+    fn from(blob_sidecar: Arc<BlobSidecar<P>>) -> Self {
+        let blob_id = blob_sidecar.as_ref().into();
+
+        Self {
+            blob_sidecar,
+            blob_id,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub struct BlockRewards {
     pub total: Gwei,

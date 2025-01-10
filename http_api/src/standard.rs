@@ -89,7 +89,7 @@ use crate::{
     error::{Error, IndexedError},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
-    misc::{APIBlock, BackSyncedStatus, BroadcastValidation, SignedAPIBlock, SyncedStatus},
+    misc::{APIBlock, BroadcastValidation, SignedAPIBlock, SyncedStatus},
     response::{EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
@@ -1700,12 +1700,11 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(eth1_api): State<Arc<Eth1Api>>,
     State(is_synced): State<Arc<SyncedStatus>>,
-    State(is_back_synced): State<Arc<BackSyncedStatus>>,
 ) -> EthResponse<NodeSyncingResponse> {
     let snapshot = controller.snapshot();
     let head_slot = snapshot.head_slot();
     let is_synced = is_synced.get();
-    let is_back_synced = is_back_synced.get();
+    let is_back_synced = snapshot.is_back_synced();
     let el_offline = eth1_api.el_offline();
 
     EthResponse::json(NodeSyncingResponse {
@@ -1720,11 +1719,14 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/node/health`
-pub async fn node_health(
+pub async fn node_health<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
     State(is_synced): State<Arc<SyncedStatus>>,
-    State(is_back_synced): State<Arc<BackSyncedStatus>>,
 ) -> StatusCode {
-    if is_synced.get() && is_back_synced.get() {
+    let snapshot = controller.snapshot();
+    let is_back_synced = snapshot.is_back_synced();
+
+    if is_synced.get() && is_back_synced {
         StatusCode::OK
     } else {
         StatusCode::PARTIAL_CONTENT

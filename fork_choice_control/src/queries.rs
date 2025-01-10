@@ -6,7 +6,8 @@ use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationItem, ChainLink, StateCacheProcessor, Store,
+    AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
+    StateCacheProcessor, Store,
 };
 use helper_functions::misc;
 use itertools::Itertools as _;
@@ -270,6 +271,11 @@ where
             optimistic: head.is_optimistic(),
             finalized: store.is_slot_finalized(head.slot()),
         }
+    }
+
+    #[must_use]
+    pub fn is_back_synced(&self) -> bool {
+        self.store_snapshot().is_back_synced()
     }
 
     #[must_use]
@@ -562,6 +568,23 @@ where
     pub fn min_checked_data_availability_epoch(&self) -> Epoch {
         self.store_snapshot().min_checked_data_availability_epoch()
     }
+
+    pub fn validate_blob_sidecar_with_state(
+        &self,
+        blob_sidecar: Arc<BlobSidecar<P>>,
+        block_seen: bool,
+        origin: &BlobSidecarOrigin,
+        parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Result<Arc<BeaconState<P>>>,
+    ) -> Result<BlobSidecarAction<P>> {
+        self.store_snapshot().validate_blob_sidecar_with_state(
+            blob_sidecar,
+            block_seen,
+            origin,
+            parent_fn,
+            state_fn,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -759,6 +782,11 @@ impl<P: Preset> Snapshot<'_, P> {
 
         self.state_cache
             .try_state_at_slot(&self.store_snapshot, root, slot)
+    }
+
+    #[must_use]
+    pub fn is_back_synced(&self) -> bool {
+        self.store_snapshot.is_back_synced()
     }
 
     #[must_use]

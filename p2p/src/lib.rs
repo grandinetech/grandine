@@ -1,7 +1,9 @@
 pub use eth2_libp2p::{metrics, Enr, ListenAddr, Multiaddr, NetworkConfig};
 
 pub use crate::{
-    block_sync_service::{BlockSyncService, Channels as BlockSyncServiceChannels},
+    block_sync_service::{
+        print_sync_database_info, BlockSyncService, Channels as BlockSyncServiceChannels,
+    },
     messages::{
         ApiToP2p, P2pToSlasher, P2pToValidator, SubnetServiceToP2p, SyncToApi, SyncToMetrics,
         ToSubnetService, ValidatorToP2p,

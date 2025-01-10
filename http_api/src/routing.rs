@@ -26,7 +26,7 @@ use validator::{ApiToValidator, ValidatorConfig};
 use crate::{
     error::Error,
     gui, middleware,
-    misc::{BackSyncedStatus, SyncedStatus},
+    misc::SyncedStatus,
     standard::{
         beacon_events, beacon_heads, beacon_state, blob_sidecars, block, block_attestations,
         block_headers, block_id_headers, block_rewards, block_root, config_spec, debug_fork_choice,
@@ -76,7 +76,6 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
     pub is_synced: Arc<SyncedStatus>,
-    pub is_back_synced: Arc<BackSyncedStatus>,
     pub event_channels: Arc<EventChannels>,
     pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
     pub api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
@@ -155,12 +154,6 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<BlsToExecutionChange
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<SyncedStatus> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.is_synced.clone_arc()
-    }
-}
-
-impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<BackSyncedStatus> {
-    fn from_ref(state: &NormalState<P, W>) -> Self {
-        state.is_back_synced.clone_arc()
     }
 }
 

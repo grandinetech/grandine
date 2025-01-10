@@ -41,7 +41,6 @@ pub enum Feature {
     SubscribeToAllAttestationSubnets,
     SubscribeToAllSyncCommitteeSubnets,
     TrackMetrics,
-    TrustBackSyncBlocks,
     // By default we fully validate objects produced by the current instance of the application.
     // This costs some resources but may help in case of bugs.
     TrustOwnAttestationSignatures,

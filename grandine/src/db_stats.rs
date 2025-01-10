@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bytesize::ByteSize;
+use database::DatabaseMode;
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot,
     PrefixableKey as _, SlotBlobId, SlotByStateRoot, StateByBlockRoot, StateCheckpoint,
@@ -55,7 +56,8 @@ pub fn print<P: Preset>(
     storage_config: &StorageConfig,
     custom_path: Option<PathBuf>,
 ) -> Result<()> {
-    let storage_database = storage_config.beacon_fork_choice_database(custom_path, true)?;
+    let storage_database =
+        storage_config.beacon_fork_choice_database(custom_path, DatabaseMode::ReadOnly)?;
 
     let mut total_size = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");

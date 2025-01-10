@@ -190,6 +190,10 @@ where
                 .expect("sender in Controller is not dropped until mutator thread exits")
             {
                 MutatorMessage::Tick { wait_group, tick } => self.handle_tick(&wait_group, tick)?,
+                MutatorMessage::BackSyncStatus {
+                    wait_group,
+                    is_back_synced,
+                } => self.handle_back_sync_status(wait_group, is_back_synced),
                 MutatorMessage::Block {
                     wait_group,
                     result,
@@ -440,7 +444,7 @@ where
         }
 
         if self.store.is_forward_synced() && misc::slots_since_epoch_start::<P>(tick.slot) == 0 {
-            if tick.kind == TickKind::AttestFourth {
+            if tick.kind == TickKind::AttestFourth && self.store.is_back_synced() {
                 self.prune_old_records()?;
             }
 
@@ -465,6 +469,15 @@ where
         }
 
         Ok(())
+    }
+
+    fn handle_back_sync_status(&mut self, wait_group: W, is_back_synced: bool) {
+        if self.store.is_back_synced() != is_back_synced {
+            self.store_mut().set_back_synced(is_back_synced);
+            self.update_store_snapshot();
+        }
+
+        drop(wait_group);
     }
 
     #[expect(clippy::too_many_lines)]
@@ -1636,13 +1649,15 @@ where
         self.event_channels
             .send_blob_sidecar_event(block_root, blob_sidecar);
 
-        self.spawn(PersistBlobSidecarsTask {
-            store_snapshot: self.owned_store(),
-            storage: self.storage.clone_arc(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: wait_group.clone(),
-            metrics: self.metrics.clone(),
-        });
+        if !self.storage.prune_storage_enabled() {
+            self.spawn(PersistBlobSidecarsTask {
+                store_snapshot: self.owned_store(),
+                storage: self.storage.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group: wait_group.clone(),
+                metrics: self.metrics.clone(),
+            });
+        }
 
         self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
@@ -2337,6 +2352,10 @@ where
     }
 
     fn prune_old_records(&self) -> Result<()> {
+        if self.storage.archive_storage_enabled() {
+            return Ok(());
+        }
+
         let storage = self.storage.clone_arc();
         let blobs_up_to_epoch = self.store.min_checked_data_availability_epoch();
         let blobs_up_to_slot = misc::compute_start_slot_at_epoch::<P>(blobs_up_to_epoch);
@@ -2376,7 +2395,9 @@ where
 
                 match storage.prune_old_state_roots(blocks_up_to_slot) {
                     Ok(()) => {
-                        debug!("pruned old state roots from storage up to slot {blocks_up_to_slot}");
+                        debug!(
+                            "pruned old state roots from storage up to slot {blocks_up_to_slot}"
+                        );
                     }
                     Err(error) => {
                         error!("pruning old state roots from storage failed: {error:?}")

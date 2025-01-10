@@ -23,6 +23,7 @@ use crate::{
     messages::{AttestationVerifierMessage, P2pMessage},
     storage::{Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL},
     unbounded_sink::UnboundedSink,
+    StorageMode,
 };
 
 #[cfg(test)]
@@ -102,7 +103,7 @@ where
             chain_config.clone_arc(),
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            false,
+            StorageMode::Standard,
         ));
 
         let event_channels = Arc::new(EventChannels::default());
@@ -124,6 +125,7 @@ where
             futures::sink::drain(),
             storage,
             core::iter::empty(),
+            true,
         )
         .expect("Controller::new should not fail in tests and benchmarks")
     }

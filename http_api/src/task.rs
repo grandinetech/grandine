@@ -28,7 +28,7 @@ use validator::{ApiToValidator, ValidatorConfig};
 use crate::{
     error::Error,
     http_api_config::HttpApiConfig,
-    misc::{BackSyncedStatus, SyncedStatus},
+    misc::SyncedStatus,
     routing::{self, NormalState},
 };
 
@@ -105,7 +105,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         } = channels;
 
         let is_synced = Arc::new(SyncedStatus::new(controller.is_forward_synced()));
-        let is_back_synced = Arc::new(BackSyncedStatus::default());
 
         let state = NormalState {
             chain_config: controller.chain_config().clone_arc(),
@@ -121,7 +120,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             sync_committee_agg_pool,
             bls_to_execution_change_pool,
             is_synced: is_synced.clone_arc(),
-            is_back_synced: is_back_synced.clone_arc(),
             event_channels,
             api_to_liveness_tx,
             api_to_p2p_tx,
@@ -143,7 +141,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             .into_future()
             .map_err(AnyhowError::new);
 
-        let handle_sync_statuses = handle_sync_statuses(is_synced, is_back_synced, sync_to_api_rx);
+        let handle_sync_statuses = handle_sync_statuses(is_synced, sync_to_api_rx);
 
         info!("HTTP server listening on {address}");
 
@@ -156,7 +154,6 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
 
 async fn handle_sync_statuses(
     is_synced: Arc<SyncedStatus>,
-    is_back_synced: Arc<BackSyncedStatus>,
     mut sync_to_api_rx: UnboundedReceiver<SyncToApi>,
 ) -> Result<()> {
     loop {
@@ -164,7 +161,6 @@ async fn handle_sync_statuses(
             message = sync_to_api_rx.select_next_some() => {
                 match message {
                     SyncToApi::SyncStatus(status) => is_synced.set(status),
-                    SyncToApi::BackSyncStatus(status) => is_back_synced.set(status),
                 }
             }
 

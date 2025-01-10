@@ -20,6 +20,41 @@ use unwrap_none::UnwrapNone as _;
 const GROWTH_STEP: ByteSize = ByteSize::mib(256);
 const MAX_NAMED_DATABASES: usize = 10;
 
+#[derive(Clone, Copy)]
+pub enum DatabaseMode {
+    ReadOnly,
+    ReadWrite,
+}
+
+impl DatabaseMode {
+    #[must_use]
+    pub const fn is_read_only(self) -> bool {
+        matches!(self, Self::ReadOnly)
+    }
+
+    #[must_use]
+    pub const fn mode_permissions(self) -> u16 {
+        match self {
+            // <https://erthink.github.io/libmdbx/group__c__opening.html#gabb7dd3b10dd31639ba252df545e11768>
+            // The UNIX permissions to set on created files. Zero value means to open existing, but do not create.
+            Self::ReadOnly => 0,
+            Self::ReadWrite => 0o600,
+        }
+    }
+
+    #[must_use]
+    #[cfg(target_os = "linux")]
+    pub fn permissions(self) -> u32 {
+        self.mode_permissions().into()
+    }
+
+    #[must_use]
+    #[cfg(not(target_os = "linux"))]
+    pub const fn permissions(self) -> u16 {
+        self.mode_permissions()
+    }
+}
+
 pub struct Database(DatabaseKind);
 
 impl Database {
@@ -27,14 +62,14 @@ impl Database {
         name: &str,
         directory: impl AsRef<Path>,
         max_size: ByteSize,
-        read_only: bool,
+        mode: DatabaseMode,
     ) -> Result<Self> {
         // If a database with the legacy name exists, keep using it.
         // Otherwise, create a new database with the specified name.
         // This check will not force existing users to resync.
         let legacy_name = directory.as_ref().to_str().ok_or(Error)?;
 
-        if !read_only {
+        if !mode.is_read_only() {
             fs_err::create_dir_all(&directory)?;
         }
 
@@ -48,14 +83,14 @@ impl Database {
                 shrink_threshold: None,
                 page_size: None,
             })
-            .open_with_permissions(directory.as_ref(), 0o600)?;
+            .open_with_permissions(directory.as_ref(), mode.permissions())?;
 
         let transaction = environment.begin_rw_txn()?;
         let existing_db = transaction.open_db(Some(legacy_name));
 
         let database_name = if existing_db.is_err() {
             info!("database: {legacy_name} with name {name}");
-            if !read_only {
+            if !mode.is_read_only() {
                 transaction.create_db(Some(name), DatabaseFlags::default())?;
             }
 
@@ -753,7 +788,13 @@ mod tests {
     }
 
     fn build_persistent_database() -> Result<Database> {
-        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(1), false)?;
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(1),
+            DatabaseMode::ReadWrite,
+        )?;
+
         populate_database(&database)?;
         Ok(database)
     }

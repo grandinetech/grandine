@@ -1,15 +1,36 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
+use strum::EnumString;
 use types::phase0::primitives::Slot;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumString)]
+#[strum(serialize_all = "snake_case")]
+pub enum AppDatabase {
+    Sync,
+}
 
 #[derive(Clone, Subcommand)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub enum GrandineCommand {
+    /// Show information about database records
+    /// (example: grandine db-info --database sync)
+    DbInfo {
+        /// Type of the database
+        #[clap(short, long)]
+        database: AppDatabase,
+        /// Path to a custom directory where database files are stored
+        /// (example: grandine --network holesky db-info -d sync -p ~/.grandine/holesky/beacon/sync)
+        #[clap(short, long)]
+        path: Option<PathBuf>,
+    },
+
     /// Show `beacon_fork_choice` database element sizes
     /// (example: grandine db-stats)
     DbStats {
-        /// Custom database path
+        /// Path to a custom directory where `beacon_fork_choice` database files are stored
+        #[expect(clippy::doc_markdown)]
+        /// (example: grandine --network holesky db-stats -p ~/.grandine/holesky/beacon/beacon_fork_choice)
         #[clap(short, long)]
         path: Option<PathBuf>,
     },

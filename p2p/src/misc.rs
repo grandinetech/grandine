@@ -7,6 +7,12 @@ use types::phase0::primitives::{CommitteeIndex, Epoch, Slot, SubnetId, Validator
 
 pub type RequestId = usize;
 
+#[derive(PartialEq, Eq)]
+pub enum RPCRequestType {
+    Range,
+    Root,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AttestationSubnetActions {
     pub discoveries: Vec<SubnetPeerDiscovery>,

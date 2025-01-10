@@ -1,6 +1,6 @@
 use core::{cmp::Ordering, convert::Infallible as Never, time::Duration};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     sync::Arc,
     time::Instant,
 };
@@ -60,7 +60,10 @@ use crate::{
         ApiToP2p, P2pToSlasher, P2pToSync, P2pToValidator, ServiceInboundMessage,
         ServiceOutboundMessage, SubnetServiceToP2p, SyncToP2p, ValidatorToP2p,
     },
-    misc::{AttestationSubnetActions, RequestId, SubnetPeerDiscovery, SyncCommitteeSubnetAction},
+    misc::{
+        AttestationSubnetActions, RPCRequestType, RequestId, SubnetPeerDiscovery,
+        SyncCommitteeSubnetAction,
+    },
     upnp::PortMappings,
 };
 
@@ -102,8 +105,6 @@ pub struct Channels<P: Preset> {
 #[expect(clippy::struct_field_names)]
 pub struct Network<P: Preset> {
     network_globals: Arc<NetworkGlobals>,
-    received_blob_sidecars: HashMap<BlobIdentifier, Slot>,
-    received_block_roots: HashMap<H256, Slot>,
     controller: RealController<P>,
     channels: Channels<P>,
     dedicated_executor: Arc<DedicatedExecutor>,
@@ -187,8 +188,6 @@ impl<P: Preset> Network<P> {
 
         let network = Self {
             network_globals,
-            received_blob_sidecars: HashMap::new(),
-            received_block_roots: HashMap::new(),
             controller,
             channels,
             dedicated_executor,
@@ -304,7 +303,6 @@ impl<P: Preset> Network<P> {
                     match message {
                         P2pMessage::Slot(slot) => {
                             self.on_slot(slot);
-                            self.track_collection_metrics();
                         }
                         P2pMessage::Accept(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Accept);
@@ -349,8 +347,8 @@ impl<P: Preset> Network<P> {
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
                         P2pMessage::FinalizedCheckpoint(finalized_checkpoint) => {
-                            self.prune_received_blob_sidecars(finalized_checkpoint.epoch);
-                            self.prune_received_block_roots(finalized_checkpoint.epoch);
+                            P2pToSync::FinalizedCheckpoint(finalized_checkpoint)
+                                .send(&self.channels.p2p_to_sync_tx);
                         }
                         P2pMessage::HeadState(_state) => {
                             // This message is only used in tests
@@ -398,9 +396,6 @@ impl<P: Preset> Network<P> {
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {
                     match message {
-                        SyncToP2p::PruneReceivedBlocks => {
-                            self.received_block_roots = HashMap::new();
-                        }
                         SyncToP2p::ReportPeer(peer_id, peer_action, report_source, reason) => {
                             self.report_peer(
                                 peer_id,
@@ -800,7 +795,7 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn handle_network_event(&mut self, network_event: NetworkEvent<RequestId, P>) {
+    fn handle_network_event(&self, network_event: NetworkEvent<RequestId, P>) {
         match network_event {
             NetworkEvent::PeerConnectedIncoming(peer_id) => {
                 debug!("peer {peer_id} connected incoming");
@@ -817,7 +812,7 @@ impl<P: Preset> Network<P> {
                 self.update_peer_count();
             }
             NetworkEvent::RPCFailed { peer_id, id, error } => {
-                debug!("request {id:?} to peer {peer_id} failed: {error}");
+                debug!("request_id: {id:?} to peer {peer_id} failed: {error}");
                 P2pToSync::RequestFailed(peer_id).send(&self.channels.p2p_to_sync_tx);
             }
             NetworkEvent::RequestReceived {
@@ -1192,7 +1187,7 @@ impl<P: Preset> Network<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    fn handle_response(&mut self, peer_id: PeerId, request_id: RequestId, response: Response<P>) {
+    fn handle_response(&self, peer_id: PeerId, request_id: RequestId, response: Response<P>) {
         match response {
             Response::Status(remote) => {
                 debug!("received Status response (peer_id: {peer_id}, remote: {remote:?})");
@@ -1204,7 +1199,7 @@ impl<P: Preset> Network<P> {
             // > blob sidecar is well-formatted, has valid inclusion proof, and is correct w.r.t. the expected KZG commitments
             // > through `verify_blob_kzg_proof``.
             Response::BlobsByRange(Some(blob_sidecar)) => {
-                let blob_identifier = blob_sidecar.as_ref().into();
+                let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
                 debug!(
                     "received BlobsByRange response chunk \
@@ -1213,19 +1208,13 @@ impl<P: Preset> Network<P> {
                     blob_sidecar.slot(),
                 );
 
-                info!(
-                    "received blob sidecar from RPC slot: {}, id: {blob_identifier:?}",
-                    blob_sidecar.slot()
-                );
-
-                if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar.slot()) {
-                    let block_seen = self
-                        .received_block_roots
-                        .contains_key(&blob_identifier.block_root);
-
-                    P2pToSync::RequestedBlobSidecar(blob_sidecar, block_seen, peer_id)
-                        .send(&self.channels.p2p_to_sync_tx);
-                }
+                P2pToSync::RequestedBlobSidecar(
+                    blob_sidecar,
+                    peer_id,
+                    request_id,
+                    RPCRequestType::Range,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRange(None) => {
                 debug!(
@@ -1237,7 +1226,7 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRoot(Some(blob_sidecar)) => {
-                let blob_identifier = blob_sidecar.as_ref().into();
+                let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
                 debug!(
                     "received BlobsByRoot response chunk \
@@ -1246,22 +1235,13 @@ impl<P: Preset> Network<P> {
                     blob_sidecar.slot(),
                 );
 
-                info!(
-                    "received blob sidecar from RPC slot: {}, id: {blob_identifier:?}",
-                    blob_sidecar.slot()
-                );
-
-                if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar.slot()) {
-                    let block_seen = self
-                        .received_block_roots
-                        .contains_key(&blob_identifier.block_root);
-
-                    P2pToSync::RequestedBlobSidecar(blob_sidecar, block_seen, peer_id)
-                        .send(&self.channels.p2p_to_sync_tx);
-                }
-
-                P2pToSync::BlobsByRootChunkReceived(blob_identifier, peer_id, request_id)
-                    .send(&self.channels.p2p_to_sync_tx);
+                P2pToSync::RequestedBlobSidecar(
+                    blob_sidecar,
+                    peer_id,
+                    request_id,
+                    RPCRequestType::Root,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRoot(None) => {
                 debug!(
@@ -1279,12 +1259,8 @@ impl<P: Preset> Network<P> {
                     slot: {block_slot}, root: {block_root:?})",
                 );
 
-                info!("received beacon block from RPC slot: {block_slot}, root: {block_root:?}");
-
-                if self.register_new_received_block(block_root, block.message().slot()) {
-                    P2pToSync::RequestedBlock((block, peer_id, request_id))
-                        .send(&self.channels.p2p_to_sync_tx);
-                }
+                P2pToSync::RequestedBlock(block, peer_id, request_id, RPCRequestType::Range)
+                    .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRange(None) => {
                 debug!(
@@ -1292,7 +1268,7 @@ impl<P: Preset> Network<P> {
                     request_id: {request_id}",
                 );
 
-                P2pToSync::BlocksByRangeRequestFinished(request_id)
+                P2pToSync::BlocksByRangeRequestFinished(peer_id, request_id)
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRoot(Some(block)) => {
@@ -1305,18 +1281,16 @@ impl<P: Preset> Network<P> {
                     slot: {block_slot}, root: {block_root:?})",
                 );
 
-                info!("received beacon block from RPC slot: {block_slot}, root: {block_root:?}");
+                P2pToSync::RequestedBlock(
+                    block.clone_arc(),
+                    peer_id,
+                    request_id,
+                    RPCRequestType::Root,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
 
-                P2pToSync::BlockByRootRequestFinished(block_root)
-                    .send(&self.channels.p2p_to_sync_tx);
-
-                if self.register_new_received_block(block_root, block.message().slot()) {
-                    self.controller
-                        .on_requested_block(block.clone_arc(), Some(peer_id));
-
-                    if let Some(network_to_slasher_tx) = &self.channels.network_to_slasher_tx {
-                        P2pToSlasher::Block(block).send(network_to_slasher_tx);
-                    }
+                if let Some(network_to_slasher_tx) = &self.channels.network_to_slasher_tx {
+                    P2pToSlasher::Block(block).send(network_to_slasher_tx);
                 }
             }
             Response::BlocksByRoot(None) => {
@@ -1348,7 +1322,7 @@ impl<P: Preset> Network<P> {
     #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     fn handle_pubsub_message(
-        &mut self,
+        &self,
         message_id: MessageId,
         source: PeerId,
         message: PubsubMessage<P>,
@@ -1359,34 +1333,12 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["beacon_block"]);
                 }
 
-                let block_root = beacon_block.message().hash_tree_root();
-                let block_slot = beacon_block.message().slot();
-
-                if !self.register_new_received_block(block_root, block_slot) {
-                    return;
-                }
-
-                let block_slot_timestamp = misc::compute_timestamp_at_slot(
-                    self.controller.chain_config(),
-                    &self.controller.head_state().value(),
-                    block_slot,
-                );
-
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.observe_block_duration_to_slot(block_slot_timestamp);
-                }
-
-                info!(
-                    "received beacon block as gossip (slot: {block_slot}, root: {block_root:?}, \
-                    peer_id: {source})"
-                );
-
                 if let Some(network_to_slasher_tx) = &self.channels.network_to_slasher_tx {
                     P2pToSlasher::Block(beacon_block.clone_arc()).send(network_to_slasher_tx);
                 }
 
-                self.controller
-                    .on_gossip_block(beacon_block, GossipId { source, message_id });
+                P2pToSync::GossipBlock(beacon_block, source, GossipId { source, message_id })
+                    .send(&self.channels.p2p_to_sync_tx);
             }
             PubsubMessage::BlobSidecar(data) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1401,16 +1353,12 @@ impl<P: Preset> Network<P> {
                     from {source}",
                 );
 
-                let block_seen = self
-                    .received_block_roots
-                    .contains_key(&blob_identifier.block_root);
-
-                self.controller.on_gossip_blob_sidecar(
+                P2pToSync::GossipBlobSidecar(
                     blob_sidecar,
                     subnet_id,
                     GossipId { source, message_id },
-                    block_seen,
-                );
+                )
+                .send(&self.channels.p2p_to_sync_tx);
             }
             PubsubMessage::DataColumnSidecar(_) => {}
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
@@ -1710,19 +1658,6 @@ impl<P: Preset> Network<P> {
         peer_id: PeerId,
         blob_identifiers: Vec<BlobIdentifier>,
     ) {
-        let blob_identifiers = blob_identifiers
-            .into_iter()
-            .filter(|blob_identifier| !self.received_blob_sidecars.contains_key(blob_identifier))
-            .collect::<Vec<_>>();
-
-        if blob_identifiers.is_empty() {
-            debug!(
-                "cannot request BlobSidecarsByRoot: all requested blob sidecars have been received",
-            );
-
-            return;
-        }
-
         let request =
             BlobsByRootRequest::new(self.controller.chain_config(), blob_identifiers.into_iter());
 
@@ -1752,10 +1687,6 @@ impl<P: Preset> Network<P> {
     }
 
     fn request_block_by_root(&self, request_id: RequestId, peer_id: PeerId, block_root: H256) {
-        if self.received_block_roots.contains_key(&block_root) {
-            return;
-        }
-
         let request = BlocksByRootRequest::new(
             self.controller.chain_config(),
             self.controller.phase(),
@@ -1805,7 +1736,11 @@ impl<P: Preset> Network<P> {
         source: ReportSource,
         reason: impl Into<&'static str>,
     ) {
-        ServiceInboundMessage::ReportPeer(peer_id, peer_action, source, reason.into())
+        let reason = reason.into();
+
+        debug!("reporting peer: {peer_id} {peer_action} {source:?} {reason}");
+
+        ServiceInboundMessage::ReportPeer(peer_id, peer_action, source, reason)
             .send(&self.network_to_service_tx);
     }
 
@@ -1842,34 +1777,6 @@ impl<P: Preset> Network<P> {
             .map(|digest| GossipTopic::new(subnet.into(), GossipEncoding::default(), digest))
     }
 
-    fn prune_received_blob_sidecars(&mut self, epoch: Epoch) {
-        let start_of_epoch = Self::start_of_epoch(epoch);
-
-        self.received_blob_sidecars
-            .retain(|_, slot| *slot >= start_of_epoch);
-    }
-
-    fn prune_received_block_roots(&mut self, epoch: Epoch) {
-        let start_of_epoch = Self::start_of_epoch(epoch);
-
-        self.received_block_roots
-            .retain(|_, slot| *slot >= start_of_epoch);
-    }
-
-    fn register_new_received_block(&mut self, block_root: H256, slot: Slot) -> bool {
-        self.received_block_roots.insert(block_root, slot).is_none()
-    }
-
-    fn register_new_received_blob_sidecar(
-        &mut self,
-        blob_identifier: BlobIdentifier,
-        slot: Slot,
-    ) -> bool {
-        self.received_blob_sidecars
-            .insert(blob_identifier, slot)
-            .is_none()
-    }
-
     fn update_peer_count(&self) {
         PEER_LOG_METRICS.set_connected_peer_count(self.network_globals.connected_peers())
     }
@@ -1882,26 +1789,6 @@ impl<P: Preset> Network<P> {
 
                 None
             })
-    }
-
-    fn track_collection_metrics(&self) {
-        if let Some(metrics) = self.metrics.as_ref() {
-            let type_name = tynm::type_name::<Self>();
-
-            metrics.set_collection_length(
-                module_path!(),
-                &type_name,
-                "received_blob_sidecars",
-                self.received_blob_sidecars.len(),
-            );
-
-            metrics.set_collection_length(
-                module_path!(),
-                &type_name,
-                "received_block_roots",
-                self.received_block_roots.len(),
-            );
-        }
     }
 
     const fn start_of_epoch(epoch: Epoch) -> Slot {

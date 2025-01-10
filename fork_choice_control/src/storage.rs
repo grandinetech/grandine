@@ -12,7 +12,7 @@ use itertools::Itertools as _;
 use log::{debug, info, warn};
 use nonzero_ext::nonzero;
 use reqwest::Client;
-use ssz::{Ssz, SszRead, SszReadDefault as _, SszWrite};
+use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use transition_functions::combined;
@@ -33,7 +33,7 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use crate::checkpoint_sync;
+use crate::{checkpoint_sync, StorageMode};
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 
@@ -57,7 +57,7 @@ pub struct Storage<P> {
     config: Arc<Config>,
     pub(crate) database: Database,
     pub(crate) archival_epoch_interval: NonZeroU64,
-    prune_storage: bool,
+    storage_mode: StorageMode,
     phantom: PhantomData<P>,
 }
 
@@ -67,13 +67,13 @@ impl<P: Preset> Storage<P> {
         config: Arc<Config>,
         database: Database,
         archival_epoch_interval: NonZeroU64,
-        prune_storage: bool,
+        storage_mode: StorageMode,
     ) -> Self {
         Self {
             config,
             database,
             archival_epoch_interval,
-            prune_storage,
+            storage_mode,
             phantom: PhantomData,
         }
     }
@@ -81,6 +81,16 @@ impl<P: Preset> Storage<P> {
     #[must_use]
     pub(crate) const fn config(&self) -> &Arc<Config> {
         &self.config
+    }
+
+    #[must_use]
+    pub const fn archive_storage_enabled(&self) -> bool {
+        self.storage_mode.is_archive()
+    }
+
+    #[must_use]
+    pub const fn prune_storage_enabled(&self) -> bool {
+        self.storage_mode.is_prune()
     }
 
     #[expect(clippy::too_many_lines)]
@@ -254,7 +264,7 @@ impl<P: Preset> Storage<P> {
             let state = chain_link.state(store);
             let state_slot = chain_link.slot();
 
-            if !self.prune_storage {
+            if !self.prune_storage_enabled() {
                 if finalized {
                     slots.finalized.push(state_slot);
                     batch.push(serialize(FinalizedBlockByRoot(block_root), block)?);
@@ -267,7 +277,7 @@ impl<P: Preset> Storage<P> {
             }
 
             if finalized {
-                if !self.prune_storage {
+                if !self.prune_storage_enabled() {
                     batch.push(serialize(
                         SlotByStateRoot(block.message().state_root()),
                         state_slot,
@@ -300,7 +310,7 @@ impl<P: Preset> Storage<P> {
                     }
                 }
 
-                if !(archival_state_appended || self.prune_storage) {
+                if !(archival_state_appended || self.prune_storage_enabled()) {
                     let state_epoch = Self::epoch_at_slot(state_slot);
                     let append_state = misc::is_epoch_start::<P>(state_slot)
                         && state_epoch.is_multiple_of(self.archival_epoch_interval);
@@ -827,7 +837,7 @@ impl<P: Preset> Storage<P> {
 
         itertools::process_results(results, |pairs| {
             pairs
-                .filter(|(key_bytes, _)| SlotBlobId::has_prefix(key_bytes))
+                .take_while(|(key_bytes, _)| SlotBlobId::has_prefix(key_bytes))
                 .count()
         })
     }
@@ -1036,13 +1046,34 @@ pub enum Error {
     IncorrectPrefix { bytes: Vec<u8> },
 }
 
+pub fn save(database: &Database, key: impl Display, value: impl SszWrite) -> Result<()> {
+    database.put(serialize_key(key), serialize_value(value)?)
+}
+
+pub fn get<V: SszReadDefault>(database: &Database, key: impl Display) -> Result<Option<V>> {
+    database
+        .get(serialize_key(key))?
+        .map(V::from_ssz_default)
+        .transpose()
+        .map_err(Into::into)
+}
+
+fn serialize_key(key: impl Display) -> String {
+    key.to_string()
+}
+
+fn serialize_value(value: impl SszWrite) -> Result<Vec<u8>> {
+    value.to_ssz().map_err(Into::into)
+}
+
 pub fn serialize(key: impl Display, value: impl SszWrite) -> Result<(String, Vec<u8>)> {
-    Ok((key.to_string(), value.to_ssz()?))
+    Ok((serialize_key(key), serialize_value(value)?))
 }
 
 #[cfg(test)]
 mod tests {
     use bytesize::ByteSize;
+    use database::DatabaseMode;
     use tempfile::TempDir;
     use types::{
         phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock, preset::Mainnet,
@@ -1052,7 +1083,13 @@ mod tests {
 
     #[test]
     fn test_prune_old_blocks_and_states() -> Result<()> {
-        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10), false)?;
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+        )?;
+
         let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
 
         database.put_batch(vec![
@@ -1084,7 +1121,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             database,
             nonzero!(64_u64),
-            true,
+            StorageMode::Standard,
         );
 
         assert_eq!(storage.finalized_block_count()?, 2);
@@ -1111,13 +1148,18 @@ mod tests {
     #[test]
     #[expect(clippy::similar_names)]
     fn test_prune_old_blob_sidecars() -> Result<()> {
-        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10), false)?;
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+        )?;
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             database,
             nonzero!(64_u64),
-            true,
+            StorageMode::Standard,
         );
 
         let blob_id_0 = BlobIdentifier {
