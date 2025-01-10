@@ -34,7 +34,7 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Cow<'de
 
         fn visit_str<E: Error>(self, string: &str) -> Result<Self::Value, E> {
             let digits = shared::strip_hex_prefix(string)?;
-            let bytes = hex::decode(digits).map_err(E::custom)?;
+            let bytes = const_hex::decode(digits).map_err(E::custom)?;
             Ok(Cow::Owned(bytes))
         }
     }

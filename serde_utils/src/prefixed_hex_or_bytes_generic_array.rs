@@ -43,7 +43,7 @@ pub fn deserialize<'de, D: Deserializer<'de>, N: ArrayLength<u8>>(
             let digits = shared::strip_hex_prefix(string)?;
 
             let mut bytes = GenericArray::default();
-            hex::decode_to_slice(digits, &mut bytes).map_err(E::custom)?;
+            const_hex::decode_to_slice(digits, &mut bytes).map_err(E::custom)?;
 
             Ok(bytes)
         }

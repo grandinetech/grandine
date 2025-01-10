@@ -300,6 +300,7 @@ bytesize = { version = '1', features = ['serde'] }
 cached = '0.53'
 chrono = '0.4'
 clap = { version = '4', features = ['derive'] }
+const-hex = '1.14'
 const_format = '0.2'
 constant_time_eq = '0.3'
 conv = '0.3'
@@ -339,7 +340,6 @@ hash_hasher = '2'
 hashlink = '0.9'
 hex = { version = '0.4', features = ['serde'] }
 hex-literal = '0.4'
-hex_fmt = '0.3'
 hmac = '0.12'
 http = '1'
 http-body-util = '0.1'
