@@ -16,6 +16,9 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
+pub type LazyBeaconBlocks<P> = LazyVec<Arc<SignedBeaconBlock<P>>>;
+pub type LazyBlobSidecars<P> = LazyVec<Arc<BlobSidecar<P>>>;
+
 // `LazyLock` implements `core::ops::Deref`, which is more confusing than useful.
 // Explicit forcing is better.
 
@@ -51,20 +54,17 @@ impl<P: Preset> LazyBeaconBlock<P> {
     }
 }
 
-pub struct LazyBeaconBlocks<P: Preset> {
+pub struct LazyVec<T> {
     expected_count: u64,
-    blocks: LazyLock<Vec<Arc<SignedBeaconBlock<P>>>>,
+    elements: LazyLock<Vec<T>>,
 }
 
-impl<P: Preset> LazyBeaconBlocks<P> {
+impl<T> LazyVec<T> {
     #[must_use]
-    pub(crate) const fn new(
-        expected_count: u64,
-        thunk: fn() -> Vec<Arc<SignedBeaconBlock<P>>>,
-    ) -> Self {
+    pub(crate) const fn new(expected_count: u64, thunk: fn() -> Vec<T>) -> Self {
         Self {
             expected_count,
-            blocks: LazyLock::new(thunk),
+            elements: LazyLock::new(thunk),
         }
     }
 
@@ -73,13 +73,13 @@ impl<P: Preset> LazyBeaconBlocks<P> {
         self.expected_count
     }
 
-    pub fn force(&self) -> &[Arc<SignedBeaconBlock<P>>] {
-        let blocks = LazyLock::force(&self.blocks);
-        let actual_count = u64::try_from(blocks.len()).expect("block count should fit in u64");
+    pub fn force(&self) -> &[T] {
+        let elements = LazyLock::force(&self.elements);
+        let actual_count = u64::try_from(elements.len()).expect("count should fit in u64");
 
         assert_eq!(actual_count, self.expected_count);
 
-        blocks
+        elements
     }
 }
 

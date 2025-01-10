@@ -691,6 +691,7 @@ dependencies = [
  "num-integer",
  "openssl",
  "operation_pools",
+ "serde",
  "serde_json",
  "serde_utils",
  "sha2 0.10.8",

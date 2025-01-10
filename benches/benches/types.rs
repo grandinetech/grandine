@@ -10,12 +10,16 @@ use std::sync::Arc;
 use allocator as _;
 use criterion::{Criterion, Throughput};
 use easy_ext::ext;
-use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
+use eth2_cache_utils::{
+    goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars,
+};
 use itertools::Itertools as _;
-use ssz::{SszRead as _, SszWrite as _};
+use serde::{Deserialize, Serialize};
+use ssz::{SszRead, SszWrite};
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
+    deneb::containers::BlobSidecar,
     preset::Preset,
 };
 
@@ -73,6 +77,10 @@ fn main() {
             &Config::medalla(),
             &medalla::BEACON_BLOCKS_UP_TO_SLOT_128,
         )
+        .benchmark_blob_sidecars(
+            "mainnet Deneb blob sidecars from 32 slots",
+            &mainnet::DENEB_BLOB_SIDECARS_FROM_32_SLOTS,
+        )
         .final_summary();
 }
 
@@ -120,35 +128,82 @@ impl Criterion {
         config: &Config,
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
-        let ssz_bytes = LazyCell::new(|| blocks_to_ssz(blocks.force()));
-        let json_bytes = LazyCell::new(|| blocks_to_json_directly(blocks.force()));
+        let ssz_bytes = LazyCell::new(|| slice_to_ssz(blocks.force()));
+        let json_bytes = LazyCell::new(|| slice_to_json_directly(blocks.force()));
 
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(blocks.count()))
             .bench_function("from SSZ", |bencher| {
                 let ssz_bytes = ssz_bytes.iter().map(Vec::as_slice);
 
-                bencher.iter_with_large_drop(|| blocks_from_ssz::<P>(config, ssz_bytes.clone()))
+                bencher.iter_with_large_drop(|| {
+                    vec_from_ssz::<Config, Arc<SignedBeaconBlock<P>>>(config, ssz_bytes.clone())
+                })
             })
             .bench_function("to SSZ", |bencher| {
                 let blocks = blocks.force();
 
-                bencher.iter_with_large_drop(|| blocks_to_ssz(blocks))
+                bencher.iter_with_large_drop(|| slice_to_ssz(blocks))
             })
             .bench_function("from JSON", |bencher| {
                 let json_bytes = json_bytes.iter().map(Vec::as_slice);
 
-                bencher.iter_with_large_drop(|| blocks_from_json::<P>(json_bytes.clone()))
+                bencher.iter_with_large_drop(|| {
+                    vec_from_json::<Arc<SignedBeaconBlock<P>>>(json_bytes.clone())
+                })
             })
             .bench_function("to JSON directly", |bencher| {
                 let blocks = blocks.force();
 
-                bencher.iter_with_large_drop(|| blocks_to_json_directly(blocks))
+                bencher.iter_with_large_drop(|| slice_to_json_directly(blocks))
             })
             .bench_function("to JSON via serde_utils::stringify", |bencher| {
                 let blocks = blocks.force();
 
-                bencher.iter_with_large_drop(|| blocks_to_json_via_stringify(blocks))
+                bencher.iter_with_large_drop(|| slice_to_json_via_stringify(blocks))
+            });
+
+        self
+    }
+
+    fn benchmark_blob_sidecars<P: Preset>(
+        &mut self,
+        group_name: &str,
+        blob_sidecars: &LazyBlobSidecars<P>,
+    ) -> &mut Self {
+        let ssz_bytes = LazyCell::new(|| slice_to_ssz(blob_sidecars.force()));
+        let json_bytes = LazyCell::new(|| slice_to_json_directly(blob_sidecars.force()));
+
+        self.benchmark_group(group_name)
+            .throughput(Throughput::Elements(blob_sidecars.count()))
+            .bench_function("from SSZ", |bencher| {
+                let ssz_bytes = ssz_bytes.iter().map(Vec::as_slice);
+
+                bencher.iter_with_large_drop(|| {
+                    vec_from_ssz::<(), Arc<BlobSidecar<P>>>(&(), ssz_bytes.clone())
+                })
+            })
+            .bench_function("to SSZ", |bencher| {
+                let blob_sidecars = blob_sidecars.force();
+
+                bencher.iter_with_large_drop(|| slice_to_ssz(blob_sidecars))
+            })
+            .bench_function("from JSON", |bencher| {
+                let json_bytes = json_bytes.iter().map(Vec::as_slice);
+
+                bencher.iter_with_large_drop(|| {
+                    vec_from_json::<Arc<BlobSidecar<P>>>(json_bytes.clone())
+                })
+            })
+            .bench_function("to JSON directly", |bencher| {
+                let blob_sidecars = blob_sidecars.force();
+
+                bencher.iter_with_large_drop(|| slice_to_json_directly(blob_sidecars))
+            })
+            .bench_function("to JSON via serde_utils::stringify", |bencher| {
+                let blob_sidecars = blob_sidecars.force();
+
+                bencher.iter_with_large_drop(|| slice_to_json_via_stringify(blob_sidecars))
             });
 
         self
@@ -175,47 +230,46 @@ fn state_to_json_via_stringify(state: &BeaconState<impl Preset>) -> Vec<u8> {
         .expect("state should be serializable to JSON")
 }
 
-fn blocks_from_ssz<'bytes, P: Preset>(
-    config: &Config,
+fn vec_from_ssz<'bytes, C, T: SszRead<C>>(
+    context: &C,
     bytes: impl IntoIterator<Item = &'bytes [u8]>,
-) -> Vec<Arc<SignedBeaconBlock<P>>> {
+) -> Vec<T> {
     bytes
         .into_iter()
-        .map(|bytes| Arc::from_ssz(config, bytes))
+        .map(|bytes| T::from_ssz(context, bytes))
         .try_collect()
-        .expect("blocks have already been successfully deserialized")
+        .expect("iterator items have already been successfully deserialized from SSZ")
 }
 
-fn blocks_to_ssz(blocks: &[Arc<SignedBeaconBlock<impl Preset>>]) -> Vec<Vec<u8>> {
-    blocks
-        .iter()
-        .map(Arc::to_ssz)
-        .try_collect()
-        .expect("blocks can be serialized because they have already been serialized to a file")
+fn slice_to_ssz(slice: &[impl SszWrite]) -> Vec<Vec<u8>> {
+    slice.iter().map(SszWrite::to_ssz).try_collect().expect(
+        "slice elements can be serialized to SSZ because \
+         they have already been serialized to a file",
+    )
 }
 
-fn blocks_from_json<'bytes, P: Preset>(
+fn vec_from_json<'bytes, T: Deserialize<'bytes>>(
     bytes: impl IntoIterator<Item = &'bytes [u8]>,
-) -> Vec<Arc<SignedBeaconBlock<P>>> {
+) -> Vec<T> {
     bytes
         .into_iter()
         .map(serde_json::from_slice)
         .try_collect()
-        .expect("blocks should be deserializable from JSON")
+        .expect("iterator items should be deserializable from JSON")
 }
 
-fn blocks_to_json_directly(blocks: &[Arc<SignedBeaconBlock<impl Preset>>]) -> Vec<Vec<u8>> {
-    blocks
+fn slice_to_json_directly(slice: &[impl Serialize]) -> Vec<Vec<u8>> {
+    slice
         .iter()
         .map(serde_json::to_vec)
         .try_collect()
-        .expect("blocks should be serializable to JSON")
+        .expect("slice elements should be serializable to JSON")
 }
 
-fn blocks_to_json_via_stringify(blocks: &[Arc<SignedBeaconBlock<impl Preset>>]) -> Vec<Vec<u8>> {
-    blocks
+fn slice_to_json_via_stringify(slice: &[impl Serialize]) -> Vec<Vec<u8>> {
+    slice
         .iter()
-        .map(|block| serde_utils::stringify(block).and_then(|json| serde_json::to_vec(&json)))
+        .map(|element| serde_utils::stringify(element).and_then(|json| serde_json::to_vec(&json)))
         .try_collect()
-        .expect("blocks should be serializable to JSON")
+        .expect("slice elements should be serializable to JSON")
 }
