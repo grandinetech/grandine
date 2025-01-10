@@ -29,6 +29,7 @@ itertools = { workspace = true }
 num-integer = { workspace = true }
 openssl = { workspace = true }
 operation_pools = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 serde_utils = { workspace = true }
 sha2 = { workspace = true }
