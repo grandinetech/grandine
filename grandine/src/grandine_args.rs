@@ -30,7 +30,7 @@ use eth2_libp2p::{
     PeerIdSerialized,
 };
 use features::Feature;
-use fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL;
+use fork_choice_control::{StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL};
 use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
 use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATION_VERSION};
 use http_api::HttpApiConfig;
@@ -285,9 +285,14 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_ARCHIVAL_EPOCH_INTERVAL)]
     archival_epoch_interval: NonZeroU64,
 
-    /// Enable prune mode where only single checkpoint state & block are stored in the DB
+    /// Enable archival storage mode, where all blocks, states (every --archival-epoch-interval epochs) and blobs are stored in the database
     /// [default: disabled]
-    #[clap(long)]
+    #[clap(long, conflicts_with("prune_storage"))]
+    archive_storage: bool,
+
+    /// Enable prune storage mode, where only a single checkpoint state and block are stored in the database
+    /// [default: disabled]
+    #[clap(long, conflicts_with("archive_storage"))]
     prune_storage: bool,
 
     /// Number of unfinalized states to keep in memory.
@@ -346,9 +351,11 @@ struct BeaconNodeOptions {
     #[clap(long = "back_sync")]
     back_sync: bool,
 
-    /// Enable syncing historical data
+    /// Enable syncing historical data.
+    /// When used with --archive-storage, it will back-sync to genesis and reconstruct historical states.
+    /// When used without --archive-storage, it will back-sync blocks to the MIN_EPOCHS_FOR_BLOCK_REQUESTS epoch.
     /// [default: disabled]
-    #[clap(long = "back-sync")]
+    #[clap(long = "back-sync", conflicts_with("prune_storage"))]
     back_sync_enabled: bool,
 
     /// Collect Prometheus metrics
@@ -902,6 +909,7 @@ impl GrandineArgs {
             database_size,
             eth1_database_size,
             archival_epoch_interval,
+            archive_storage,
             prune_storage,
             unfinalized_states_in_memory,
             request_timeout,
@@ -1238,13 +1246,21 @@ impl GrandineArgs {
             urls: web3signer_urls,
         };
 
+        let storage_mode = if prune_storage {
+            StorageMode::Prune
+        } else if archive_storage {
+            StorageMode::Archive
+        } else {
+            StorageMode::Standard
+        };
+
         let storage_config = StorageConfig {
             in_memory,
             db_size: database_size,
             directories: directories.clone_arc(),
             eth1_db_size: eth1_database_size,
             archival_epoch_interval,
-            prune_storage,
+            storage_mode,
         };
 
         network_config_options.print_upnp_warning();
@@ -1860,6 +1876,18 @@ mod tests {
             "**test-graffiti*******************************",
         ])
         .expect_err("parse_graffiti should fail");
+    }
+
+    #[test]
+    fn incompatible_back_sync_and_storage_option() {
+        try_config_from_args(["--back-sync", "--prune-storage"])
+            .expect_err("incompatible back-sync and storage options should fail");
+    }
+
+    #[test]
+    fn incompatible_storage_options() {
+        try_config_from_args(["--archive-storage", "--prune-storage"])
+            .expect_err("incompatible storage options should fail");
     }
 
     #[test]

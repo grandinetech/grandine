@@ -7,7 +7,7 @@ use block_producer::BlockProducer;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
-use database::Database;
+use database::{Database, DatabaseMode};
 use dedicated_executor::DedicatedExecutor;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1::{Eth1Chain, Eth1Config};
@@ -41,7 +41,12 @@ use slasher::{Databases, Slasher, SlasherConfig};
 use slashing_protection::SlashingProtector;
 use std_ext::ArcExt as _;
 use tokio::select;
-use types::{config::Config as ChainConfig, preset::Preset, traits::BeaconState as _};
+use types::{
+    config::Config as ChainConfig,
+    phase0::consts::GENESIS_SLOT,
+    preset::Preset,
+    traits::{BeaconState as _, SignedBeaconBlock as _},
+};
 use validator::{
     run_validator_api, Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig,
 };
@@ -103,7 +108,7 @@ pub async fn run_after_genesis<P: Preset>(
         in_memory,
         ref directories,
         archival_epoch_interval,
-        prune_storage,
+        storage_mode,
         ..
     } = storage_config;
 
@@ -183,19 +188,21 @@ pub async fn run_after_genesis<P: Preset>(
     let storage_database = if in_memory {
         Database::in_memory()
     } else {
-        storage_config.beacon_fork_choice_database(None, false)?
+        storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadWrite)?
     };
 
     let storage = Arc::new(Storage::new(
         chain_config.clone_arc(),
         storage_database,
         archival_epoch_interval,
-        prune_storage,
+        storage_mode,
     ));
 
     let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
         .load(signer_snapshot.client(), state_load_strategy)
         .await?;
+
+    let is_anchor_genesis = anchor_block.message().slot() == GENESIS_SLOT;
 
     let mut slashing_protector = if in_memory {
         SlashingProtector::in_memory(slashing_protection_history_limit)?
@@ -243,6 +250,7 @@ pub async fn run_after_genesis<P: Preset>(
         fork_choice_to_validator_tx,
         storage.clone_arc(),
         unfinalized_blocks,
+        !back_sync_enabled || is_anchor_genesis,
     )?;
 
     let execution_service = ExecutionService::new(
@@ -339,10 +347,11 @@ pub async fn run_after_genesis<P: Preset>(
     let block_sync_database = if in_memory {
         Database::in_memory()
     } else {
-        storage_config.sync_database()?
+        storage_config.sync_database(None, DatabaseMode::ReadWrite)?
     };
 
     let mut block_sync_service = BlockSyncService::new(
+        chain_config.clone_arc(),
         block_sync_database,
         anchor_checkpoint_provider.clone(),
         controller.clone_arc(),
@@ -350,6 +359,8 @@ pub async fn run_after_genesis<P: Preset>(
         block_sync_service_channels,
         back_sync_enabled,
         loaded_from_remote,
+        storage_config.storage_mode,
+        network_config.target_peers,
     )?;
 
     block_sync_service.try_to_spawn_back_sync_states_archiver()?;
@@ -386,7 +397,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .unwrap_or_default()
                             .join(format!("slasher_attestation_votes_{fork_version:?}_db")),
                         db_size,
-                        false,
+                        DatabaseMode::ReadWrite,
                     )?,
                     attestations_db: Database::persistent(
                         "SLASHER_INDEXED_ATTESTATIONS",
@@ -396,7 +407,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .unwrap_or_default()
                             .join(format!("slasher_indexed_attestations_{fork_version:?}_db")),
                         db_size,
-                        false,
+                        DatabaseMode::ReadWrite,
                     )?,
                     min_targets_db: Database::persistent(
                         "SLASHER_MIN_TARGETS",
@@ -406,7 +417,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .unwrap_or_default()
                             .join(format!("slasher_min_targets_{fork_version:?}_db")),
                         db_size,
-                        false,
+                        DatabaseMode::ReadWrite,
                     )?,
                     max_targets_db: Database::persistent(
                         "SLASHER_MAX_TARGETS",
@@ -416,7 +427,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .unwrap_or_default()
                             .join(format!("slasher_max_targets_{fork_version:?}_db")),
                         db_size,
-                        false,
+                        DatabaseMode::ReadWrite,
                     )?,
                     blocks_db: Database::persistent(
                         "SLASHER_BLOCKS",
@@ -426,7 +437,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .unwrap_or_default()
                             .join(format!("slasher_blocks_{fork_version:?}_db")),
                         db_size,
-                        false,
+                        DatabaseMode::ReadWrite,
                     )?,
                 }
             };

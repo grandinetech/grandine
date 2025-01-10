@@ -8,14 +8,12 @@ use prometheus_metrics::Metrics;
 
 use crate::{block_sync_service::SyncDirection, misc::RequestId, sync_manager::SyncBatch};
 
-type RequestKey = usize;
-
 const MAX_ROOT_REQUESTS_PER_KEY: usize = 3;
 const REQUEST_BY_RANGE_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_BY_ROOT_TIMEOUT_IN_SECONDS: u64 = 5;
 
 pub struct RangeAndRootRequests<K> {
-    requests_by_range: SizedCache<RequestKey, (SyncBatch, Instant)>,
+    requests_by_range: SizedCache<RequestId, (SyncBatch, Instant)>,
     requests_by_root: TimedSizedCache<K, HashSet<PeerId>>,
 }
 
@@ -32,6 +30,35 @@ impl<K: Hash + Eq + Clone> Default for RangeAndRootRequests<K> {
 }
 
 impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
+    pub fn busy_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
+        self.busy_range_peers().chain(self.busy_root_peers())
+    }
+
+    pub fn busy_root_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
+        self.requests_by_root
+            .value_order()
+            .flat_map(|(_, peers)| peers)
+            .copied()
+    }
+
+    pub fn busy_range_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
+        self.requests_by_range
+            .value_order()
+            .filter(|(_, time)| time.elapsed() < REQUEST_BY_RANGE_TIMEOUT)
+            .map(|(sync_batch, _)| sync_batch.peer_id)
+    }
+
+    pub fn record_received_response(&mut self, k: &K, peer_id: &PeerId, request_id: RequestId) {
+        if let Some((batch, _)) = self.requests_by_range.cache_get_mut(&request_id) {
+            batch.response_received = true;
+            return;
+        }
+
+        self.requests_by_root
+            .cache_get_mut(k)
+            .map(|requests| requests.remove(peer_id));
+    }
+
     pub fn add_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
         self.requests_by_range
             .cache_set(request_id, (batch, Instant::now()));
@@ -120,17 +147,14 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             .count()
     }
 
-    pub fn request_by_range_finished(&mut self, request_id: RequestId) {
-        self.requests_by_range.cache_remove(&request_id);
+    pub fn request_by_range_finished(
+        &mut self,
+        request_id: RequestId,
+    ) -> Option<(SyncBatch, Instant)> {
+        self.requests_by_range.cache_remove(&request_id)
     }
 
-    pub fn chunk_by_root_received(&mut self, k: &K, peer_id: &PeerId) {
-        self.requests_by_root
-            .cache_get_mut(k)
-            .map(|requests| requests.remove(peer_id));
-    }
-
-    pub fn requests_by_range_keys(&self) -> Vec<RequestKey> {
+    pub fn requests_by_range_keys(&self) -> Vec<RequestId> {
         self.requests_by_range.key_order().copied().collect()
     }
 

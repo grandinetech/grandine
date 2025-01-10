@@ -67,6 +67,10 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         tick: Tick,
     },
+    BackSyncStatus {
+        wait_group: W,
+        is_back_synced: bool,
+    },
     Block {
         wait_group: W,
         result: Result<BlockAction<P>>,

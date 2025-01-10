@@ -18,7 +18,7 @@ use types::{
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::Phase,
     phase0::{
-        containers::{ProposerSlashing, SignedVoluntaryExit},
+        containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -26,8 +26,8 @@ use types::{
 
 use crate::{
     misc::{
-        AttestationSubnetActions, BeaconCommitteeSubscription, PeerReportReason, RequestId,
-        SyncCommitteeSubnetAction, SyncCommitteeSubscription,
+        AttestationSubnetActions, BeaconCommitteeSubscription, PeerReportReason, RPCRequestType,
+        RequestId, SyncCommitteeSubnetAction, SyncCommitteeSubscription,
     },
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
 };
@@ -39,13 +39,14 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
-    RequestedBlobSidecar(Arc<BlobSidecar<P>>, bool, PeerId),
-    RequestedBlock((Arc<SignedBeaconBlock<P>>, PeerId, RequestId)),
+    RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, RequestId, RPCRequestType),
+    RequestedBlock(Arc<SignedBeaconBlock<P>>, PeerId, RequestId, RPCRequestType),
     BlobsByRangeRequestFinished(RequestId),
-    BlobsByRootChunkReceived(BlobIdentifier, PeerId, RequestId),
-    BlocksByRangeRequestFinished(RequestId),
-    BlockByRootRequestFinished(H256),
+    BlocksByRangeRequestFinished(PeerId, RequestId),
     RequestFailed(PeerId),
+    FinalizedCheckpoint(Checkpoint),
+    GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
+    GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
 }
 
 impl<P: Preset> P2pToSync<P> {
@@ -86,7 +87,6 @@ impl<P: Preset> ApiToP2p<P> {
 
 pub enum SyncToApi {
     SyncStatus(bool),
-    BackSyncStatus(bool),
 }
 
 impl SyncToApi {
@@ -110,7 +110,6 @@ impl SyncToMetrics {
 }
 
 pub enum SyncToP2p {
-    PruneReceivedBlocks,
     ReportPeer(PeerId, PeerAction, ReportSource, PeerReportReason),
     RequestBlobsByRange(RequestId, PeerId, Slot, u64),
     RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
@@ -209,9 +208,9 @@ pub enum ServiceInboundMessage<P: Preset> {
 
 impl<P: Preset> ServiceInboundMessage<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
-        if tx.unbounded_send(self).is_err() {
-            debug!("send to network service failed because the receiver was dropped");
-        }
+        // panic if network thread is no longer running
+        tx.unbounded_send(self)
+            .expect("send to network service failed because the receiver was dropped");
     }
 }
 

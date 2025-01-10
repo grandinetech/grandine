@@ -3,7 +3,7 @@ use std::{path::Path, str};
 use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
 use bytesize::ByteSize;
-use database::Database;
+use database::{Database, DatabaseMode};
 use derive_more::Display;
 use serde::{de::DeserializeOwned, Serialize};
 use types::{
@@ -45,8 +45,12 @@ impl ProposerConfigs {
         default_gas_limit: Gas,
         default_graffiti: H256,
     ) -> Result<Self> {
-        let database =
-            Database::persistent("proposer-configs", validator_directory, DB_MAX_SIZE, false)?;
+        let database = Database::persistent(
+            "proposer-configs",
+            validator_directory,
+            DB_MAX_SIZE,
+            DatabaseMode::ReadWrite,
+        )?;
 
         Ok(Self {
             database,

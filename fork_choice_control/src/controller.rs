@@ -8,7 +8,7 @@
 // The downside is that submitting the same object multiple times in quick succession will result in
 // it being processed multiple times in parallel redundantly.
 
-use core::panic::AssertUnwindSafe;
+use core::{panic::AssertUnwindSafe, sync::atomic::AtomicBool};
 use std::{
     sync::{mpsc::Sender, Arc},
     thread::{Builder, JoinHandle},
@@ -106,6 +106,7 @@ where
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
         storage: Arc<Storage<P>>,
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
+        finished_back_sync: bool,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
 
@@ -115,6 +116,7 @@ where
             anchor_block,
             anchor_state,
             finished_initial_forward_sync,
+            finished_back_sync,
         );
 
         store.apply_tick(tick)?;
@@ -194,6 +196,14 @@ where
         MutatorMessage::Tick {
             wait_group: self.owned_wait_group(),
             tick,
+        }
+        .send(&self.mutator_tx)
+    }
+
+    pub fn on_back_sync_status(&self, is_back_synced: bool) {
+        MutatorMessage::BackSyncStatus {
+            wait_group: self.owned_wait_group(),
+            is_back_synced,
         }
         .send(&self.mutator_tx)
     }
@@ -435,6 +445,13 @@ where
         })
     }
 
+    pub fn store_back_sync_blob_sidecars(
+        &self,
+        blob_sidecars: impl IntoIterator<Item = Arc<BlobSidecar<P>>>,
+    ) -> Result<()> {
+        self.storage.store_back_sync_blob_sidecars(blob_sidecars)
+    }
+
     pub fn store_back_sync_blocks(
         &self,
         blocks: impl IntoIterator<Item = Arc<SignedBeaconBlock<P>>>,
@@ -447,9 +464,14 @@ where
         start_slot: Slot,
         end_slot: Slot,
         anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+        is_exiting: &Arc<AtomicBool>,
     ) -> Result<()> {
-        self.storage
-            .archive_back_sync_states(start_slot, end_slot, anchor_checkpoint_provider)
+        self.storage.archive_back_sync_states(
+            start_slot,
+            end_slot,
+            anchor_checkpoint_provider,
+            is_exiting,
+        )
     }
 
     fn spawn_blob_sidecar_task(

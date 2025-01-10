@@ -124,7 +124,8 @@ pub fn compute_fork_digest(current_version: Version, genesis_validators_root: H2
     ForkDigest::from_slice(&root[..ForkDigest::len_bytes()])
 }
 
-pub(crate) fn compute_domain(
+#[must_use]
+pub fn compute_domain(
     config: &Config,
     domain_type: DomainType,
     fork_version: Option<Version>,

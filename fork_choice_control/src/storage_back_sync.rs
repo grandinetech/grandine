@@ -1,16 +1,18 @@
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
-use features::Feature;
+use database::Database;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::{info, warn};
+use log::{debug, info, warn};
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
     combined::SignedBeaconBlock,
+    deneb::containers::BlobSidecar,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
     phase0::primitives::Slot,
     preset::Preset,
@@ -19,17 +21,27 @@ use types::{
 
 use crate::{
     storage::{
-        serialize, BlockRootBySlot, Error, FinalizedBlockByRoot, SlotByStateRoot, StateByBlockRoot,
+        get, serialize, BlockRootBySlot, Error, FinalizedBlockByRoot, SlotByStateRoot,
+        StateByBlockRoot,
     },
     Storage,
 };
 
+const ARCHIVER_CHECKPOINT_KEY: &str = "carchiver";
+
+// Retain archival data in memory until the number of ready beacon states
+// reaches `ARCHIVED_STATES_BEFORE_FLUSH`. This approach minimizes unnecessary
+// transactions and significantly reduces memory usage during the archiving
+// of back-synced data.
+const ARCHIVED_STATES_BEFORE_FLUSH: u64 = 5;
+
 impl<P: Preset> Storage<P> {
     pub(crate) fn archive_back_sync_states(
         &self,
-        start_slot: Slot,
+        mut start_slot: Slot,
         end_slot: Slot,
         anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+        is_exiting: &Arc<AtomicBool>,
     ) -> Result<()> {
         let WithOrigin { value, origin } = anchor_checkpoint_provider.checkpoint();
 
@@ -41,9 +53,17 @@ impl<P: Preset> Storage<P> {
         let anchor_block_slot = anchor_block.message().slot();
         let anchor_block_root = anchor_block.message().hash_tree_root();
 
+        // check whether archiving was interrupted
+        if let Some(slot) = get_latest_archived_slot(&self.database)? {
+            if self.stored_state(slot)?.is_some() && slot > start_slot && slot <= end_slot {
+                start_slot = slot;
+                info!("resuming back-sync archival from {slot} slot");
+            }
+        }
+
         let mut state = if start_slot == anchor_block_slot {
             if origin.is_checkpoint_sync() {
-                warn!("unable to back sync to genesis state as it not available");
+                warn!("unable to back-sync to genesis state as it not available");
             }
 
             anchor_state
@@ -53,22 +73,21 @@ impl<P: Preset> Storage<P> {
             })?
         };
 
-        let mut batch = vec![];
         let mut previous_block = None;
-
-        let state_transition = if Feature::TrustBackSyncBlocks.is_enabled() {
-            combined::trusted_state_transition
-        } else {
-            combined::untrusted_state_transition
-        };
+        let mut batch = vec![];
+        let mut states_in_batch = 0;
 
         if start_slot == anchor_block_slot {
             batch.push(serialize(StateByBlockRoot(anchor_block_root), &state)?);
         }
 
         for slot in (start_slot + 1)..=end_slot {
+            if is_exiting.load(Ordering::Relaxed) {
+                bail!(AnyhowError::msg("received a termination signal"));
+            }
+
             if let Some((block, _)) = self.finalized_block_by_slot(slot)? {
-                state_transition(self.config(), state.make_mut(), &block)?;
+                combined::untrusted_state_transition(self.config(), state.make_mut(), &block)?;
                 previous_block = Some(block);
             } else {
                 combined::process_slots(self.config(), state.make_mut(), slot)?;
@@ -82,10 +101,23 @@ impl<P: Preset> Storage<P> {
 
             if let Some(block) = previous_block.as_ref() {
                 if append_state {
-                    info!("archiving back sync state in slot {slot}");
+                    debug!("back-synced state in {slot} is ready for storage");
 
                     let block_root = block.message().hash_tree_root();
+
                     batch.push(serialize(StateByBlockRoot(block_root), &state)?);
+                    batch.push(serialize(ARCHIVER_CHECKPOINT_KEY, slot)?);
+
+                    states_in_batch += 1;
+
+                    if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
+                        info!("archiving back-sync data up to {slot} slot");
+
+                        self.database.put_batch(batch)?;
+
+                        batch = vec![];
+                        states_in_batch = 0;
+                    }
                 }
             }
         }
@@ -93,9 +125,17 @@ impl<P: Preset> Storage<P> {
         self.database.put_batch(batch)?;
 
         info!(
-            "back sync state archival completed (start_slot: {start_slot}, end_slot: {end_slot})",
+            "back-synced state archival completed (start_slot: {start_slot}, end_slot: {end_slot})",
         );
 
+        Ok(())
+    }
+
+    pub(crate) fn store_back_sync_blob_sidecars(
+        &self,
+        blob_sidecars: impl IntoIterator<Item = Arc<BlobSidecar<P>>>,
+    ) -> Result<()> {
+        self.append_blob_sidecars(blob_sidecars.into_iter().map(Into::into))?;
         Ok(())
     }
 
@@ -117,6 +157,10 @@ impl<P: Preset> Storage<P> {
     }
 }
 
+fn get_latest_archived_slot(database: &Database) -> Result<Option<Slot>> {
+    get(database, ARCHIVER_CHECKPOINT_KEY)
+}
+
 #[cfg(test)]
 #[cfg(feature = "eth2-cache")]
 mod tests {
@@ -127,6 +171,8 @@ mod tests {
     use eth2_cache_utils::mainnet;
     use itertools::{EitherOrBoth, Itertools as _};
     use types::phase0::consts::GENESIS_SLOT;
+
+    use crate::StorageMode;
 
     use super::*;
 
@@ -189,6 +235,7 @@ mod tests {
             0,
             128,
             &AnchorCheckpointProvider::custom_from_genesis(genesis_state),
+            &Arc::new(AtomicBool::new(false)),
         )?;
 
         // Assert that the mappings from state root to slot are stored.
@@ -215,7 +262,7 @@ mod tests {
             Arc::new(P::default_config()),
             Database::in_memory(),
             NonZeroU64::MIN,
-            false,
+            StorageMode::Standard,
         )
     }
 }

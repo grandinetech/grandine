@@ -10,7 +10,7 @@ use allocator as _;
 use anyhow::{bail, ensure, Context as _, Result};
 use builder_api::BuilderConfig;
 use clap::{Error as ClapError, Parser as _};
-use database::Database;
+use database::{Database, DatabaseMode};
 use eth1::{Eth1Chain, Eth1Config};
 use eth1_api::Auth;
 use features::Feature;
@@ -57,6 +57,7 @@ use types::preset::Minimal;
 mod commands;
 mod config_dir;
 mod consts;
+mod db_info;
 mod db_stats;
 mod grandine_args;
 mod grandine_config;
@@ -651,6 +652,7 @@ fn ensure_ports_not_in_use(
     Ok(())
 }
 
+#[expect(clippy::too_many_lines)]
 fn handle_command<P: Preset>(
     chain_config: Arc<ChainConfig>,
     storage_config: &StorageConfig,
@@ -660,20 +662,30 @@ fn handle_command<P: Preset>(
 ) -> Result<()> {
     Feature::InhibitApplicationRestart.enable();
 
+    let StorageConfig {
+        archival_epoch_interval,
+        storage_mode,
+        ..
+    } = storage_config;
+
     match command {
+        GrandineCommand::DbInfo { database, path } => {
+            db_info::print(storage_config, database, path)?
+        }
         GrandineCommand::DbStats { path } => db_stats::print::<P>(storage_config, path)?,
         GrandineCommand::Export {
             from,
             to,
             output_dir,
         } => {
-            let storage_database = storage_config.beacon_fork_choice_database(None, true)?;
+            let storage_database =
+                storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadOnly)?;
 
             let storage = Storage::new(
                 chain_config,
                 storage_database,
-                storage_config.archival_epoch_interval,
-                false,
+                *archival_epoch_interval,
+                *storage_mode,
             );
 
             let output_dir = output_dir.unwrap_or(std::env::current_dir()?);

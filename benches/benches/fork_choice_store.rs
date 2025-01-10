@@ -69,6 +69,7 @@ impl Criterion {
                     anchor_block,
                     anchor_state,
                     false,
+                    false,
                 );
 
                 for slot in (anchor_slot + 1)..=last_attestation_slot {

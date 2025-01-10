@@ -3,8 +3,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{ensure, Result};
 use bytesize::ByteSize;
-use database::Database;
+use database::{Database, DatabaseMode};
 use directories::Directories;
+use fork_choice_control::StorageMode;
 use fs_err::PathExt as _;
 use log::info;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
@@ -24,7 +25,7 @@ pub struct StorageConfig {
     pub directories: Arc<Directories>,
     pub eth1_db_size: ByteSize,
     pub archival_epoch_interval: NonZeroU64,
-    pub prune_storage: bool,
+    pub storage_mode: StorageMode,
 }
 
 impl StorageConfig {
@@ -37,14 +38,14 @@ impl StorageConfig {
                 .unwrap_or_default()
                 .join("eth1_cache"),
             self.eth1_db_size,
-            false,
+            DatabaseMode::ReadWrite,
         )
     }
 
     pub fn beacon_fork_choice_database(
         &self,
         custom_path: Option<PathBuf>,
-        read_only: bool,
+        mode: DatabaseMode,
     ) -> Result<Database> {
         let path = custom_path.unwrap_or_else(|| {
             self.directories
@@ -54,27 +55,37 @@ impl StorageConfig {
                 .join("beacon_fork_choice")
         });
 
-        if read_only {
+        if mode.is_read_only() {
             ensure!(
                 path.fs_err_try_exists()?,
                 "beacon_fork_choice database path does not exist: {path:?}",
             );
         }
 
-        Database::persistent("beacon_fork_choice", path, self.db_size, read_only)
+        Database::persistent("beacon_fork_choice", path, self.db_size, mode)
     }
 
-    pub fn sync_database(&self) -> Result<Database> {
-        Database::persistent(
-            "sync",
+    pub fn sync_database(
+        &self,
+        custom_path: Option<PathBuf>,
+        mode: DatabaseMode,
+    ) -> Result<Database> {
+        let path = custom_path.unwrap_or_else(|| {
             self.directories
                 .store_directory
                 .clone()
                 .unwrap_or_default()
-                .join("sync"),
-            self.db_size,
-            false,
-        )
+                .join("sync")
+        });
+
+        if mode.is_read_only() {
+            ensure!(
+                path.fs_err_try_exists()?,
+                "sync database path does not exist: {path:?}",
+            );
+        }
+
+        Database::persistent("sync", path, self.db_size, mode)
     }
 
     #[must_use]
@@ -85,7 +96,7 @@ impl StorageConfig {
             directories,
             eth1_db_size,
             archival_epoch_interval,
-            prune_storage,
+            storage_mode,
         } = self;
 
         let new_db_size = ByteSize::b(
@@ -108,7 +119,7 @@ impl StorageConfig {
             directories,
             eth1_db_size: new_eth1_db_size,
             archival_epoch_interval,
-            prune_storage,
+            storage_mode,
         }
     }
 
@@ -139,7 +150,7 @@ mod tests {
             directories: Arc::new(Directories::default()),
             eth1_db_size: ByteSize::gb(2),
             archival_epoch_interval: nonzero!(1_u64),
-            prune_storage: true,
+            storage_mode: StorageMode::Standard,
         };
 
         let StorageConfig {
@@ -160,7 +171,7 @@ mod tests {
             directories: Arc::new(Directories::default()),
             eth1_db_size: ByteSize::b(u64::MAX),
             archival_epoch_interval: nonzero!(1_u64),
-            prune_storage: true,
+            storage_mode: StorageMode::Standard,
         };
 
         assert_eq!(storage_config.db_size, ByteSize::b(u64::MAX));

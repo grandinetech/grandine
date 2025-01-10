@@ -59,19 +59,6 @@ impl SyncedStatus {
     }
 }
 
-#[derive(Default)]
-pub struct BackSyncedStatus(AtomicBool);
-
-impl BackSyncedStatus {
-    pub fn get(&self) -> bool {
-        self.0.load(ORDERING)
-    }
-
-    pub fn set(&self, value: bool) {
-        self.0.store(value, ORDERING);
-    }
-}
-
 pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
     SignedBeaconBlock<P>,
     ContiguousList<KzgProof, <P as Preset>::MaxBlobsPerBlock>,

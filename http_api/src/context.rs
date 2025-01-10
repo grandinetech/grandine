@@ -16,7 +16,7 @@ use eth1_api::{Eth1Api, Eth1ExecutionEngine, ExecutionService};
 use eth2_cache_utils::mainnet;
 use features::Feature;
 use fork_choice_control::{
-    Controller, StateLoadStrategy, Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+    Controller, StateLoadStrategy, Storage, StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
 };
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
@@ -147,7 +147,7 @@ impl<P: Preset> Context<P> {
             chain_config.clone_arc(),
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            false,
+            StorageMode::Standard,
         ));
 
         let state_load_strategy = StateLoadStrategy::Anchor {
@@ -190,6 +190,7 @@ impl<P: Preset> Context<P> {
             fc_to_validator_tx,
             storage,
             core::iter::empty(),
+            true,
         )?;
 
         for block in extra_blocks {
@@ -385,7 +386,6 @@ impl<P: Preset> Context<P> {
         let submit_requests = case.run(should_update_responses(), actual_address);
 
         SyncToApi::SyncStatus(true).send(&sync_to_api_tx);
-        SyncToApi::BackSyncStatus(true).send(&sync_to_api_tx);
 
         // Poll the HTTP API first to ensure it handles the messages sent above before any requests.
         // This could also be done by polling it once using `core::future::poll_fn`.
