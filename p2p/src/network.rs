@@ -312,6 +312,9 @@ impl<P: Preset> Network<P> {
                         P2pMessage::Ignore(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Ignore);
                         }
+                        P2pMessage::PublishBlobSidecar(blob_sidecar) => {
+                            self.publish_blob_sidecar(blob_sidecar);
+                        },
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
                             self.report_outcome(gossip_id.clone(), MessageAcceptance::Reject);
                             self.report_peer(

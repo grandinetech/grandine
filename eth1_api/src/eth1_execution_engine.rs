@@ -8,8 +8,9 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::{info, warn};
 use tokio::runtime::{Builder, Handle};
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams},
+    combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
     config::Config,
+    deneb::primitives::BlobIndex,
     nonstandard::{Phase, TimedPowBlock, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -30,6 +31,18 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
 
     fn allow_optimistic_merge_block_validation(&self) -> bool {
         true
+    }
+
+    fn exchange_capabilities(&self) {
+        ExecutionServiceMessage::ExchangeCapabilities.send(&self.execution_service_tx);
+    }
+
+    fn get_blobs(&self, block: Arc<SignedBeaconBlock<P>>, blob_indices: Vec<BlobIndex>) {
+        ExecutionServiceMessage::GetBlobs {
+            block,
+            blob_indices,
+        }
+        .send(&self.execution_service_tx);
     }
 
     fn notify_forkchoice_updated(

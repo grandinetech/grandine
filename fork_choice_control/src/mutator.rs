@@ -47,7 +47,10 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    deneb::{
+        containers::{BlobIdentifier, BlobSidecar},
+        primitives::BlobIndex,
+    },
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -345,6 +348,10 @@ where
             }
         }
 
+        if tick.is_start_of_epoch::<P>() {
+            self.execution_engine.exchange_capabilities();
+        }
+
         // Query the execution engine for the current status of the head
         // if it is still optimistic 1 second before the next interval.
         if tick.is_end_of_interval() {
@@ -517,6 +524,11 @@ where
                     let pending_block = reply_delayed_block_validation_result(
                         pending_block,
                         Ok(ValidationOutcome::Ignore(false)),
+                    );
+
+                    self.request_blobs_from_execution_engine(
+                        pending_block.block.clone_arc(),
+                        missing_blob_indices.clone(),
                     );
 
                     let blob_ids = missing_blob_indices
@@ -1046,6 +1058,10 @@ where
     ) {
         match result {
             Ok(BlobSidecarAction::Accept(blob_sidecar)) => {
+                if origin.is_from_el() {
+                    P2pMessage::PublishBlobSidecar(blob_sidecar.clone_arc()).send(&self.p2p_tx);
+                }
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -1699,6 +1715,14 @@ where
         }
 
         self.notify_forkchoice_updated(&new_head);
+    }
+
+    fn request_blobs_from_execution_engine(
+        &self,
+        block: Arc<SignedBeaconBlock<P>>,
+        missing_blob_indices: Vec<BlobIndex>,
+    ) {
+        self.execution_engine.get_blobs(block, missing_blob_indices);
     }
 
     fn notify_forkchoice_updated(&self, new_head: &ChainLink<P>) {

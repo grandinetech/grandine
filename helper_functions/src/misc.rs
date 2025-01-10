@@ -28,7 +28,7 @@ use types::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
             GENESIS_EPOCH, GENESIS_SLOT,
         },
-        containers::{ForkData, SigningData, Validator},
+        containers::{ForkData, SignedBeaconBlockHeader, SigningData, Validator},
         primitives::{
             CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, NodeId,
             Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
@@ -514,6 +514,39 @@ pub fn blob_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> 
     compute_start_slot_at_epoch::<P>(epoch)
 }
 
+pub fn construct_blob_sidecar<P: Preset>(
+    block: &SignedBeaconBlock<P>,
+    signed_block_header: SignedBeaconBlockHeader,
+    index: BlobIndex,
+    blob: Blob<P>,
+    kzg_commitment: KzgCommitment,
+    kzg_proof: KzgProof,
+) -> Result<BlobSidecar<P>> {
+    let message = block.message();
+
+    let Some(body) = message.body().post_deneb() else {
+        return Err(Error::BlobsForPreDenebBlock {
+            root: message.hash_tree_root(),
+            slot: message.slot(),
+        }
+        .into());
+    };
+
+    let kzg_commitment_inclusion_proof = match message.body().post_electra() {
+        Some(body) => electra_kzg_commitment_inclusion_proof(body, index)?,
+        None => deneb_kzg_commitment_inclusion_proof(body, index)?,
+    };
+
+    Ok(BlobSidecar {
+        index,
+        blob,
+        kzg_commitment,
+        kzg_proof,
+        signed_block_header,
+        kzg_commitment_inclusion_proof,
+    })
+}
+
 pub fn construct_blob_sidecars<P: Preset>(
     block: &SignedBeaconBlock<P>,
     blobs: impl IntoIterator<Item = Blob<P>>,
@@ -528,19 +561,14 @@ pub fn construct_blob_sidecars<P: Preset>(
 
     izip!(0.., blobs, proofs, commitments)
         .map(|(index, blob, kzg_proof, kzg_commitment)| {
-            let kzg_commitment_inclusion_proof = match block.message().body().post_electra() {
-                Some(body) => electra_kzg_commitment_inclusion_proof(body, index)?,
-                None => deneb_kzg_commitment_inclusion_proof(body, index)?,
-            };
-
-            Ok(BlobSidecar {
+            construct_blob_sidecar(
+                block,
+                signed_block_header,
                 index,
                 blob,
                 kzg_commitment,
                 kzg_proof,
-                signed_block_header,
-                kzg_commitment_inclusion_proof,
-            })
+            )
         })
         .collect()
 }

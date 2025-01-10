@@ -1,5 +1,7 @@
 use parse_display::Display;
+use ssz::H256;
 use thiserror::Error;
+use types::phase0::primitives::Slot;
 
 #[derive(Debug, Error)]
 pub(crate) enum Error {
@@ -9,6 +11,10 @@ pub(crate) enum Error {
     AttestationSourceMismatch,
     #[error("attesting indices are not sorted and unique")]
     AttestingIndicesNotSortedAndUnique,
+    #[error(
+        "attempted to construct a blob sidecar for pre-Deneb block: slot: {slot}, root: {root:?}"
+    )]
+    BlobsForPreDenebBlock { root: H256, slot: Slot },
     #[error("committee index is out of bounds")]
     CommitteeIndexOutOfBounds,
     #[error("aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}")]

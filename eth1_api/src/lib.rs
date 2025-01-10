@@ -7,6 +7,7 @@ pub use crate::{
     execution_service::ExecutionService,
     messages::{Eth1ApiToMetrics, Eth1ConnectionData, Eth1Metrics, ExecutionServiceMessage},
     misc::{ApiController, RealController},
+    tasks::{spawn_blobs_download_task, spawn_exchange_capabilities_task},
 };
 
 mod auth;
@@ -18,3 +19,4 @@ mod eth1_execution_engine;
 mod execution_service;
 mod messages;
 mod misc;
+mod tasks;

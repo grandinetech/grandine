@@ -10,7 +10,8 @@ use either::Either;
 use futures::channel::oneshot::Sender;
 use thiserror::Error;
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams},
+    combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
+    deneb::primitives::BlobIndex,
     nonstandard::{Phase, TimedPowBlock},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -22,6 +23,12 @@ pub trait ExecutionEngine<P: Preset> {
     const IS_NULL: bool;
 
     fn allow_optimistic_merge_block_validation(&self) -> bool;
+
+    /// [`engine_exchangeCapabilities`](https://github.com/ethereum/execution-apis/blob/9707339bc8222f6d43b3bf0a7a91623f7ce52213/src/engine/common.md#engine_exchangecapabilities)
+    fn exchange_capabilities(&self);
+
+    /// [`engine_getBlobsV1`](https://github.com/ethereum/execution-apis/blob/9707339bc8222f6d43b3bf0a7a91623f7ce52213/src/engine/cancun.md#engine_getblobsv1)
+    fn get_blobs(&self, block: Arc<SignedBeaconBlock<P>>, blob_indices: Vec<BlobIndex>);
 
     /// [`notify_forkchoice_updated`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/fork-choice.md#notify_forkchoice_updated)
     fn notify_forkchoice_updated(
@@ -51,6 +58,14 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
 
     fn allow_optimistic_merge_block_validation(&self) -> bool {
         (*self).allow_optimistic_merge_block_validation()
+    }
+
+    fn exchange_capabilities(&self) {
+        (*self).exchange_capabilities();
+    }
+
+    fn get_blobs(&self, block: Arc<SignedBeaconBlock<P>>, blob_indices: Vec<BlobIndex>) {
+        (*self).get_blobs(block, blob_indices)
     }
 
     fn notify_forkchoice_updated(
@@ -90,6 +105,14 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
 
     fn allow_optimistic_merge_block_validation(&self) -> bool {
         self.as_ref().allow_optimistic_merge_block_validation()
+    }
+
+    fn exchange_capabilities(&self) {
+        self.as_ref().exchange_capabilities()
+    }
+
+    fn get_blobs(&self, block: Arc<SignedBeaconBlock<P>>, blob_indices: Vec<BlobIndex>) {
+        self.as_ref().get_blobs(block, blob_indices)
     }
 
     fn notify_forkchoice_updated(
@@ -132,6 +155,18 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
         self.lock()
             .expect("execution engine mutex is poisoned")
             .allow_optimistic_merge_block_validation()
+    }
+
+    fn exchange_capabilities(&self) {
+        self.lock()
+            .expect("execution engine mutex is poisoned")
+            .exchange_capabilities()
+    }
+
+    fn get_blobs(&self, block: Arc<SignedBeaconBlock<P>>, blob_indices: Vec<BlobIndex>) {
+        self.lock()
+            .expect("execution engine mutex is poisoned")
+            .get_blobs(block, blob_indices)
     }
 
     fn notify_forkchoice_updated(
@@ -182,6 +217,10 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
         false
     }
 
+    fn exchange_capabilities(&self) {}
+
+    fn get_blobs(&self, _block: Arc<SignedBeaconBlock<P>>, _blob_indices: Vec<BlobIndex>) {}
+
     fn notify_forkchoice_updated(
         &self,
         _head_eth1_block_hash: ExecutionBlockHash,
@@ -219,6 +258,10 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine {
     fn allow_optimistic_merge_block_validation(&self) -> bool {
         self.optimistic_merge_block_validation
     }
+
+    fn exchange_capabilities(&self) {}
+
+    fn get_blobs(&self, _block: Arc<SignedBeaconBlock<P>>, _blob_indices: Vec<BlobIndex>) {}
 
     fn notify_forkchoice_updated(
         &self,

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use dedicated_executor::DedicatedExecutor;
 use derive_more::Constructor;
 use either::Either;
 use execution_engine::{ForkChoiceUpdatedResponse, PayloadAttributes, PayloadStatusV1};
 use fork_choice_control::Wait;
 use futures::{channel::mpsc::UnboundedReceiver, StreamExt as _};
 use log::warn;
+use std_ext::ArcExt as _;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::Phase,
@@ -14,12 +16,16 @@ use types::{
     preset::Preset,
 };
 
-use crate::{eth1_api::Eth1Api, messages::ExecutionServiceMessage, misc::ApiController};
+use crate::{
+    eth1_api::Eth1Api, messages::ExecutionServiceMessage, misc::ApiController,
+    spawn_blobs_download_task, spawn_exchange_capabilities_task,
+};
 
 #[derive(Constructor)]
 pub struct ExecutionService<P: Preset, W: Wait> {
     api: Arc<Eth1Api>,
     controller: ApiController<P, W>,
+    dedicated_executor: Arc<DedicatedExecutor>,
     rx: UnboundedReceiver<ExecutionServiceMessage<P>>,
 }
 
@@ -27,6 +33,24 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
     pub async fn run(mut self) -> Result<()> {
         while let Some(message) = self.rx.next().await {
             match message {
+                ExecutionServiceMessage::ExchangeCapabilities => {
+                    spawn_exchange_capabilities_task(
+                        self.api.clone_arc(),
+                        &self.dedicated_executor,
+                    );
+                }
+                ExecutionServiceMessage::GetBlobs {
+                    block,
+                    blob_indices,
+                } => {
+                    spawn_blobs_download_task(
+                        self.api.clone_arc(),
+                        self.controller.clone_arc(),
+                        &self.dedicated_executor,
+                        block,
+                        blob_indices,
+                    );
+                }
                 ExecutionServiceMessage::NotifyForkchoiceUpdated {
                     head_eth1_block_hash,
                     safe_eth1_block_hash,

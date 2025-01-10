@@ -1706,7 +1706,7 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
     let head_slot = snapshot.head_slot();
     let is_synced = is_synced.get();
     let is_back_synced = is_back_synced.get();
-    let el_offline = eth1_api.el_offline().await;
+    let el_offline = eth1_api.el_offline();
 
     EthResponse::json(NodeSyncingResponse {
         head_slot,

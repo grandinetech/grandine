@@ -494,6 +494,7 @@ impl AttesterSlashingOrigin {
 #[derive(Debug)]
 pub enum BlobSidecarOrigin {
     Api(Option<OneshotSender<Result<ValidationOutcome>>>),
+    ExecutionLayer,
     Gossip(SubnetId, GossipId),
     Requested(PeerId),
     Own,
@@ -510,7 +511,7 @@ impl BlobSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
-            Self::Own | Self::Requested(_) => (None, None),
+            Self::ExecutionLayer | Self::Own | Self::Requested(_) => (None, None),
         }
     }
 
@@ -518,7 +519,7 @@ impl BlobSidecarOrigin {
     pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id),
-            Self::Api(_) | Self::Own | Self::Requested(_) => None,
+            Self::Api(_) | Self::ExecutionLayer | Self::Own | Self::Requested(_) => None,
         }
     }
 
@@ -527,7 +528,7 @@ impl BlobSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => Some(*peer_id),
-            Self::Api(_) | Self::Own => None,
+            Self::Api(_) | Self::ExecutionLayer | Self::Own => None,
         }
     }
 
@@ -535,8 +536,13 @@ impl BlobSidecarOrigin {
     pub const fn subnet_id(&self) -> Option<SubnetId> {
         match self {
             Self::Gossip(subnet_id, _) => Some(*subnet_id),
-            Self::Api(_) | Self::Own | Self::Requested(_) => None,
+            Self::Api(_) | Self::ExecutionLayer | Self::Own | Self::Requested(_) => None,
         }
+    }
+
+    #[must_use]
+    pub const fn is_from_el(&self) -> bool {
+        matches!(self, Self::ExecutionLayer)
     }
 }
 

@@ -8,7 +8,9 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+arc-swap = { workspace = true }
 bls = { workspace = true }
+dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
 either = { workspace = true }
 enum-iterator = { workspace = true }
@@ -18,8 +20,10 @@ features = { workspace = true }
 fork_choice_control = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
+helper_functions = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
+itertools = { workspace = true }
 jwt-simple = { workspace = true }
 log = { workspace = true }
 memoffset = { workspace = true }

@@ -198,9 +198,17 @@ impl<P: Preset> Context<P> {
             controller.on_requested_block(block, None);
         }
 
+        let dedicated_executor = Arc::new(DedicatedExecutor::new(
+            "dedicated-executor",
+            num_cpus::get(),
+            None,
+            None,
+        ));
+
         let execution_service = ExecutionService::new(
             eth1_api.clone_arc(),
             controller.clone_arc(),
+            dedicated_executor.clone_arc(),
             execution_service_rx,
         );
 
@@ -231,13 +239,6 @@ impl<P: Preset> Context<P> {
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             H256::default(),
-        ));
-
-        let dedicated_executor = Arc::new(DedicatedExecutor::new(
-            "dedicated-executor",
-            num_cpus::get(),
-            None,
-            None,
         ));
 
         let attestation_verifier = AttestationVerifier::new(

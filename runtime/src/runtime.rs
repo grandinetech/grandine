@@ -144,6 +144,22 @@ pub async fn run_after_genesis<P: Preset>(
     let mut validator_to_slasher_tx = None;
     let mut validator_to_liveness_tx = None;
 
+    let num_of_cpus = num_cpus::get();
+
+    let dedicated_executor_low_priority = Arc::new(DedicatedExecutor::new(
+        "de-low",
+        (num_of_cpus / 4).max(1),
+        Some(19),
+        metrics.clone(),
+    ));
+
+    let dedicated_executor_normal_priority = Arc::new(DedicatedExecutor::new(
+        "de-normal",
+        num_of_cpus,
+        None,
+        metrics.clone(),
+    ));
+
     let eth1_api = Arc::new(Eth1Api::new(
         chain_config.clone_arc(),
         signer_snapshot.client().clone(),
@@ -152,6 +168,11 @@ pub async fn run_after_genesis<P: Preset>(
         eth1_api_to_metrics_tx,
         metrics.clone(),
     ));
+
+    eth1_api::spawn_exchange_capabilities_task(
+        eth1_api.clone_arc(),
+        &dedicated_executor_low_priority,
+    );
 
     let execution_engine = Arc::new(Eth1ExecutionEngine::new(
         chain_config.clone_arc(),
@@ -227,26 +248,11 @@ pub async fn run_after_genesis<P: Preset>(
     let execution_service = ExecutionService::new(
         eth1_api.clone_arc(),
         controller.clone_arc(),
+        dedicated_executor_low_priority.clone_arc(),
         execution_service_rx,
     );
 
     let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
-
-    let num_of_cpus = num_cpus::get();
-
-    let dedicated_executor_low_priority = Arc::new(DedicatedExecutor::new(
-        "de-low",
-        (num_of_cpus / 4).max(1),
-        Some(19),
-        metrics.clone(),
-    ));
-
-    let dedicated_executor_normal_priority = Arc::new(DedicatedExecutor::new(
-        "de-normal",
-        num_of_cpus,
-        None,
-        metrics.clone(),
-    ));
 
     let attestation_verifier = AttestationVerifier::new(
         controller.clone_arc(),

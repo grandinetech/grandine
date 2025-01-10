@@ -399,6 +399,10 @@ where
         })
     }
 
+    pub fn on_el_blob_sidecar(&self, blob_sidecar: Arc<BlobSidecar<P>>) {
+        self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::ExecutionLayer)
+    }
+
     pub fn on_gossip_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,

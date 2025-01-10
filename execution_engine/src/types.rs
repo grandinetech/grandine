@@ -723,6 +723,13 @@ impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(bound = "")]
+pub struct BlobAndProofV1<P: Preset> {
+    pub blob: Blob<P>,
+    pub proof: KzgProof,
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Result;

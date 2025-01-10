@@ -21,7 +21,7 @@ use log::debug;
 use serde::Serialize;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobIdentifier,
+    deneb::containers::{BlobIdentifier, BlobSidecar},
     phase0::{
         containers::Checkpoint,
         primitives::{DepositIndex, ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -165,6 +165,7 @@ pub enum P2pMessage<P: Preset> {
     Slot(Slot),
     Accept(GossipId),
     Ignore(GossipId),
+    PublishBlobSidecar(Arc<BlobSidecar<P>>),
     Reject(GossipId, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),

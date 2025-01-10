@@ -6,12 +6,12 @@ use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
 use execution_engine::{
-    EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response,
-    EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
-    RawExecutionRequests,
+    BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
+    EngineGetPayloadV3Response, EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
+    PayloadStatusV1, RawExecutionRequests,
 };
-use futures::{channel::mpsc::UnboundedSender, lock::Mutex, Future};
+use futures::{channel::mpsc::UnboundedSender, Future};
 use log::warn;
 use prometheus_metrics::Metrics;
 use reqwest::{header::HeaderMap, Client};
@@ -23,6 +23,7 @@ use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
+    deneb::primitives::VersionedHash,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::Preset,
@@ -39,23 +40,26 @@ use web3::{
 use crate::{
     auth::Auth,
     deposit_event::DepositEvent,
-    endpoints::{Endpoint, EndpointStatus, Endpoints},
+    endpoints::{Endpoint, Endpoints},
     eth1_block::Eth1Block,
     Eth1ApiToMetrics, Eth1ConnectionData,
 };
 
 const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
+const ENGINE_GET_BLOBS_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
+
+pub const ENGINE_GET_EL_BLOBS_V1: &str = "engine_getBlobsV1";
 
 #[expect(clippy::struct_field_names)]
 pub struct Eth1Api {
     config: Arc<Config>,
     client: Client,
-    auth: Arc<Auth>,
-    endpoints: Mutex<Endpoints>,
+    pub(crate) auth: Arc<Auth>,
+    pub(crate) endpoints: Endpoints,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
-    metrics: Option<Arc<Metrics>>,
+    pub(crate) metrics: Option<Arc<Metrics>>,
 }
 
 impl Eth1Api {
@@ -72,7 +76,7 @@ impl Eth1Api {
             config,
             client,
             auth,
-            endpoints: Mutex::new(Endpoints::new(eth1_rpc_urls)),
+            endpoints: Endpoints::new(eth1_rpc_urls),
             eth1_api_to_metrics_tx,
             metrics,
         }
@@ -80,13 +84,13 @@ impl Eth1Api {
 
     pub async fn current_head_number(&self) -> Result<ExecutionBlockNumber> {
         Ok(self
-            .request_with_fallback(|(api, headers)| Ok(api.block_number(headers)))
+            .request_with_fallback(|(api, headers)| Ok(api.block_number(headers)), None)
             .await?
             .as_u64())
     }
 
     pub async fn get_block(&self, block_id: BlockId) -> Result<Option<Eth1Block>> {
-        self.request_with_fallback(|(api, headers)| Ok(api.block(block_id, headers)))
+        self.request_with_fallback(|(api, headers)| Ok(api.block(block_id, headers)), None)
             .await?
             .map(Eth1Block::try_from)
             .transpose()
@@ -120,7 +124,7 @@ impl Eth1Api {
             .build();
 
         let logs = self
-            .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)))
+            .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
             .await?;
 
         if let Some(log) = logs.first() {
@@ -130,6 +134,21 @@ impl Eth1Api {
         }
 
         Ok(None)
+    }
+
+    pub(crate) async fn get_blobs<P: Preset>(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Vec<Option<BlobAndProofV1<P>>>> {
+        let params = vec![serde_json::to_value(versioned_hashes)?];
+
+        self.execute(
+            ENGINE_GET_EL_BLOBS_V1,
+            params,
+            Some(ENGINE_GET_BLOBS_TIMEOUT),
+            Some(ENGINE_GET_EL_BLOBS_V1),
+        )
+        .await
     }
 
     pub async fn get_blocks(
@@ -176,7 +195,7 @@ impl Eth1Api {
         let mut deposit_events = BTreeMap::<_, Vec<_>>::new();
 
         for log in self
-            .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)))
+            .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
             .await?
         {
             let block_number = match log.block_number {
@@ -217,6 +236,7 @@ impl Eth1Api {
                     "engine_newPayloadV1",
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
             }
@@ -227,6 +247,7 @@ impl Eth1Api {
                     "engine_newPayloadV2",
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
             }
@@ -247,6 +268,7 @@ impl Eth1Api {
                     "engine_newPayloadV3",
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
             }
@@ -272,6 +294,7 @@ impl Eth1Api {
                     "engine_newPayloadV4",
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
             }
@@ -320,6 +343,7 @@ impl Eth1Api {
                     "engine_forkchoiceUpdatedV1",
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                    None,
                 )
                 .await?
             }
@@ -328,6 +352,7 @@ impl Eth1Api {
                     "engine_forkchoiceUpdatedV2",
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                    None,
                 )
                 .await?
             }
@@ -336,6 +361,7 @@ impl Eth1Api {
                     "engine_forkchoiceUpdatedV3",
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                    None,
                 )
                 .await?
             }
@@ -344,6 +370,7 @@ impl Eth1Api {
                     "engine_forkchoiceUpdatedV3",
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                    None,
                 )
                 .await?
             }
@@ -397,6 +424,7 @@ impl Eth1Api {
                     "engine_getPayloadV1",
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
                 .map(Into::into)
@@ -408,6 +436,7 @@ impl Eth1Api {
                     "engine_getPayloadV2",
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
                 .map(Into::into)
@@ -419,6 +448,7 @@ impl Eth1Api {
                     "engine_getPayloadV3",
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
                 .map(Into::into)
@@ -430,6 +460,7 @@ impl Eth1Api {
                     "engine_getPayloadV4",
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
                 )
                 .await
                 .map(Into::into)
@@ -442,81 +473,69 @@ impl Eth1Api {
         method: &str,
         params: Vec<Value>,
         timeout: Option<Duration>,
+        capability: Option<&str>,
     ) -> Result<T> {
         let _timer = self.metrics.as_ref().map(|metrics| {
             prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
         });
 
-        self.request_with_fallback(|(api, headers)| {
-            Ok(CallFuture::new(api.transport().execute_with_headers(
-                method,
-                params.clone(),
-                headers,
-                timeout,
-            )))
-        })
+        self.request_with_fallback(
+            |(api, headers)| {
+                Ok(CallFuture::new(api.transport().execute_with_headers(
+                    method,
+                    params.clone(),
+                    headers,
+                    timeout,
+                )))
+            },
+            capability,
+        )
         .await
     }
 
-    pub async fn el_offline(&self) -> bool {
-        self.endpoints.lock().await.el_offline()
+    #[must_use]
+    pub fn el_offline(&self) -> bool {
+        self.endpoints.el_offline()
     }
 
-    async fn request_with_fallback<R, O, F>(&self, request_from_api: R) -> Result<O>
+    async fn request_with_fallback<R, O, F>(
+        &self,
+        request_from_api: R,
+        capability: Option<&str>,
+    ) -> Result<O>
     where
         R: Fn((Eth<Http>, Option<HeaderMap>)) -> Result<CallFuture<O, F>> + Sync + Send,
         O: DeserializeOwned + Send,
         F: Future<Output = Result<Value, Web3Error>> + Send,
     {
-        while let Some(endpoint) = self.current_endpoint().await {
-            let url = endpoint.url();
-            let http = Http::with_client(self.client.clone(), url.clone().into_url());
-            let api = Web3::new(http).eth();
-            let headers = self.auth.headers()?;
-            let query = request_from_api((api, headers))?.await;
+        let mut endpoints_for_request = self.endpoints.endpoints_for_request(capability).peekable();
+
+        while let Some(endpoint) = endpoints_for_request.next() {
+            let api = self.build_api_for_request(endpoint);
+            let query = request_from_api((api, self.auth.headers()?))?.await;
 
             match query {
                 Ok(result) => {
-                    self.set_endpoint_status(EndpointStatus::Online).await;
-
-                    if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
-                        Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData {
-                            sync_eth1_connected: true,
-                            sync_eth1_fallback_connected: endpoint.is_fallback(),
-                        })
-                        .send(metrics_tx);
-                    }
-
+                    self.on_ok_response(endpoint);
                     return Ok(result);
                 }
                 Err(error) => {
-                    if let Some(metrics) = self.metrics.as_ref() {
-                        metrics.eth1_api_errors_count.inc();
-                    }
+                    self.on_error_response(endpoint);
 
-                    match self.peek_next_endpoint().await {
+                    match endpoints_for_request.peek() {
                         Some(next_endpoint) => warn!(
-                            "Eth1 RPC endpoint {url} returned an error: {error}; \
-                             switching to {}",
+                            "Eth1 RPC endpoint {} returned an error: {error}; switching to {}",
+                            endpoint.url(),
                             next_endpoint.url(),
                         ),
                         None => warn!(
-                            "last available Eth1 RPC endpoint {url} returned an error: {error}",
+                            "last available Eth1 RPC endpoint {} returned an error: {error}",
+                            endpoint.url(),
                         ),
                     }
-
-                    if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
-                        Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData::default())
-                            .send(metrics_tx);
-                    }
-
-                    self.set_endpoint_status(EndpointStatus::Offline).await;
-                    self.next_endpoint().await;
                 }
             }
         }
-
-        self.reset_endpoints().await;
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.eth1_api_reset_count.inc();
@@ -525,32 +544,38 @@ impl Eth1Api {
         // Checking this in `Eth1Api::new` would be unnecessarily strict.
         // Syncing a predefined network without proposing blocks does not require an Eth1 RPC
         // (except during the Merge transition).
-        ensure!(
-            !self.endpoints.lock().await.is_empty(),
-            Error::NoEndpointsProvided
-        );
+        ensure!(!self.endpoints.is_empty(), Error::NoEndpointsProvided);
 
         bail!(Error::EndpointsExhausted)
     }
 
-    async fn current_endpoint(&self) -> Option<Endpoint> {
-        (*self.endpoints.lock().await).current().cloned()
+    pub(crate) fn build_api_for_request(&self, endpoint: &Endpoint) -> Eth<Http> {
+        let http = Http::with_client(self.client.clone(), endpoint.url().clone().into_url());
+        Web3::new(http).eth()
     }
 
-    async fn set_endpoint_status(&self, status: EndpointStatus) {
-        (*self.endpoints.lock().await).set_status(status)
+    pub(crate) fn on_ok_response(&self, endpoint: &Endpoint) {
+        endpoint.set_online_status(true);
+
+        if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
+            Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData {
+                sync_eth1_connected: true,
+                sync_eth1_fallback_connected: endpoint.is_fallback,
+            })
+            .send(metrics_tx);
+        }
     }
 
-    async fn next_endpoint(&self) {
-        self.endpoints.lock().await.advance();
-    }
+    pub(crate) fn on_error_response(&self, endpoint: &Endpoint) {
+        endpoint.set_online_status(false);
 
-    async fn peek_next_endpoint(&self) -> Option<Endpoint> {
-        self.endpoints.lock().await.peek_next().cloned()
-    }
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.eth1_api_errors_count.inc();
+        }
 
-    async fn reset_endpoints(&self) {
-        self.endpoints.lock().await.reset();
+        if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
+            Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData::default()).send(metrics_tx);
+        }
     }
 }
 
@@ -605,8 +630,7 @@ mod tests {
             None,
         ));
 
-        assert!(eth1_api.el_offline().await);
-        assert_eq!(eth1_api.current_endpoint().await, None);
+        assert!(eth1_api.el_offline());
 
         assert_eq!(
             eth1_api
@@ -642,7 +666,7 @@ mod tests {
             None,
         ));
 
-        assert!(!eth1_api.el_offline().await);
+        assert!(!eth1_api.el_offline());
         assert_eq!(
             eth1_api
                 .current_head_number()
@@ -653,8 +677,15 @@ mod tests {
         );
 
         // Despite the endpoint returning an error, it remains the only available option
-        assert!(eth1_api.current_endpoint().await.is_some());
-        assert!(eth1_api.el_offline().await);
+        assert!(eth1_api.el_offline());
+        assert_eq!(
+            eth1_api
+                .current_head_number()
+                .await
+                .expect_err("500 response should be a an error")
+                .downcast::<Error>()?,
+            Error::EndpointsExhausted,
+        );
 
         Ok(())
     }
@@ -693,14 +724,9 @@ mod tests {
             None,
         ));
 
-        // Set to use the primary endpoint which is not a fallback
-        assert!(!eth1_api.el_offline().await);
-        assert!(!eth1_api
-            .current_endpoint()
-            .await
-            .expect("endpoint should be available")
-            .is_fallback());
+        assert!(!eth1_api.el_offline());
 
+        // Expect to use the fallback endpoint when the primary endpoint returns an error
         assert_eq!(
             eth1_api
                 .current_head_number()
@@ -709,15 +735,8 @@ mod tests {
             119_363,
         );
 
-        // Expect to use the fallback endpoint when the primary endpoint returns an error
-        assert!(eth1_api
-            .current_endpoint()
-            .await
-            .expect("the fallback endpoint should be available")
-            .is_fallback());
-
         // Even though the primary endpoint is offline, eth1_api itself is not offline
-        assert!(!eth1_api.el_offline().await);
+        assert!(!eth1_api.el_offline());
 
         Ok(())
     }

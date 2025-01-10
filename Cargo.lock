@@ -2270,7 +2270,9 @@ name = "eth1_api"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "bls",
+ "dedicated_executor",
  "derive_more 1.0.0",
  "either",
  "enum-iterator",
@@ -2280,9 +2282,11 @@ dependencies = [
  "fork_choice_control",
  "fs-err",
  "futures",
+ "helper_functions",
  "hex",
  "hex-literal",
  "httpmock",
+ "itertools 0.13.0",
  "jwt-simple",
  "log",
  "memoffset",

@@ -1,16 +1,24 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use either::Either;
 use execution_engine::{PayloadAttributes, PayloadId, PayloadStatusV1};
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams},
+    combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
+    deneb::primitives::BlobIndex,
     nonstandard::Phase,
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
 
 pub enum ExecutionServiceMessage<P: Preset> {
+    ExchangeCapabilities,
+    GetBlobs {
+        block: Arc<SignedBeaconBlock<P>>,
+        blob_indices: Vec<BlobIndex>,
+    },
     NotifyForkchoiceUpdated {
         head_eth1_block_hash: ExecutionBlockHash,
         safe_eth1_block_hash: ExecutionBlockHash,
