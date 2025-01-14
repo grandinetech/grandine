@@ -306,6 +306,10 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
     request_timeout: u64,
 
+    /// Max amount of epochs to retain beacon states in state cache
+    #[clap(long, default_value_t = StoreConfig::default().max_epochs_to_retain_states_in_cache)]
+    max_epochs_to_retain_states_in_cache: u64,
+
     /// Default state cache lock timeout in milliseconds
     #[clap(long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
     state_cache_lock_timeout: u64,
@@ -896,6 +900,7 @@ impl GrandineArgs {
             prune_storage,
             unfinalized_states_in_memory,
             request_timeout,
+            max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout,
             state_slot,
             subscribe_all_subnets,
@@ -1259,6 +1264,7 @@ impl GrandineArgs {
             storage_config,
             unfinalized_states_in_memory,
             request_timeout: Duration::from_millis(request_timeout),
+            max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout: Duration::from_millis(state_cache_lock_timeout),
             command,
             slashing_enabled,

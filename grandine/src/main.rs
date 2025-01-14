@@ -371,6 +371,7 @@ fn try_main() -> Result<()> {
         network_config,
         storage_config,
         request_timeout,
+        max_epochs_to_retain_states_in_cache,
         state_cache_lock_timeout,
         unfinalized_states_in_memory,
         command,
@@ -429,6 +430,7 @@ fn try_main() -> Result<()> {
 
     let store_config = StoreConfig {
         max_empty_slots,
+        max_epochs_to_retain_states_in_cache,
         state_cache_lock_timeout,
         unfinalized_states_in_memory,
     };
