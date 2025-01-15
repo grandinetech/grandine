@@ -7,7 +7,11 @@ authors = ["Grandine <info@grandine.io>"]
 [dependencies]
 anyhow = { workspace = true }
 kzg = { workspace = true }
-rust-kzg-blst = { workspace = true }
+rust-kzg-arkworks5 = { workspace = true, optional = true }
+rust-kzg-blst = { workspace = true, optional = true }
+rust-kzg-constantine = { workspace = true, optional = true }
+rust-kzg-mcl = { workspace = true, optional = true }
+rust-kzg-zkcrypto = { workspace = true, optional = true }
 thiserror = { workspace = true }
 types = { workspace = true }
 
@@ -20,3 +24,14 @@ test-generator = { workspace = true }
 
 [lints]
 workspace = true
+
+[features]
+# `bls-backend-any` should not be passed to Cargo.
+# It only exist to avoid duplicating lists of features.
+bls-backend-any = []
+
+arkworks = ["bls-backend-any", "dep:rust-kzg-arkworks5"]
+blst = ["bls-backend-any", "dep:rust-kzg-blst"]
+constantine = ["bls-backend-any", "dep:rust-kzg-constantine"]
+mcl = ["bls-backend-any", "dep:rust-kzg-mcl"]
+zkcrypto = ["bls-backend-any", "dep:rust-kzg-zkcrypto"]

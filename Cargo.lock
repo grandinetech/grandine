@@ -22,6 +22,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "addchain"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b2e69442aa5628ea6951fa33e24efe8313f4321a91bd729fc2f75bdfc858570"
+dependencies = [
+ "num-bigint 0.3.3",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -207,6 +218,131 @@ version = "0.0.0"
 dependencies = [
  "easy-ext",
  "typenum",
+]
+
+[[package]]
+name = "ark-bls12-381"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3df4dcc01ff89867cd86b0da835f23c3f02738353aaee7dde7495af71363b8d5"
+dependencies = [
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+]
+
+[[package]]
+name = "ark-ec"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43d68f2d516162846c1238e755a7c4d131b892b70cc70c471a8e3ca3ed818fce"
+dependencies = [
+ "ahash",
+ "ark-ff",
+ "ark-poly",
+ "ark-serialize",
+ "ark-std",
+ "educe",
+ "fnv",
+ "hashbrown 0.15.2",
+ "itertools 0.13.0",
+ "num-bigint 0.4.6",
+ "num-integer",
+ "num-traits",
+ "zeroize",
+]
+
+[[package]]
+name = "ark-ff"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a177aba0ed1e0fbb62aa9f6d0502e9b46dad8c2eab04c14258a1212d2557ea70"
+dependencies = [
+ "ark-ff-asm",
+ "ark-ff-macros",
+ "ark-serialize",
+ "ark-std",
+ "arrayvec",
+ "digest 0.10.7",
+ "educe",
+ "itertools 0.13.0",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "paste",
+ "zeroize",
+]
+
+[[package]]
+name = "ark-ff-asm"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60"
+dependencies = [
+ "quote 1.0.37",
+ "syn 2.0.90",
+]
+
+[[package]]
+name = "ark-ff-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09be120733ee33f7693ceaa202ca41accd5653b779563608f1234f78ae07c4b3"
+dependencies = [
+ "num-bigint 0.4.6",
+ "num-traits",
+ "proc-macro2 1.0.92",
+ "quote 1.0.37",
+ "syn 2.0.90",
+]
+
+[[package]]
+name = "ark-poly"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "579305839da207f02b89cd1679e50e67b4331e2f9294a57693e5051b7703fe27"
+dependencies = [
+ "ahash",
+ "ark-ff",
+ "ark-serialize",
+ "ark-std",
+ "educe",
+ "fnv",
+ "hashbrown 0.15.2",
+]
+
+[[package]]
+name = "ark-serialize"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7"
+dependencies = [
+ "ark-serialize-derive",
+ "ark-std",
+ "arrayvec",
+ "digest 0.10.7",
+ "num-bigint 0.4.6",
+]
+
+[[package]]
+name = "ark-serialize-derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d"
+dependencies = [
+ "proc-macro2 1.0.92",
+ "quote 1.0.37",
+ "syn 2.0.90",
+]
+
+[[package]]
+name = "ark-std"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -982,7 +1118,7 @@ name = "bls-zkcrypto"
 version = "0.0.0"
 dependencies = [
  "bls-core",
- "bls12_381",
+ "bls12_381 0.8.0 (git+https://github.com/zkcrypto/bls12_381.git)",
  "derivative",
  "derive_more 1.0.0",
  "ff",
@@ -999,6 +1135,18 @@ dependencies = [
  "static_assertions",
  "typenum",
  "zeroize",
+]
+
+[[package]]
+name = "bls12_381"
+version = "0.8.0"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+dependencies = [
+ "ff",
+ "group",
+ "pairing",
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -1418,6 +1566,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
+name = "constantine-core"
+version = "0.1.0"
+source = "git+https://github.com/mratsim/constantine.git?branch=constantine-public-sys#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
+dependencies = [
+ "constantine-sys",
+]
+
+[[package]]
+name = "constantine-ethereum-kzg"
+version = "0.1.0"
+source = "git+https://github.com/mratsim/constantine.git?branch=constantine-public-sys#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
+dependencies = [
+ "constantine-core",
+ "constantine-sys",
+]
+
+[[package]]
+name = "constantine-sys"
+version = "0.1.0"
+source = "git+https://github.com/mratsim/constantine.git?branch=constantine-public-sys#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
+
+[[package]]
 name = "conv"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1813,7 +1983,7 @@ dependencies = [
  "asn1-rs",
  "displaydoc",
  "nom",
- "num-bigint",
+ "num-bigint 0.4.6",
  "num-traits",
  "rusticata-macros",
 ]
@@ -2087,6 +2257,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "educe"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2 1.0.92",
+ "quote 1.0.37",
+ "syn 2.0.90",
+]
+
+[[package]]
 name = "eip_2335"
 version = "0.0.0"
 dependencies = [
@@ -2239,6 +2421,26 @@ name = "enum-map-derive"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
+dependencies = [
+ "proc-macro2 1.0.92",
+ "quote 1.0.37",
+ "syn 2.0.90",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea0dcfa4e54eeb516fe454635a95753ddd39acda650ce703031c6973e315dd5"
+dependencies = [
+ "enum-ordinalize-derive",
+]
+
+[[package]]
+name = "enum-ordinalize-derive"
+version = "4.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d28318a75d4aead5c4db25382e8ef717932d0346600cacae6357eb5941bc5ff"
 dependencies = [
  "proc-macro2 1.0.92",
  "quote 1.0.37",
@@ -2618,8 +2820,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
  "bitvec",
+ "byteorder",
+ "ff_derive",
  "rand_core 0.6.4",
  "subtle",
+]
+
+[[package]]
+name = "ff_derive"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f54704be45ed286151c5e11531316eaef5b8f5af7d597b806fdb8af108d84a"
+dependencies = [
+ "addchain",
+ "cfg-if",
+ "num-bigint 0.3.3",
+ "num-integer",
+ "num-traits",
+ "proc-macro2 1.0.92",
+ "quote 1.0.37",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3141,6 +3361,7 @@ dependencies = [
  "http_api_utils",
  "itertools 0.13.0",
  "keymanager",
+ "kzg_utils",
  "log",
  "logging",
  "metrics",
@@ -4151,7 +4372,7 @@ dependencies = [
  "hashing",
  "helper_functions",
  "hex-literal",
- "num-bigint",
+ "num-bigint 0.4.6",
  "ssz",
  "types",
 ]
@@ -4371,9 +4592,8 @@ dependencies = [
 [[package]]
 name = "kzg"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#cb71d62a55e015758fd0277e67246fce2850340b"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
 dependencies = [
- "blst",
  "sha2 0.10.8",
  "siphasher 1.0.1",
 ]
@@ -4385,7 +4605,11 @@ dependencies = [
  "anyhow",
  "hex",
  "kzg",
+ "rust-kzg-arkworks5",
  "rust-kzg-blst",
+ "rust-kzg-constantine",
+ "rust-kzg-mcl",
+ "rust-kzg-zkcrypto",
  "serde",
  "serde_yaml",
  "spec_test_utils",
@@ -5064,6 +5288,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
+name = "mcl_rust"
+version = "1.0.2"
+source = "git+https://github.com/herumi/mcl-rust.git#db8e9a639d27fffb167bc48159ef2e3178b347dc"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "mediatype"
 version = "0.19.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5400,6 +5632,17 @@ checksum = "77a8165726e8236064dbb45459242600304b42a5ea24ee2948e18e023bf7ba84"
 dependencies = [
  "overload",
  "winapi",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f6f7833f2cbf2360a6cfd58cd41a53aa7a90bd4c202f5b1c7dd2ed73c57b2c3"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
 ]
 
 [[package]]
@@ -6823,9 +7066,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-kzg-arkworks5"
+version = "0.1.0"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff",
+ "ark-poly",
+ "ark-serialize",
+ "ark-std",
+ "hex",
+ "kzg",
+ "libc",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "rust-kzg-blst"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#cb71d62a55e015758fd0277e67246fce2850340b"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
 dependencies = [
  "blst",
  "hex",
@@ -6834,6 +7094,53 @@ dependencies = [
  "once_cell",
  "rand 0.8.5",
  "smallvec",
+]
+
+[[package]]
+name = "rust-kzg-constantine"
+version = "0.1.0"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+dependencies = [
+ "blst",
+ "constantine-core",
+ "constantine-ethereum-kzg",
+ "constantine-sys",
+ "hex",
+ "kzg",
+ "libc",
+ "once_cell",
+ "rand 0.8.5",
+ "smallvec",
+]
+
+[[package]]
+name = "rust-kzg-mcl"
+version = "0.1.0"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+dependencies = [
+ "blst",
+ "hex",
+ "kzg",
+ "libc",
+ "mcl_rust",
+ "once_cell",
+ "rand 0.8.5",
+ "smallvec",
+]
+
+[[package]]
+name = "rust-kzg-zkcrypto"
+version = "0.1.0"
+source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+dependencies = [
+ "bls12_381 0.8.0 (git+https://github.com/grandinetech/rust-kzg.git)",
+ "byteorder",
+ "ff",
+ "hex",
+ "kzg",
+ "libc",
+ "rand 0.8.5",
+ "subtle",
 ]
 
 [[package]]

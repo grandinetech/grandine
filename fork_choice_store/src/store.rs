@@ -1836,6 +1836,7 @@ impl<P: Preset> Store<P> {
                 &blob_sidecar.blob,
                 blob_sidecar.kzg_commitment,
                 blob_sidecar.kzg_proof,
+                self.store_config.kzg_backend,
             )
             .unwrap_or(false),
             Error::BlobSidecarInvalid { blob_sidecar }
