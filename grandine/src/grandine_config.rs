@@ -6,6 +6,7 @@ use eth1_api::AuthOptions;
 use features::Feature;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
+use kzg_utils::KzgBackend;
 use log::info;
 use p2p::NetworkConfig;
 use runtime::{MetricsConfig, StorageConfig};
@@ -67,6 +68,7 @@ pub struct GrandineConfig {
     pub slashing_protection_history_limit: u64,
     pub in_memory: bool,
     pub validator_api_config: Option<ValidatorApiConfig>,
+    pub kzg_backend: KzgBackend,
 }
 
 impl GrandineConfig {

@@ -1,6 +1,7 @@
 use core::{ops::Mul as _, time::Duration};
 
 use derivative::Derivative;
+use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
 use types::config::Config as ChainConfig;
 
 pub const DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS: u64 = 1500;
@@ -16,6 +17,8 @@ pub struct StoreConfig {
     pub state_cache_lock_timeout: Duration,
     #[derivative(Default(value = "128"))]
     pub unfinalized_states_in_memory: u64,
+    #[derivative(Default(value = "DEFAULT_KZG_BACKEND"))]
+    pub kzg_backend: KzgBackend,
 }
 
 impl StoreConfig {

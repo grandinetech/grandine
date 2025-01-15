@@ -10,18 +10,12 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn get_blob_bytes(&self) -> Vec<u8> {
-        hex::decode(&self.blob[2..]).expect("should decode blob bytes")
-    }
-
     pub fn get_z_bytes(&self) -> Vec<u8> {
         hex::decode(&self.z[2..]).expect("should decode z bytes")
     }
 
-    pub fn get_z_bytes_fixed(&self) -> [u8; 32] {
-        self.get_z_bytes()
-            .try_into()
-            .expect("test input z bytes should fit into 32 byte array")
+    pub fn get_z_bytes_fixed(&self) -> Result<[u8; 32], Vec<u8>> {
+        self.get_z_bytes().try_into()
     }
 }
 

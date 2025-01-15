@@ -392,6 +392,7 @@ fn try_main() -> Result<()> {
         slashing_protection_history_limit,
         in_memory,
         validator_api_config,
+        kzg_backend,
     } = config;
 
     features.into_iter().for_each(Feature::enable);
@@ -434,6 +435,7 @@ fn try_main() -> Result<()> {
         max_epochs_to_retain_states_in_cache,
         state_cache_lock_timeout,
         unfinalized_states_in_memory,
+        kzg_backend,
     };
 
     let eth1_auth = Arc::new(Auth::new(auth_options)?);

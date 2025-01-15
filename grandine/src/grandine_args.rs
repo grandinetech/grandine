@@ -36,6 +36,7 @@ use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATI
 use http_api::HttpApiConfig;
 use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
+use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
 use log::warn;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
@@ -393,6 +394,9 @@ struct BeaconNodeOptions {
     /// [default: disabled]
     #[clap(long)]
     in_memory: bool,
+
+    #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
+    kzg_backend: KzgBackend,
 }
 
 #[expect(
@@ -931,6 +935,7 @@ impl GrandineArgs {
             track_liveness,
             detect_doppelgangers,
             in_memory,
+            kzg_backend,
         } = beacon_node_options;
 
         // let SlasherOptions {
@@ -1310,6 +1315,7 @@ impl GrandineArgs {
             slashing_protection_history_limit,
             in_memory,
             validator_api_config,
+            kzg_backend,
         })
     }
 

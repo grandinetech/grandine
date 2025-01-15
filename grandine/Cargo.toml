@@ -39,6 +39,7 @@ http_api_utils = { workspace = true }
 itertools = { workspace = true }
 libmdbx = { workspace = true }
 keymanager = { workspace = true }
+kzg_utils = { workspace = true }
 log = { workspace = true }
 logging = { workspace = true }
 metrics = { workspace = true }
@@ -73,7 +74,8 @@ tempfile = { workspace = true }
 test-case = { workspace = true }
 
 [features]
-default = ["bls/blst"]
+default = ["bls/blst", "kzg_utils/blst"]
+
 logger-always-write-style = []
 
 # `preset-any` and `network-any` should not be passed to Cargo.

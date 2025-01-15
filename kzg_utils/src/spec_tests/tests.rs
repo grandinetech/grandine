@@ -1,6 +1,5 @@
 #![expect(clippy::manual_let_else)]
 
-use kzg::{eip_4844::bytes_to_blob, Fr as _, G1 as _};
 use spec_test_utils::Case;
 use test_generator::test_resources;
 use types::preset::Mainnet;
@@ -10,64 +9,101 @@ use crate::{
         blob_to_kzg_commitment, compute_blob_kzg_proof, compute_kzg_proof, verify_blob_kzg_proof,
         verify_blob_kzg_proof_batch, verify_kzg_proof,
     },
-    spec_tests::{containers, utils::deserialize, Fr, G1},
+    spec_tests::{containers, utils::deserialize},
+    KzgBackend,
 };
+
+fn available_backends() -> impl Iterator<Item = KzgBackend> {
+    let backends = [
+        #[cfg(feature = "arkworks")]
+        KzgBackend::Arkworks,
+        #[cfg(feature = "blst")]
+        KzgBackend::Blst,
+        #[cfg(feature = "constantine")]
+        KzgBackend::Constantine,
+        #[cfg(feature = "mcl")]
+        KzgBackend::Mcl,
+        #[cfg(feature = "zkcrypto")]
+        KzgBackend::Zkcrypto,
+    ];
+
+    assert_ne!(
+        backends.len(),
+        0,
+        "no backend selected - please provide at least one backend (arkworks, blst, constantine, mcl or zkcrypto)"
+    );
+
+    backends.into_iter()
+}
+
+macro_rules! unwrap_test_input {
+    ($val:expr, $test:ident) => {
+        match $val {
+            Ok(v) => v,
+            Err(_) => {
+                assert!($test.output.is_none());
+                return;
+            }
+        }
+    };
+}
 
 #[test_resources("consensus-spec-tests/tests/general/deneb/kzg/blob_to_kzg_commitment/*/*")]
 fn test_blob_to_kzg_commitment(case: Case) {
     let test: containers::blob_to_kzg_commitment::Test = case.yaml("data");
 
-    let blob = match deserialize(&test.input.blob) {
-        Ok(blob) => blob,
-        Err(_) => {
-            assert!(test.output.is_none());
-            return;
+    let blob = unwrap_test_input!(deserialize(&test.input.blob), test);
+
+    for backend in available_backends() {
+        match blob_to_kzg_commitment::<Mainnet>(&blob, backend) {
+            Ok(commitment) => {
+                let output = test.output.as_ref().expect("test output should exist");
+                let expected_commitment =
+                    deserialize(output).expect("should decode commitment bytes");
+
+                assert_eq!(
+                    commitment, expected_commitment,
+                    "commitments do not match, backend {backend}"
+                )
+            }
+            Err(_) => assert!(
+                test.output.is_none(),
+                "test output should not exist (backend {backend})"
+            ),
         }
-    };
-
-    if test.output.is_none() {
-        return;
     }
-
-    let output = test.output.as_ref().expect("test output should exist");
-    let expected_commitment = deserialize(output).expect("should decode commitment bytes");
-
-    let commitment =
-        blob_to_kzg_commitment::<Mainnet>(&blob).expect("should compute blob to kzg commitment");
-
-    assert_eq!(commitment, expected_commitment);
 }
 
 #[test_resources("consensus-spec-tests/tests/general/deneb/kzg/compute_blob_kzg_proof/*/*")]
 fn test_compute_blob_kzg_proof(case: Case) {
     let test: containers::compute_blob_kzg_proof::Test = case.yaml("data");
 
-    let blob = match deserialize(&test.input.blob) {
-        Ok(blob) => blob,
-        Err(_) => {
-            assert!(test.output.is_none());
-            return;
-        }
-    };
+    let blob = unwrap_test_input!(deserialize(&test.input.blob), test);
+    let commitment = unwrap_test_input!(deserialize(&test.input.commitment), test);
 
-    if G1::from_bytes(&test.input.get_commitment_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
+    for backend in available_backends() {
+        match compute_blob_kzg_proof::<Mainnet>(&blob, commitment, backend) {
+            Ok(proof) => {
+                let output = test
+                    .output
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("test output should exist (backend {backend})"));
 
-    let commitment =
-        deserialize(&test.input.commitment).expect("should deserialize test input to commitment");
+                let expected_proof = deserialize(output).unwrap_or_else(|_| {
+                    panic!("should deserialize test output to proof (backend {backend})")
+                });
 
-    match compute_blob_kzg_proof::<Mainnet>(&blob, commitment) {
-        Ok(proof) => {
-            let output = test.output.as_ref().expect("test output should exist");
-            let expected_proof =
-                deserialize(output).expect("should deserialize test output to proof");
-
-            assert_eq!(proof, expected_proof);
-        }
-        Err(_) => {
-            assert!(test.output.is_none());
+                assert_eq!(
+                    proof, expected_proof,
+                    "proofs do not match (backend {backend})"
+                );
+            }
+            Err(_) => {
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
+            }
         }
     }
 }
@@ -76,25 +112,28 @@ fn test_compute_blob_kzg_proof(case: Case) {
 fn test_compute_kzg_proof(case: Case) {
     let test: containers::compute_kzg_proof::Test = case.yaml("data");
 
-    if bytes_to_blob::<Fr>(&test.input.get_blob_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
+    let blob = unwrap_test_input!(deserialize(&test.input.blob), test);
+    let z_bytes = unwrap_test_input!(test.input.get_z_bytes_fixed(), test);
+
+    for backend in available_backends() {
+        match compute_kzg_proof::<Mainnet>(&blob, z_bytes, backend) {
+            Ok((proof, y)) => {
+                let (expected_proof, expected_y) = test.get_output();
+
+                assert_eq!(
+                    proof, expected_proof,
+                    "proofs do not match (backend {backend})"
+                );
+                assert_eq!(y, expected_y, "ys do not match (backend {backend}");
+            }
+            Err(_) => {
+                assert!(
+                    test.output.is_none(),
+                    "should compute kzg proof (backend {backend})"
+                )
+            }
+        };
     }
-
-    let blob = deserialize(&test.input.blob).expect("should deserialize test input to blob");
-
-    if Fr::from_bytes(&test.input.get_z_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
-
-    let (expected_proof, expected_y) = test.get_output();
-
-    let (proof, y) = compute_kzg_proof::<Mainnet>(&blob, test.input.get_z_bytes_fixed())
-        .expect("should compute kzg proof");
-
-    assert_eq!(proof, expected_proof);
-    assert_eq!(y, expected_y);
 }
 
 #[test_resources("consensus-spec-tests/tests/general/deneb/kzg/verify_blob_kzg_proof/*/*")]
@@ -109,27 +148,27 @@ fn test_verify_blob_kzg_proof(case: Case) {
         }
     };
 
-    if G1::from_bytes(&test.input.get_commitment_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
+    let commitment = unwrap_test_input!(deserialize(&test.input.commitment), test);
+    let proof = unwrap_test_input!(deserialize(&test.input.proof), test);
 
-    if G1::from_bytes(&test.input.get_proof_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
+    for backend in available_backends() {
+        match verify_blob_kzg_proof::<Mainnet>(&blob, commitment, proof, backend) {
+            Ok(output) => {
+                let expected_output = test
+                    .output
+                    .unwrap_or_else(|| panic!("test output should exist (backend {backend})"));
 
-    let commitment =
-        deserialize(&test.input.commitment).expect("should deserialize test input to commitment");
-    let proof = deserialize(&test.input.proof).expect("should deserialize test input to proof");
-
-    match verify_blob_kzg_proof::<Mainnet>(&blob, commitment, proof) {
-        Ok(output) => {
-            let expected_output = test.output.expect("test output should exist");
-            assert_eq!(output, expected_output);
-        }
-        Err(_) => {
-            assert!(test.output.is_none());
+                assert_eq!(
+                    output, expected_output,
+                    "outputs do not match (backend {backend})"
+                );
+            }
+            Err(_) => {
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
+            }
         }
     }
 }
@@ -141,51 +180,51 @@ fn test_verify_blob_kzg_proof_batch(case: Case) {
     let mut blobs = vec![];
 
     for blob in &test.input.blobs {
-        let blob = match deserialize(blob) {
-            Ok(blob) => blob,
-            Err(_) => {
-                assert!(test.output.is_none());
-                return;
-            }
-        };
+        let blob = unwrap_test_input!(deserialize(blob), test);
         blobs.push(blob);
     }
 
-    for commitment_bytes in test.input.get_commitments_bytes() {
-        if G1::from_bytes(&commitment_bytes).is_err() {
-            assert!(test.output.is_none());
-            return;
-        }
-    }
+    let commitments = unwrap_test_input!(
+        test.input
+            .commitments
+            .iter()
+            .map(|c| deserialize(c))
+            .collect::<Result<Vec<_>, _>>(),
+        test
+    );
 
-    for proof_bytes in test.input.get_proofs_bytes() {
-        if G1::from_bytes(&proof_bytes).is_err() {
-            assert!(test.output.is_none());
-            return;
-        }
-    }
+    let proofs = unwrap_test_input!(
+        test.input
+            .proofs
+            .iter()
+            .map(|c| deserialize(c))
+            .collect::<Result<Vec<_>, _>>(),
+        test
+    );
 
-    let commitments = test
-        .input
-        .commitments
-        .iter()
-        .map(|c| deserialize(c).expect("should deserialize test input to commitment"))
-        .collect::<Vec<_>>();
+    for backend in available_backends() {
+        match verify_blob_kzg_proof_batch::<Mainnet>(
+            blobs.iter(),
+            commitments.clone(),
+            proofs.clone(),
+            backend,
+        ) {
+            Ok(output) => {
+                let expected_output = test
+                    .output
+                    .unwrap_or_else(|| panic!("test output should exist (backend {backend})"));
 
-    let proofs = test
-        .input
-        .proofs
-        .iter()
-        .map(|c| deserialize(c).expect("should deserialize test input to proof"))
-        .collect::<Vec<_>>();
-
-    match verify_blob_kzg_proof_batch::<Mainnet>(blobs.iter(), commitments, proofs) {
-        Ok(output) => {
-            let expected_output = test.output.expect("test output should exist");
-            assert_eq!(output, expected_output);
-        }
-        Err(_) => {
-            assert!(test.output.is_none());
+                assert_eq!(
+                    output, expected_output,
+                    "outputs do not match (backend {backend})"
+                );
+            }
+            Err(_) => {
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
+            }
         }
     }
 }
@@ -194,39 +233,29 @@ fn test_verify_blob_kzg_proof_batch(case: Case) {
 fn test_verify_kzg_proof(case: Case) {
     let test: containers::verify_kzg_proof::Test = case.yaml("data");
 
-    if G1::from_bytes(&test.input.get_commitment_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
+    let commitment = unwrap_test_input!(deserialize(&test.input.commitment), test);
+    let z = unwrap_test_input!(test.input.get_z_bytes_fixed(), test);
+    let y = unwrap_test_input!(test.input.get_y_bytes_fixed(), test);
+    let proof = unwrap_test_input!(deserialize(&test.input.proof), test);
 
-    if Fr::from_bytes(&test.input.get_z_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
+    for backend in available_backends() {
+        match verify_kzg_proof(commitment, z, y, proof, backend) {
+            Ok(output) => {
+                let expected_output = test
+                    .output
+                    .unwrap_or_else(|| panic!("test output should exist (backend {backend})"));
 
-    if Fr::from_bytes(&test.input.get_y_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
-
-    if G1::from_bytes(&test.input.get_proof_bytes()).is_err() {
-        assert!(test.output.is_none());
-        return;
-    }
-
-    let commitment =
-        deserialize(&test.input.commitment).expect("should deserialize test input to commitment");
-    let z = test.input.get_z_bytes_fixed();
-    let y = test.input.get_y_bytes_fixed();
-    let proof = deserialize(&test.input.proof).expect("should deserialize test input to proof");
-
-    match verify_kzg_proof(commitment, z, y, proof) {
-        Ok(output) => {
-            let expected_output = test.output.expect("test output should exist");
-            assert_eq!(output, expected_output);
-        }
-        Err(_) => {
-            assert!(test.output.is_none());
+                assert_eq!(
+                    output, expected_output,
+                    "outputs do not match (backend: {backend})"
+                );
+            }
+            Err(_) => {
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
+            }
         }
     }
 }
