@@ -547,6 +547,13 @@ impl<P: Preset> Store<P> {
         Some(&mut self.unfinalized[segment_id][*position].chain_link)
     }
 
+    pub fn unfinalized_fork_tips(&self) -> impl Iterator<Item = &ChainLink<P>> {
+        self.unfinalized()
+            .values()
+            .filter_map(Segment::last_non_invalid_block)
+            .map(|unfinalized_block| &unfinalized_block.chain_link)
+    }
+
     // TODO(Grandine Team): The Optimistic Sync specification says that a node whose forks are all
     //                      non-viable due to invalid payloads should be considered optimistic, but
     //                      it's not clear if that means Eth Beacon Node API responses should have
@@ -1900,7 +1907,7 @@ impl<P: Preset> Store<P> {
         self.update_head_segment_id();
 
         self.blob_cache.on_slot(new_tick.slot);
-        self.prune_state_cache()?;
+        self.prune_state_cache(true)?;
 
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
@@ -2462,12 +2469,12 @@ impl<P: Preset> Store<P> {
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.prune_checkpoint_states();
-        self.prune_state_cache().ok();
+        self.prune_state_cache(false).ok();
         self.aggregate_and_proof_supersets
             .prune(self.finalized_epoch());
     }
 
-    fn prune_state_cache(&self) -> Result<()> {
+    fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) -> Result<()> {
         let retain_slots =
             self.store_config.max_epochs_to_retain_states_in_cache * P::SlotsPerEpoch::U64;
 
@@ -2476,7 +2483,15 @@ impl<P: Preset> Store<P> {
             .saturating_sub(retain_slots)
             .max(self.finalized_slot());
 
-        self.state_cache.prune(prune_slot)
+        let fork_tip_block_roots = if preserve_unfinalized_fork_tips {
+            self.unfinalized_fork_tips()
+                .map(|chain_link| chain_link.block_root)
+                .collect()
+        } else {
+            [].into()
+        };
+
+        self.state_cache.prune(prune_slot, &fork_tip_block_roots)
     }
 
     /// Applies changes to [`Store.latest_messages`] and computes changes to attesting balances.

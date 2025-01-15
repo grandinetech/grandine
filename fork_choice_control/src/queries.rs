@@ -6,7 +6,7 @@ use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationItem, ChainLink, Segment, StateCacheProcessor, Store,
+    AggregateAndProofOrigin, AttestationItem, ChainLink, StateCacheProcessor, Store,
 };
 use helper_functions::misc;
 use itertools::Itertools as _;
@@ -35,7 +35,7 @@ use crate::{
 };
 
 #[cfg(test)]
-use ::{clock::Tick, types::phase0::consts::GENESIS_SLOT};
+use ::{clock::Tick, fork_choice_store::Segment, types::phase0::consts::GENESIS_SLOT};
 
 // TODO(Grandine Team): There is currently no way to persist payload statuses.
 //                      We previously treated blocks loaded from the database as optimistic.
@@ -182,15 +182,8 @@ where
         }
 
         store
-            .unfinalized()
-            .values()
-            .filter_map(Segment::last_non_invalid_block)
-            .map(|unfinalized_block| {
-                (
-                    &unfinalized_block.chain_link,
-                    unfinalized_block.is_optimistic(),
-                )
-            })
+            .unfinalized_fork_tips()
+            .map(|chain_link| (chain_link, chain_link.is_optimistic()))
             .map_into()
             .collect_vec()
     }

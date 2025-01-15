@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::{backtrace::Backtrace, sync::Arc};
+use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 
 use anyhow::{bail, Result};
 use features::Feature;
@@ -65,8 +65,8 @@ impl<P: Preset> StateCacheProcessor<P> {
             .get_or_insert_with(block_root, slot, ignore_missing_rewards, f)
     }
 
-    pub fn prune(&self, last_pruned_slot: Slot) -> Result<()> {
-        self.state_cache.prune(last_pruned_slot)
+    pub fn prune(&self, last_pruned_slot: Slot, preserved_states: &HashSet<H256>) -> Result<()> {
+        self.state_cache.prune(last_pruned_slot, preserved_states)
     }
 
     pub fn try_state_at_slot(
