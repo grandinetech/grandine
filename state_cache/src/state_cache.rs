@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use im::{HashMap, OrdMap};
@@ -198,9 +198,14 @@ impl<P: Preset> StateCache<P> {
         lengths.into_iter().sum::<usize>().pipe(Ok)
     }
 
-    pub fn prune(&self, last_pruned_slot: Slot) -> Result<()> {
+    pub fn prune(&self, last_pruned_slot: Slot, preserved_states: &HashSet<H256>) -> Result<()> {
         for (block_root, state_map_lock) in self.all_state_map_locks()? {
             let mut state_map = self.try_lock_map(&state_map_lock, block_root)?;
+
+            if preserved_states.contains(&block_root) {
+                continue;
+            }
+
             let (_, retained) = state_map.split(&last_pruned_slot);
             *state_map = retained;
         }
@@ -346,7 +351,7 @@ mod tests {
     fn test_state_cache_prune() -> Result<()> {
         let cache = new_test_cache()?;
 
-        cache.prune(2)?;
+        cache.prune(2, &[].into())?;
 
         assert_eq!(cache.before_or_at_slot(ROOT_1, 1)?, None);
         assert_eq!(cache.before_or_at_slot(ROOT_2, 2)?, None);
@@ -360,6 +365,24 @@ mod tests {
         );
 
         assert_eq!(cache.len()?, 2);
+
+        cache.insert(ROOT_1, (state_at_slot(1), None))?;
+        cache.insert(ROOT_1, (state_at_slot(2), None))?;
+        cache.insert(ROOT_2, (state_at_slot(2), None))?;
+
+        cache.prune(2, &[ROOT_1].into())?;
+
+        assert_eq!(
+            cache.before_or_at_slot(ROOT_1, 1)?,
+            Some((state_at_slot(1), None)),
+        );
+        assert_eq!(
+            cache.before_or_at_slot(ROOT_1, 2)?,
+            Some((state_at_slot(2), None)),
+        );
+        assert_eq!(cache.before_or_at_slot(ROOT_2, 2)?, None);
+
+        assert_eq!(cache.len()?, 4);
 
         Ok(())
     }
