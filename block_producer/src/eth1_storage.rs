@@ -56,9 +56,15 @@ pub trait Eth1Storage {
         &self,
         config: &Config,
         metrics: Option<&Arc<Metrics>>,
-        state_at_slot: &impl BeaconState<P>,
+        state_at_slot: &CombinedBeaconState<P>,
     ) -> Result<Eth1Data> {
         let _timer = metrics.map(|metrics| metrics.eth1_vote_times.start_timer());
+
+        if let Some(state) = state_at_slot.post_electra() {
+            if state.eth1_deposit_index() == state.deposit_requests_start_index() {
+                return Ok(state.eth1_data());
+            }
+        }
 
         let eth1_data = state_at_slot.eth1_data();
         let period_start = voting_period_start_time(config, state_at_slot);

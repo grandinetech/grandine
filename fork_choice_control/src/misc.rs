@@ -12,7 +12,7 @@ use serde::Serialize;
 use strum::IntoStaticStr;
 use types::{
     combined::{SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobSidecar,
+    deneb::containers::{BlobIdentifier, BlobSidecar},
     phase0::primitives::ValidatorIndex,
     preset::Preset,
 };
@@ -118,7 +118,10 @@ pub enum MutatorRejectionReason {
     InvalidAggregateAndProof,
     InvalidAttestation,
     InvalidBlock,
-    InvalidBlobSidecar,
+    #[strum(serialize = "invalid_blob_sidecar")]
+    InvalidBlobSidecar {
+        blob_identifier: BlobIdentifier,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]

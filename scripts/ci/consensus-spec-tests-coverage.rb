@@ -15,6 +15,7 @@ IGNORED_GLOBS = %w[
   presets/*/trusted_setups/*.json
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
+  tests/*/*/light_client/data_collection/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/eip6110/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/fulu/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/whisk/*/*/*/*/*.{ssz_snappy,yaml}

@@ -456,11 +456,20 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .controller
             .preprocessed_state_at_current_slot()?;
 
-        let outcome = match unphased::validate_voluntary_exit(
-            &self.producer_context.chain_config,
-            &state,
-            exit,
-        ) {
+        let result = match state.as_ref() {
+            BeaconState::Phase0(_)
+            | BeaconState::Altair(_)
+            | BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_) => {
+                unphased::validate_voluntary_exit(&self.producer_context.chain_config, &state, exit)
+            }
+            BeaconState::Electra(state) => {
+                electra::validate_voluntary_exit(&self.producer_context.chain_config, state, exit)
+            }
+        };
+
+        let outcome = match result {
             Ok(()) => {
                 voluntary_exits.push(exit);
                 PoolAdditionOutcome::Accept
