@@ -1907,7 +1907,7 @@ impl<P: Preset> Store<P> {
         self.update_head_segment_id();
 
         self.blob_cache.on_slot(new_tick.slot);
-        self.prune_state_cache(true)?;
+        self.prune_state_cache(true);
 
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
@@ -2469,12 +2469,12 @@ impl<P: Preset> Store<P> {
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.prune_checkpoint_states();
-        self.prune_state_cache(false).ok();
+        self.prune_state_cache(false);
         self.aggregate_and_proof_supersets
             .prune(self.finalized_epoch());
     }
 
-    fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) -> Result<()> {
+    fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) {
         let retain_slots =
             self.store_config.max_epochs_to_retain_states_in_cache * P::SlotsPerEpoch::U64;
 
@@ -2491,7 +2491,9 @@ impl<P: Preset> Store<P> {
             [].into()
         };
 
-        self.state_cache.prune(prune_slot, &fork_tip_block_roots)
+        if let Err(error) = self.state_cache.prune(prune_slot, &fork_tip_block_roots) {
+            error!("failed to prune beacon state cache: {error:?}");
+        }
     }
 
     /// Applies changes to [`Store.latest_messages`] and computes changes to attesting balances.
