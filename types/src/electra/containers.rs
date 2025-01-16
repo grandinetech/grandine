@@ -16,7 +16,7 @@ use crate::{
             AttestationData, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
             SignedVoluntaryExit,
         },
-        primitives::{Epoch, ExecutionAddress, Gwei, Slot, ValidatorIndex, H256},
+        primitives::{CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -245,6 +245,17 @@ pub struct SignedBeaconBlock<P: Preset> {
 #[serde(bound = "", deny_unknown_fields)]
 pub struct SignedBlindedBeaconBlock<P: Preset> {
     pub message: BlindedBeaconBlock<P>,
+    pub signature: SignatureBytes,
+}
+
+#[derive(PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct SingleAttestation {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committee_index: CommitteeIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub attester_index: ValidatorIndex,
+    pub data: AttestationData,
     pub signature: SignatureBytes,
 }
 
