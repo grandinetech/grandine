@@ -924,8 +924,7 @@ impl<P: Preset> Network<P> {
                 self.handle_blobs_by_range_request(peer_id, peer_request_id, request_id, request)
             }
             RequestType::BlobsByRoot(request) => {
-                self.handle_blobs_by_root_request(peer_id, peer_request_id, request_id, request);
-                Ok(())
+                self.handle_blobs_by_root_request(peer_id, peer_request_id, request_id, request)
             }
             RequestType::Goodbye(goodbye_reason) => {
                 debug!("received GoodBye request (peer_id: {peer_id}, reason: {goodbye_reason:?})");
@@ -978,12 +977,7 @@ impl<P: Preset> Network<P> {
         debug!("received BeaconBlocksByRange request (peer_id: {peer_id}, request: {request:?})");
 
         let start_slot = request.start_slot();
-        let max_request_blocks = match request {
-            OldBlocksByRangeRequest::V1(_) => self.controller.chain_config().max_request_blocks,
-            OldBlocksByRangeRequest::V2(_) => {
-                self.controller.chain_config().max_request_blocks_deneb
-            }
-        };
+        let max_request_blocks = request.max_request_blocks(self.controller.chain_config());
         let difference = request
             .count()
             .min(max_request_blocks)
@@ -1049,28 +1043,27 @@ impl<P: Preset> Network<P> {
     ) -> Result<()> {
         debug!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
 
-        let start_slot = request.start_slot();
-        let max_request_blob_sidecars = match request {
-            BlobsByRangeRequest::V1(_) => self.controller.chain_config().max_request_blob_sidecars,
-            BlobsByRangeRequest::V2(_) => {
-                self.controller
-                    .chain_config()
-                    .max_request_blob_sidecars_electra
+        let BlobsByRangeRequest { start_slot, count } = request;
+        let chain_config = self.controller.chain_config();
+        let phase = chain_config.phase_at_slot::<P>(start_slot);
+        let Some(max_request_blob_sidecars) = chain_config.max_request_blob_sidecars(phase) else {
+            return Err(Error::InvalidPhaseRequest {
+                phase,
+                protocol: "blob_sidecars_by_range".to_owned(),
             }
+            .into());
         };
-        let difference = request
-            .count()
+
+        let difference = count
             .min(max_request_blob_sidecars)
             .min(MAX_FOR_DOS_PREVENTION);
 
-        let end_slot =
-            request
-                .start_slot()
-                .checked_add(difference)
-                .ok_or(Error::EndSlotOverflow {
-                    start_slot,
-                    difference,
-                })?;
+        let end_slot = start_slot
+            .checked_add(difference)
+            .ok_or(Error::EndSlotOverflow {
+                start_slot,
+                difference,
+            })?;
 
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
@@ -1121,19 +1114,23 @@ impl<P: Preset> Network<P> {
         peer_request_id: PeerRequestId,
         request_id: IncomingRequestId,
         request: BlobsByRootRequest,
-    ) {
+    ) -> Result<()> {
         debug!("received BlobsByRootRequest request (peer_id: {peer_id}, request: {request:?})");
 
         // TODO(feature/deneb): MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS
-        let max_request_blob_sidecars = match request {
-            BlobsByRootRequest::V1(_) => self.controller.chain_config().max_request_blob_sidecars,
-            BlobsByRootRequest::V2(_) => {
-                self.controller
-                    .chain_config()
-                    .max_request_blob_sidecars_electra
+        let BlobsByRootRequest { blob_ids } = request;
+        let phase = self.controller.phase();
+        let Some(max_request_blob_sidecars) = self
+            .controller
+            .chain_config()
+            .max_request_blob_sidecars(phase)
+        else {
+            return Err(Error::InvalidPhaseRequest {
+                phase,
+                protocol: "blob_sidecars_by_root".to_owned(),
             }
+            .into());
         };
-        let blob_ids = request.blob_ids();
 
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
@@ -1181,6 +1178,8 @@ impl<P: Preset> Network<P> {
                 Ok::<_, anyhow::Error>(())
             })
             .detach();
+
+        Ok(())
     }
 
     fn handle_blocks_by_root_request(
@@ -1190,10 +1189,7 @@ impl<P: Preset> Network<P> {
         request_id: IncomingRequestId,
         request: BlocksByRootRequest,
     ) {
-        let max_request_blocks = match request {
-            BlocksByRootRequest::V1(_) => self.controller.chain_config().max_request_blocks,
-            BlocksByRootRequest::V2(_) => self.controller.chain_config().max_request_blocks_deneb,
-        };
+        let max_request_blocks = request.max_request_blocks(self.controller.chain_config());
         let block_roots = request.block_roots();
 
         debug!(
@@ -1738,7 +1734,7 @@ impl<P: Preset> Network<P> {
         count: u64,
     ) {
         // TODO: is count capped in eth2_libp2p?
-        let request = BlobsByRangeRequest::new(start_slot, count);
+        let request = BlobsByRangeRequest { start_slot, count };
 
         debug!(
             "sending BlobSidecarsByRange request (request_id: {request_id} peer_id: {peer_id}, \
@@ -1896,6 +1892,8 @@ impl<P: Preset> Network<P> {
 enum Error {
     #[error("end slot overflowed ({start_slot} + {difference})")]
     EndSlotOverflow { start_slot: u64, difference: u64 },
+    #[error("cannot request {protocol} at {phase}")]
+    InvalidPhaseRequest { protocol: String, phase: Phase },
 }
 
 fn fork_digest(fork_context: &ForkContext) -> ForkDigest {
