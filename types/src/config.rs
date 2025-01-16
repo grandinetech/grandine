@@ -752,6 +752,15 @@ impl Config {
         }
     }
 
+    #[must_use]
+    pub const fn max_request_blob_sidecars(&self, phase: Phase) -> Option<u64> {
+        match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => None,
+            Phase::Deneb => Some(self.max_request_blob_sidecars),
+            Phase::Electra => Some(self.max_request_blob_sidecars_electra),
+        }
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }
