@@ -47,6 +47,7 @@ pub enum P2pToSync<P: Preset> {
     FinalizedCheckpoint(Checkpoint),
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
+    BlobSidecarRejected(BlobIdentifier),
 }
 
 impl<P: Preset> P2pToSync<P> {

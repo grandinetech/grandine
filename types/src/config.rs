@@ -122,9 +122,7 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub epochs_per_subnet_subscription: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
-    pub gossip_max_size: usize,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub max_chunk_size: usize,
+    pub max_payload_size: usize,
     pub message_domain_valid_snappy: DomainType,
     #[serde(with = "serde_utils::string_or_native")]
     pub resp_timeout: u64,
@@ -235,8 +233,7 @@ impl Default for Config {
             // Networking
             attestation_subnet_extra_bits: 0,
             epochs_per_subnet_subscription: nonzero!(256_u64),
-            gossip_max_size: 10_485_760,
-            max_chunk_size: 10_485_760,
+            max_payload_size: 10_485_760,
             message_domain_valid_snappy: H32(hex!("01000000")),
             resp_timeout: 10,
             subnets_per_node: 2,
@@ -744,20 +741,22 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn blob_sidecar_subnet_count(&self, phase: Phase) -> Option<NonZeroU64> {
+    pub const fn blob_sidecar_subnet_count(&self, phase: Phase) -> NonZeroU64 {
         match phase {
-            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => None,
-            Phase::Deneb => Some(self.blob_sidecar_subnet_count),
-            Phase::Electra => Some(self.blob_sidecar_subnet_count_electra),
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                self.blob_sidecar_subnet_count
+            }
+            Phase::Electra => self.blob_sidecar_subnet_count_electra,
         }
     }
 
     #[must_use]
-    pub const fn max_request_blob_sidecars(&self, phase: Phase) -> Option<u64> {
+    pub const fn max_request_blob_sidecars(&self, phase: Phase) -> u64 {
         match phase {
-            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => None,
-            Phase::Deneb => Some(self.max_request_blob_sidecars),
-            Phase::Electra => Some(self.max_request_blob_sidecars_electra),
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                self.max_request_blob_sidecars
+            }
+            Phase::Electra => self.max_request_blob_sidecars_electra,
         }
     }
 

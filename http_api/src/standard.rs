@@ -60,7 +60,7 @@ use types::{
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
+        SignedBeaconBlock, SignedBlindedBeaconBlock, SingleAttestation,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -1045,7 +1045,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
-    let max_blobs_per_block = version.max_blobs_per_block::<P>().unwrap_or_default();
+    let max_blobs_per_block = version.max_blobs_per_block::<P>();
 
     let blob_identifiers = query
         .indices
@@ -1497,73 +1497,30 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attestations): EthJson<Vec<Arc<Attestation<P>>>>,
 ) -> Result<(), Error> {
-    let grouped_by_target = attestations
-        .into_iter()
-        .enumerate()
-        .chunk_by(|(_, attestation)| attestation.data().target);
+    submit_attestations_to_pool(controller, api_to_p2p_tx, attestations).await
+}
 
-    let (targets, target_attestations): (Vec<_>, Vec<_>) = grouped_by_target
+/// `POST /eth/v2/beacon/pool/attestations`
+pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthJson(attestations): EthJson<Vec<SingleAttestation<P>>>,
+) -> Result<(), Error> {
+    let attestations = attestations
         .into_iter()
-        .map(|(target, attestations)| (target, attestations.collect_vec()))
-        .unzip();
-
-    let (successes, failures): (Vec<_>, Vec<_>) = targets
-        .into_iter()
-        .map(|target| {
-            if controller.head_block_root().value == target.root {
-                let state = controller.preprocessed_state_at_current_slot()?;
-
-                if accessors::get_current_epoch(&state) == target.epoch {
-                    return Ok(state);
+        .map(|attestation| {
+            let attestation = match attestation {
+                SingleAttestation::Phase0(attestatation) => Attestation::Phase0(attestatation),
+                SingleAttestation::Electra(single_attestation) => {
+                    operation_pools::try_convert_to_attestation(&controller, single_attestation)?
                 }
-            }
+            };
 
-            controller
-                .checkpoint_state(target)?
-                .ok_or(Error::TargetStateNotFound)
+            Ok(Arc::new(attestation))
         })
-        .zip(target_attestations)
-        .flat_map(|(target_state_result, attestations)| {
-            let target_state = target_state_result
-                .map_err(|error| {
-                    warn!("attestations submitted to beacon node were rejected: {error}");
-                    error
-                })
-                .ok();
+        .collect::<Result<Vec<_>>>()?;
 
-            let controller = controller.clone_arc();
-
-            attestations.into_iter().map(move |(index, attestation)| {
-                submit_attestation_to_pool(
-                    controller.clone_arc(),
-                    index,
-                    attestation,
-                    target_state.clone(),
-                )
-            })
-        })
-        .collect::<FuturesOrdered<_>>()
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .partition_result();
-
-    // Send messages after validating all attestations to make their order deterministic.
-    // Doing it above wouldn't work because `FuturesOrdered` polls futures concurrently.
-    //
-    // Send messages before reporting failures to be consistent with `submit_pool_sync_committees`.
-    // By this point votes from accepted attestations have already been included in fork choice.
-    for (attestation, subnet_id, validation_outcome) in successes {
-        if validation_outcome == ValidationOutcome::Accept {
-            ApiToP2p::PublishSingularAttestation(attestation, subnet_id).send(&api_to_p2p_tx);
-        }
-    }
-
-    if !failures.is_empty() {
-        return Err(Error::InvalidAttestations(failures));
-    }
-
-    Ok(())
+    submit_attestations_to_pool(controller, api_to_p2p_tx, attestations).await
 }
 
 /// `POST /eth/v1/beacon/pool/sync_committees`
@@ -2955,7 +2912,6 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
     let run = async {
         let AttestationData {
             slot,
-            index: committee_index,
             beacon_block_root,
             target,
             ..
@@ -2974,6 +2930,8 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
         let committees_per_slot =
             accessors::get_committee_count_per_slot(&target_state, relative_epoch);
 
+        let committee_index = misc::committee_index(&attestation);
+
         let subnet_id =
             misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)?;
 
@@ -2987,6 +2945,80 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
     };
 
     run.await.map_err(|error| IndexedError { index, error })
+}
+
+async fn submit_attestations_to_pool<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
+    attestations: Vec<Arc<Attestation<P>>>,
+) -> Result<(), Error> {
+    let grouped_by_target = attestations
+        .into_iter()
+        .enumerate()
+        .chunk_by(|(_, attestation)| attestation.data().target);
+
+    let (targets, target_attestations): (Vec<_>, Vec<_>) = grouped_by_target
+        .into_iter()
+        .map(|(target, attestations)| (target, attestations.collect_vec()))
+        .unzip();
+
+    let (successes, failures): (Vec<_>, Vec<_>) = targets
+        .into_iter()
+        .map(|target| {
+            if controller.head_block_root().value == target.root {
+                let state = controller.preprocessed_state_at_current_slot()?;
+
+                if accessors::get_current_epoch(&state) == target.epoch {
+                    return Ok(state);
+                }
+            }
+
+            controller
+                .checkpoint_state(target)?
+                .ok_or(Error::TargetStateNotFound)
+        })
+        .zip(target_attestations)
+        .flat_map(|(target_state_result, attestations)| {
+            let target_state = target_state_result
+                .map_err(|error| {
+                    warn!("attestations submitted to beacon node were rejected: {error}");
+                    error
+                })
+                .ok();
+
+            let controller = controller.clone_arc();
+
+            attestations.into_iter().map(move |(index, attestation)| {
+                submit_attestation_to_pool(
+                    controller.clone_arc(),
+                    index,
+                    attestation,
+                    target_state.clone(),
+                )
+            })
+        })
+        .collect::<FuturesOrdered<_>>()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .partition_result();
+
+    // Send messages after validating all attestations to make their order deterministic.
+    // Doing it above wouldn't work because `FuturesOrdered` polls futures concurrently.
+    //
+    // Send messages before reporting failures to be consistent with `submit_pool_sync_committees`.
+    // By this point votes from accepted attestations have already been included in fork choice.
+    for (attestation, subnet_id, validation_outcome) in successes {
+        if validation_outcome == ValidationOutcome::Accept {
+            ApiToP2p::PublishSingularAttestation(attestation, subnet_id).send(&api_to_p2p_tx);
+        }
+    }
+
+    if !failures.is_empty() {
+        return Err(Error::InvalidAttestations(failures));
+    }
+
+    Ok(())
 }
 
 async fn submit_blob_sidecar<P: Preset, W: Wait>(

@@ -78,8 +78,8 @@ mod tests {
 
     #[duplicate_item(
         glob                                                                              function_name                 preset;
-        ["consensus-spec-tests/tests/mainnet/fulu/networking/get_custody_columns/*/*"] [get_custody_groups_mainnet] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/fulu/networking/get_custody_columns/*/*"] [get_custody_groups_minimal] [Minimal];
+        ["consensus-spec-tests/tests/mainnet/fulu/networking/get_custody_groups/*/*"] [get_custody_groups_mainnet] [Mainnet];
+        ["consensus-spec-tests/tests/minimal/fulu/networking/get_custody_groups/*/*"] [get_custody_groups_minimal] [Minimal];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {

@@ -435,6 +435,9 @@ impl<P: Preset> BlockSyncService<P> {
                             self.prune_received_blob_sidecars(finalized_checkpoint.epoch);
                             self.prune_received_block_roots(finalized_checkpoint.epoch);
                         }
+                        P2pToSync::BlobSidecarRejected(blob_identifier) => {
+                            self.received_blob_sidecars.remove(&blob_identifier);
+                        }
                     }
                 }
             }

@@ -282,13 +282,10 @@ pub fn compute_subnet_for_attestation<P: Preset>(
 pub fn compute_subnet_for_blob_sidecar<P: Preset>(
     config: &Config,
     blob_sidecar: &BlobSidecar<P>,
-) -> Result<SubnetId> {
+) -> SubnetId {
     let phase = config.phase_at_slot::<P>(blob_sidecar.signed_block_header.message.slot);
 
-    Ok(blob_sidecar.index
-        % config
-            .blob_sidecar_subnet_count(phase)
-            .ok_or(Error::BlobSidecarSubnetNotAvailable)?)
+    blob_sidecar.index % config.blob_sidecar_subnet_count(phase)
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#broadcast-sync-committee-message>

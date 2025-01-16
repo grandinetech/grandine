@@ -18,6 +18,8 @@ use types::{
 
 use crate::Store;
 
+const ALLOWED_EMPTY_SLOTS_MULTIPLIER: u64 = 2;
+
 pub struct StateCacheProcessor<P: Preset> {
     state_cache: StateCache<P>,
 }
@@ -186,7 +188,7 @@ fn process_slots<P: Preset>(
         }
 
         let state_slot = state.slot();
-        let max_empty_slots = store.store_config().max_empty_slots;
+        let max_empty_slots = store.store_config().max_empty_slots * ALLOWED_EMPTY_SLOTS_MULTIPLIER;
         let is_forward_synced = store.is_forward_synced();
 
         if !is_forward_synced && state_slot + max_empty_slots < slot {

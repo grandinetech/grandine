@@ -68,6 +68,7 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
+    StateCacheError,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -1175,7 +1176,6 @@ impl<P: Preset> Store<P> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
-    #[expect(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -1186,7 +1186,7 @@ impl<P: Preset> Store<P> {
         let message = aggregate_and_proof.message();
         let aggregator_index = message.aggregator_index();
         let selection_proof = message.selection_proof();
-        let aggregate = message.aggregate();
+        let aggregate = Arc::new(message.aggregate());
 
         match self.validate_attestation_internal(&aggregate, false)? {
             PartialAttestationAction::Accept => {}
@@ -1204,12 +1204,9 @@ impl<P: Preset> Store<P> {
             }
         }
 
-        let AttestationData {
-            slot,
-            index,
-            target,
-            ..
-        } = aggregate.data();
+        let AttestationData { slot, target, .. } = aggregate.data();
+
+        let index = misc::committee_index(&aggregate);
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.
@@ -1478,7 +1475,7 @@ impl<P: Preset> Store<P> {
     /// [`validate_on_attestation`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#validate_on_attestation
     fn validate_attestation_internal(
         &self,
-        attestation: &Attestation<P>,
+        attestation: &Arc<Attestation<P>>,
         is_from_block: bool,
     ) -> Result<PartialAttestationAction> {
         let AttestationData {
@@ -1514,24 +1511,21 @@ impl<P: Preset> Store<P> {
                 ensure!(
                     index == 0,
                     Error::AttestationDataIndexNotZero {
-                        attestation: Arc::new(attestation.clone())
+                        attestation: attestation.clone_arc()
                     }
                 );
 
-                // TODO(feature/electra): clone should not be necessary
-                let committee_indices = misc::get_committee_indices::<P>(
-                    *attestation
-                        .committee_bits()
-                        .expect("post-Electra attestation must contain committee_bits field"),
-                )
-                .collect_vec();
+                if let Attestation::Electra(electra_attestation) = attestation.as_ref() {
+                    let committee_indices =
+                        misc::get_committee_indices::<P>(electra_attestation.committee_bits);
 
-                ensure!(
-                    committee_indices.len() == 1,
-                    Error::AttestationFromMultipleCommittees {
-                        attestation: Arc::new(attestation.clone())
-                    }
-                );
+                    ensure!(
+                        committee_indices.count() == 1,
+                        Error::AttestationFromMultipleCommittees {
+                            attestation: attestation.clone_arc()
+                        }
+                    );
+                }
             }
 
             // > Attestations must be from the current or previous epoch
@@ -1559,7 +1553,7 @@ impl<P: Preset> Store<P> {
         ensure!(
             target.epoch == Self::epoch_at_slot(slot),
             Error::AttestationTargetsWrongEpoch {
-                attestation: Arc::new(attestation.clone()),
+                attestation: attestation.clone_arc(),
             },
         );
 
@@ -1590,7 +1584,7 @@ impl<P: Preset> Store<P> {
         ensure!(
             ghost_vote_block.message().slot() <= slot,
             Error::AttestationForFutureBlock {
-                attestation: Arc::new(attestation.clone()),
+                attestation: attestation.clone_arc(),
                 block: ghost_vote_block.clone_arc(),
             },
         );
@@ -1606,7 +1600,7 @@ impl<P: Preset> Store<P> {
         ensure!(
             target.root == ancestor_at_target_epoch_start,
             Error::LmdGhostInconsistentWithFfgTarget {
-                attestation: Arc::new(attestation.clone()),
+                attestation: attestation.clone_arc(),
             },
         );
 
@@ -1714,8 +1708,7 @@ impl<P: Preset> Store<P> {
         let max_blobs_per_block = self
             .chain_config()
             .phase_at_slot::<P>(block_header.slot)
-            .max_blobs_per_block::<P>()
-            .unwrap_or_default();
+            .max_blobs_per_block::<P>();
 
         ensure!(
             blob_sidecar.index < max_blobs_per_block,
@@ -1724,8 +1717,7 @@ impl<P: Preset> Store<P> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected =
-                misc::compute_subnet_for_blob_sidecar(&self.chain_config, &blob_sidecar)?;
+            let expected = misc::compute_subnet_for_blob_sidecar(&self.chain_config, &blob_sidecar);
 
             ensure!(
                 actual == expected,
@@ -1759,7 +1751,16 @@ impl<P: Preset> Store<P> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
-        let state = state_fn()?;
+        let state = match state_fn() {
+            Ok(state) => state,
+            Err(error) => {
+                if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
+                    return Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar));
+                }
+
+                bail!(error);
+            }
+        };
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         SingleVerifier.verify_singular(
@@ -1877,15 +1878,16 @@ impl<P: Preset> Store<P> {
                     .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
             },
             || {
-                Ok(self
-                    .state_cache
-                    .try_state_at_slot(self, block_header.parent_root, block_header.slot)?
+                self.state_cache
+                    .try_state_at_slot(self, block_header.parent_root, block_header.slot)
+                    .transpose()
                     .unwrap_or_else(|| {
-                        self.chain_link(block_header.parent_root)
-                            .or_else(|| self.chain_link_before_or_at(block_header.slot))
-                            .map(|chain_link| chain_link.state(self))
-                            .unwrap_or_else(|| self.head().state(self))
-                    }))
+                        self.state_cache.state_at_slot(
+                            self,
+                            self.head().block_root,
+                            block_header.slot,
+                        )
+                    })
             },
         )
     }

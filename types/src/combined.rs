@@ -76,6 +76,7 @@ use crate::{
             SignedAggregateAndProof as ElectraSignedAggregateAndProof,
             SignedBeaconBlock as ElectraSignedBeaconBlock,
             SignedBlindedBeaconBlock as ElectraSignedBlindedBeaconBlock,
+            SingleAttestation as ElectraSingleAttestation,
         },
     },
     nonstandard::Phase,
@@ -298,6 +299,17 @@ impl<P: Preset> BeaconState<P> {
             Self::Phase0(_) | Self::Altair(_) | Self::Bellatrix(_) => None,
             Self::Capella(state) => Some(state),
             Self::Deneb(state) => Some(state),
+            Self::Electra(state) => Some(state),
+        }
+    }
+
+    pub fn post_electra(&self) -> Option<&dyn PostElectraBeaconState<P>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
         }
     }
@@ -1509,6 +1521,13 @@ impl<P: Preset> Attestation<P> {
             Self::Electra(_) => Phase::Electra,
         }
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize)]
+#[serde(bound = "", untagged)]
+pub enum SingleAttestation<P: Preset> {
+    Phase0(Phase0Attestation<P>),
+    Electra(ElectraSingleAttestation),
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, From, Serialize)]

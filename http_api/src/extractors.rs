@@ -27,7 +27,7 @@ use serde_with::{As, DisplayFromStr};
 use ssz::SszRead;
 use types::{
     altair::containers::SignedContributionAndProof,
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof},
+    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SingleAttestation},
     config::Config,
     nonstandard::Phase,
     phase0::{
@@ -233,6 +233,19 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
 
 #[async_trait]
 impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<Arc<Attestation<P>>>> {
+    type Rejection = Error;
+
+    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
+        request
+            .extract()
+            .await
+            .map(|Json(attestation)| Self(attestation))
+            .map_err(Error::InvalidJsonBody)
+    }
+}
+
+#[async_trait]
+impl<S, P: Preset> FromRequest<S, Body> for EthJson<Vec<SingleAttestation<P>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {

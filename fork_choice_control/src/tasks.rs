@@ -19,9 +19,10 @@ use helper_functions::{
 };
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
+use ssz::SszHash as _;
 use types::{
     combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::BlobSidecar,
+    deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -342,13 +343,18 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_blob_sidecar_task_times.start_timer());
 
+        let block_root = blob_sidecar.signed_block_header.message.hash_tree_root();
+        let index = blob_sidecar.index;
+        let blob_identifier = BlobIdentifier { block_root, index };
+
         let result = store_snapshot.validate_blob_sidecar(blob_sidecar, block_seen, &origin);
 
         MutatorMessage::BlobSidecar {
             wait_group,
             result,
-            block_seen,
             origin,
+            blob_identifier,
+            block_seen,
             submission_time,
         }
         .send(&mutator_tx);

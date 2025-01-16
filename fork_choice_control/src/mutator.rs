@@ -233,14 +233,16 @@ where
                 MutatorMessage::BlobSidecar {
                     wait_group,
                     result,
-                    block_seen,
                     origin,
+                    blob_identifier,
+                    block_seen,
                     submission_time,
                 } => self.handle_blob_sidecar(
                     wait_group,
                     result,
-                    block_seen,
                     origin,
+                    blob_identifier,
+                    block_seen,
                     submission_time,
                 ),
                 MutatorMessage::CheckpointState {
@@ -645,7 +647,7 @@ where
 
                 let (gossip_id, sender) = origin.split();
 
-                if let Some(gossip_id) = gossip_id {
+                if gossip_id.is_some() {
                     P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidBlock)
                         .send(&self.p2p_tx);
                 }
@@ -798,7 +800,7 @@ where
 
                 let (gossip_id, sender) = origin.split();
 
-                if let Some(gossip_id) = gossip_id {
+                if gossip_id.is_some() {
                     P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidAggregateAndProof)
                         .send(&self.p2p_tx);
                 }
@@ -943,7 +945,7 @@ where
                 let attestation = error.attestation();
                 let (gossip_id, sender) = attestation.origin.split();
 
-                if let Some(gossip_id) = gossip_id {
+                if gossip_id.is_some() {
                     P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidAttestation)
                         .send(&self.p2p_tx);
                 }
@@ -1065,8 +1067,9 @@ where
         &mut self,
         wait_group: W,
         result: Result<BlobSidecarAction<P>>,
-        block_seen: bool,
         origin: BlobSidecarOrigin,
+        blob_identifier: BlobIdentifier,
+        block_seen: bool,
         submission_time: Instant,
     ) {
         match result {
@@ -1149,10 +1152,11 @@ where
 
                 let (gossip_id, sender) = origin.split();
 
-                if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidBlobSidecar)
-                        .send(&self.p2p_tx);
-                }
+                P2pMessage::Reject(
+                    gossip_id,
+                    MutatorRejectionReason::InvalidBlobSidecar { blob_identifier },
+                )
+                .send(&self.p2p_tx);
 
                 reply_to_http_api(sender, Err(error));
             }
@@ -1454,7 +1458,7 @@ where
         let unfinalized_states_in_memory = self.store.store_config().unfinalized_states_in_memory;
         let head_slot = self.store.head().slot();
 
-        if misc::is_epoch_start::<P>(head_slot) {
+        if misc::is_epoch_start::<P>(block.message().slot()) {
             info!("unloading old beacon states (head slot: {head_slot})");
 
             self.store_mut()

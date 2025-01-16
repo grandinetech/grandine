@@ -365,8 +365,8 @@ jwt-simple = { version = '0.12', default-features = false, features = ['pure-rus
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 lazy_static = '1'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'c228fe15808c3acbf18dc3af1a03ef5cbdcda07a' }
-libp2p = { version = '0.54', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
-libp2p-mplex = '0.42'
+libp2p = { version = '0.55', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
+libp2p-mplex = '0.43'
 log = '0.4'
 lru = '0.12'
 mediatype = '0.19'

@@ -65,11 +65,12 @@ pub enum Phase {
 
 impl Phase {
     #[must_use]
-    pub const fn max_blobs_per_block<P: Preset>(self) -> Option<u64> {
+    pub const fn max_blobs_per_block<P: Preset>(self) -> u64 {
         match self {
-            Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella => None,
-            Self::Deneb => Some(P::MaxBlobsPerBlock::U64),
-            Self::Electra => Some(P::MaxBlobsPerBlockElectra::U64),
+            Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella | Self::Deneb => {
+                P::MaxBlobsPerBlock::U64
+            }
+            Self::Electra => P::MaxBlobsPerBlockElectra::U64,
         }
     }
 }

@@ -187,7 +187,7 @@ pub mod deneb {
 
 pub mod electra {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
-    pub use block_processing::get_expected_withdrawals;
+    pub use block_processing::{get_expected_withdrawals, validate_voluntary_exit};
     pub(crate) use block_processing::{
         process_block, process_block_for_gossip, process_deposit_data,
     };
