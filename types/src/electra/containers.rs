@@ -220,7 +220,7 @@ pub struct PendingConsolidation {
 #[serde(deny_unknown_fields)]
 pub struct PendingPartialWithdrawal {
     #[serde(with = "serde_utils::string_or_native")]
-    pub index: ValidatorIndex,
+    pub validator_index: ValidatorIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub amount: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
@@ -248,7 +248,7 @@ pub struct SignedBlindedBeaconBlock<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct SingleAttestation {
     #[serde(with = "serde_utils::string_or_native")]

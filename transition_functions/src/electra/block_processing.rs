@@ -328,8 +328,8 @@ pub fn get_expected_withdrawals<P: Preset>(
             break;
         }
 
-        let validator_balance = state.balances().get(withdrawal.index).copied()?;
-        let validator = state.validators().get(withdrawal.index)?;
+        let validator_balance = state.balances().get(withdrawal.validator_index).copied()?;
+        let validator = state.validators().get(withdrawal.validator_index)?;
         let has_sufficient_effective_balance =
             validator.effective_balance >= P::MIN_ACTIVATION_BALANCE;
         let has_excess_balance = validator_balance > P::MIN_ACTIVATION_BALANCE;
@@ -348,7 +348,7 @@ pub fn get_expected_withdrawals<P: Preset>(
 
             withdrawals.push(Withdrawal {
                 index: withdrawal_index,
-                validator_index: withdrawal.index,
+                validator_index: withdrawal.validator_index,
                 address,
                 amount: withdrawable_balance,
             });
@@ -1004,11 +1004,11 @@ fn process_withdrawal_request<P: Preset>(
 
     // > Verify pubkey exists
     let request_pubkey = withdrawal_request.validator_pubkey;
-    let Some(index) = index_of_public_key(state, request_pubkey) else {
+    let Some(validator_index) = index_of_public_key(state, request_pubkey) else {
         return Ok(());
     };
-    let validator_balance = *balance(state, index)?;
-    let validator = state.validators().get(index)?;
+    let validator_balance = *balance(state, validator_index)?;
+    let validator = state.validators().get(validator_index)?;
 
     // > Verify withdrawal credentials
     let has_correct_credential = has_execution_withdrawal_credential(validator);
@@ -1039,12 +1039,12 @@ fn process_withdrawal_request<P: Preset>(
         return Ok(());
     }
 
-    let pending_balance_to_withdraw = get_pending_balance_to_withdraw(state, index);
+    let pending_balance_to_withdraw = get_pending_balance_to_withdraw(state, validator_index);
 
     if is_full_exit_request {
         // > Only exit validator if it has no pending withdrawals in the queue
         if pending_balance_to_withdraw == 0 {
-            initiate_validator_exit(config, state, index)?;
+            initiate_validator_exit(config, state, validator_index)?;
         }
 
         return Ok(());
@@ -1067,7 +1067,7 @@ fn process_withdrawal_request<P: Preset>(
         state
             .pending_partial_withdrawals_mut()
             .push(PendingPartialWithdrawal {
-                index,
+                validator_index,
                 amount: to_withdraw,
                 withdrawable_epoch,
             })?;
@@ -1159,8 +1159,8 @@ pub fn process_consolidation_request<P: Preset>(
         return Ok(());
     }
 
-    // > Verify that target has execution withdrawal credentials
-    if !has_execution_withdrawal_credential(target_validator) {
+    // > Verify that target has compounding withdrawal credentials
+    if !has_compounding_withdrawal_credential(target_validator) {
         return Ok(());
     }
 
@@ -1212,13 +1212,6 @@ pub fn process_consolidation_request<P: Preset>(
             source_index,
             target_index,
         })?;
-
-    // > Churn any target excess active balance of target and raise its max
-    let target_validator = state.validators().get(target_index)?;
-
-    if has_eth1_withdrawal_credential(target_validator) {
-        return switch_to_compounding_validator(state, target_index);
-    }
 
     Ok(())
 }

@@ -15,6 +15,8 @@ pub(crate) enum Error {
         "attempted to construct a blob sidecar for pre-Deneb block: slot: {slot}, root: {root:?}"
     )]
     BlobsForPreDenebBlock { root: H256, slot: Slot },
+    #[error("cannot compute subnet for blob sidecar")]
+    BlobSidecarSubnetNotAvailable,
     #[error("committee index is out of bounds")]
     CommitteeIndexOutOfBounds,
     #[error("aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}")]

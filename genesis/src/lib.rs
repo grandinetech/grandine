@@ -381,11 +381,6 @@ mod spec_tests {
     #[duplicate_item(
         glob                                                                  function_name              phase;
         ["consensus-spec-tests/tests/*/phase0/genesis/initialization/*/*"]    [phase0_initialization]    [Phase0];
-        ["consensus-spec-tests/tests/*/altair/genesis/initialization/*/*"]    [altair_initialization]    [Altair];
-        ["consensus-spec-tests/tests/*/bellatrix/genesis/initialization/*/*"] [bellatrix_initialization] [Bellatrix];
-        ["consensus-spec-tests/tests/*/capella/genesis/initialization/*/*"]   [capella_initialization]   [Capella];
-        ["consensus-spec-tests/tests/*/deneb/genesis/initialization/*/*"]     [deneb_initialization]     [Deneb];
-        ["consensus-spec-tests/tests/*/electra/genesis/initialization/*/*"]   [electra_initialization]   [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -393,17 +388,12 @@ mod spec_tests {
     }
 
     #[duplicate_item(
-        glob                                                            function_name        phase;
-        ["consensus-spec-tests/tests/*/phase0/genesis/validity/*/*"]    [phase0_validity]    [Phase0];
-        ["consensus-spec-tests/tests/*/altair/genesis/validity/*/*"]    [altair_validity]    [Altair];
-        ["consensus-spec-tests/tests/*/bellatrix/genesis/validity/*/*"] [bellatrix_validity] [Bellatrix];
-        ["consensus-spec-tests/tests/*/capella/genesis/validity/*/*"]   [capella_validity]   [Capella];
-        ["consensus-spec-tests/tests/*/deneb/genesis/validity/*/*"]     [deneb_validity]     [Deneb];
-        ["consensus-spec-tests/tests/*/electra/genesis/validity/*/*"]   [electra_validity]   [Electra];
+        glob                                                            function_name;
+        ["consensus-spec-tests/tests/*/phase0/genesis/validity/*/*"]    [phase0_validity];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
-        run_validity_case(case, Phase::phase);
+        run_validity_case(case);
     }
 
     fn run_initialization_case(case: Case, phase: Phase) {
@@ -457,8 +447,8 @@ mod spec_tests {
         assert_eq!(actual_genesis_state, expected_genesis_state);
     }
 
-    fn run_validity_case(case: Case, phase: Phase) {
-        let config = Config::minimal().start_and_stay_in(phase);
+    fn run_validity_case(case: Case) {
+        let config = Config::minimal().start_and_stay_in(Phase::Phase0);
         let genesis_state = case.ssz::<_, BeaconState<Minimal>>(&config, "genesis");
         let is_valid = case.yaml("is_valid");
 

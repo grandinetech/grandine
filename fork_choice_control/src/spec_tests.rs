@@ -174,7 +174,8 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 proofs,
                 valid,
             } => {
-                type BlobBundle<P> = ContiguousList<Blob<P>, <P as Preset>::MaxBlobsPerBlock>;
+                type BlobBundle<P> =
+                    ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>;
 
                 let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
 
