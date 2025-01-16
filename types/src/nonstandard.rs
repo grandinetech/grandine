@@ -12,6 +12,7 @@ use smallvec::SmallVec;
 use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
+use typenum::Unsigned as _;
 
 use crate::{
     altair::{
@@ -60,6 +61,17 @@ pub enum Phase {
     Capella,
     Deneb,
     Electra,
+}
+
+impl Phase {
+    #[must_use]
+    pub const fn max_blobs_per_block<P: Preset>(self) -> Option<u64> {
+        match self {
+            Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella => None,
+            Self::Deneb => Some(P::MaxBlobsPerBlock::U64),
+            Self::Electra => Some(P::MaxBlobsPerBlockElectra::U64),
+        }
+    }
 }
 
 /// Like [`Option`], but with [`None`] greater than any [`Some`].
@@ -281,8 +293,8 @@ pub struct TimedPowBlock {
 pub struct WithBlobsAndMev<T, P: Preset> {
     pub value: T,
     pub commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-    pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobsPerBlock>>,
-    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobsPerBlock>>,
+    pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>>,
+    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
     pub mev: Option<Wei>,
     pub execution_requests: Option<ExecutionRequests<P>>,
 }

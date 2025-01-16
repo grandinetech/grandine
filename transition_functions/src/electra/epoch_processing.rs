@@ -369,14 +369,12 @@ fn process_pending_consolidations<P: Preset>(
         }
 
         // > Calculate the consolidated balance
-        let max_effective_balance = get_max_effective_balance::<P>(source_validator);
-
         let source_effective_balance = core::cmp::min(
             state
                 .balances()
                 .get(pending_consolidation.source_index)
                 .copied()?,
-            max_effective_balance,
+            source_validator.effective_balance,
         );
 
         decrease_balance(

@@ -19,9 +19,9 @@ use ssz::{
 };
 use strum::{Display, EnumString};
 use typenum::{
-    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, True, Unsigned, B1, U1, U1048576, U1073741824,
-    U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144, U32, U4,
-    U4096, U512, U6, U64, U65536, U8, U8192, U9,
+    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, True, Unsigned, B1, U1, U10, U1048576,
+    U1073741824, U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144,
+    U32, U4, U4096, U512, U6, U64, U65536, U8, U8192, U9,
 };
 
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
     config::Config,
     deneb::{
         consts::BytesPerFieldElement,
-        primitives::{Blob, KzgCommitment, KzgProof},
+        primitives::{Blob, KzgCommitment},
     },
     eip7594::Cell,
     electra::containers::{
@@ -137,19 +137,14 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + ArrayLength<H256, ArrayType: Copy>
         + Debug
         + Eq;
-    type MaxBlobCommitmentsPerBlock: MerkleElements<KzgCommitment>
+    type MaxBlobCommitmentsPerBlock: MerkleElements<Blob<Self>>
         + MerkleElements<Cell>
-        + Eq
-        + Debug
-        + Send
-        + Sync;
-    type MaxBlobsPerBlock: MerkleElements<Blob<Self>>
         + MerkleElements<KzgCommitment>
-        + MerkleElements<KzgProof>
         + Eq
         + Debug
         + Send
         + Sync;
+    type MaxBlobsPerBlock: MerkleElements<Blob<Self>> + Eq + Debug + Send + Sync;
 
     // Electra
     type MaxAttestationsElectra: MerkleElements<ElectraAttestation<Self>> + Eq + Debug + Send + Sync;
@@ -158,6 +153,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
+    type MaxBlobsPerBlockElectra: MerkleElements<Blob<Self>> + Eq + Debug + Send + Sync;
     type MaxConsolidationRequestsPerPayload: MerkleElements<ConsolidationRequest>
         + Eq
         + Debug
@@ -172,13 +168,6 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     type PendingDepositsLimit: MerkleElements<PendingDeposit> + Eq + Debug + Send + Sync;
     type PendingConsolidationsLimit: MerkleElements<PendingConsolidation> + Eq + Debug + Send + Sync;
     type PendingPartialWithdrawalsLimit: MerkleElements<PendingPartialWithdrawal>
-        + Eq
-        + Debug
-        + Send
-        + Sync;
-    type MaxBlobsPerBlockElectra: MerkleElements<Blob<Self>>
-        + MerkleElements<KzgCommitment>
-        + MerkleElements<KzgProof>
         + Eq
         + Debug
         + Send
@@ -298,13 +287,13 @@ impl Preset for Mainnet {
     // Electra
     type MaxAttestationsElectra = U8;
     type MaxAttesterSlashingsElectra = U1;
-    type MaxConsolidationRequestsPerPayload = U1;
+    type MaxBlobsPerBlockElectra = U9;
+    type MaxConsolidationRequestsPerPayload = U2;
     type MaxDepositRequestsPerPayload = U8192;
     type MaxWithdrawalRequestsPerPayload = U16;
     type PendingDepositsLimit = U134217728;
     type PendingConsolidationsLimit = U262144;
     type PendingPartialWithdrawalsLimit = U134217728;
-    type MaxBlobsPerBlockElectra = U9;
 
     // Derived type-level variables
     type MaxAggregatorsPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -367,9 +356,9 @@ impl Preset for Minimal {
         // Electra
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
+        type MaxBlobsPerBlockElectra;
         type MaxConsolidationRequestsPerPayload;
         type PendingDepositsLimit;
-        type MaxBlobsPerBlockElectra;
     }
 
     // Phase 0
@@ -387,8 +376,8 @@ impl Preset for Minimal {
     type MaxWithdrawalsPerPayload = U4;
 
     // Deneb
-    type MaxBlobCommitmentsPerBlock = U16;
-    type KzgCommitmentInclusionProofDepth = U9;
+    type MaxBlobCommitmentsPerBlock = U32;
+    type KzgCommitmentInclusionProofDepth = U10;
 
     // Electra
     type MaxDepositRequestsPerPayload = U4;
@@ -466,13 +455,13 @@ impl Preset for Medalla {
         // Electra
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
+        type MaxBlobsPerBlockElectra;
         type MaxConsolidationRequestsPerPayload;
         type MaxDepositRequestsPerPayload;
         type MaxWithdrawalRequestsPerPayload;
         type PendingDepositsLimit;
         type PendingConsolidationsLimit;
         type PendingPartialWithdrawalsLimit;
-        type MaxBlobsPerBlockElectra;
 
         // Derived type-level variables
         type MaxAggregatorsPerSlot;
@@ -874,6 +863,8 @@ pub struct ElectraPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_attester_slashings_electra: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    max_blobs_per_block_electra: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     max_consolidation_requests_per_payload: u64,
     #[serde(with = "serde_utils::string_or_native")]
     max_deposit_requests_per_payload: u64,
@@ -895,8 +886,6 @@ pub struct ElectraPreset {
     pending_partial_withdrawals_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     whistleblower_reward_quotient_electra: NonZeroU64,
-    #[serde(with = "serde_utils::string_or_native")]
-    max_blobs_per_block_electra: u64,
 }
 
 impl ElectraPreset {
@@ -905,6 +894,7 @@ impl ElectraPreset {
         Self {
             max_attestations_electra: P::MaxAttestationsElectra::U64,
             max_attester_slashings_electra: P::MaxAttesterSlashingsElectra::U64,
+            max_blobs_per_block_electra: P::MaxBlobsPerBlockElectra::U64,
             max_consolidation_requests_per_payload: P::MaxConsolidationRequestsPerPayload::U64,
             max_deposit_requests_per_payload: P::MaxDepositRequestsPerPayload::U64,
             max_effective_balance_electra: P::MAX_EFFECTIVE_BALANCE_ELECTRA,
@@ -917,7 +907,6 @@ impl ElectraPreset {
             pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
             pending_partial_withdrawals_limit: P::PendingPartialWithdrawalsLimit::U64,
             whistleblower_reward_quotient_electra: P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,
-            max_blobs_per_block_electra: P::MaxBlobsPerBlockElectra::U64,
         }
     }
 }

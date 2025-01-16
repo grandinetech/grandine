@@ -7,6 +7,7 @@ use core::fmt::Debug;
 
 use derivative::Derivative;
 use derive_more::{AsRef, Deref};
+use serde::{Serialize, Serializer};
 
 use crate::{
     error::{ReadError, WriteError},
@@ -52,6 +53,12 @@ impl<'list, T> IntoIterator for &'list DynamicList<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<T: Serialize> Serialize for DynamicList<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self)
     }
 }
 

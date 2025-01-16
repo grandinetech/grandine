@@ -31,7 +31,7 @@ use types::{
         containers::{ForkData, SignedBeaconBlockHeader, SigningData, Validator},
         primitives::{
             CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, NodeId,
-            Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H256,
+            Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H128, H256,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
@@ -157,7 +157,7 @@ pub(crate) fn compute_shuffled_index<P: Preset>(
     shuffling::shuffle_single::<P>(index, index_count, seed)
 }
 
-pub(crate) fn compute_proposer_index<P: Preset>(
+fn compute_proposer_index_pre_electra<P: Preset>(
     state: &impl BeaconState<P>,
     indices: &PackedIndices,
     seed: H256,
@@ -195,13 +195,70 @@ pub(crate) fn compute_proposer_index<P: Preset>(
                 .expect("candidate_index was produced by enumerating active validators")
                 .effective_balance;
 
-            // > [Modified in Electra:EIP7251]
-            (effective_balance * max_random_byte
-                >= get_state_max_effective_balance(state) * random_byte)
+            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE * random_byte)
                 .then_some(candidate_index)
         })
         .ok_or(Error::FailedToSelectProposer)
         .map_err(Into::into)
+}
+
+fn compute_proposer_index_post_electra<P: Preset>(
+    state: &impl BeaconState<P>,
+    indices: &PackedIndices,
+    seed: H256,
+) -> Result<ValidatorIndex> {
+    let total = indices
+        .len()
+        .try_conv::<u64>()?
+        .pipe(NonZeroU64::new)
+        .ok_or(Error::NoActiveValidators)?;
+
+    let max_random_value = u64::from(u16::MAX);
+
+    (0..u64::MAX / H128::len_bytes() as u64)
+        .flat_map(|quotient| {
+            hashing::hash_256_64(seed, quotient)
+                .to_fixed_bytes()
+                .into_iter()
+                .tuples()
+                .map(|bytes: (u8, u8)| u64::from(u16::from_le_bytes(bytes.into())))
+        })
+        .zip(0..)
+        .find_map(|(random_value, attempt)| {
+            let shuffled_index_of_index = compute_shuffled_index::<P>(attempt % total, total, seed)
+                .try_conv::<usize>()
+                .expect(
+                    "shuffled_index_of_index fits in usize because it is less than indices.len()",
+                );
+
+            let candidate_index = indices
+                .get(shuffled_index_of_index)
+                .expect("compute_shuffled_index returns a value less than indices.len()");
+
+            let effective_balance = state
+                .validators()
+                .get(candidate_index)
+                .expect("candidate_index was produced by enumerating active validators")
+                .effective_balance;
+
+            (effective_balance * max_random_value
+                >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value)
+                .then_some(candidate_index)
+        })
+        .ok_or(Error::FailedToSelectProposer)
+        .map_err(Into::into)
+}
+
+pub(crate) fn compute_proposer_index<P: Preset>(
+    state: &impl BeaconState<P>,
+    indices: &PackedIndices,
+    seed: H256,
+) -> Result<ValidatorIndex> {
+    if state.is_post_electra() {
+        compute_proposer_index_post_electra(state, indices, seed)
+    } else {
+        compute_proposer_index_pre_electra(state, indices, seed)
+    }
 }
 
 /// [`compute_subnet_for_attestation`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/validator.md#broadcast-attestation)
@@ -222,9 +279,16 @@ pub fn compute_subnet_for_attestation<P: Preset>(
 }
 
 /// [`compute_subnet_for_blob_sidecar`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.1/specs/deneb/validator.md#sidecar)
-#[must_use]
-pub fn compute_subnet_for_blob_sidecar(config: &Config, blob_index: BlobIndex) -> SubnetId {
-    blob_index % config.blob_sidecar_subnet_count
+pub fn compute_subnet_for_blob_sidecar<P: Preset>(
+    config: &Config,
+    blob_sidecar: &BlobSidecar<P>,
+) -> Result<SubnetId> {
+    let phase = config.phase_at_slot::<P>(blob_sidecar.signed_block_header.message.slot);
+
+    Ok(blob_sidecar.index
+        % config
+            .blob_sidecar_subnet_count(phase)
+            .ok_or(Error::BlobSidecarSubnetNotAvailable)?)
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#broadcast-sync-committee-message>
@@ -600,15 +664,6 @@ pub fn get_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
         P::MAX_EFFECTIVE_BALANCE_ELECTRA
     } else {
         P::MIN_ACTIVATION_BALANCE
-    }
-}
-
-#[must_use]
-pub fn get_state_max_effective_balance<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Gwei {
-    if state.is_post_electra() {
-        P::MAX_EFFECTIVE_BALANCE_ELECTRA
-    } else {
-        P::MAX_EFFECTIVE_BALANCE
     }
 }
 

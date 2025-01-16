@@ -2532,9 +2532,11 @@ name = "execution_engine"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "const-hex",
  "either",
  "ethereum-types",
  "futures",
+ "hex",
  "hex-literal",
  "serde",
  "serde_json",

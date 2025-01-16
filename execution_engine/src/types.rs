@@ -1,8 +1,16 @@
+use core::{
+    fmt::{Formatter, Result as FmtResult},
+    marker::PhantomData,
+};
 use std::sync::Arc;
 
 use ethereum_types::H64;
-use serde::{Deserialize, Serialize};
-use ssz::{ByteList, ByteVector, ContiguousList};
+use serde::{
+    de::{Error as _, Visitor},
+    ser::{Error as _, SerializeSeq as _},
+    Deserialize, Deserializer, Serialize,
+};
+use ssz::{ByteList, ByteVector, ContiguousList, SszReadDefault as _, SszWrite as _};
 use types::{
     bellatrix::{
         containers::ExecutionPayload as BellatrixExecutionPayload,
@@ -27,6 +35,10 @@ use types::{
     },
     preset::Preset,
 };
+
+const DEPOSIT_REQUEST_TYPE: &str = "0x00";
+const WITHDRAWAL_REQUEST_TYPE: &str = "0x01";
+const CONSOLIDATION_REQUEST_TYPE: &str = "0x02";
 
 /// [`ExecutionPayloadV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#executionpayloadv1)
 #[derive(Deserialize, Serialize)]
@@ -366,8 +378,8 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobsBundleV1<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub proofs: ContiguousList<KzgProof, P::MaxBlobsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobsPerBlock>,
+    pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 /// [`ForkChoiceStateV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#forkchoicestatev1)
@@ -688,16 +700,127 @@ impl From<PayloadStatus> for PayloadStatusV1 {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(test, derive(Default))]
+#[cfg_attr(test, derive(Clone, Default, Debug, Eq, PartialEq))]
 pub struct RawExecutionRequests<P: Preset>(
-    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
     ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
-    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
     ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    #[serde(with = "crate::ssz_as_prefixed_hex_or_bytes")]
     ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
 );
+
+impl<P: Preset> Serialize for RawExecutionRequests<P> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let Self(deposit_requests, withdrawal_requests, consolidation_requests) = self;
+        let mut seq = serializer.serialize_seq(None)?;
+
+        if !deposit_requests.is_empty() {
+            let bytes = deposit_requests.to_ssz().map_err(S::Error::custom)?;
+            seq.serialize_element(&format_args!(
+                "{DEPOSIT_REQUEST_TYPE}{}",
+                const_hex::encode(bytes).as_str()
+            ))?;
+        }
+
+        if !withdrawal_requests.is_empty() {
+            let bytes = withdrawal_requests.to_ssz().map_err(S::Error::custom)?;
+            seq.serialize_element(&format_args!(
+                "{WITHDRAWAL_REQUEST_TYPE}{}",
+                const_hex::encode(bytes).as_str()
+            ))?;
+        }
+
+        if !consolidation_requests.is_empty() {
+            let bytes = consolidation_requests.to_ssz().map_err(S::Error::custom)?;
+
+            seq.serialize_element(&format_args!(
+                "{CONSOLIDATION_REQUEST_TYPE}{}",
+                const_hex::encode(bytes).as_str(),
+            ))?;
+        }
+
+        seq.end()
+    }
+}
+
+impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RawExecutionRequestsVisitor<P: Preset> {
+            _phantom_data: PhantomData<P>,
+        }
+
+        impl<'de, P: Preset> Visitor<'de> for RawExecutionRequestsVisitor<P> {
+            type Value = RawExecutionRequests<P>;
+
+            fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
+                formatter.write_str("a sequence of execution requests")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut deposit_requests = ContiguousList::default();
+                let mut withdrawal_requests = ContiguousList::default();
+                let mut consolidation_requests = ContiguousList::default();
+
+                while let Some(next_element) = seq.next_element::<String>()? {
+                    if let Some(digits) = next_element.strip_prefix(DEPOSIT_REQUEST_TYPE) {
+                        let bytes = hex::decode(digits).map_err(A::Error::custom)?;
+
+                        deposit_requests =
+                            ContiguousList::from_ssz_default(bytes).map_err(A::Error::custom)?;
+
+                        continue;
+                    }
+
+                    if let Some(digits) = next_element.strip_prefix(WITHDRAWAL_REQUEST_TYPE) {
+                        let bytes = hex::decode(digits).map_err(A::Error::custom)?;
+
+                        withdrawal_requests =
+                            ContiguousList::from_ssz_default(bytes).map_err(A::Error::custom)?;
+
+                        continue;
+                    }
+
+                    if let Some(digits) = next_element.strip_prefix(CONSOLIDATION_REQUEST_TYPE) {
+                        let bytes = hex::decode(digits).map_err(A::Error::custom)?;
+
+                        consolidation_requests =
+                            ContiguousList::from_ssz_default(bytes).map_err(A::Error::custom)?;
+
+                        continue;
+                    }
+
+                    return Err(serde::de::Error::unknown_variant(
+                        &next_element,
+                        &[
+                            DEPOSIT_REQUEST_TYPE,
+                            WITHDRAWAL_REQUEST_TYPE,
+                            CONSOLIDATION_REQUEST_TYPE,
+                        ],
+                    ));
+                }
+
+                Ok(RawExecutionRequests(
+                    deposit_requests,
+                    withdrawal_requests,
+                    consolidation_requests,
+                ))
+            }
+        }
+
+        let visitor = RawExecutionRequestsVisitor {
+            _phantom_data: PhantomData,
+        };
+
+        deserializer.deserialize_seq(visitor)
+    }
+}
 
 impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
     fn from(execution_requests: ExecutionRequests<P>) -> Self {
@@ -735,7 +858,9 @@ mod tests {
     use anyhow::Result;
     use hex_literal::hex;
     use serde_json::{json, Value};
-    use types::{phase0::primitives::H160, preset::Mainnet};
+    use types::{
+        electra::containers::ConsolidationRequest, phase0::primitives::H160, preset::Mainnet,
+    };
 
     use super::*;
 
@@ -811,10 +936,81 @@ mod tests {
     }
 
     #[test]
-    fn test_default_raw_execution_requests_serialization() -> Result<()> {
+    fn test_default_raw_execution_requests_roundtrip() -> Result<()> {
         let serialized = serde_json::to_value(RawExecutionRequests::<Mainnet>::default())?;
-        assert_eq!(serialized, json!(["0x", "0x", "0x"]));
+        assert_eq!(serialized, json!([]));
+
+        assert_eq!(
+            serde_json::from_value::<RawExecutionRequests::<Mainnet>>(json!([]))?,
+            RawExecutionRequests::<Mainnet>::default(),
+        );
+
         Ok(())
+    }
+
+    #[test]
+    fn test_non_default_raw_execution_requests_roundtrip() -> Result<()> {
+        let execution_requests = ExecutionRequests::<Mainnet> {
+            deposits: ContiguousList::try_from(vec![
+                DepositRequest {
+                    pubkey: hex!("92f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688").into(),
+                    withdrawal_credentials: hex!("02000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa").into(),
+                    amount: 1_000_000_000_000,
+                    signature: hex!("a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b").into(),
+                    index: 0,
+                },
+                DepositRequest {
+                    pubkey: hex!("90a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d6").into(),
+                    withdrawal_credentials: hex!("02000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa").into(),
+                    amount: 1_000_000_000_000,
+                    signature: hex!("b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e0").into(),
+                    index: 1,
+                }
+            ])?,
+            withdrawals: ContiguousList::try_from(vec![
+                WithdrawalRequest {
+                    source_address: ExecutionAddress::repeat_byte(2),
+                    validator_pubkey: hex!("aaf9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688").into(),
+                    amount: 4_000_000_000_000,
+                },
+            ])?,
+            consolidations: ContiguousList::try_from(vec![
+                ConsolidationRequest {
+                    source_pubkey: hex!("aaf9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688").into(),
+                    source_address: ExecutionAddress::repeat_byte(3),
+                    target_pubkey: hex!("abc9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688").into(),
+                },
+            ])?,
+        };
+
+        let raw_execution_requests = RawExecutionRequests::from(execution_requests);
+        let serialized = serde_json::to_value(raw_execution_requests.clone())?;
+
+        let expected_serialzed = json!([
+            "0x0092f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68802000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b000000000000000090a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d602000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e00100000000000000",
+            "0x010202020202020202020202020202020202020202aaf9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68800409452a3030000",
+            "0x020303030303030303030303030303030303030303aaf9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688abc9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688",
+        ]);
+
+        assert_eq!(serialized, expected_serialzed);
+        assert_eq!(
+            serde_json::from_value::<RawExecutionRequests::<Mainnet>>(expected_serialzed)?,
+            raw_execution_requests,
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_prefix_raw_execution_requests_deserialization() {
+        let payload = json!([
+            "0x0392f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68802000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b000000000000000090a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d602000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e00100000000000000",
+        ]);
+
+        let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(payload)
+            .expect_err("execution requests object with invalid prefix should be rejected");
+
+        assert!(error.to_string().starts_with("unknown variant"));
     }
 
     #[test]
