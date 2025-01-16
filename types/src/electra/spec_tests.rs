@@ -327,6 +327,12 @@ tests_for_type! {
 }
 
 tests_for_type! {
+    SingleAttestation,
+    "consensus-spec-tests/tests/mainnet/electra/ssz_static/SingleAttestation/*/*",
+    "consensus-spec-tests/tests/minimal/electra/ssz_static/SingleAttestation/*/*",
+}
+
+tests_for_type! {
     SyncAggregate<_>,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/SyncAggregate/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/SyncAggregate/*/*",
