@@ -951,7 +951,16 @@ impl<P: Preset> Network<P> {
         debug!("received BeaconBlocksByRange request (peer_id: {peer_id}, request: {request:?})");
 
         let start_slot = request.start_slot();
-        let difference = request.count().min(MAX_FOR_DOS_PREVENTION);
+        let max_request_blocks = match request {
+            OldBlocksByRangeRequest::V1(_) => self.controller.chain_config().max_request_blocks,
+            OldBlocksByRangeRequest::V2(_) => {
+                self.controller.chain_config().max_request_blocks_deneb
+            }
+        };
+        let difference = request
+            .count()
+            .min(max_request_blocks)
+            .min(MAX_FOR_DOS_PREVENTION);
 
         // `end_slot` is exclusive.
         let end_slot = start_slot
@@ -1013,17 +1022,28 @@ impl<P: Preset> Network<P> {
     ) -> Result<()> {
         debug!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
 
-        let BlobsByRangeRequest { start_slot, count } = request;
-        let difference = count
-            .min(self.controller.chain_config().max_request_blob_sidecars)
+        let start_slot = request.start_slot();
+        let max_request_blob_sidecars = match request {
+            BlobsByRangeRequest::V1(_) => self.controller.chain_config().max_request_blob_sidecars,
+            BlobsByRangeRequest::V2(_) => {
+                self.controller
+                    .chain_config()
+                    .max_request_blob_sidecars_electra
+            }
+        };
+        let difference = request
+            .count()
+            .min(max_request_blob_sidecars)
             .min(MAX_FOR_DOS_PREVENTION);
 
-        let end_slot = start_slot
-            .checked_add(difference)
-            .ok_or(Error::EndSlotOverflow {
-                start_slot,
-                difference,
-            })?;
+        let end_slot =
+            request
+                .start_slot()
+                .checked_add(difference)
+                .ok_or(Error::EndSlotOverflow {
+                    start_slot,
+                    difference,
+                })?;
 
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
@@ -1078,11 +1098,18 @@ impl<P: Preset> Network<P> {
         debug!("received BlobsByRootRequest request (peer_id: {peer_id}, request: {request:?})");
 
         // TODO(feature/deneb): MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS
-        let BlobsByRootRequest { blob_ids } = request;
+        let max_request_blob_sidecars = match request {
+            BlobsByRootRequest::V1(_) => self.controller.chain_config().max_request_blob_sidecars,
+            BlobsByRootRequest::V2(_) => {
+                self.controller
+                    .chain_config()
+                    .max_request_blob_sidecars_electra
+            }
+        };
+        let blob_ids = request.blob_ids();
 
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
-        let max_request_blob_sidecars = self.controller.chain_config().max_request_blob_sidecars;
 
         self.dedicated_executor
             .spawn(async move {
@@ -1136,6 +1163,10 @@ impl<P: Preset> Network<P> {
         request_id: IncomingRequestId,
         request: BlocksByRootRequest,
     ) {
+        let max_request_blocks = match request {
+            BlocksByRootRequest::V1(_) => self.controller.chain_config().max_request_blocks,
+            BlocksByRootRequest::V2(_) => self.controller.chain_config().max_request_blocks_deneb,
+        };
         let block_roots = request.block_roots();
 
         debug!(
@@ -1149,7 +1180,7 @@ impl<P: Preset> Network<P> {
             .spawn(async move {
                 let block_roots = block_roots
                     .into_iter()
-                    .take(MAX_FOR_DOS_PREVENTION.try_into()?);
+                    .take(MAX_FOR_DOS_PREVENTION.min(max_request_blocks).try_into()?);
 
                 let blocks = controller.blocks_by_root(block_roots)?;
 
@@ -1652,7 +1683,7 @@ impl<P: Preset> Network<P> {
         count: u64,
     ) {
         // TODO: is count capped in eth2_libp2p?
-        let request = BlobsByRangeRequest { start_slot, count };
+        let request = BlobsByRangeRequest::new(start_slot, count);
 
         debug!(
             "sending BlobSidecarsByRange request (request_id: {request_id} peer_id: {peer_id}, \
