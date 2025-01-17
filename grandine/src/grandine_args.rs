@@ -341,9 +341,14 @@ struct BeaconNodeOptions {
     #[clap(long)]
     jwt_version: Option<String>,
 
-    /// Enable syncing historical data
+    /// [DEPRECATED] Enable syncing historical data
     /// [default: disabled]
     #[clap(long = "back_sync")]
+    back_sync: bool,
+
+    /// Enable syncing historical data
+    /// [default: disabled]
+    #[clap(long = "back-sync")]
     back_sync_enabled: bool,
 
     /// Collect Prometheus metrics
@@ -908,7 +913,8 @@ impl GrandineArgs {
             jwt_id,
             jwt_secret,
             jwt_version,
-            back_sync_enabled,
+            back_sync,
+            mut back_sync_enabled,
             metrics_enabled,
             metrics_address,
             metrics_port,
@@ -1199,6 +1205,11 @@ impl GrandineArgs {
             id: jwt_id,
             version: jwt_version,
         };
+
+        if back_sync {
+            warn!("--back_sync option is deprecated. Use --back-sync instead.");
+            back_sync_enabled = true;
+        }
 
         let builder_url = if builder_url.is_none() && builder_api_url.is_some() {
             warn!("--builder-api-url option is deprecated. Use --builder-url instead.");
@@ -1501,6 +1512,24 @@ mod tests {
                     .join(".grandine/mainnet/network"),
             ),
         );
+    }
+
+    #[test]
+    fn back_sync_disabled_by_default() {
+        let config = config_from_args([]);
+        assert!(!config.back_sync_enabled);
+    }
+
+    #[test]
+    fn supports_back_sync_flag() {
+        let config = config_from_args(["--back-sync"]);
+        assert!(config.back_sync_enabled);
+    }
+
+    #[test]
+    fn supports_deprecated_back_sync_flag() {
+        let config = config_from_args(["--back_sync"]);
+        assert!(config.back_sync_enabled);
     }
 
     #[test]
