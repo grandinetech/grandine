@@ -397,6 +397,71 @@ impl<P: Preset> Storage<P> {
         Ok(())
     }
 
+    pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
+        let mut block_roots_to_remove = vec![];
+        let mut keys_to_remove = vec![];
+
+        let results = self
+            .database
+            .iterator_descending(..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string())?;
+
+        for result in results {
+            let (key_bytes, value_bytes) = result?;
+
+            if !BlockRootBySlot::has_prefix(&key_bytes) {
+                break;
+            }
+
+            block_roots_to_remove.push(H256::from_ssz_default(value_bytes)?);
+            keys_to_remove.push(key_bytes.into_owned());
+        }
+
+        for block_root in block_roots_to_remove {
+            let key = FinalizedBlockByRoot(block_root).to_string();
+            self.database.delete(key)?;
+
+            let key = UnfinalizedBlockByRoot(block_root).to_string();
+            self.database.delete(key)?;
+
+            let key = StateByBlockRoot(block_root).to_string();
+            self.database.delete(key)?;
+        }
+
+        for key in keys_to_remove {
+            self.database.delete(key)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn prune_old_state_roots(&self, up_to_slot: Slot) -> Result<()> {
+        let mut keys_to_remove = vec![];
+
+        let results = self
+            .database
+            .iterator_ascending(SlotByStateRoot(H256::zero()).to_string()..)?;
+
+        for result in results {
+            let (key_bytes, value_bytes) = result?;
+
+            if !SlotByStateRoot::has_prefix(&key_bytes) {
+                break;
+            }
+
+            let slot = Slot::from_ssz_default(value_bytes)?;
+
+            if slot < up_to_slot {
+                keys_to_remove.push(key_bytes.into_owned());
+            }
+        }
+
+        for key in keys_to_remove {
+            self.database.delete(key)?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn checkpoint_state_slot(&self) -> Result<Option<Slot>> {
         if let Some(StateCheckpoint { head_slot, .. }) = self.load_state_checkpoint()? {
             return Ok(Some(head_slot));
@@ -704,6 +769,18 @@ impl<P: Preset> Storage<P> {
 
 #[cfg(test)]
 impl<P: Preset> Storage<P> {
+    pub fn block_root_by_slot_count(&self) -> Result<usize> {
+        let results = self
+            .database
+            .iterator_ascending(BlockRootBySlot(0).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
+                .count()
+        })
+    }
+
     pub fn finalized_block_count(&self) -> Result<usize> {
         let results = self
             .database
@@ -719,10 +796,34 @@ impl<P: Preset> Storage<P> {
         })
     }
 
+    pub fn unfinalized_block_count(&self) -> Result<usize> {
+        let results = self
+            .database
+            .iterator_ascending(UnfinalizedBlockByRoot(H256::zero()).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .take_while(|(key_bytes, _)| UnfinalizedBlockByRoot::has_prefix(key_bytes))
+                .count()
+        })
+    }
+
+    pub fn slot_by_state_root_count(&self) -> Result<usize> {
+        let results = self
+            .database
+            .iterator_ascending(SlotByStateRoot(H256::zero()).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .take_while(|(key_bytes, _)| SlotByStateRoot::has_prefix(key_bytes))
+                .count()
+        })
+    }
+
     pub fn slot_by_blob_id_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending((H256::zero()).to_string()..)?;
+            .iterator_ascending(SlotBlobId(0, H256::zero(), 0).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -731,14 +832,26 @@ impl<P: Preset> Storage<P> {
         })
     }
 
-    pub fn blob_sidecar_by_blob_id_count(&self) -> Result<usize> {
+    pub fn state_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending((H256::zero()).to_string()..)?;
+            .iterator_ascending(StateByBlockRoot(H256::zero()).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
-                .filter(|(key_bytes, _)| BlobSidecarByBlobId::has_prefix(key_bytes))
+                .take_while(|(key_bytes, _)| StateByBlockRoot::has_prefix(key_bytes))
+                .count()
+        })
+    }
+
+    pub fn blob_sidecar_by_blob_id_count(&self) -> Result<usize> {
+        let results = self
+            .database
+            .iterator_ascending(BlobSidecarByBlobId(H256::zero(), 0).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .take_while(|(key_bytes, _)| BlobSidecarByBlobId::has_prefix(key_bytes))
                 .count()
         })
     }
@@ -931,9 +1044,69 @@ pub fn serialize(key: impl Display, value: impl SszWrite) -> Result<(String, Vec
 mod tests {
     use bytesize::ByteSize;
     use tempfile::TempDir;
-    use types::preset::Mainnet;
+    use types::{
+        phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock, preset::Mainnet,
+    };
 
     use super::*;
+
+    #[test]
+    fn test_prune_old_blocks_and_states() -> Result<()> {
+        let database = Database::persistent("test_db", TempDir::new()?, ByteSize::mib(10), false)?;
+        let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
+
+        database.put_batch(vec![
+            // Slot 1
+            serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
+            serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
+            // Slot 3
+            serialize(BlockRootBySlot(3), H256::repeat_byte(3))?,
+            serialize(FinalizedBlockByRoot(H256::repeat_byte(3)), &block)?,
+            // Slot 5
+            serialize(BlockRootBySlot(5), H256::repeat_byte(5))?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(5)), &block)?,
+            //Slot 6
+            serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(6)), &block)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(6)), 6_u64)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(6)), 6_u64)?,
+            // Slot 10, test case that "10" < "3" is not true
+            serialize(BlockRootBySlot(10), H256::repeat_byte(10))?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(10)), &block)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(10)), 10_u64)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(10)), 10_u64)?,
+        ])?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            database,
+            nonzero!(64_u64),
+            true,
+        );
+
+        assert_eq!(storage.finalized_block_count()?, 2);
+        assert_eq!(storage.unfinalized_block_count()?, 4);
+        assert_eq!(storage.block_root_by_slot_count()?, 5);
+        assert_eq!(storage.slot_by_state_root_count()?, 3);
+        assert_eq!(storage.state_count()?, 3);
+
+        storage.prune_old_blocks_and_states(5)?;
+
+        assert_eq!(storage.finalized_block_count()?, 0);
+        assert_eq!(storage.unfinalized_block_count()?, 3);
+        assert_eq!(storage.block_root_by_slot_count()?, 3);
+        assert_eq!(storage.slot_by_state_root_count()?, 3);
+        assert_eq!(storage.state_count()?, 2);
+
+        storage.prune_old_state_roots(5)?;
+
+        assert_eq!(storage.slot_by_state_root_count()?, 2);
+
+        Ok(())
+    }
 
     #[test]
     #[expect(clippy::similar_names)]

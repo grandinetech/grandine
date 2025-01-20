@@ -3070,15 +3070,24 @@ impl<P: Preset> Store<P> {
         self.blob_cache.unpersisted_blob_sidecars()
     }
 
-    pub fn should_check_data_availability_at_slot(&self, slot: Slot) -> bool {
-        let min_checked_epoch = self.chain_config.deneb_fork_epoch.max(
+    pub fn min_checked_block_availability_epoch(&self) -> Epoch {
+        self.tick
+            .epoch::<P>()
+            .checked_sub(self.chain_config.min_epochs_for_block_requests)
+            .unwrap_or(GENESIS_EPOCH)
+    }
+
+    pub fn min_checked_data_availability_epoch(&self) -> Epoch {
+        self.chain_config.deneb_fork_epoch.max(
             self.tick
                 .epoch::<P>()
                 .checked_sub(self.chain_config.min_epochs_for_blob_sidecars_requests)
                 .unwrap_or(GENESIS_EPOCH),
-        );
+        )
+    }
 
-        misc::compute_epoch_at_slot::<P>(slot) >= min_checked_epoch
+    pub fn should_check_data_availability_at_slot(&self, slot: Slot) -> bool {
+        misc::compute_epoch_at_slot::<P>(slot) >= self.min_checked_data_availability_epoch()
     }
 
     pub fn state_cache(&self) -> Arc<StateCacheProcessor<P>> {

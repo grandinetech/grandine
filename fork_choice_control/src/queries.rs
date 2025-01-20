@@ -554,6 +554,14 @@ where
             storage: self.storage(),
         }
     }
+
+    pub fn min_checked_block_availability_epoch(&self) -> Epoch {
+        self.store_snapshot().min_checked_block_availability_epoch()
+    }
+
+    pub fn min_checked_data_availability_epoch(&self) -> Epoch {
+        self.store_snapshot().min_checked_data_availability_epoch()
+    }
 }
 
 #[cfg(test)]
