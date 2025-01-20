@@ -143,6 +143,8 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub min_epochs_for_blob_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub min_epochs_for_block_requests: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub data_column_sidecar_subnet_count: u64,
@@ -240,6 +242,7 @@ impl Default for Config {
             max_request_blob_sidecars: 768,
             max_request_data_column_sidecars: 0x4000,
             min_epochs_for_blob_sidecars_requests: 4096,
+            min_epochs_for_block_requests: 33024,
             blob_sidecar_subnet_count: nonzero!(6_u64),
             data_column_sidecar_subnet_count: 64,
 
@@ -331,6 +334,9 @@ impl Config {
             deposit_chain_id: 5,
             deposit_contract_address: H160(hex!("1234567890123456789012345678901234567890")),
             deposit_network_id: 5,
+
+            // Networking
+            min_epochs_for_block_requests: 272,
 
             ..Self::default()
         }

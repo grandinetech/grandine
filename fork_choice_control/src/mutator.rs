@@ -441,7 +441,7 @@ where
 
         if self.store.is_forward_synced() && misc::slots_since_epoch_start::<P>(tick.slot) == 0 {
             if tick.kind == TickKind::AttestFourth {
-                self.prune_old_blob_sidecars()?;
+                self.prune_old_records()?;
             }
 
             if let Some(metrics) = self.metrics.as_ref() {
@@ -2336,27 +2336,50 @@ where
         Ok(())
     }
 
-    fn prune_old_blob_sidecars(&self) -> Result<()> {
+    fn prune_old_records(&self) -> Result<()> {
         let storage = self.storage.clone_arc();
-        let current_epoch = misc::compute_epoch_at_slot::<P>(self.store.slot());
-        let up_to_epoch = current_epoch.saturating_sub(
-            self.store
-                .chain_config()
-                .min_epochs_for_blob_sidecars_requests,
-        );
-        let up_to_slot = misc::compute_start_slot_at_epoch::<P>(up_to_epoch);
+        let blobs_up_to_epoch = self.store.min_checked_data_availability_epoch();
+        let blobs_up_to_slot = misc::compute_start_slot_at_epoch::<P>(blobs_up_to_epoch);
+        let blocks_up_to_epoch = self.store.min_checked_block_availability_epoch();
+        let blocks_up_to_slot = misc::compute_start_slot_at_epoch::<P>(blocks_up_to_epoch);
 
         Builder::new()
-            .name("old-blob-pruner".to_owned())
+            .name("old-data-pruner".to_owned())
             .spawn(move || {
-                debug!("pruning old blob sidecards from storage up to slot {up_to_slot}…");
+                debug!("pruning old blob sidecars from storage up to slot {blobs_up_to_slot}…");
 
-                match storage.prune_old_blob_sidecars(up_to_slot) {
+                match storage.prune_old_blob_sidecars(blobs_up_to_slot) {
                     Ok(()) => {
-                        debug!("pruned old blob sidecards from storage up to slot {up_to_slot}");
+                        debug!(
+                            "pruned old blob sidecars from storage up to slot {blobs_up_to_slot}"
+                        );
                     }
                     Err(error) => {
-                        error!("pruning old blob sidecards from storage failed: {error:?}")
+                        error!("pruning old blob sidecars from storage failed: {error:?}")
+                    }
+                }
+
+                debug!("pruning old blocks and states from storage up to slot {blocks_up_to_slot}…");
+
+                match storage.prune_old_blocks_and_states(blocks_up_to_slot) {
+                    Ok(()) => {
+                        debug!(
+                            "pruned old blocks and states from storage up to slot {blocks_up_to_slot}"
+                        );
+                    }
+                    Err(error) => {
+                        error!("pruning old blocks and states from storage failed: {error:?}")
+                    }
+                }
+
+                debug!("pruning old state roots from storage up to slot {blocks_up_to_slot}…");
+
+                match storage.prune_old_state_roots(blocks_up_to_slot) {
+                    Ok(()) => {
+                        debug!("pruned old state roots from storage up to slot {blocks_up_to_slot}");
+                    }
+                    Err(error) => {
+                        error!("pruning old state roots from storage failed: {error:?}")
                     }
                 }
             })?;
