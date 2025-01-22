@@ -1619,7 +1619,17 @@ impl<P: Preset> Network<P> {
         let (local_finalized_root_at_remote_finalized_epoch, sync_status) =
             match local.finalized_epoch.cmp(&remote.finalized_epoch) {
                 Ordering::Less => (None, SyncStatus::Advanced { info }),
-                Ordering::Equal => (Some(local.finalized_root), SyncStatus::Synced { info }),
+                Ordering::Equal => {
+                    let max_empty_slots = self.controller.store_config().max_empty_slots;
+
+                    let status = if remote.head_slot + max_empty_slots < local.head_slot {
+                        SyncStatus::Behind { info }
+                    } else {
+                        SyncStatus::Synced { info }
+                    };
+
+                    (Some(local.finalized_root), status)
+                }
                 Ordering::Greater => {
                     let remote_finalized_slot = Self::start_of_epoch(remote.finalized_epoch);
 
