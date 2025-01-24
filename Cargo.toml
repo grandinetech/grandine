@@ -294,7 +294,7 @@ base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
-bls12_381 = { git = "https://github.com/zkcrypto/bls12_381.git" }
+bls12_381 = { git = "https://github.com/sp1-patches/bls12_381", tag = "patch-0.8.0-sp1-4.0.0", features = ["groups"] }
 blst = { version = '0.3', features = ['portable'] }
 bstr = '1'
 build-time = '0.1'
@@ -418,7 +418,8 @@ serde_with = '3'
 serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
-sha2 = { version = '0.10', features = ['compress'] }
+#sha2 = { version = '0.10', features = ['compress'] }
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-4.0.0", features = ["compress"] }
 slog = { version = '2', features = ['max_level_trace'] }
 slog-async = '2'
 slog-stdlog = '4'
@@ -575,3 +576,5 @@ codegen-units = 1
 # `geth` responds to invalid payloads with objects containing `method` and `params`.
 # We had to fork `jsonrpc` because it does not allow nonstandard members.
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
+bls12_381 = { git = "https://github.com/sp1-patches/bls12_381", tag = "patch-0.8.0-sp1-4.0.0", features = ["groups"] }
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-4.0.0" }
