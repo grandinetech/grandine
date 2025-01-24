@@ -728,26 +728,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.69.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
-dependencies = [
- "bitflags 2.6.0",
- "cexpr",
- "clang-sys",
- "itertools 0.12.1",
- "lazy_static",
- "lazycell",
- "proc-macro2 1.0.92",
- "quote 1.0.37",
- "regex",
- "rustc-hash 1.1.0",
- "shlex",
- "syn 2.0.90",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
@@ -3344,7 +3324,7 @@ version = "1.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84793ab0a88a3afe0148d042677634c24c90a0303205666cc88970a1073a77ef"
 dependencies = [
- "bindgen 0.70.1",
+ "bindgen",
  "cmake",
 ]
 
@@ -4132,15 +4112,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
@@ -4363,12 +4334,6 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
  "spin 0.9.8",
 ]
-
-[[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "levenshtein"
@@ -6473,8 +6438,8 @@ dependencies = [
 
 [[package]]
 name = "reth-libmdbx"
-version = "1.0.6"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=c228fe15808c3acbf18dc3af1a03ef5cbdcda07a#c228fe15808c3acbf18dc3af1a03ef5cbdcda07a"
+version = "1.1.5"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=3212af2d85a54eb207661361ac9fe1d7de4b5b8e#3212af2d85a54eb207661361ac9fe1d7de4b5b8e"
 dependencies = [
  "bitflags 2.6.0",
  "byteorder",
@@ -6482,16 +6447,17 @@ dependencies = [
  "indexmap 2.7.0",
  "parking_lot",
  "reth-mdbx-sys",
- "thiserror 1.0.69",
+ "smallvec",
+ "thiserror 2.0.7",
  "tracing",
 ]
 
 [[package]]
 name = "reth-mdbx-sys"
-version = "1.0.6"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=c228fe15808c3acbf18dc3af1a03ef5cbdcda07a#c228fe15808c3acbf18dc3af1a03ef5cbdcda07a"
+version = "1.1.5"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=3212af2d85a54eb207661361ac9fe1d7de4b5b8e#3212af2d85a54eb207661361ac9fe1d7de4b5b8e"
 dependencies = [
- "bindgen 0.69.5",
+ "bindgen",
  "cc",
 ]
 

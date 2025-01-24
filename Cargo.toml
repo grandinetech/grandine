@@ -359,7 +359,7 @@ jemallocator = '0.5'
 jwt-simple = { version = '0.12', default-features = false, features = ['pure-rust'] }
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 lazy_static = '1'
-libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'c228fe15808c3acbf18dc3af1a03ef5cbdcda07a' }
+libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '3212af2d85a54eb207661361ac9fe1d7de4b5b8e' }
 libp2p = { version = '0.54', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
 libp2p-mplex = '0.42'
 log = '0.4'
