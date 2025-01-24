@@ -496,12 +496,12 @@ impl Eth1Api {
 
                     match self.peek_next_endpoint().await {
                         Some(next_endpoint) => warn!(
-                            "Eth1 RPC endpoint {url} returned an error: {error}; \
+                            "Eth1 RPC endpoint {url} returned an error: {error:?}; \
                              switching to {}",
                             next_endpoint.url(),
                         ),
                         None => warn!(
-                            "last available Eth1 RPC endpoint {url} returned an error: {error}",
+                            "last available Eth1 RPC endpoint {url} returned an error: {error:?}",
                         ),
                     }
 

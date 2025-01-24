@@ -62,6 +62,8 @@ pub fn try_run(argc: u64, argv: *const *const c_char) -> Result<()> {
 
 #[no_mangle]
 pub extern "C" fn grandine_run(argc: u64, argv: *const *const c_char) -> u64 {
+    std::env::set_var("RUST_BACKTRACE", "1");
+
     // let argc = argc as usize;
 
     // // Convert the raw pointer `argv` to a Rust slice of pointers

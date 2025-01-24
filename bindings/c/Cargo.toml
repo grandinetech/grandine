@@ -7,17 +7,17 @@ authors = ["Grandine <info@grandine.io>"]
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-runtime = { workspace = true, features = ["network-goerli", "network-mainnet", "network-sepolia", "network-shadow", "network-holesky", "embed"] }
+runtime = { workspace = true, features = ["network-goerli", "network-mainnet", "network-sepolia", "network-shadow", "network-holesky"] }
 directories = { workspace = true }
 grandine_version = { workspace = true }
-validator = { workspace = true, features = ["embed"] }
+validator = { workspace = true, features = [] }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
-eth1_api = { workspace = true, features = ["embed"] }
-signer = { workspace = true, features = ["embed"] }
+eth1_api = { workspace = true, features = [] }
+signer = { workspace = true, features = [] }
 slashing_protection = { workspace = true }
-http_api = { workspace = true, features = ["embed"] }
-slasher = { workspace = true, features = ["embed"] }
+http_api = { workspace = true, features = [] }
+slasher = { workspace = true, features = [] }
 anyhow = { workspace = true }
 types = { workspace = true }
 thiserror = { workspace = true }
