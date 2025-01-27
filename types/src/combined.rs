@@ -1511,7 +1511,7 @@ impl<P: Preset> Attestation<P> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, From, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum AttesterSlashing<P: Preset> {
     Phase0(Phase0AttesterSlashing<P>),

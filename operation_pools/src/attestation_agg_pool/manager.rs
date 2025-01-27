@@ -113,6 +113,21 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             .await
     }
 
+    pub async fn best_aggregate_attestation_by_data_root_and_committee_index(
+        &self,
+        attestation_data_root: H256,
+        epoch: Epoch,
+        committee_index: CommitteeIndex,
+    ) -> Option<Attestation<P>> {
+        self.pool
+            .best_aggregate_attestation_by_data_root_and_committee_index(
+                attestation_data_root,
+                epoch,
+                committee_index,
+            )
+            .await
+    }
+
     pub async fn best_proposable_attestations(
         &self,
         beacon_state: Arc<BeaconState<P>>,

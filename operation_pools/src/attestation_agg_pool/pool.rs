@@ -189,6 +189,29 @@ impl<P: Preset> Pool<P> {
         None
     }
 
+    // Handler for the `/eth/v2/validator/aggregate_attestation` API call.
+    // Expects `attestation_data_root` computed from the post-Electra `AttestationData`,
+    // with `committee_index` explicitly set to 0 and provided separately.
+    pub async fn best_aggregate_attestation_by_data_root_and_committee_index(
+        &self,
+        attestation_data_root: H256,
+        epoch: Epoch,
+        committee_index: CommitteeIndex,
+    ) -> Option<Attestation<P>> {
+        self.aggregate_attestations_by_epoch(epoch)
+            .await
+            .into_iter()
+            .filter(|attestation| {
+                let mut data = attestation.data;
+                let data_committee_index = data.index;
+                data.index = 0;
+
+                data_committee_index == committee_index
+                    && data.hash_tree_root() == attestation_data_root
+            })
+            .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
+    }
+
     pub async fn best_aggregate_attestation_by_data_root(
         &self,
         attestation_data_root: H256,

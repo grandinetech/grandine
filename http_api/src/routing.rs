@@ -29,19 +29,22 @@ use crate::{
     misc::SyncedStatus,
     standard::{
         beacon_events, beacon_heads, beacon_state, blob_sidecars, block, block_attestations,
-        block_headers, block_id_headers, block_rewards, block_root, config_spec, debug_fork_choice,
-        deposit_contract, expected_withdrawals, fork_schedule, genesis, get_state_validators,
-        node_health, node_identity, node_peer, node_peer_count, node_peers, node_syncing_status,
-        node_version, pool_attestations, pool_attester_slashings, pool_bls_to_execution_changes,
+        block_attestations_v2, block_headers, block_id_headers, block_rewards, block_root,
+        config_spec, debug_fork_choice, deposit_contract, expected_withdrawals, fork_schedule,
+        genesis, get_state_validators, node_health, node_identity, node_peer, node_peer_count,
+        node_peers, node_syncing_status, node_version, pool_attestations, pool_attestations_v2,
+        pool_attester_slashings, pool_attester_slashings_v2, pool_bls_to_execution_changes,
         pool_proposer_slashings, pool_voluntary_exits, post_state_validators,
         publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
         state_committees, state_finality_checkpoints, state_fork, state_randao, state_root,
-        state_sync_committees, state_validator, state_validator_balances, submit_pool_attestations,
-        submit_pool_attester_slashing, submit_pool_bls_to_execution_change,
+        state_sync_committees, state_validator, state_validator_balances,
+        state_validator_identities, submit_pool_attestations, submit_pool_attester_slashing,
+        submit_pool_attester_slashing_v2, submit_pool_bls_to_execution_change,
         submit_pool_proposer_slashing, submit_pool_sync_committees, submit_pool_voluntary_exit,
-        sync_committee_rewards, validator_aggregate_attestation, validator_attestation_data,
-        validator_attester_duties, validator_beacon_committee_selections, validator_blinded_block,
-        validator_block, validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
+        sync_committee_rewards, validator_aggregate_attestation,
+        validator_aggregate_attestation_v2, validator_attestation_data, validator_attester_duties,
+        validator_beacon_committee_selections, validator_blinded_block, validator_block,
+        validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_publish_aggregate_and_proofs,
         validator_publish_contributions_and_proofs, validator_register_validator,
         validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
@@ -307,6 +310,7 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
 //                      (`beacon`, `config`, `debug`, etc.). The same could be done with `gui`, but
 //                      `PATCH /features` requires special attention because it's more dangerous.
 
+#[expect(clippy::too_many_lines)]
 fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<NormalState<P, W>> {
     let state_routes = Router::new()
         .route("/eth/v1/beacon/states/:state_id/root", get(state_root))
@@ -322,6 +326,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .route(
             "/eth/v1/beacon/states/:state_id/validators",
             post(post_state_validators),
+        )
+        .route(
+            "/eth/v1/beacon/states/:state_id/validator_identities",
+            post(state_validator_identities),
         )
         .route(
             "/eth/v1/beacon/states/:state_id/validators/:validator_id",
@@ -345,7 +353,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .route("/eth/v1/beacon/headers", get(block_headers))
         .route("/eth/v1/beacon/headers/:block_id", get(block_id_headers));
 
-    let block_routes = Router::new()
+    let block_v1_routes = Router::new()
         .route("/eth/v1/beacon/blocks/:block_id/root", get(block_root))
         .route(
             "/eth/v1/beacon/blocks/:block_id/attestations",
@@ -359,7 +367,12 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
             )),
         );
 
-    let pool_routes = Router::new()
+    let block_v2_routes = Router::new().route(
+        "/eth/v2/beacon/blocks/:block_id/attestations",
+        get(block_attestations_v2),
+    );
+
+    let pool_v1_routes = Router::new()
         .route(
             "/eth/v1/beacon/pool/attestations",
             get(pool_attestations).post(submit_pool_attestations),
@@ -385,6 +398,16 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
             post(submit_pool_sync_committees),
         );
 
+    let pool_v2_routes = Router::new()
+        .route(
+            "/eth/v2/beacon/pool/attestations",
+            get(pool_attestations_v2),
+        )
+        .route(
+            "/eth/v2/beacon/pool/attester_slashings",
+            get(pool_attester_slashings_v2).post(submit_pool_attester_slashing_v2),
+        );
+
     let reward_routes = Router::new()
         .route(
             "/eth/v1/beacon/rewards/blocks/:block_id",
@@ -407,8 +430,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .route("/eth/v1/beacon/genesis", get(genesis))
         .merge(state_routes)
         .merge(header_routes)
-        .merge(block_routes)
-        .merge(pool_routes)
+        .merge(block_v1_routes)
+        .merge(block_v2_routes)
+        .merge(pool_v1_routes)
+        .merge(pool_v2_routes)
         .merge(reward_routes)
 }
 
@@ -544,6 +569,14 @@ fn eth_v2_validator_routes<P: Preset, W: Wait>(
     state: NormalState<P, W>,
 ) -> Router<NormalState<P, W>> {
     Router::new()
+        .route(
+            "/eth/v2/validator/aggregate_attestation",
+            get(validator_aggregate_attestation_v2),
+        )
+        .route(
+            "/eth/v2/validator/aggregate_and_proofs",
+            post(validator_publish_aggregate_and_proofs),
+        )
         .route("/eth/v2/validator/blocks/:slot", get(validator_block))
         .layer(axum::middleware::map_request_with_state(
             state,

@@ -13,6 +13,7 @@ use bls::SignatureBytes;
 use futures::channel::oneshot::Canceled;
 use http_api_utils::ApiError;
 use serde::{Serialize, Serializer};
+use ssz::H256;
 use thiserror::Error;
 use tokio::task::JoinError;
 use types::{deneb::primitives::BlobIndex, phase0::primitives::Slot};
@@ -21,6 +22,8 @@ use types::{deneb::primitives::BlobIndex, phase0::primitives::Slot};
 pub enum Error {
     #[error("attestation cannot be found")]
     AttestationNotFound,
+    #[error("block {block_root} not validated")]
+    BlockNotValidatedForAggregation { block_root: H256 },
     #[error("block not found")]
     BlockNotFound,
     #[error(transparent)]
@@ -225,9 +228,10 @@ impl Error {
             | Self::UnableToProduceBeaconBlock
             | Self::UnableToProduceBlindedBlock => StatusCode::INTERNAL_SERVER_ERROR,
             Self::EndpointNotImplemented => StatusCode::NOT_IMPLEMENTED,
-            Self::HeadFarBehind { .. } | Self::HeadIsOptimistic | Self::NodeIsSyncing => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+            Self::BlockNotValidatedForAggregation { .. }
+            | Self::HeadFarBehind { .. }
+            | Self::HeadIsOptimistic
+            | Self::NodeIsSyncing => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
