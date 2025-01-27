@@ -31,7 +31,9 @@ use types::{
     config::Config,
     nonstandard::Phase,
     phase0::{
-        containers::{ProposerSlashing, SignedVoluntaryExit},
+        containers::{
+            AttesterSlashing as Phase0AttesterSlashing, ProposerSlashing, SignedVoluntaryExit,
+        },
         primitives::{Epoch, ValidatorIndex},
     },
     preset::Preset,
@@ -196,7 +198,7 @@ impl<S> FromRequest<S, Body> for EthJson<Box<SignedVoluntaryExit>> {
 }
 
 #[async_trait]
-impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
+impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<Phase0AttesterSlashing<P>>> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
@@ -205,6 +207,27 @@ impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
             .await
             .map(|Json(slashing)| Self(slashing))
             .map_err(Error::InvalidJsonBody)
+    }
+}
+
+#[async_trait]
+impl<S, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P>>> {
+    type Rejection = Error;
+
+    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
+        match extract_phase(&request)? {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                request
+                    .extract()
+                    .await
+                    .map(|Json(slashing)| Self(Box::new(AttesterSlashing::Phase0(slashing))))
+            }
+            Phase::Electra => request
+                .extract()
+                .await
+                .map(|Json(slashing)| Self(Box::new(AttesterSlashing::Electra(slashing)))),
+        }
+        .map_err(Error::InvalidJsonBody)
     }
 }
 
@@ -371,15 +394,7 @@ where
                 request.extract_parts::<TypedHeader<ContentType>>().await?;
 
             if content_type == ContentType::octet_stream() {
-                let phase = request
-                    .headers()
-                    .get(ETH_CONSENSUS_VERSION)
-                    .ok_or(Error::MissingEthConsensusVersionHeader)?
-                    .to_str()?
-                    .parse()
-                    .map_err(AnyhowError::msg)
-                    .map_err(Error::InvalidEthConsensusVersionHeader)?;
-
+                let phase = extract_phase(&request)?;
                 let bytes = Bytes::from_request(request, state).await?;
                 let block = T::from_ssz(&phase, bytes)?;
                 return Ok(Self(block));
@@ -392,4 +407,17 @@ where
 
         run.await.map_err(Error::InvalidBlock)
     }
+}
+
+fn extract_phase(request: &Request<Body>) -> Result<Phase, Error> {
+    request
+        .headers()
+        .get(ETH_CONSENSUS_VERSION)
+        .ok_or(Error::MissingEthConsensusVersionHeader)?
+        .to_str()
+        .map_err(AnyhowError::msg)
+        .map_err(Error::InvalidEthConsensusVersionHeader)?
+        .parse()
+        .map_err(AnyhowError::msg)
+        .map_err(Error::InvalidEthConsensusVersionHeader)
 }

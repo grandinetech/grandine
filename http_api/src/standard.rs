@@ -43,7 +43,7 @@ use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
-use ssz::{ContiguousList, SszHash as _};
+use ssz::{ContiguousList, Ssz, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
@@ -71,8 +71,8 @@ use types::{
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
-            AttestationData, Checkpoint, Fork, ProposerSlashing, SignedBeaconBlockHeader,
-            SignedVoluntaryExit, Validator,
+            AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint, Fork,
+            ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
         },
         primitives::{
             ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, SubnetId, Uint256,
@@ -178,6 +178,14 @@ pub struct AggregateAttestationQuery {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AggregateAttestationV2Query {
+    attestation_data_root: H256,
+    committee_index: CommitteeIndex,
+    slot: Slot,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AttestationDataQuery {
     committee_index: CommitteeIndex,
     slot: Slot,
@@ -252,6 +260,15 @@ pub struct StateFinalityCheckpointsResponse {
 #[derive(Serialize)]
 pub struct StateRandaoResponse {
     randao: H256,
+}
+
+#[derive(Serialize, Ssz)]
+pub struct StateValidatorIdentityResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    index: ValidatorIndex,
+    pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    activation_epoch: Epoch,
 }
 
 #[derive(Serialize)]
@@ -541,6 +558,58 @@ pub async fn post_state_validators<P: Preset, W: Wait>(
         state_id,
         &ids_and_statuses,
     )
+}
+
+/// `POST /eth/v1/beacon/states/{state_id}/validator_identities`
+pub async fn state_validator_identities<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
+    EthJson(ids): EthJson<Vec<ValidatorId>>,
+) -> Result<
+    EthResponse<
+        ContiguousList<StateValidatorIdentityResponse, P::ValidatorRegistryLimit>,
+        (),
+        JsonOrSsz,
+    >,
+    Error,
+> {
+    let WithStatus {
+        value: state,
+        optimistic,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    let ids = ids.into_iter().collect::<HashSet<_>>();
+
+    let validators = (0..)
+        .zip(state.validators())
+        .filter_map(|(index, validator)| {
+            if !ids.is_empty() {
+                let validator_index = ValidatorId::ValidatorIndex(index);
+                let validator_pubkey = ValidatorId::PublicKey(*validator.pubkey.as_bytes());
+
+                let allowed_by_id =
+                    ids.contains(&validator_index) || ids.contains(&validator_pubkey);
+
+                if !allowed_by_id {
+                    return None;
+                }
+            }
+
+            Some(StateValidatorIdentityResponse {
+                index,
+                pubkey: validator.pubkey.to_bytes(),
+                activation_epoch: validator.activation_epoch,
+            })
+        });
+
+    let validators = ContiguousList::try_from_iter(validators).map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(validators, &headers)?
+        .execution_optimistic(optimistic)
+        .finalized(finalized))
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}`
@@ -934,6 +1003,29 @@ pub async fn block_attestations<P: Preset, W: Wait>(
         .pipe(Ok)
 }
 
+/// `GET /eth/v2/beacon/blocks/{block_id}/attestations`
+pub async fn block_attestations_v2<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(block_id): EthPath<BlockId>,
+) -> Result<Response, Error> {
+    let WithStatus {
+        value: block,
+        optimistic,
+        finalized,
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let attestations = block.message().body().combined_attestations().collect_vec();
+
+    attestations
+        .pipe(EthResponse::json)
+        .execution_optimistic(optimistic)
+        .finalized(finalized)
+        .version(block.phase())
+        .into_response()
+        .pipe(Ok)
+}
+
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
 pub async fn blob_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
@@ -1215,34 +1307,28 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
     } = query;
 
     let phase = chain_config.phase_at_slot::<P>(slot);
-    let epoch = misc::compute_epoch_at_slot::<P>(slot);
-
-    let aggregates = attestation_agg_pool
-        .aggregate_attestations_by_epoch(epoch)
-        .await;
-
-    let singular_attestations = attestation_agg_pool
-        .singular_attestations_by_epoch(epoch)
-        .await;
-
-    let attestations = aggregates
-        .iter()
-        .chain(singular_attestations.iter().map(Arc::as_ref))
-        .filter(|attestation| attestation.data.index == committee_index)
-        .filter(|attestation| attestation.data.slot == slot)
-        .cloned()
-        .filter_map(|attestation| {
-            if phase < Phase::Electra {
-                Some(Attestation::Phase0(attestation))
-            } else {
-                convert_to_electra_attestation(attestation)
-                    .map(Attestation::Electra)
-                    .ok()
-            }
-        })
-        .collect();
+    let attestations =
+        get_pool_attestations(attestation_agg_pool, slot, committee_index, phase).await;
 
     Ok(EthResponse::json(attestations))
+}
+
+/// `GET /eth/v2/beacon/pool/attestations`
+pub async fn pool_attestations_v2<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
+    EthQuery(query): EthQuery<PoolAttestationQuery>,
+) -> Result<EthResponse<Vec<Attestation<P>>>, Error> {
+    let PoolAttestationQuery {
+        slot,
+        committee_index,
+    } = query;
+
+    let phase = chain_config.phase_at_slot::<P>(slot);
+    let attestations =
+        get_pool_attestations(attestation_agg_pool, slot, committee_index, phase).await;
+
+    Ok(EthResponse::json(attestations).version(phase))
 }
 
 /// `POST /eth/v1/beacon/pool/proposer_slashings`
@@ -1314,6 +1400,31 @@ pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(event_channels): State<Arc<EventChannels>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthJson(attester_slashing): EthJson<Box<Phase0AttesterSlashing<P>>>,
+) -> Result<(), Error> {
+    let attester_slashing = Box::new(AttesterSlashing::Phase0(*attester_slashing));
+
+    let outcome = block_producer
+        .handle_external_attester_slashing(*attester_slashing.clone())
+        .await?;
+
+    if outcome.is_publishable() {
+        event_channels.send_attester_slashing_event(&attester_slashing);
+        ApiToP2p::PublishAttesterSlashing(attester_slashing).send(&api_to_p2p_tx);
+    }
+
+    if let PoolAdditionOutcome::Reject(_, error) = outcome {
+        return Err(Error::InvalidAttesterSlashing(error));
+    }
+
+    Ok(())
+}
+
+/// `POST /eth/v2/beacon/pool/attester_slashings`
+pub async fn submit_pool_attester_slashing_v2<P: Preset, W: Wait>(
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(event_channels): State<Arc<EventChannels>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attester_slashing): EthJson<Box<AttesterSlashing<P>>>,
 ) -> Result<(), Error> {
     let outcome = block_producer
@@ -1339,6 +1450,35 @@ pub async fn pool_attester_slashings<P: Preset, W: Wait>(
     let data = block_producer.get_attester_slashings().await;
 
     Ok(EthResponse::json(data))
+}
+
+/// `GET /eth/v2/beacon/pool/attester_slashings`
+pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(controller): State<ApiController<P, W>>,
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+) -> Result<EthResponse<Vec<AttesterSlashing<P>>>, Error> {
+    let snapshot = controller.snapshot();
+    let head_slot = snapshot.head_slot();
+    let phase = chain_config.phase_at_slot::<P>(head_slot);
+    let slashings = block_producer.get_attester_slashings().await;
+
+    let data = match phase {
+        Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+            slashings
+                .into_iter()
+                .filter_map(AttesterSlashing::pre_electra)
+                .map(|slashing| AttesterSlashing::Phase0(slashing))
+                .collect()
+        }
+        Phase::Electra => slashings
+            .into_iter()
+            .filter_map(AttesterSlashing::post_electra)
+            .map(|slashing| AttesterSlashing::Electra(slashing))
+            .collect(),
+    };
+
+    Ok(EthResponse::json(data).version(phase))
 }
 
 /// `POST /eth/v1/beacon/pool/attestations`
@@ -1909,6 +2049,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
 /// `GET /eth/v1/validator/aggregate_attestation`
 pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
+    State(controller): State<ApiController<P, W>>,
     State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
     EthQuery(query): EthQuery<AggregateAttestationQuery>,
 ) -> Result<EthResponse<Attestation<P>>, Error> {
@@ -1925,7 +2066,15 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
         .await
         .ok_or(Error::AttestationNotFound)?;
 
-    // TODO: feature/electra - abstract or refactor
+    let block_root = attestation.data.beacon_block_root;
+    let is_valid = controller
+        .block_by_root(attestation.data.beacon_block_root)?
+        .is_some_and(|block| !block.optimistic);
+
+    if !is_valid {
+        return Err(Error::BlockNotValidatedForAggregation { block_root });
+    }
+
     let attestation = if phase < Phase::Electra {
         Attestation::Phase0(attestation)
     } else {
@@ -1933,6 +2082,49 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json(attestation))
+}
+
+/// `GET /eth/v2/validator/aggregate_attestation`
+pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(controller): State<ApiController<P, W>>,
+    State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
+    EthQuery(query): EthQuery<AggregateAttestationV2Query>,
+) -> Result<EthResponse<Attestation<P>>, Error> {
+    let AggregateAttestationV2Query {
+        attestation_data_root,
+        committee_index,
+        slot,
+    } = query;
+
+    let phase = chain_config.phase_at_slot::<P>(slot);
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+    let attestation = attestation_agg_pool
+        .best_aggregate_attestation_by_data_root_and_committee_index(
+            attestation_data_root,
+            epoch,
+            committee_index,
+        )
+        .await
+        .ok_or(Error::AttestationNotFound)?;
+
+    let block_root = attestation.data.beacon_block_root;
+    let is_valid = controller
+        .block_by_root(block_root)?
+        .is_some_and(|block| !block.optimistic);
+
+    if !is_valid {
+        return Err(Error::BlockNotValidatedForAggregation { block_root });
+    }
+
+    let attestation = if phase < Phase::Electra {
+        Attestation::Phase0(attestation)
+    } else {
+        convert_to_electra_attestation(attestation).map(Attestation::Electra)?
+    };
+
+    Ok(EthResponse::json(attestation).version(phase))
 }
 
 /// `GET /eth/v1/validator/blinded_blocks/{slot}`
@@ -2301,6 +2493,7 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/validator/aggregate_and_proofs`
+/// `POST /eth/v2/validator/aggregate_and_proofs`
 ///
 /// This deviates from [the specification] by returning errors as [`IndexedError`].
 /// Lighthouse does the same thing.
@@ -2706,6 +2899,41 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
     };
 
     Ok(status_code)
+}
+
+async fn get_pool_attestations<P: Preset, W: Wait>(
+    attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
+    slot: Slot,
+    committee_index: CommitteeIndex,
+    phase: Phase,
+) -> Vec<Attestation<P>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+    let aggregates = attestation_agg_pool
+        .aggregate_attestations_by_epoch(epoch)
+        .await;
+
+    let singular_attestations = attestation_agg_pool
+        .singular_attestations_by_epoch(epoch)
+        .await;
+
+    aggregates
+        .iter()
+        .chain(singular_attestations.iter().map(Arc::as_ref))
+        .filter(|attestation| {
+            attestation.data.index == committee_index && attestation.data.slot == slot
+        })
+        .cloned()
+        .filter_map(|attestation| {
+            if phase < Phase::Electra {
+                Some(Attestation::Phase0(attestation))
+            } else {
+                convert_to_electra_attestation(attestation)
+                    .map(Attestation::Electra)
+                    .ok()
+            }
+        })
+        .collect()
 }
 
 async fn submit_attestation_to_pool<P: Preset, W: Wait>(
