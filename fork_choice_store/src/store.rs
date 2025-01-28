@@ -418,7 +418,7 @@ impl<P: Preset> Store<P> {
 
         Some(WithStatus {
             value: &chain_link.block,
-            optimistic: chain_link.is_optimistic(),
+            status: chain_link.payload_status,
             finalized: self.is_slot_finalized(chain_link.slot()),
         })
     }
@@ -471,7 +471,7 @@ impl<P: Preset> Store<P> {
             .find(|chain_link| chain_link.block.message().state_root() == state_root)
             .map(|chain_link| WithStatus {
                 value: chain_link.state(self),
-                optimistic: chain_link.is_optimistic(),
+                status: chain_link.payload_status,
                 finalized: self.is_slot_finalized(chain_link.slot()),
             })
     }

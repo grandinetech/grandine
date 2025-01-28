@@ -345,7 +345,7 @@ impl<T, P: Preset> WithBlobsAndMev<T, P> {
 
 pub struct WithStatus<T> {
     pub value: T,
-    pub optimistic: bool,
+    pub status: PayloadStatus,
     pub finalized: bool,
 }
 
@@ -361,10 +361,15 @@ pub struct WithStatus<T> {
 /// ```
 impl<T> WithStatus<T> {
     #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.status.is_valid()
+    }
+
+    #[must_use]
     pub const fn valid(value: T, finalized: bool) -> Self {
         Self {
             value,
-            optimistic: false,
+            status: PayloadStatus::Valid,
             finalized,
         }
     }
@@ -373,7 +378,7 @@ impl<T> WithStatus<T> {
     pub const fn valid_and_finalized(value: T) -> Self {
         Self {
             value,
-            optimistic: false,
+            status: PayloadStatus::Valid,
             finalized: true,
         }
     }
@@ -382,7 +387,7 @@ impl<T> WithStatus<T> {
     pub const fn valid_and_unfinalized(value: T) -> Self {
         Self {
             value,
-            optimistic: false,
+            status: PayloadStatus::Valid,
             finalized: false,
         }
     }
@@ -396,13 +401,13 @@ impl<T> WithStatus<T> {
     pub fn map<U>(self, function: impl FnOnce(T) -> U) -> WithStatus<U> {
         let Self {
             value,
-            optimistic,
+            status,
             finalized,
         } = self;
 
         WithStatus {
             value: function(value),
-            optimistic,
+            status,
             finalized,
         }
     }
@@ -413,13 +418,13 @@ impl<T: Clone> WithStatus<&T> {
     pub fn cloned(self) -> WithStatus<T> {
         let Self {
             value,
-            optimistic,
+            status,
             finalized,
         } = self;
 
         WithStatus {
             value: value.clone(),
-            optimistic,
+            status,
             finalized,
         }
     }

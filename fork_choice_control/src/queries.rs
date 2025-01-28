@@ -111,7 +111,7 @@ where
 
         Ok(WithStatus {
             value: chain_link.state(&store),
-            optimistic: chain_link.is_optimistic(),
+            status: chain_link.payload_status,
             finalized: store.is_slot_finalized(chain_link.slot()),
         })
     }
@@ -123,7 +123,7 @@ where
 
         WithStatus {
             value: chain_link.block_root,
-            optimistic: chain_link.is_optimistic(),
+            status: chain_link.payload_status,
             finalized: true,
         }
     }
@@ -135,7 +135,7 @@ where
 
         WithStatus {
             value: chain_link.block.clone_arc(),
-            optimistic: chain_link.is_optimistic(),
+            status: chain_link.payload_status,
             finalized: true,
         }
     }
@@ -153,7 +153,7 @@ where
 
         WithStatus {
             value: chain_link.state(&store),
-            optimistic: chain_link.is_optimistic(),
+            status: chain_link.payload_status,
             finalized: true,
         }
     }
@@ -227,7 +227,7 @@ where
 
         WithStatus {
             value: head.clone(),
-            optimistic: head.is_optimistic(),
+            status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -244,7 +244,7 @@ where
 
         WithStatus {
             value: head.block_root,
-            optimistic: head.is_optimistic(),
+            status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -256,7 +256,7 @@ where
 
         WithStatus {
             value: head.block.clone_arc(),
-            optimistic: head.is_optimistic(),
+            status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -268,7 +268,7 @@ where
 
         WithStatus {
             value: head.state(&store),
-            optimistic: head.is_optimistic(),
+            status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -344,7 +344,7 @@ where
         if let Some(chain_link) = store.chain_link(block_root) {
             return Ok(Some(WithStatus {
                 value: block_root,
-                optimistic: chain_link.is_optimistic(),
+                status: chain_link.payload_status,
                 finalized: store.is_slot_finalized(chain_link.slot()),
             }));
         }
@@ -389,7 +389,7 @@ where
 
                 return Ok(Some(WithStatus {
                     value: BlockWithRoot { block, root },
-                    optimistic: chain_link.is_optimistic(),
+                    status: chain_link.payload_status,
                     finalized: store.is_slot_finalized(chain_link.slot()),
                 }));
             }
@@ -542,7 +542,7 @@ where
 
         Ok(WithStatus {
             value: state,
-            optimistic: head.is_optimistic(),
+            status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         })
     }
@@ -875,7 +875,7 @@ impl<P: Preset> Snapshot<'_, P> {
 
             return Ok(Some(WithStatus {
                 value: state,
-                optimistic: chain_link.is_optimistic(),
+                status: chain_link.payload_status,
                 finalized: store.is_slot_finalized(slot),
             }));
         }

@@ -635,7 +635,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
         let WithStatus {
             value: head,
-            optimistic,
+            status,
             ..
         } = self.controller.head();
 
@@ -667,7 +667,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             config: self.chain_config.clone_arc(),
             beacon_block_root: block_root,
             beacon_state,
-            optimistic,
+            optimistic: status.is_optimistic(),
         }))
     }
 
