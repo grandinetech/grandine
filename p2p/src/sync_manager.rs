@@ -50,9 +50,12 @@ impl From<&StatusMessage> for ChainId {
 }
 
 const BATCHES_PER_PEER: usize = 1;
-const EPOCHS_PER_REQUEST: u64 = 2; // max 32
-const GREEDY_MODE_BATCH_MULTIPLIER: usize = 3;
-const GREEDY_MODE_PEER_LIMIT: usize = 2;
+const EPOCHS_PER_REQUEST: u64 = if cfg!(test) {
+    2
+} else {
+    // max 32
+    1
+};
 const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN_IN_SECONDS: u64 = 12;
@@ -731,14 +734,8 @@ impl SyncManager {
     }
 
     fn peer_sync_batch_assignments(peers: &[PeerId]) -> impl Iterator<Item = PeerId> + '_ {
-        let batches_per_peer = if peers.len() <= GREEDY_MODE_PEER_LIMIT {
-            BATCHES_PER_PEER * GREEDY_MODE_BATCH_MULTIPLIER
-        } else {
-            BATCHES_PER_PEER
-        };
-
         core::iter::repeat(peers)
-            .take(batches_per_peer)
+            .take(BATCHES_PER_PEER)
             .flatten()
             .copied()
     }
@@ -956,6 +953,7 @@ mod tests {
         let current_slot = 20_001;
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
+        let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
 
         let peer_status = StatusMessage {
             fork_digest: H32::default(),
@@ -977,8 +975,8 @@ mod tests {
                 local_finalized_slot,
             )?;
 
-            let sync_range_from = local_head_slot + 64 * 3 * i + 1;
-            let sync_range_to = sync_range_from + 64 * 3 - 1;
+            let sync_range_from = local_head_slot + slots_per_request * i + 1;
+            let sync_range_to = sync_range_from + slots_per_request - 1;
 
             assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
 
@@ -991,11 +989,7 @@ mod tests {
                 batches
                     .into_iter()
                     .map(|batch| (batch.start_slot, batch.count)),
-                [
-                    (sync_range_from, 64),
-                    (sync_range_from + 64, 64),
-                    (sync_range_from + 64 * 2, 64),
-                ],
+                [(sync_range_from, slots_per_request)],
             );
         }
 
@@ -1008,6 +1002,7 @@ mod tests {
         let current_slot = 20_001;
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
+        let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
 
         let peer_status = StatusMessage {
             fork_digest: H32::default(),
@@ -1029,7 +1024,7 @@ mod tests {
         )?;
 
         let sync_range_from = local_head_slot + 1;
-        let sync_range_to = sync_range_from + 64 * 3 - 1;
+        let sync_range_to = sync_range_from + slots_per_request - 1;
 
         assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
 
@@ -1044,7 +1039,7 @@ mod tests {
             )?;
 
             let sync_range_from = local_head_slot - 32 + 1;
-            let sync_range_to = sync_range_from + 64 * 3 - 1;
+            let sync_range_to = sync_range_from + slots_per_request - 1;
 
             assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
         }
@@ -1062,8 +1057,8 @@ mod tests {
                 local_finalized_slot,
             )?;
 
-            let sync_range_from = local_finalized_slot + 64 * 3 * i + 1;
-            sync_range_to = sync_range_from + 64 * 3 - 1;
+            let sync_range_from = local_finalized_slot + slots_per_request * i + 1;
+            sync_range_to = sync_range_from + slots_per_request - 1;
 
             assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
 
@@ -1080,7 +1075,7 @@ mod tests {
         )?;
 
         let sync_range_from = local_head_slot - 32 + 1;
-        let sync_range_to = sync_range_from + 64 * 3 - 1;
+        let sync_range_to = sync_range_from + slots_per_request - 1;
 
         assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
 
