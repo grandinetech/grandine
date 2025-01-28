@@ -505,7 +505,8 @@ impl<P: Preset> Context<P> {
                 .check_block_root(block.message().hash_tree_root())
                 .expect("no storage errors should occur")
                 .expect("block should be present in the store")
-                .optimistic,
+                .status
+                .is_optimistic(),
             expected_optimistic,
         );
     }

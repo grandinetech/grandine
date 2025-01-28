@@ -441,7 +441,7 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<Withdrawal>>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -467,7 +467,7 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
     let expected_withdrawals = transition_functions::capella::get_expected_withdrawals(state)?;
 
     Ok(EthResponse::json(expected_withdrawals)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -479,14 +479,14 @@ pub async fn state_root<P: Preset, W: Wait>(
 ) -> Result<EthResponse<RootResponse>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let root = state.hash_tree_root();
 
     Ok(EthResponse::json(RootResponse { root })
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -498,12 +498,12 @@ pub async fn state_fork<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Fork>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     Ok(EthResponse::json(state.fork())
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -515,7 +515,7 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
 ) -> Result<EthResponse<StateFinalityCheckpointsResponse>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -526,7 +526,7 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json(response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -577,7 +577,7 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
 > {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -608,7 +608,7 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
     let validators = ContiguousList::try_from_iter(validators).map_err(AnyhowError::new)?;
 
     Ok(EthResponse::json_or_ssz(validators, &headers)?
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -620,7 +620,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
 ) -> Result<EthResponse<StateValidatorResponse>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -647,7 +647,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json(response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -660,7 +660,7 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -680,7 +680,7 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
     .collect();
 
     Ok(EthResponse::json(balances)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -693,7 +693,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
     let WithStatus {
         value: mut state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -748,7 +748,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
         .collect::<Result<_>>()?;
 
     Ok(EthResponse::json(responses)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -761,13 +761,13 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
 ) -> Result<Response, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let Some(state) = state.post_altair() else {
         return Ok(EthResponse::json(StateSyncCommitteeResponse::default())
-            .execution_optimistic(optimistic)
+            .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
             .into_response());
     };
@@ -803,7 +803,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json(response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .into_response())
 }
@@ -817,7 +817,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
 ) -> Result<EthResponse<StateRandaoResponse>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -836,7 +836,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
     let response = StateRandaoResponse { randao };
 
     Ok(EthResponse::json(response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -900,7 +900,7 @@ pub async fn block_headers<P: Preset, W: Wait>(
 
     let WithStatus {
         value: block,
-        optimistic,
+        status,
         finalized,
     } = with_status;
 
@@ -911,7 +911,7 @@ pub async fn block_headers<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json([response])
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -925,7 +925,7 @@ pub async fn block_id_headers<P: Preset, W: Wait>(
 
     let WithStatus {
         value: block,
-        optimistic,
+        status,
         finalized,
     } = controller
         .block_by_root(root)?
@@ -939,7 +939,7 @@ pub async fn block_id_headers<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json(response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -952,14 +952,14 @@ pub async fn block<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Arc<SignedBeaconBlock<P>>, (), JsonOrSsz>, Error> {
     let WithStatus {
         value: block,
-        optimistic,
+        status,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = block.phase();
 
     Ok(EthResponse::json_or_ssz(block, &headers)?
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .version(version))
 }
@@ -972,12 +972,12 @@ pub async fn block_root<P: Preset, W: Wait>(
 ) -> Result<EthResponse<RootResponse>, Error> {
     let WithStatus {
         value: root,
-        optimistic,
+        status,
         finalized,
     } = block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?;
 
     Ok(EthResponse::json(RootResponse { root })
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -989,7 +989,7 @@ pub async fn block_attestations<P: Preset, W: Wait>(
 ) -> Result<Response, Error> {
     let WithStatus {
         value: block,
-        optimistic,
+        status,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -997,7 +997,7 @@ pub async fn block_attestations<P: Preset, W: Wait>(
 
     attestations
         .pipe(EthResponse::json)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .into_response()
         .pipe(Ok)
@@ -1011,7 +1011,7 @@ pub async fn block_attestations_v2<P: Preset, W: Wait>(
 ) -> Result<Response, Error> {
     let WithStatus {
         value: block,
-        optimistic,
+        status,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -1019,7 +1019,7 @@ pub async fn block_attestations_v2<P: Preset, W: Wait>(
 
     attestations
         .pipe(EthResponse::json)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .version(block.phase())
         .into_response()
@@ -1194,7 +1194,7 @@ pub async fn block_rewards<P: Preset, W: Wait>(
 ) -> Result<EthResponse<BlockRewardsResponse>, Error> {
     let WithStatus {
         value: signed_block,
-        optimistic,
+        status,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -1233,7 +1233,7 @@ pub async fn block_rewards<P: Preset, W: Wait>(
     };
 
     Ok(EthResponse::json(rewards_response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -1247,7 +1247,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<SyncCommitteeRewardsResponse>>, Error> {
     let WithStatus {
         value: block,
-        optimistic,
+        status,
         finalized,
     } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -1255,7 +1255,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
 
     if block_slot == GENESIS_SLOT || block.phase() < Phase::Altair {
         return Ok(EthResponse::json(vec![])
-            .execution_optimistic(optimistic)
+            .execution_optimistic(status.is_optimistic())
             .finalized(finalized));
     }
 
@@ -1291,7 +1291,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
     .collect::<Result<_>>()?;
 
     Ok(EthResponse::json(response)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
@@ -1731,14 +1731,14 @@ pub async fn beacon_state<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Arc<BeaconState<P>>, (), JsonOrSsz>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = state.phase();
 
     Ok(EthResponse::json_or_ssz(state, &headers)?
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .version(version))
 }
@@ -1891,7 +1891,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
     } = state;
@@ -1940,7 +1940,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
     Ok(EthResponse::json(response)
         .dependent_root(dependent_root)
-        .execution_optimistic(optimistic))
+        .execution_optimistic(status.is_optimistic()))
 }
 
 /// `GET /eth/v1/validator/duties/proposer/{epoch}`
@@ -1950,7 +1950,7 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
     } = controller.preprocessed_state_at_epoch(epoch)?;
@@ -1973,7 +1973,7 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 
     Ok(EthResponse::json(response)
         .dependent_root(dependent_root)
-        .execution_optimistic(optimistic))
+        .execution_optimistic(status.is_optimistic()))
 }
 
 // TODO(Grandine Team): This returns incorrect duties if called before Altair.
@@ -1993,7 +1993,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
 
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
     } = state_id::state(
@@ -2003,7 +2003,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     )?;
 
     let Some(state) = state.post_altair() else {
-        return Ok(EthResponse::json(vec![]).execution_optimistic(optimistic));
+        return Ok(EthResponse::json(vec![]).execution_optimistic(status.is_optimistic()));
     };
 
     let requested_period = misc::sync_committee_period::<P>(epoch);
@@ -2043,7 +2043,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
         .filter_map(Result::transpose)
         .collect::<Result<_>>()?;
 
-    Ok(EthResponse::json(duties).execution_optimistic(optimistic))
+    Ok(EthResponse::json(duties).execution_optimistic(status.is_optimistic()))
 }
 
 /// `GET /eth/v1/validator/aggregate_attestation`
@@ -2069,7 +2069,7 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
     let block_root = attestation.data.beacon_block_root;
     let is_valid = controller
         .block_by_root(attestation.data.beacon_block_root)?
-        .is_some_and(|block| !block.optimistic);
+        .is_some_and(|block| block.is_valid());
 
     if !is_valid {
         return Err(Error::BlockNotValidatedForAggregation { block_root });
@@ -2112,7 +2112,7 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
     let block_root = attestation.data.beacon_block_root;
     let is_valid = controller
         .block_by_root(block_root)?
-        .is_some_and(|block| !block.optimistic);
+        .is_some_and(|block| block.is_valid());
 
     if !is_valid {
         return Err(Error::BlockNotValidatedForAggregation { block_root });
@@ -2340,7 +2340,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 
     let WithStatus {
         value: head,
-        optimistic,
+        status,
         ..
     } = controller.head();
 
@@ -2377,11 +2377,11 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         state = controller
             .state_before_or_at_slot(block_root, slot)
             .ok_or(Error::StateNotFound)?;
-        is_optimistic = block.optimistic;
+        is_optimistic = block.status.is_optimistic();
     } else {
         block_root = head.block_root;
         state = controller.state_by_chain_link(&head);
-        is_optimistic = optimistic;
+        is_optimistic = status.is_optimistic();
     };
 
     if is_optimistic {
@@ -2660,7 +2660,7 @@ fn state_validators<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
     let WithStatus {
         value: state,
-        optimistic,
+        status,
         finalized,
     } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
 
@@ -2712,7 +2712,7 @@ fn state_validators<P: Preset, W: Wait>(
     .collect();
 
     Ok(EthResponse::json(validators)
-        .execution_optimistic(optimistic)
+        .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
 
