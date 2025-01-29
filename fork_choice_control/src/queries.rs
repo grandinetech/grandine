@@ -158,12 +158,11 @@ where
         }
     }
 
-    // TODO(Grandine Team): This will incorrectly return `None` for archived slots.
-    #[must_use]
-    pub fn finalized_block_root_before_or_at(&self, slot: Slot) -> Option<H256> {
-        self.store_snapshot()
-            .finalized_before_or_at(slot)
-            .map(|chain_link| chain_link.block_root)
+    pub fn finalized_block_root_before_or_at(&self, slot: Slot) -> Result<Option<H256>> {
+        match self.store_snapshot().finalized_before_or_at(slot) {
+            Some(chain_link) => Ok(Some(chain_link.block_root)),
+            None => self.storage().block_root_before_or_at_slot(slot),
+        }
     }
 
     pub fn checkpoint_state(&self, checkpoint: Checkpoint) -> Result<Option<Arc<BeaconState<P>>>> {
