@@ -1581,11 +1581,18 @@ impl<P: Preset> Network<P> {
                 Ordering::Greater => {
                     let remote_finalized_slot = Self::start_of_epoch(remote.finalized_epoch);
 
-                    (
-                        self.controller
-                            .finalized_block_root_before_or_at(remote_finalized_slot),
-                        SyncStatus::Behind { info },
-                    )
+                    let finalized_root_at_slot = match self
+                        .controller
+                        .finalized_block_root_before_or_at(remote_finalized_slot)
+                    {
+                        Ok(root) => root,
+                        Err(error) => {
+                            warn!("failed to query for finalized block root: {error:?}");
+                            None
+                        }
+                    };
+
+                    (finalized_root_at_slot, SyncStatus::Behind { info })
                 }
             };
 
@@ -1606,7 +1613,10 @@ impl<P: Preset> Network<P> {
 
                 return;
             }
-        } else if matches!(sync_status, SyncStatus::Behind { .. }) {
+        } else if matches!(sync_status, SyncStatus::Behind { .. })
+            && local.finalized_root != H256::zero()
+            && remote.finalized_root != H256::zero()
+        {
             debug!(
                 "disconnecting peer {peer_id} due to missing historical data \
                  required to validate finalized root {:?} at epoch {}",

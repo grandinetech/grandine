@@ -534,6 +534,21 @@ impl<P: Preset> Storage<P> {
         self.block_root_by_slot(slot)
     }
 
+    pub(crate) fn block_root_before_or_at_slot(&self, slot: Slot) -> Result<Option<H256>> {
+        let results = self
+            .database
+            .iterator_descending(..=BlockRootBySlot(slot).to_string())?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
+                .map(|(_, value_bytes)| H256::from_ssz_default(value_bytes))
+                .next()
+                .transpose()
+        })?
+        .map_err(Into::into)
+    }
+
     pub(crate) fn finalized_block_by_slot(
         &self,
         slot: Slot,
@@ -798,10 +813,8 @@ impl<P: Preset> Storage<P> {
 
         itertools::process_results(results, |pairs| {
             pairs
-                .take_while(|(key_bytes, _)| {
-                    FinalizedBlockByRoot::has_prefix(key_bytes)
-                        && !UnfinalizedBlockByRoot::has_prefix(key_bytes)
-                })
+                .take_while(|(key_bytes, _)| FinalizedBlockByRoot::has_prefix(key_bytes))
+                .filter(|(key_bytes, _)| !UnfinalizedBlockByRoot::has_prefix(key_bytes))
                 .count()
         })
     }
@@ -1210,6 +1223,43 @@ mod tests {
 
         assert_eq!(storage.slot_by_blob_id_count()?, 1);
         assert_eq!(storage.blob_sidecar_by_blob_id_count()?, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_root_before_or_at_slot() -> Result<()> {
+        let database = Database::in_memory();
+
+        database.put_batch(vec![
+            serialize(BlockRootBySlot(2), H256::repeat_byte(2))?,
+            serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
+        ])?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            database,
+            nonzero!(64_u64),
+            StorageMode::Standard,
+        );
+
+        assert_eq!(storage.block_root_before_or_at_slot(1)?, None);
+        assert_eq!(
+            storage.block_root_before_or_at_slot(2)?,
+            Some(H256::repeat_byte(2)),
+        );
+        assert_eq!(
+            storage.block_root_before_or_at_slot(3)?,
+            Some(H256::repeat_byte(2)),
+        );
+        assert_eq!(
+            storage.block_root_before_or_at_slot(6)?,
+            Some(H256::repeat_byte(6)),
+        );
+        assert_eq!(
+            storage.block_root_before_or_at_slot(9)?,
+            Some(H256::repeat_byte(6)),
+        );
 
         Ok(())
     }
