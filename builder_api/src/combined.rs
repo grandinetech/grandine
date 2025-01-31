@@ -1,6 +1,7 @@
 use bls::{PublicKeyBytes, SignatureBytes};
+use enum_iterator::Sequence;
 use serde::Deserialize;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, ReadError, Size, SszRead, SszReadDefault, SszSize};
 use types::{
     bellatrix::containers::ExecutionPayload as BellatrixExecutionPayload,
     capella::containers::ExecutionPayload as CapellaExecutionPayload,
@@ -36,6 +37,40 @@ pub enum SignedBuilderBid<P: Preset> {
     Capella(CapellaSignedBuilderBid<P>),
     Deneb(DenebSignedBuilderBid<P>),
     Electra(ElectraSignedBuilderBid<P>),
+}
+
+impl<P: Preset> SszSize for SignedBuilderBid<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 2 }>([
+        BellatrixSignedBuilderBid::<P>::SIZE,
+        CapellaSignedBuilderBid::<P>::SIZE,
+        DenebSignedBuilderBid::<P>::SIZE,
+        ElectraSignedBuilderBid::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszRead<Phase> for SignedBuilderBid<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        let block = match phase {
+            Phase::Phase0 => {
+                return Err(ReadError::Custom {
+                    message: "signed builder bid is not available in Phase 0",
+                });
+            }
+            Phase::Altair => {
+                return Err(ReadError::Custom {
+                    message: "signed builder bid is not available in Altair",
+                });
+            }
+            Phase::Bellatrix => Self::Bellatrix(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+        };
+
+        Ok(block)
+    }
 }
 
 impl<P: Preset> SignedBuilderBid<P> {
@@ -124,6 +159,39 @@ pub enum ExecutionPayloadAndBlobsBundle<P: Preset> {
     Capella(CapellaExecutionPayload<P>),
     Deneb(DenebExecutionPayloadAndBlobsBundle<P>),
     Electra(DenebExecutionPayloadAndBlobsBundle<P>),
+}
+
+impl<P: Preset> SszSize for ExecutionPayloadAndBlobsBundle<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
+        BellatrixExecutionPayload::<P>::SIZE,
+        CapellaExecutionPayload::<P>::SIZE,
+        DenebExecutionPayloadAndBlobsBundle::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszRead<Phase> for ExecutionPayloadAndBlobsBundle<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        let block = match phase {
+            Phase::Phase0 => {
+                return Err(ReadError::Custom {
+                    message: "execution payload and blobs bundle is not available in Phase 0",
+                });
+            }
+            Phase::Altair => {
+                return Err(ReadError::Custom {
+                    message: "execution payload and blobs bundle is not available in Altair",
+                });
+            }
+            Phase::Bellatrix => Self::Bellatrix(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+        };
+
+        Ok(block)
+    }
 }
 
 impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>

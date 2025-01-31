@@ -1,15 +1,21 @@
 use core::time::Duration;
-use std::sync::Arc;
+use std::{sync::Arc, time::SystemTime};
 
 use anyhow::{bail, ensure, Result};
+use arc_swap::ArcSwap;
 use bls::PublicKeyBytes;
-use derive_more::Constructor;
 use helper_functions::{misc, signing::SignForAllForks};
+use http_api_utils::ETH_CONSENSUS_VERSION;
 use itertools::Itertools as _;
 use log::{debug, info};
+use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use prometheus_metrics::Metrics;
-use reqwest::{Client, Response, StatusCode};
-use ssz::SszHash as _;
+use reqwest::{
+    header::{HeaderValue, ACCEPT, CONTENT_TYPE},
+    Client, Response, StatusCode,
+};
+use serde::de::DeserializeOwned;
+use ssz::{ContiguousList, SszHash as _, SszRead, SszWrite as _};
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
@@ -29,9 +35,10 @@ use crate::{
     combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
     consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
     unphased::containers::SignedValidatorRegistrationV1,
-    BuilderConfig,
+    BuilderApiFormat, BuilderConfig,
 };
 
+const DATE_MS_HEADER: &str = "Date-Milliseconds";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 #[derive(Debug, Error)]
@@ -52,6 +59,8 @@ pub enum BuilderApiError {
         header_root: H256,
         payload_root: H256,
     },
+    #[error("received response with unsupported content-type: {content_type:?}")]
+    UnsupportedContentType { content_type: Option<HeaderValue> },
     #[error(
         "Builder API responded with incorrect version \
          (computed: {computed}, response: {in_response})"
@@ -59,14 +68,26 @@ pub enum BuilderApiError {
     VersionMismatch { computed: Phase, in_response: Phase },
 }
 
-#[derive(Constructor)]
 pub struct Api {
     config: BuilderConfig,
     client: Client,
     metrics: Option<Arc<Metrics>>,
+    supports_block_ssz: ArcSwap<Option<bool>>,
+    supports_validators_ssz: ArcSwap<Option<bool>>,
 }
 
 impl Api {
+    #[must_use]
+    pub fn new(config: BuilderConfig, client: Client, metrics: Option<Arc<Metrics>>) -> Self {
+        Self {
+            config,
+            client,
+            metrics,
+            supports_block_ssz: ArcSwap::from_pointee(None),
+            supports_validators_ssz: ArcSwap::from_pointee(None),
+        }
+    }
+
     #[expect(
         clippy::unnecessary_min_or_max,
         reason = "GENESIS_SLOT const might be adjusted independently."
@@ -111,25 +132,74 @@ impl Api {
         Ok(())
     }
 
-    pub async fn register_validators(
+    pub async fn register_validators<P: Preset>(
         &self,
-        validator_registrations: &[SignedValidatorRegistrationV1],
+        validator_registrations: ContiguousList<
+            SignedValidatorRegistrationV1,
+            P::ValidatorRegistryLimit,
+        >,
     ) -> Result<()> {
         let _timer = self
             .metrics
             .as_ref()
             .map(|metrics| metrics.builder_register_validator_times.start_timer());
 
-        debug!("registering validators: {validator_registrations:?}");
+        let use_json = self.config.builder_api_format == BuilderApiFormat::Json
+            || self
+                .supports_validators_ssz
+                .load()
+                .is_some_and(|supported| !supported);
+
+        let response = self
+            .post_validators::<P>(&validator_registrations, use_json)
+            .await;
+
+        // See <https://github.com/ethereum/builder-specs/pull/110>
+        if use_json {
+            response
+        } else {
+            match response {
+                Ok(()) => {
+                    self.supports_validators_ssz.store(Arc::new(Some(true)));
+                    Ok(())
+                }
+                Err(error) => {
+                    debug!(
+                        "received error in non-JSON register validators request: {error:?}, \
+                         retrying in JSON"
+                    );
+
+                    self.supports_validators_ssz.store(Arc::new(Some(false)));
+                    self.post_validators::<P>(&validator_registrations, true)
+                        .await
+                }
+            }
+        }
+    }
+
+    async fn post_validators<P: Preset>(
+        &self,
+        validator_registrations: &ContiguousList<
+            SignedValidatorRegistrationV1,
+            P::ValidatorRegistryLimit,
+        >,
+        use_json: bool,
+    ) -> Result<()> {
+        debug!("registering validators: {validator_registrations:?}, use_json: {use_json}");
 
         let url = self.url("/eth/v1/builder/validators")?;
-        let response = self
-            .client
-            .post(url.into_url())
-            .json(validator_registrations)
-            .send()
-            .await?;
+        let request = self.client.post(url.into_url());
 
+        let request = if use_json {
+            request.json(validator_registrations)
+        } else {
+            request
+                .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(validator_registrations.to_ssz()?)
+        };
+
+        let response = request.send().await?;
         let response = handle_error(response).await?;
 
         debug!("register_validators response: {response:?}");
@@ -154,14 +224,31 @@ impl Api {
             "/eth/v1/builder/header/{slot}/{parent_hash:?}/{pubkey:?}"
         ))?;
 
-        debug!("getting execution payload header from {url}");
+        let use_json = self.config.builder_api_format == BuilderApiFormat::Json;
 
-        let response = self
-            .client
-            .get(url.into_url())
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await?;
+        debug!("getting execution payload header from {url}, use_json: {use_json}");
+
+        let request = self.client.get(url.into_url()).timeout(REQUEST_TIMEOUT);
+
+        // See <https://github.com/ethereum/builder-specs/pull/104>
+        let request = if use_json {
+            request.header(ACCEPT, APPLICATION_JSON.as_ref())
+        } else {
+            request.header(
+                ACCEPT,
+                format!("{APPLICATION_OCTET_STREAM};q=1,{APPLICATION_JSON};q=0.9"),
+            )
+        };
+
+        let request = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            Ok(timestamp) => request.header(DATE_MS_HEADER, format!("{}", timestamp.as_millis())),
+            Err(error) => {
+                debug!("unable to calculate timestamp: {error:?}");
+                request
+            }
+        };
+
+        let response = request.send().await?;
         let response = handle_error(response).await?;
 
         if response.status() == StatusCode::NO_CONTENT {
@@ -169,7 +256,7 @@ impl Api {
             return Ok(None);
         }
 
-        let builder_bid = response.json::<SignedBuilderBid<P>>().await?;
+        let builder_bid = self.parse_response::<SignedBuilderBid<P>>(response).await?;
 
         debug!("get_execution_payload_header response: {builder_bid:?}");
 
@@ -222,25 +309,40 @@ impl Api {
         let (next_interval, remaining_time) =
             clock::next_interval_with_remaining_time(chain_config, genesis_time)?;
 
+        let use_json = self.config.builder_api_format == BuilderApiFormat::Json
+            || self
+                .supports_block_ssz
+                .load()
+                .is_some_and(|supported| !supported);
+
         debug!(
             "posting blinded block to {url} with timeout of {remaining_time:?} \
-             before next interval {next_interval:?}",
+             before next interval {next_interval:?}, use_json: {use_json}",
         );
 
         let block_root = block.message().hash_tree_root();
         let slot = block.message().slot();
 
-        let response = self
+        let request = self
             .client
             .post(url.into_url())
-            .json(block)
             .timeout(remaining_time)
-            .send()
-            .await?;
+            .header(ETH_CONSENSUS_VERSION, block.phase().as_ref());
 
+        let request = if use_json {
+            request.json(block)
+        } else {
+            request
+                .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(block.to_ssz()?)
+        };
+
+        let response = request.send().await?;
         let response = handle_error(response).await?;
-        let response: WithBlobsAndMev<ExecutionPayload<P>, P> = response
-            .json::<ExecutionPayloadAndBlobsBundle<P>>()
+
+        let response: WithBlobsAndMev<ExecutionPayload<P>, P> = self
+            .parse_response::<ExecutionPayloadAndBlobsBundle<P>>(response)
             .await?
             .into();
 
@@ -248,7 +350,13 @@ impl Api {
 
         debug!("post_blinded_block response: {execution_payload:?}");
 
-        validate_phase(block.phase(), execution_payload.phase())?;
+        ensure!(
+            execution_payload.is_valid_with(block.phase()),
+            BuilderApiError::VersionMismatch {
+                computed: block.phase(),
+                in_response: execution_payload.phase(),
+            },
+        );
 
         let header_root = block.execution_payload_header().hash_tree_root();
         let payload_root = execution_payload.hash_tree_root();
@@ -264,6 +372,38 @@ impl Api {
         info!("received execution payload from builder for block {block_root:?} at slot {slot}");
 
         Ok(response)
+    }
+
+    async fn parse_response<T: DeserializeOwned + SszRead<Phase>>(
+        &self,
+        response: Response,
+    ) -> Result<T> {
+        let content_type = response.headers().get(CONTENT_TYPE);
+
+        debug!("received response with content_type: {content_type:?}");
+
+        if content_type.is_none()
+            || content_type == Some(&HeaderValue::from_static(APPLICATION_JSON.as_ref()))
+        {
+            return response
+                .json()
+                .await
+                .inspect(|_| self.supports_block_ssz.store(Arc::new(Some(false))))
+                .map_err(Into::into);
+        }
+
+        if content_type == Some(&HeaderValue::from_static(APPLICATION_OCTET_STREAM.as_ref())) {
+            let phase = http_api_utils::extract_phase_from_headers(response.headers())?;
+            let bytes = response.bytes().await?;
+
+            return T::from_ssz(&phase, &bytes)
+                .inspect(|_| self.supports_block_ssz.store(Arc::new(Some(true))))
+                .map_err(Into::into);
+        }
+
+        bail!(BuilderApiError::UnsupportedContentType {
+            content_type: content_type.cloned(),
+        })
     }
 
     fn url(&self, path: &str) -> Result<RedactingUrl> {
@@ -345,6 +485,7 @@ mod tests {
     ) -> Result<(), BuilderApiError> {
         let api = BuilderApi::new(
             BuilderConfig {
+                builder_api_format: BuilderApiFormat::Json,
                 builder_api_url: "http://localhost"
                     .parse()
                     .expect("http://localhost should be a valid URL"),

@@ -13,6 +13,7 @@ execution_engine = { workspace = true }
 features = { workspace = true }
 fork_choice_store = { workspace = true }
 helper_functions = { workspace = true }
+http = { workspace = true }
 http-body-util = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }

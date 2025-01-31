@@ -16,6 +16,7 @@ use types::{
 
 #[derive(Debug, Deserialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
 pub struct BuilderBid<P: Preset> {
     pub header: Box<ExecutionPayloadHeader<P>>,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
@@ -23,23 +24,26 @@ pub struct BuilderBid<P: Preset> {
     pub pubkey: PublicKeyBytes,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
 pub struct SignedBuilderBid<P: Preset> {
     pub message: BuilderBid<P>,
     pub signature: SignatureBytes,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
 pub struct BlobsBundle<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
 pub struct ExecutionPayloadAndBlobsBundle<P: Preset> {
     pub execution_payload: ExecutionPayload<P>,
     pub blobs_bundle: BlobsBundle<P>,

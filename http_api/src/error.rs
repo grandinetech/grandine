@@ -11,7 +11,7 @@ use axum::{
 use axum_extra::extract::QueryRejection;
 use bls::{traits::SignatureBytes as _, SignatureBytes};
 use futures::channel::oneshot::Canceled;
-use http_api_utils::ApiError;
+use http_api_utils::{ApiError, PhaseHeaderError};
 use serde::{Serialize, Serializer};
 use ssz::H256;
 use thiserror::Error;
@@ -28,6 +28,8 @@ pub enum Error {
     BlockNotFound,
     #[error(transparent)]
     Canceled(#[from] Canceled),
+    #[error(transparent)]
+    InvalidRequestConsensusHeader(#[from] PhaseHeaderError),
     #[error(
         "committees_at_slot ({requested}) does not match \
          the expected number of committees ({computed})"
@@ -73,8 +75,6 @@ pub enum Error {
     InvalidContributionAndProofs(Vec<IndexedError>),
     #[error("invalid epoch")]
     InvalidEpoch(#[source] AnyhowError),
-    #[error("invalid eth-consensus-version header")]
-    InvalidEthConsensusVersionHeader(#[source] AnyhowError),
     #[error("invalid JSON body")]
     InvalidJsonBody(#[source] JsonRejection),
     #[error("invalid peer ID")]
@@ -106,8 +106,6 @@ pub enum Error {
     LivenessTrackingNotEnabled,
     #[error("matching head block for attestation is not found")]
     MatchingAttestationHeadBlockNotFound,
-    #[error("eth-consensus-version header expected")]
-    MissingEthConsensusVersionHeader,
     #[error("beacon node is currently syncing and not serving requests on this endpoint")]
     NodeIsSyncing,
     #[error("peer not found")]
@@ -201,9 +199,9 @@ impl Error {
             | Self::InvalidBlock(_)
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
+            | Self::InvalidRequestConsensusHeader(_)
             | Self::InvalidContributionAndProofs(_)
             | Self::InvalidEpoch(_)
-            | Self::InvalidEthConsensusVersionHeader(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidProposerSlashing(_)
@@ -214,7 +212,6 @@ impl Error {
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
             | Self::InvalidValidatorSignatures(_)
-            | Self::MissingEthConsensusVersionHeader
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
             | Self::StatePreCapella

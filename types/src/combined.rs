@@ -839,6 +839,17 @@ impl<P: Preset> SszRead<Phase> for SignedBlindedBeaconBlock<P> {
     }
 }
 
+impl<P: Preset> SszWrite for SignedBlindedBeaconBlock<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Bellatrix(signed_blinded_block) => signed_blinded_block.write_variable(bytes),
+            Self::Capella(signed_blinded_block) => signed_blinded_block.write_variable(bytes),
+            Self::Deneb(signed_blinded_block) => signed_blinded_block.write_variable(bytes),
+            Self::Electra(signed_blinded_block) => signed_blinded_block.write_variable(bytes),
+        }
+    }
+}
+
 impl<P: Preset> SignedBlindedBeaconBlock<P> {
     pub fn split(self) -> (BlindedBeaconBlock<P>, SignatureBytes) {
         match self {
@@ -1018,7 +1029,48 @@ impl<P: Preset> SszHash for ExecutionPayload<P> {
     }
 }
 
+impl<P: Preset> SszSize for ExecutionPayload<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
+        BellatrixExecutionPayload::<P>::SIZE,
+        CapellaExecutionPayload::<P>::SIZE,
+        DenebExecutionPayload::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszRead<Phase> for ExecutionPayload<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        let block = match phase {
+            Phase::Phase0 => {
+                return Err(ReadError::Custom {
+                    message: "execution payload is not available in Phase 0",
+                });
+            }
+            Phase::Altair => {
+                return Err(ReadError::Custom {
+                    message: "execution payload is not available in Altair",
+                });
+            }
+            Phase::Bellatrix => Self::Bellatrix(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Deneb | Phase::Electra => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
+        };
+
+        Ok(block)
+    }
+}
+
 impl<P: Preset> ExecutionPayload<P> {
+    pub const fn is_valid_with(&self, phase: Phase) -> bool {
+        matches!(
+            (self, phase),
+            (Self::Bellatrix(_), Phase::Bellatrix)
+                | (Self::Capella(_), Phase::Capella)
+                | (Self::Deneb(_), Phase::Deneb | Phase::Electra)
+        )
+    }
+
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Bellatrix(_) => Phase::Bellatrix,
@@ -1664,6 +1716,25 @@ mod spec_tests {
 
         assert_eq!(actual_ssz_bytes, expected_ssz_bytes);
         assert_eq!(value.phase(), Phase::test_phase);
+    }
+
+    #[duplicate_item(
+        glob                                                                             function_name                         combined_type      preset    phase;
+        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/ExecutionPayload/*/*"] [bellatrix_mainnet_execution_payload] [ExecutionPayload] [Mainnet] [Bellatrix];
+        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/ExecutionPayload/*/*"] [bellatrix_minimal_execution_payload] [ExecutionPayload] [Minimal] [Bellatrix];
+        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/ExecutionPayload/*/*"]   [capella_mainnet_execution_payload]   [ExecutionPayload] [Mainnet] [Capella];
+        ["consensus-spec-tests/tests/minimal/capella/ssz_static/ExecutionPayload/*/*"]   [capella_minimal_execution_payload]   [ExecutionPayload] [Minimal] [Capella];
+        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/ExecutionPayload/*/*"]     [deneb_mainnet_execution_payload]     [ExecutionPayload] [Mainnet] [Deneb];
+        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/ExecutionPayload/*/*"]     [deneb_minimal_execution_payload]     [ExecutionPayload] [Minimal] [Deneb];
+        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/ExecutionPayload/*/*"]   [electra_mainnet_execution_payload]   [ExecutionPayload] [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/electra/ssz_static/ExecutionPayload/*/*"]   [electra_minimal_execution_payload]   [ExecutionPayload] [Minimal] [Electra];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let expected_ssz_bytes = case.bytes("serialized.ssz_snappy");
+
+        combined_type::<preset>::from_ssz(&Phase::phase, expected_ssz_bytes.as_slice())
+            .expect("SSZ decoding should succeed");
     }
 
     #[duplicate_item(

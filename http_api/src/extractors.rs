@@ -40,7 +40,6 @@ use types::{
 
 use crate::{
     error::Error,
-    misc::ETH_CONSENSUS_VERSION,
     validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
 };
 
@@ -203,7 +202,10 @@ impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        match extract_phase(&request)? {
+        let phase = http_api_utils::extract_phase_from_headers(request.headers())
+            .map_err(Error::InvalidRequestConsensusHeader)?;
+
+        match phase {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 request
                     .extract()
@@ -382,9 +384,12 @@ where
                 request.extract_parts::<TypedHeader<ContentType>>().await?;
 
             if content_type == ContentType::octet_stream() {
-                let phase = extract_phase(&request)?;
+                let phase = http_api_utils::extract_phase_from_headers(request.headers())
+                    .map_err(Error::InvalidRequestConsensusHeader)?;
+
                 let bytes = Bytes::from_request(request, state).await?;
                 let block = T::from_ssz(&phase, bytes)?;
+
                 return Ok(Self(block));
             }
 
@@ -395,17 +400,4 @@ where
 
         run.await.map_err(Error::InvalidBlock)
     }
-}
-
-fn extract_phase(request: &Request<Body>) -> Result<Phase, Error> {
-    request
-        .headers()
-        .get(ETH_CONSENSUS_VERSION)
-        .ok_or(Error::MissingEthConsensusVersionHeader)?
-        .to_str()
-        .map_err(AnyhowError::msg)
-        .map_err(Error::InvalidEthConsensusVersionHeader)?
-        .parse()
-        .map_err(AnyhowError::msg)
-        .map_err(Error::InvalidEthConsensusVersionHeader)
 }
