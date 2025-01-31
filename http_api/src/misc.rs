@@ -32,8 +32,6 @@ use ::{
     futures::{channel::mpsc::UnboundedReceiver, lock::Mutex},
 };
 
-pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
-
 const ORDERING: Ordering = Ordering::SeqCst;
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use http_api_utils::ETH_CONSENSUS_VERSION;
 use mediatype::{MediaType, MediaTypeList};
 use mime::APPLICATION_OCTET_STREAM;
 use serde::Serialize;
@@ -11,7 +12,7 @@ use ssz::SszWrite;
 use tap::Pipe as _;
 use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::H256};
 
-use crate::{error::Error, misc::ETH_CONSENSUS_VERSION};
+use crate::error::Error;
 
 const ETH_CONSENSUS_BLOCK_VALUE: &str = "eth-consensus-block-value";
 const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";

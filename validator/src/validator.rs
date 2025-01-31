@@ -47,10 +47,11 @@ use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
-use ssz::{BitList, BitVector};
+use ssz::{BitList, BitVector, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use try_from_iterator::TryFromIterator as _;
 use types::{
     altair::{
         containers::{ContributionAndProof, SignedContributionAndProof, SyncCommitteeMessage},
@@ -2104,11 +2105,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     message,
                     signature: signature.into(),
                 })
-                .collect_vec();
+                .chunks(MAX_VALIDATORS_PER_REGISTRATION)
+                .into_iter()
+                .map(ContiguousList::<_, P::ValidatorRegistryLimit>::try_from_iter)
+                .collect::<Result<Vec<_>, ReadError>>()
+                .inspect_err(|error| {
+                    warn!("failed to collect validator registrations: {error:?}")
+                })?;
 
             // Do not submit requests in parallel. Doing so causes all of them to be timed out.
-            for registration in signed_registrations.chunks(MAX_VALIDATORS_PER_REGISTRATION) {
-                if let Err(error) = builder_api.register_validators(registration).await {
+            for registrations in signed_registrations {
+                if let Err(error) = builder_api.register_validators::<P>(registrations).await {
                     warn!("failed to register validator batch: {error}");
                 }
             }

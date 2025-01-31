@@ -4,6 +4,8 @@ use std::sync::Arc;
 use parse_display::Display;
 use prometheus_metrics::Metrics;
 
+pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
+
 #[derive(Clone, Copy)]
 enum ApiType {
     Http,

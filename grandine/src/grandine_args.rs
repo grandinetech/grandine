@@ -15,8 +15,8 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::{ensure, Result};
 use bls::PublicKeyBytes;
 use builder_api::{
-    BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
-    PREFERRED_EXECUTION_GAS_LIMIT,
+    BuilderApiFormat, BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
+    DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, PREFERRED_EXECUTION_GAS_LIMIT,
 };
 use bytesize::ByteSize;
 use clap::{error::ErrorKind, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum};
@@ -724,6 +724,10 @@ struct ValidatorOptions {
     #[clap(long)]
     keystore_storage_password_file: Option<PathBuf>,
 
+    /// Data format for communication with the builder API
+    #[clap(long = "builder-format", default_value_t = BuilderApiFormat::default())]
+    builder_api_format: BuilderApiFormat,
+
     /// [DEPRECATED] External block builder API URL
     #[clap(long)]
     builder_api_url: Option<RedactingUrl>,
@@ -951,6 +955,7 @@ impl GrandineArgs {
             keystore_password_dir,
             keystore_password_file,
             keystore_storage_password_file,
+            builder_api_format,
             builder_api_url,
             builder_url,
             builder_disable_checks,
@@ -1232,6 +1237,7 @@ impl GrandineArgs {
         };
 
         let builder_config = builder_url.map(|url| BuilderConfig {
+            builder_api_format,
             builder_api_url: url,
             builder_disable_checks,
             builder_max_skipped_slots,

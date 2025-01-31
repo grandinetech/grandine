@@ -152,8 +152,8 @@ impl GrandineConfig {
 
         if let Some(builder_config) = builder_config {
             info!(
-                "using external block builder (API URL: {})",
-                builder_config.builder_api_url,
+                "using external block builder (API URL: {}, format: {})",
+                builder_config.builder_api_url, builder_config.builder_api_format,
             );
         }
 

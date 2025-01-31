@@ -1,14 +1,18 @@
 use core::time::Duration;
 
+use anyhow::{Error as AnyhowError, Result};
 use axum::{error_handling::HandleErrorLayer, http::StatusCode, Router};
 use features::Feature;
+use http::{HeaderMap, HeaderValue};
+use thiserror::Error;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     trace::TraceLayer,
 };
+use types::nonstandard::Phase;
 
-use crate::{logging, middleware, misc::ApiMetrics, ApiError};
+use crate::{logging, middleware, misc::ApiMetrics, ApiError, ETH_CONSENSUS_VERSION};
 
 pub fn extend_router_with_middleware<E: ApiError + Send + Sync + 'static>(
     mut router: Router,
@@ -58,4 +62,28 @@ pub fn extend_router_with_middleware<E: ApiError + Send + Sync + 'static>(
     }
 
     router
+}
+
+#[derive(Debug, Error)]
+pub enum PhaseHeaderError {
+    #[error("invalid eth-consensus-version header")]
+    InvalidEthConsensusVersionHeader(#[source] AnyhowError),
+    #[error("eth-consensus-version header expected")]
+    MissingEthConsensusVersionHeader,
+}
+
+pub fn extract_phase_from_headers(
+    headers: &HeaderMap<HeaderValue>,
+) -> Result<Phase, PhaseHeaderError> {
+    let phase = headers
+        .get(ETH_CONSENSUS_VERSION)
+        .ok_or(PhaseHeaderError::MissingEthConsensusVersionHeader)?
+        .to_str()
+        .map_err(AnyhowError::msg)
+        .map_err(PhaseHeaderError::InvalidEthConsensusVersionHeader)?
+        .parse()
+        .map_err(AnyhowError::msg)
+        .map_err(PhaseHeaderError::InvalidEthConsensusVersionHeader)?;
+
+    Ok(phase)
 }

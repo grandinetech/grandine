@@ -7,14 +7,18 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
+arc-swap = { workspace = true }
 anyhow = { workspace = true }
 bls = { workspace = true }
 clock = { workspace = true }
 derive_more = { workspace = true }
+enum-iterator = { workspace = true }
 helper_functions = { workspace = true }
 hex-literal = { workspace = true }
+http_api_utils = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+mime = { workspace = true }
 prometheus_metrics = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
