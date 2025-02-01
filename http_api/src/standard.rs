@@ -1132,9 +1132,8 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
-    let blob_sidecars = DynamicList::try_from_iter_with_maximum(
-        blob_sidecars.into_iter(),
+    let blob_sidecars = DynamicList::from_vec(
+        controller.blob_sidecars_by_ids(blob_identifiers)?,
         usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
     )
     .map_err(AnyhowError::new)?;

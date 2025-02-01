@@ -1,5 +1,7 @@
 #![expect(clippy::module_name_repetitions)]
 
+use core::convert::Infallible;
+
 use thiserror::Error;
 
 use crate::{
@@ -30,6 +32,8 @@ pub enum ReadError {
     VectorFirstOffsetMismatch { expected: usize, actual: usize },
     #[error("expected vector to have {expected} elements, found {actual} elements")]
     VectorSizeMismatch { expected: usize, actual: usize },
+    #[error("list size in bytes is not a multiple of element size")]
+    ListSizeNotMultiple { list: usize, element: usize },
     #[error("first offset of list is not aligned")]
     ListFirstOffsetUnaligned { first_offset: usize },
     #[error("expected list to have no more than {maximum} elements, found {actual} elements")]
@@ -51,6 +55,12 @@ pub enum ReadError {
     //                      worsen performance.
     #[error("{message}")]
     Custom { message: &'static str },
+}
+
+impl From<Infallible> for ReadError {
+    fn from(infallible: Infallible) -> Self {
+        match infallible {}
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]

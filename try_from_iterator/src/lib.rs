@@ -12,6 +12,14 @@ pub trait TryFromIterator<T>: Sized {
     fn try_from_iter(items: impl IntoIterator<Item = T>) -> Result<Self, Self::Error>;
 }
 
+impl<T> TryFromIterator<T> for Box<[T]> {
+    type Error = Infallible;
+
+    fn try_from_iter(items: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
+        Ok(Self::from_iter(items))
+    }
+}
+
 impl<T> TryFromIterator<T> for Vec<T> {
     type Error = Infallible;
 
