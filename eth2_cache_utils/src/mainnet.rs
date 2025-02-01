@@ -64,6 +64,9 @@ pub static ALTAIR_BEACON_BLOCKS_FROM_8192_SLOTS: LazyBeaconBlocks<Mainnet> =
 pub static CAPELLA_BEACON_BLOCKS_FROM_244816_SLOTS: LazyBeaconBlocks<Mainnet> =
     LazyBeaconBlocks::new(127, || beacon_blocks(7_834_112..=7_834_240, 7));
 
+pub static DENEB_BEACON_BLOCKS_FROM_128_SLOTS: LazyBeaconBlocks<Mainnet> =
+    LazyBeaconBlocks::new(128, || beacon_blocks(9_481_344..=9_481_472, 7));
+
 pub static DENEB_BLOB_SIDECARS_FROM_32_SLOTS: LazyBlobSidecars<Mainnet> =
     LazyBlobSidecars::new(129, || {
         blob_sidecars(9_481_344..=9_481_393, 7)

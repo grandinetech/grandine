@@ -68,11 +68,8 @@ impl<T: SszSize> SszSize for DynamicList<T> {
 
 impl<T: SszReadDefault> SszRead<usize> for DynamicList<T> {
     fn from_ssz_unchecked(maximum: &usize, bytes: &[u8]) -> Result<Self, ReadError> {
-        let results = shared::read_list(&(), bytes)?;
-
-        itertools::process_results(results, |elements| {
-            Self::try_from_iter_with_maximum(elements, *maximum)
-        })?
+        let elements = shared::read_list(*maximum, &(), bytes)?;
+        Ok(Self::new_unchecked(elements))
     }
 }
 
@@ -110,24 +107,6 @@ impl<T> DynamicList<T> {
     pub fn from_iter_with_maximum(elements: impl IntoIterator<Item = T>, maximum: usize) -> Self {
         let elements = elements.into_iter().take(maximum).collect::<Box<_>>();
         Self::new_unchecked(elements)
-    }
-
-    pub fn try_from_iter_with_maximum(
-        elements: impl IntoIterator<Item = T>,
-        maximum: usize,
-    ) -> Result<Self, ReadError> {
-        let elements = Box::from_iter(elements);
-
-        Self::validate_length(elements.len(), maximum)?;
-        Ok(Self::new_unchecked(elements))
-    }
-
-    const fn validate_length(actual: usize, maximum: usize) -> Result<(), ReadError> {
-        if actual > maximum {
-            return Err(ReadError::ListTooLong { maximum, actual });
-        }
-
-        Ok(())
     }
 
     const fn new_unchecked(elements: Box<[T]>) -> Self {

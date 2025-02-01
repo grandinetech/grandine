@@ -11,7 +11,7 @@ use allocator as _;
 use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{
-    goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars,
+    goerli, mainnet, medalla, LazyAttestations, LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars,
 };
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::containers::BlobSidecar,
+    phase0::containers::Attestation,
     preset::Preset,
 };
 
@@ -68,6 +69,11 @@ fn main() {
             &mainnet::ALTAIR_BEACON_BLOCKS_FROM_128_SLOTS,
         )
         .benchmark_blocks(
+            "mainnet Deneb blocks from 128 slots",
+            &Config::mainnet(),
+            &mainnet::DENEB_BEACON_BLOCKS_FROM_128_SLOTS,
+        )
+        .benchmark_blocks(
             "Goerli blocks up to slot 128",
             &Config::goerli(),
             &goerli::BEACON_BLOCKS_UP_TO_SLOT_128,
@@ -76,6 +82,10 @@ fn main() {
             "Medalla blocks up to slot 128",
             &Config::medalla(),
             &medalla::BEACON_BLOCKS_UP_TO_SLOT_128,
+        )
+        .benchmark_attestations(
+            "Goerli aggregate attestations from epoch 17119",
+            &goerli::AGGREGATE_ATTESTATIONS_FROM_EPOCH_17119,
         )
         .benchmark_blob_sidecars(
             "mainnet Deneb blob sidecars from 32 slots",
@@ -161,6 +171,48 @@ impl Criterion {
                 let blocks = blocks.force();
 
                 bencher.iter_with_large_drop(|| slice_to_json_via_stringify(blocks))
+            });
+
+        self
+    }
+
+    // TODO(feature/optimize-ssz-decoding): Deduplicate benchmarking methods again.
+    fn benchmark_attestations<P: Preset>(
+        &mut self,
+        group_name: &str,
+        attestations: &LazyAttestations<P>,
+    ) -> &mut Self {
+        let ssz_bytes = LazyCell::new(|| slice_to_ssz(attestations.force()));
+        let json_bytes = LazyCell::new(|| slice_to_json_directly(attestations.force()));
+
+        self.benchmark_group(group_name)
+            .throughput(Throughput::Elements(attestations.count()))
+            .bench_function("from SSZ", |bencher| {
+                let ssz_bytes = ssz_bytes.iter().map(Vec::as_slice);
+
+                bencher.iter_with_large_drop(|| {
+                    vec_from_ssz::<(), Attestation<P>>(&(), ssz_bytes.clone())
+                })
+            })
+            .bench_function("to SSZ", |bencher| {
+                let attestations = attestations.force();
+
+                bencher.iter_with_large_drop(|| slice_to_ssz(attestations))
+            })
+            .bench_function("from JSON", |bencher| {
+                let json_bytes = json_bytes.iter().map(Vec::as_slice);
+
+                bencher.iter_with_large_drop(|| vec_from_json::<Attestation<P>>(json_bytes.clone()))
+            })
+            .bench_function("to JSON directly", |bencher| {
+                let attestations = attestations.force();
+
+                bencher.iter_with_large_drop(|| slice_to_json_directly(attestations))
+            })
+            .bench_function("to JSON via serde_utils::stringify", |bencher| {
+                let attestations = attestations.force();
+
+                bencher.iter_with_large_drop(|| slice_to_json_via_stringify(attestations))
             });
 
         self

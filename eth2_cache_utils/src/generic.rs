@@ -11,11 +11,12 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::containers::BlobSidecar,
-    phase0::primitives::Slot,
+    phase0::{containers::Attestation, primitives::Slot},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
 
+pub type LazyAttestations<P> = LazyVec<Attestation<P>>;
 pub type LazyBeaconBlocks<P> = LazyVec<Arc<SignedBeaconBlock<P>>>;
 pub type LazyBlobSidecars<P> = LazyVec<Arc<BlobSidecar<P>>>;
 
