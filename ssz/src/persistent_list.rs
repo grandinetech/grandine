@@ -241,8 +241,7 @@ impl<T: SszSize, N, B> SszSize for PersistentList<T, N, B> {
 
 impl<C, T: SszRead<C>, N: Unsigned, B: BundleSize<T>> SszRead<C> for PersistentList<T, N, B> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
-        let results = shared::read_list(context, bytes)?;
-        itertools::process_results(results, |elements| Self::try_from_iter(elements))?
+        shared::read_list(N::USIZE, context, bytes)
     }
 }
 

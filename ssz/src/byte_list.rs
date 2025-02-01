@@ -56,8 +56,13 @@ impl<N> SszSize for ByteList<N> {
 }
 
 impl<C, N: Unsigned> SszRead<C> for ByteList<N> {
-    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
-        ContiguousList::from_ssz_unchecked(context, bytes).map(Into::into)
+    fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        // Do not forward to `ContiguousList::from_ssz_unchecked`.
+        // The specialized implementation here is much faster.
+        // The difference is most noticeable when decoding transactions in execution payloads.
+        ContiguousList::<u8, N>::validate_length(bytes.len())?;
+        let bytes = ContiguousList::new_unchecked(bytes.into());
+        Ok(Self { bytes })
     }
 }
 

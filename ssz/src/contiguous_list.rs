@@ -104,8 +104,7 @@ impl<T: SszSize, N> SszSize for ContiguousList<T, N> {
 
 impl<C, T: SszRead<C>, N: Unsigned> SszRead<C> for ContiguousList<T, N> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
-        let results = shared::read_list(context, bytes)?;
-        itertools::process_results(results, |elements| Self::try_from_iter(elements))?
+        shared::read_list(N::USIZE, context, bytes)
     }
 }
 
@@ -144,7 +143,7 @@ impl<T, N> ContiguousList<T, N> {
         ContiguousList::new_unchecked(self.into_iter().map(function).collect())
     }
 
-    const fn validate_length(actual: usize) -> Result<(), ReadError>
+    pub(crate) const fn validate_length(actual: usize) -> Result<(), ReadError>
     where
         N: Unsigned,
     {
@@ -157,7 +156,7 @@ impl<T, N> ContiguousList<T, N> {
         Ok(())
     }
 
-    const fn new_unchecked(elements: Box<[T]>) -> Self {
+    pub(crate) const fn new_unchecked(elements: Box<[T]>) -> Self {
         Self {
             elements,
             phantom: PhantomData,
