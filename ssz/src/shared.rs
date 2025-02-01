@@ -8,6 +8,7 @@
 use core::ops::Range;
 
 use itertools::{Either, Itertools as _};
+use try_from_iterator::TryFromIterator;
 use typenum::Unsigned;
 
 use crate::{
@@ -57,6 +58,7 @@ pub fn write_offset(bytes: &mut [u8], destination: usize, offset: usize) -> Resu
     Ok(())
 }
 
+// TODO(feature/optimize-ssz-decoding): Rewrite `read_vector` the same way as `read_list`.
 #[inline]
 pub fn read_vector<'all, C, T: SszRead<C> + 'all, N: Unsigned>(
     context: &'all C,
@@ -101,18 +103,36 @@ pub fn write_variable_vector<N: Unsigned>(
 }
 
 #[inline]
-pub fn read_list<'all, C, T: SszRead<C> + 'all>(
-    context: &'all C,
-    bytes: &'all [u8],
-) -> Result<impl Iterator<Item = Result<T, ReadError>> + 'all, ReadError> {
+pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>> + Default>(
+    maximum: usize,
+    context: &C,
+    bytes: &[u8],
+) -> Result<L, ReadError> {
+    // TODO(feature/optimize-ssz-decoding): Is the early return needed for correctness?
+    if bytes.is_empty() {
+        return Ok(L::default());
+    }
+
     if let Size::Fixed { size } = T::SIZE {
-        let results = bytes.chunks(size).map(|chunk| T::from_ssz(context, chunk));
+        if bytes.len() % size != 0 {
+            return Err(ReadError::ListSizeNotMultiple {
+                list: bytes.len(),
+                element: size,
+            });
+        }
 
-        Ok(Either::Left(results))
-    } else if bytes.is_empty() {
-        let results = read_variable_elements(context, bytes, 0)?;
+        // TODO(feature/optimize-ssz-decoding): Benchmark without the early validation if that makes sense.
+        let actual = bytes.len() / size;
 
-        Ok(Either::Right(results))
+        if actual > maximum {
+            return Err(ReadError::ListTooLong { maximum, actual });
+        }
+
+        bytes
+            .chunks_exact(size)
+            .map(|chunk| T::from_ssz_unchecked(context, chunk))
+            .process_results(|elements| L::try_from_iter(elements))?
+            .map_err(Into::into)
     } else {
         let first_offset_subslice = subslice(bytes, 0..BYTES_PER_LENGTH_OFFSET)?;
         let first_offset = read_offset_unchecked(first_offset_subslice)?;
@@ -121,9 +141,16 @@ pub fn read_list<'all, C, T: SszRead<C> + 'all>(
             return Err(ReadError::ListFirstOffsetUnaligned { first_offset });
         }
 
-        let results = read_variable_elements(context, bytes, first_offset)?;
+        // TODO(feature/optimize-ssz-decoding): Benchmark without the early validation if that makes sense.
+        let actual = first_offset / BYTES_PER_LENGTH_OFFSET;
 
-        Ok(Either::Right(results))
+        if actual > maximum {
+            return Err(ReadError::ListTooLong { maximum, actual });
+        }
+
+        read_variable_elements(context, bytes, first_offset)?
+            .process_results(|elements| L::try_from_iter(elements))?
+            .map_err(Into::into)
     }
 }
 

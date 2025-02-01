@@ -6,6 +6,7 @@ use derivative::Derivative;
 use derive_more::From;
 use ethereum_types::H256;
 use generic_array::ArrayLength;
+use generic_array::GenericArray;
 use serde::{Deserialize, Deserializer, Serialize};
 use typenum::{NonZero, U1};
 
@@ -59,8 +60,12 @@ impl<N: ContiguousVectorElements<u8>> SszSize for ByteVector<N> {
 }
 
 impl<C, N: ContiguousVectorElements<u8> + NonZero> SszRead<C> for ByteVector<N> {
-    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
-        ContiguousVector::from_ssz_unchecked(context, bytes).map(Into::into)
+    fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        // Do not forward to `ContiguousVector::from_ssz_unchecked`.
+        // The specialized implementation here is much faster.
+        // The difference is most noticeable when decoding blobs in blob sidecars.
+        let bytes = GenericArray::from_slice(bytes).clone().into();
+        Ok(Self { bytes })
     }
 }
 

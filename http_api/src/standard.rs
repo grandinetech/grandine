@@ -1261,8 +1261,8 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         controller.blob_sidecars_by_ids(blob_identifiers)?
     };
 
-    let blob_sidecars = DynamicList::try_from_iter_with_maximum(
-        blob_sidecars.into_iter(),
+    let blob_sidecars = DynamicList::from_vec(
+        blob_sidecars,
         usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
     )
     .map_err(AnyhowError::new)?;
@@ -1359,8 +1359,8 @@ pub async fn blobs<P: Preset, W: Wait>(
             .collect()
     };
 
-    let blobs = DynamicList::try_from_iter_with_maximum(
-        blobs.into_iter(),
+    let blobs = DynamicList::from_vec(
+        blobs,
         usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
     )
     .map_err(AnyhowError::new)?;
@@ -2153,11 +2153,9 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
 
     let data_column_sidecars = controller.data_column_sidecars_by_ids(data_column_identifiers)?;
 
-    let data_column_sidecars = DynamicList::try_from_iter_with_maximum(
-        data_column_sidecars.into_iter(),
-        P::NumberOfColumns::USIZE,
-    )
-    .map_err(AnyhowError::new)?;
+    let data_column_sidecars =
+        DynamicList::from_vec(data_column_sidecars, P::NumberOfColumns::USIZE)
+            .map_err(AnyhowError::new)?;
 
     Ok(EthResponse::json_or_ssz(data_column_sidecars, &headers)?
         .execution_optimistic(status.is_optimistic())
