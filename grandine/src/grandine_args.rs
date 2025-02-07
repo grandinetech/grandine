@@ -79,7 +79,7 @@ use crate::{
 };
 
 /// Grandine Team <info@grandine.io>
-/// Fast PoS and Sharding client supporting Ethereum 2.0 networks
+/// High performance Ethereum consensus layer client
 #[derive(Parser)]
 #[clap(display_name = APPLICATION_NAME, verbatim_doc_comment, version = APPLICATION_VERSION)]
 pub struct GrandineArgs {
