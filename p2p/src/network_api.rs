@@ -64,6 +64,7 @@ pub struct NodePeerCount {
 
 #[derive(Serialize)]
 struct NodeMetadata {
+    #[serde(with = "serde_utils::string_or_native")]
     seq_number: u64,
     attnets: EnrAttestationBitfield,
     syncnets: Option<EnrSyncCommitteeBitfield>,
