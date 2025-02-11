@@ -44,6 +44,7 @@ use crate::{
 
 const LATEST_FINALIZED_BACK_SYNC_CHECKPOINT_KEY: &str = "latest_finalized_back_sync_checkpoint";
 const NETWORK_EVENT_INTERVAL: Duration = Duration::from_secs(1);
+const MISSED_SLOTS_TO_TRIGGER_SYNC: u64 = 2;
 
 #[derive(Debug, Error)]
 #[error("ran out of request IDs")]
@@ -568,7 +569,7 @@ impl<P: Preset> BlockSyncService<P> {
                 if snapshot.is_forward_synced() {
                     self.set_forward_synced(true)?;
 
-                    if head_slot >= self.slot {
+                    if self.slot.saturating_sub(head_slot) < MISSED_SLOTS_TO_TRIGGER_SYNC {
                         return Ok(());
                     }
                 } else {
