@@ -763,7 +763,7 @@ impl<'list, T, B> Iterator for Leaves<'list, T, B> {
     }
 }
 
-impl<'list, T, B> FusedIterator for Leaves<'list, T, B> {}
+impl<T, B> FusedIterator for Leaves<'_, T, B> {}
 
 // TODO(Grandine Team): `LeavesMut::next` clones `right` nodes earlier than needed.
 //                      Try replacing the `Vec` with a stack of mutable references
@@ -791,4 +791,4 @@ impl<'list, T: Clone, B> Iterator for LeavesMut<'list, T, B> {
     }
 }
 
-impl<'list, T: Clone, B> FusedIterator for LeavesMut<'list, T, B> {}
+impl<T: Clone, B> FusedIterator for LeavesMut<'_, T, B> {}

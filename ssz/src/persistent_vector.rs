@@ -439,4 +439,4 @@ impl<'vector, T, B: BundleSize<T>> Iterator for Leaves<'vector, T, B> {
     }
 }
 
-impl<'vector, T, B: BundleSize<T>> FusedIterator for Leaves<'vector, T, B> {}
+impl<T, B: BundleSize<T>> FusedIterator for Leaves<'_, T, B> {}

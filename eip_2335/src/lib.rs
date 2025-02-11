@@ -360,7 +360,7 @@ impl<'de> Deserialize<'de> for Eip2334Path {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct PathVisitor;
 
-        impl<'de> Visitor<'de> for PathVisitor {
+        impl Visitor<'_> for PathVisitor {
             type Value = Eip2334Path;
 
             fn expecting(&self, formatter: &mut Formatter) -> FmtResult {

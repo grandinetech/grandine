@@ -26,9 +26,9 @@ impl TryFrom<SecretKeyBytes> for SecretKey {
 
     #[inline]
     fn try_from(secret_key_bytes: SecretKeyBytes) -> Result<Self, Self::Error> {
-        Ok(RawSecretKey::from_bytes(secret_key_bytes.as_ref())
+        RawSecretKey::from_bytes(secret_key_bytes.as_ref())
             .map(Self)
-            .map_err(|_| Error::InvalidSecretKey)?)
+            .map_err(|_| Error::InvalidSecretKey)
     }
 }
 

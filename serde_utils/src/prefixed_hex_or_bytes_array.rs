@@ -14,7 +14,7 @@ pub fn deserialize<'de, D: Deserializer<'de>, const N: usize>(
         human_readable: bool,
     }
 
-    impl<'de, const N: usize> Visitor<'de> for ArrayVisitor<N> {
+    impl<const N: usize> Visitor<'_> for ArrayVisitor<N> {
         type Value = [u8; N];
 
         fn expecting(&self, formatter: &mut Formatter) -> FmtResult {

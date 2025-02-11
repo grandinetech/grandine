@@ -287,6 +287,7 @@ impl Database {
         .pipe(Ok)
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn iterator_ascending(
         &self,
         range: RangeFrom<impl AsRef<[u8]>>,
@@ -331,6 +332,7 @@ impl Database {
         .pipe(Ok)
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn iterator_descending(
         &self,
         range: RangeToInclusive<impl AsRef<[u8]>>,

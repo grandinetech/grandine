@@ -682,7 +682,7 @@ impl<P: Preset> Store<P> {
         &'store self,
         segment: &'store Segment<P>,
         last_included: Position,
-    ) -> impl Iterator<Item = &ChainLink<P>> {
+    ) -> impl Iterator<Item = &'store ChainLink<P>> {
         self.segments_ending_with(segment, last_included)
             .flat_map(|(segment, position)| segment.chain_ending_at(position))
     }
@@ -691,7 +691,7 @@ impl<P: Preset> Store<P> {
         &'store self,
         segment: &'store Segment<P>,
         last_included: Position,
-    ) -> impl Iterator<Item = (&Segment<P>, Position)> {
+    ) -> impl Iterator<Item = (&'store Segment<P>, Position)> {
         core::iter::successors(Some((segment, last_included)), move |(segment, _)| {
             let parent_location = self.parent_location(segment)?;
             let parent = &self.unfinalized[&parent_location.segment_id];

@@ -37,9 +37,9 @@ impl TryFrom<SignatureBytes> for Signature {
 
     #[inline]
     fn try_from(bytes: SignatureBytes) -> Result<Self, Self::Error> {
-        Ok(RawSignature::uncompress(bytes.as_bytes())
+        RawSignature::uncompress(bytes.as_bytes())
             .map(Self)
-            .map_err(|_| Error::InvalidSignature)?)
+            .map_err(|_| Error::InvalidSignature)
     }
 }
 

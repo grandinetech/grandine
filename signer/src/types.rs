@@ -186,7 +186,7 @@ pub enum SigningBlock<'block, P: Preset> {
     Electra { block_header: BeaconBlockHeader },
 }
 
-impl<'block, P: Preset> SigningBlock<'block, P> {
+impl<P: Preset> SigningBlock<'_, P> {
     pub const fn slot(&self) -> Slot {
         match self {
             SigningBlock::Phase0 { block } => block.slot,

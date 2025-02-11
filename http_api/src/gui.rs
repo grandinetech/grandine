@@ -645,7 +645,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                         previous_epoch_sync_committee_assignments.remove(&validator_index);
 
                     let previous_epoch_sync_committee_performance = sync_committee_performance(
-                        &previous_epoch_sync_committee_assignment,
+                        previous_epoch_sync_committee_assignment.as_ref(),
                         &previous_epoch_sync_aggregates_with_roots,
                     );
 
@@ -847,7 +847,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                         previous_epoch_sync_committee_assignments.remove(&validator_index);
 
                     let previous_epoch_sync_committee_performance = sync_committee_performance(
-                        &previous_epoch_sync_committee_assignment,
+                        previous_epoch_sync_committee_assignment.as_ref(),
                         &previous_epoch_sync_aggregates_with_roots,
                     );
 
@@ -1049,7 +1049,7 @@ fn sync_aggregate_with_root<P: Preset>(
 }
 
 fn sync_committee_performance(
-    assignment: &Option<SyncCommitteeAssignment>,
+    assignment: Option<&SyncCommitteeAssignment>,
     sync_aggregates_with_roots: &HashMap<Slot, (SyncAggregate<impl Preset>, H256)>,
 ) -> BTreeMap<Slot, SyncCommitteePerformance> {
     assignment

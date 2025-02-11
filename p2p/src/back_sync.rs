@@ -282,6 +282,7 @@ impl<P: Preset> Batch<P> {
             .collect()
     }
 
+    #[expect(clippy::type_complexity)]
     fn verify_from_checkpoint(
         &self,
         config: &Config,

@@ -70,7 +70,7 @@ impl SecretKeyTrait<SIZE> for SecretKey {
     #[must_use]
     fn sign(&self, message: impl AsRef<[u8]>) -> Signature {
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
-            &[message.as_ref()],
+            [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
         let signature = h * self.as_raw();

@@ -18,7 +18,7 @@ where
 {
     struct HexVisitor<T>(PhantomData<T>);
 
-    impl<'de, T: Num<FromStrRadixErr: Display>> Visitor<'de> for HexVisitor<T> {
+    impl<T: Num<FromStrRadixErr: Display>> Visitor<'_> for HexVisitor<T> {
         type Value = T;
 
         fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
