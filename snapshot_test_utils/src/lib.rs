@@ -413,7 +413,7 @@ fn parse_response<'b, 'h>(
     Ok((response, body))
 }
 
-fn unwrap_response_field<T>(option: Option<T>) -> T {
+const fn unwrap_response_field<T>(option: Option<T>) -> T {
     option.expect("httparse sets Response fields to Some if response is valid")
 }
 

@@ -19,7 +19,7 @@ pub fn deserialize<'de, D: Deserializer<'de>, N: ArrayLength<u8>>(
         phantom: PhantomData<N>,
     }
 
-    impl<'de, N: ArrayLength<u8>> Visitor<'de> for GenericArrayVisitor<N> {
+    impl<N: ArrayLength<u8>> Visitor<'_> for GenericArrayVisitor<N> {
         type Value = GenericArray<u8, N>;
 
         fn expecting(&self, formatter: &mut Formatter) -> FmtResult {

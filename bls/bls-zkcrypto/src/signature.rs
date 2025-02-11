@@ -44,7 +44,7 @@ impl SignatureTrait for Signature {
     #[must_use]
     fn verify(&self, message: impl AsRef<[u8]>, public_key: Self::PublicKey) -> bool {
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
-            &[message.as_ref()],
+            [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
 
@@ -74,7 +74,7 @@ impl SignatureTrait for Signature {
             .fold(G1Projective::identity(), |acc, pk| acc + pk.as_raw());
 
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
-            &[message.as_ref()],
+            [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
 
@@ -110,7 +110,7 @@ impl SignatureTrait for Signature {
 
         for i in 0..sigs.len() {
             let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
-                &[msgs[i]],
+                [msgs[i]],
                 DOMAIN_SEPARATION_TAG,
             );
 
