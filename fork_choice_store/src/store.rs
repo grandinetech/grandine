@@ -1176,7 +1176,6 @@ impl<P: Preset> Store<P> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
-    #[expect(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -1205,12 +1204,9 @@ impl<P: Preset> Store<P> {
             }
         }
 
-        let AttestationData {
-            slot,
-            index,
-            target,
-            ..
-        } = aggregate.data();
+        let AttestationData { slot, target, .. } = aggregate.data();
+
+        let index = misc::committee_index(&aggregate);
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.

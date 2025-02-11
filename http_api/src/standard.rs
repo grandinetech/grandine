@@ -2912,7 +2912,6 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
     let run = async {
         let AttestationData {
             slot,
-            index: committee_index,
             beacon_block_root,
             target,
             ..
@@ -2930,6 +2929,8 @@ async fn submit_attestation_to_pool<P: Preset, W: Wait>(
 
         let committees_per_slot =
             accessors::get_committee_count_per_slot(&target_state, relative_epoch);
+
+        let committee_index = misc::committee_index(&attestation);
 
         let subnet_id =
             misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)?;
