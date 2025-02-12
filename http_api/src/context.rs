@@ -88,6 +88,7 @@ impl<P: Preset> Context<P> {
         let (api_to_liveness_tx, api_to_liveness_rx) = futures::channel::mpsc::unbounded();
         let (api_to_p2p_tx, api_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (api_to_validator_tx, api_to_validator_rx) = futures::channel::mpsc::unbounded();
+        let (execution_service_to_blob_fetcher_tx, _) = futures::channel::mpsc::unbounded();
         let (fc_to_attestation_verifier_tx, fc_to_attestation_verifier_rx) =
             futures::channel::mpsc::unbounded();
         let (fc_to_p2p_tx, fc_to_p2p_rx) = futures::channel::mpsc::unbounded();
@@ -211,6 +212,7 @@ impl<P: Preset> Context<P> {
             controller.clone_arc(),
             dedicated_executor.clone_arc(),
             execution_service_rx,
+            execution_service_to_blob_fetcher_tx,
         );
 
         let signer = Arc::new(Signer::new(

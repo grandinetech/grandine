@@ -28,7 +28,7 @@ use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
 use drain_filter_polyfill::VecExt as _;
-use eth2_libp2p::GossipId;
+use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
@@ -47,10 +47,7 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
-    deneb::{
-        containers::{BlobIdentifier, BlobSidecar},
-        primitives::BlobIndex,
-    },
+    deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -515,7 +512,6 @@ where
                 );
             }
             Ok(BlockAction::DelayUntilBlobs(block)) => {
-                let slot = block.message().slot();
                 let block_root = block.message().hash_tree_root();
 
                 let pending_block = PendingBlock {
@@ -541,11 +537,6 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    self.request_blobs_from_execution_engine(
-                        pending_block.block.clone_arc(),
-                        missing_blob_indices.clone(),
-                    );
-
                     let blob_ids = missing_blob_indices
                         .into_iter()
                         .map(|index| BlobIdentifier { block_root, index })
@@ -553,7 +544,11 @@ where
 
                     let peer_id = pending_block.origin.peer_id();
 
-                    P2pMessage::BlobsNeeded(blob_ids, slot, peer_id).send(&self.p2p_tx);
+                    self.request_blobs_from_execution_engine(
+                        pending_block.block.clone_arc(),
+                        blob_ids,
+                        peer_id,
+                    );
 
                     self.delay_block_until_blobs(block_root, pending_block);
                 }
@@ -1739,9 +1734,11 @@ where
     fn request_blobs_from_execution_engine(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
-        missing_blob_indices: Vec<BlobIndex>,
+        missing_blobs: Vec<BlobIdentifier>,
+        peer_id: Option<PeerId>,
     ) {
-        self.execution_engine.get_blobs(block, missing_blob_indices);
+        self.execution_engine
+            .get_blobs(block, missing_blobs, peer_id);
     }
 
     fn notify_forkchoice_updated(&self, new_head: &ChainLink<P>) {

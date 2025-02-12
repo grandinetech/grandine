@@ -7,6 +7,7 @@ use core::{
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
+use dashmap::DashMap;
 use database::Database;
 use eth1_api::RealController;
 use eth2_libp2p::{PeerAction, PeerId, ReportSource};
@@ -28,7 +29,7 @@ use tokio_stream::wrappers::IntervalStream;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
-    phase0::primitives::{Epoch, Slot, H256},
+    phase0::primitives::{Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -78,7 +79,7 @@ pub struct BlockSyncService<P: Preset> {
     is_back_synced: bool,
     is_forward_synced: bool,
     is_exiting: Arc<AtomicBool>,
-    received_blob_sidecars: HashMap<BlobIdentifier, Slot>,
+    received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
@@ -108,6 +109,7 @@ impl<P: Preset> BlockSyncService<P> {
         loaded_from_remote: bool,
         storage_mode: StorageMode,
         target_peers: usize,
+        received_blob_sidecars: Arc<DashMap<BlobIdentifier, u64>>,
     ) -> Result<Self> {
         let database;
         let back_sync;
@@ -206,7 +208,7 @@ impl<P: Preset> BlockSyncService<P> {
             // `BlockSyncService::set_forward_synced` subscribe to core topics on startup.
             is_forward_synced: false,
             is_exiting: Arc::new(AtomicBool::new(false)),
-            received_blob_sidecars: HashMap::new(),
+            received_blob_sidecars,
             received_block_roots: HashMap::new(),
             fork_choice_to_sync_rx,
             p2p_to_sync_rx,
@@ -309,6 +311,10 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                         P2pToSync::GossipBlobSidecar(blob_sidecar, subnet_id, gossip_id) => {
                             let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
+                            let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
+
+                            self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot);
+
                             let block_seen = self
                                 .received_block_roots
                                 .contains_key(&blob_identifier.block_root);
@@ -432,8 +438,11 @@ impl<P: Preset> BlockSyncService<P> {
                             self.request_blobs_and_blocks_if_ready()?;
                         }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
-                            self.prune_received_blob_sidecars(finalized_checkpoint.epoch);
-                            self.prune_received_block_roots(finalized_checkpoint.epoch);
+                            let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
+                                finalized_checkpoint.epoch);
+
+                            self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
+                            self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             self.received_blob_sidecars.remove(&blob_identifier);
@@ -773,7 +782,7 @@ impl<P: Preset> BlockSyncService<P> {
 
             if self.back_sync.is_some() {
                 self.received_block_roots = HashMap::new();
-                self.received_blob_sidecars = HashMap::new();
+                self.received_blob_sidecars.clear();
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready()?;
@@ -791,26 +800,12 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    fn prune_received_blob_sidecars(&mut self, epoch: Epoch) {
-        let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(epoch);
-
-        self.received_blob_sidecars
-            .retain(|_, slot| *slot >= start_of_epoch);
-    }
-
-    fn prune_received_block_roots(&mut self, epoch: Epoch) {
-        let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(epoch);
-
-        self.received_block_roots
-            .retain(|_, slot| *slot >= start_of_epoch);
-    }
-
     fn register_new_received_block(&mut self, block_root: H256, slot: Slot) -> bool {
         self.received_block_roots.insert(block_root, slot).is_none()
     }
 
     fn register_new_received_blob_sidecar(
-        &mut self,
+        &self,
         blob_identifier: BlobIdentifier,
         slot: Slot,
     ) -> bool {

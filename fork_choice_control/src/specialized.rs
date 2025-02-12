@@ -49,10 +49,10 @@ pub type BenchController<P> =
 
 #[cfg(test)]
 pub type TestController<P> =
-    Controller<P, TestExecutionEngine, AttestationVerifierDrain<P>, WaitGroup>;
+    Controller<P, TestExecutionEngine<P>, AttestationVerifierDrain<P>, WaitGroup>;
 
 #[cfg(test)]
-pub type TestExecutionEngine = Arc<Mutex<MockExecutionEngine>>;
+pub type TestExecutionEngine<P> = Arc<Mutex<MockExecutionEngine<P>>>;
 
 impl<P, E, A> Controller<P, E, A, WaitGroup>
 where
@@ -182,7 +182,7 @@ impl<P: Preset> TestController<P> {
             chain_config,
             anchor_block,
             anchor_state,
-            Arc::new(Mutex::new(MockExecutionEngine::new(true, false))),
+            Arc::new(Mutex::new(MockExecutionEngine::new(true, false, None))),
             futures::sink::drain(),
         )
     }
@@ -191,7 +191,7 @@ impl<P: Preset> TestController<P> {
         chain_config: Arc<ChainConfig>,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
-        execution_engine: TestExecutionEngine,
+        execution_engine: TestExecutionEngine<P>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let store_config = StoreConfig::aggressive(&chain_config);

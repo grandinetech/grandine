@@ -4,9 +4,14 @@ use anyhow::Result;
 use dedicated_executor::DedicatedExecutor;
 use derive_more::Constructor;
 use either::Either;
-use execution_engine::{ForkChoiceUpdatedResponse, PayloadAttributes, PayloadStatusV1};
+use execution_engine::{
+    ExecutionServiceMessage, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadStatusV1,
+};
 use fork_choice_control::Wait;
-use futures::{channel::mpsc::UnboundedReceiver, StreamExt as _};
+use futures::{
+    channel::mpsc::{UnboundedReceiver, UnboundedSender},
+    StreamExt as _,
+};
 use log::warn;
 use std_ext::ArcExt as _;
 use types::{
@@ -17,8 +22,8 @@ use types::{
 };
 
 use crate::{
-    eth1_api::Eth1Api, messages::ExecutionServiceMessage, misc::ApiController,
-    spawn_blobs_download_task, spawn_exchange_capabilities_task,
+    eth1_api::Eth1Api, messages::Eth1ApiToBlobFetcher, misc::ApiController,
+    spawn_exchange_capabilities_task,
 };
 
 #[derive(Constructor)]
@@ -27,6 +32,7 @@ pub struct ExecutionService<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
     rx: UnboundedReceiver<ExecutionServiceMessage<P>>,
+    blob_fetcher_tx: UnboundedSender<Eth1ApiToBlobFetcher<P>>,
 }
 
 impl<P: Preset, W: Wait> ExecutionService<P, W> {
@@ -41,15 +47,22 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                 }
                 ExecutionServiceMessage::GetBlobs {
                     block,
-                    blob_indices,
+                    blob_identifiers,
+                    peer_id,
                 } => {
-                    spawn_blobs_download_task(
-                        self.api.clone_arc(),
-                        self.controller.clone_arc(),
-                        &self.dedicated_executor,
+                    // Fetch blobs from the EL in a separate task concurrently.
+                    // Blob fetching from the EL should not delay the 'engine_forkchoiceUpdated'
+                    // call, if all required blobs are received via gossip in the meantime.
+                    //
+                    // The message to trigger blob fetching should not be sent directly from
+                    // `Mutator` to `ExecutionBlobFetcher`, as fetching must occur only after
+                    // the execution payload is validated with the `engine_newPayload` call.
+                    Eth1ApiToBlobFetcher::GetBlobs {
                         block,
-                        blob_indices,
-                    );
+                        blob_identifiers,
+                        peer_id,
+                    }
+                    .send(&self.blob_fetcher_tx);
                 }
                 ExecutionServiceMessage::NotifyForkchoiceUpdated {
                     head_eth1_block_hash,
