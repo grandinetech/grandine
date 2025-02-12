@@ -814,7 +814,7 @@ mod spec_tests {
         let body = case.ssz_default("body");
         let post_option = case.try_ssz_default("post");
         let Execution { execution_valid } = case.yaml("execution");
-        let execution_engine = MockExecutionEngine::new(execution_valid, false);
+        let execution_engine = MockExecutionEngine::new(execution_valid, false, None);
 
         let result = process_execution_payload(
             &P::default_config(),

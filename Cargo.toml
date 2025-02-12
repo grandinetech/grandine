@@ -313,6 +313,7 @@ crossbeam-skiplist = '0.1'
 crossbeam-utils = '0.8'
 ctr = { version = '0.9', features = ['zeroize'] }
 darling = '0.20'
+dashmap = '6.1'
 dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.4'
 derivative = '2'

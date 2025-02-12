@@ -173,7 +173,6 @@ pub enum P2pMessage<P: Preset> {
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
-    BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
 }

@@ -1873,6 +1873,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2559,10 +2573,12 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "bls",
+ "dashmap",
  "dedicated_executor",
  "derive_more 1.0.0",
  "either",
  "enum-iterator",
+ "eth2_libp2p",
  "ethereum-types",
  "execution_engine",
  "features",
@@ -2745,10 +2761,12 @@ dependencies = [
  "anyhow",
  "const-hex",
  "either",
+ "eth2_libp2p",
  "ethereum-types",
  "futures",
  "hex",
  "hex-literal",
+ "log",
  "serde",
  "serde_json",
  "serde_utils",
@@ -5873,6 +5891,7 @@ dependencies = [
  "arithmetic",
  "bls",
  "cached",
+ "dashmap",
  "database",
  "dedicated_executor",
  "derive_more 1.0.0",
@@ -6996,6 +7015,7 @@ dependencies = [
  "builder_api",
  "bytesize",
  "clock",
+ "dashmap",
  "database",
  "dedicated_executor",
  "directories",

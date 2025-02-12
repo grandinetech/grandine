@@ -8,7 +8,7 @@ use std::{
 use anyhow::{bail, Result};
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
-use eth1_api::RealController;
+use eth1_api::{BlobFetcherToP2p, RealController};
 use eth2_libp2p::{
     rpc::{
         methods::{
@@ -92,6 +92,7 @@ const OLD_PHASE_TOPICS_REMAIN_EPOCHS: u64 = 2;
 
 pub struct Channels<P: Preset> {
     pub api_to_p2p_rx: UnboundedReceiver<ApiToP2p<P>>,
+    pub blob_fetcher_to_p2p_rx: UnboundedReceiver<BlobFetcherToP2p>,
     pub fork_choice_to_p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     pub pool_to_p2p_rx: UnboundedReceiver<PoolToP2pMessage>,
     pub p2p_to_sync_tx: UnboundedSender<P2pToSync<P>>,
@@ -223,6 +224,19 @@ impl<P: Preset> Network<P> {
                     }
                 },
 
+                message = self.channels.blob_fetcher_to_p2p_rx.select_next_some() => {
+                    match message {
+                        BlobFetcherToP2p::BlobsNeeded(identifiers, slot, peer_id) => {
+                            debug!("blobs needed: {identifiers:?} from {peer_id:?}");
+
+                            let peer_id = self.ensure_peer_connected(peer_id);
+
+                            P2pToSync::BlobsNeeded(identifiers, slot, peer_id)
+                                .send(&self.channels.p2p_to_sync_tx);
+                        }
+                    }
+                },
+
                 message = self.channels.api_to_p2p_rx.select_next_some() => {
                     let success = match message {
                         ApiToP2p::PublishBeaconBlock(beacon_block) => {
@@ -332,24 +346,8 @@ impl<P: Preset> Network<P> {
                                 );
                             }
                         }
-                        P2pMessage::BlobsNeeded(identifiers, slot, peer_id) => {
-                            if let Some(peer_id) = peer_id {
-                                debug!("blobs needed: {identifiers:?} from {peer_id}");
-                            } else {
-                                debug!("blobs needed: {identifiers:?}");
-                            }
-
-                            let peer_id = self.ensure_peer_connected(peer_id);
-
-                            P2pToSync::BlobsNeeded(identifiers, slot, peer_id)
-                                .send(&self.channels.p2p_to_sync_tx);
-                        }
                         P2pMessage::BlockNeeded(root, peer_id) => {
-                            if let Some(peer_id) = peer_id {
-                                debug!("block needed: {root:?} from {peer_id}");
-                            } else {
-                                debug!("block needed: {root:?}");
-                            }
+                            debug!("block needed: {root:?} from {peer_id:?}");
 
                             let peer_id = self.ensure_peer_connected(peer_id);
 

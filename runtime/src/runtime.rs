@@ -7,13 +7,14 @@ use block_producer::BlockProducer;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
+use dashmap::DashMap;
 use database::{Database, DatabaseMode};
 use dedicated_executor::DedicatedExecutor;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1::{Eth1Chain, Eth1Config};
 use eth1_api::{
     Eth1Api, Eth1ApiToMetrics, Eth1ConnectionData, Eth1ExecutionEngine, Eth1Metrics,
-    ExecutionService, RealController,
+    ExecutionBlobFetcher, ExecutionService, RealController,
 };
 use fork_choice_control::{Controller, StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
@@ -120,6 +121,9 @@ pub async fn run_after_genesis<P: Preset>(
         warn!("failed to load validator keys");
     }
 
+    let (blob_fetcher_to_p2p_tx, blob_fetcher_to_p2p_rx) = mpsc::unbounded();
+    let (execution_service_to_blob_fetcher_tx, execution_service_to_blob_fetcher_rx) =
+        mpsc::unbounded();
     let (execution_service_tx, execution_service_rx) = mpsc::unbounded();
     let (fork_choice_to_attestation_verifier_tx, fork_choice_to_attestation_verifier_rx) =
         mpsc::unbounded();
@@ -253,11 +257,22 @@ pub async fn run_after_genesis<P: Preset>(
         !back_sync_enabled || is_anchor_genesis,
     )?;
 
+    let received_blob_sidecars = Arc::new(DashMap::new());
+
     let execution_service = ExecutionService::new(
         eth1_api.clone_arc(),
         controller.clone_arc(),
         dedicated_executor_low_priority.clone_arc(),
         execution_service_rx,
+        execution_service_to_blob_fetcher_tx,
+    );
+
+    let execution_blob_fetcher = ExecutionBlobFetcher::new(
+        eth1_api.clone_arc(),
+        controller.clone_arc(),
+        received_blob_sidecars.clone_arc(),
+        blob_fetcher_to_p2p_tx,
+        execution_service_to_blob_fetcher_rx,
     );
 
     let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
@@ -361,6 +376,7 @@ pub async fn run_after_genesis<P: Preset>(
         loaded_from_remote,
         storage_config.storage_mode,
         network_config.target_peers,
+        received_blob_sidecars,
     )?;
 
     block_sync_service.try_to_spawn_back_sync_states_archiver()?;
@@ -562,6 +578,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let p2p_channels = Channels {
         api_to_p2p_rx,
+        blob_fetcher_to_p2p_rx,
         fork_choice_to_p2p_rx,
         pool_to_p2p_rx,
         p2p_to_sync_tx,
@@ -669,6 +686,7 @@ pub async fn run_after_genesis<P: Preset>(
     select! {
         result = join_mutator => result,
         result = spawn_fallible(execution_service.run()) => result,
+        result = spawn_fallible(execution_blob_fetcher.run()) => result,
         result = spawn_fallible(validator.run()) => result,
         result = spawn_fallible(attestation_verifier.run()) => result,
         result = spawn_fallible(block_sync_service.run()) => result.map(from_never),

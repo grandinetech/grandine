@@ -3,21 +3,24 @@ use std::sync::Arc;
 use anyhow::Result;
 use derive_more::Constructor;
 use either::Either;
-use execution_engine::{ExecutionEngine, PayloadAttributes, PayloadId, PayloadStatusV1};
+use eth2_libp2p::PeerId;
+use execution_engine::{
+    ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId, PayloadStatusV1,
+};
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::{info, warn};
 use tokio::runtime::{Builder, Handle};
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
     config::Config,
-    deneb::primitives::BlobIndex,
+    deneb::containers::BlobIdentifier,
     nonstandard::{Phase, TimedPowBlock, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
 use web3::types::U64;
 
-use crate::{eth1_api::Eth1Api, messages::ExecutionServiceMessage};
+use crate::eth1_api::Eth1Api;
 
 #[derive(Constructor)]
 pub struct Eth1ExecutionEngine<P: Preset> {
@@ -37,10 +40,16 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
         ExecutionServiceMessage::ExchangeCapabilities.send(&self.execution_service_tx);
     }
 
-    fn get_blobs(&self, block: Arc<SignedBeaconBlock<P>>, blob_indices: Vec<BlobIndex>) {
+    fn get_blobs(
+        &self,
+        block: Arc<SignedBeaconBlock<P>>,
+        blob_identifiers: Vec<BlobIdentifier>,
+        peer_id: Option<PeerId>,
+    ) {
         ExecutionServiceMessage::GetBlobs {
             block,
-            blob_indices,
+            blob_identifiers,
+            peer_id,
         }
         .send(&self.execution_service_tx);
     }

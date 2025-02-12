@@ -5,7 +5,9 @@ use anyhow::Result;
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::GossipId;
-use execution_engine::{MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus};
+use execution_engine::{
+    ExecutionServiceMessage, MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
+};
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
@@ -38,8 +40,9 @@ pub struct Context<P: Preset> {
         reason = "Keep the `MutatorHandle` around to avoid joining the mutator thread prematurely."
     )]
     mutator_handle: MutatorHandle<P, WaitGroup>,
-    execution_engine: TestExecutionEngine,
+    execution_engine: TestExecutionEngine<P>,
     p2p_rx: UnboundedReceiver<P2pMessage<P>>,
+    service_rx: UnboundedReceiver<ExecutionServiceMessage<P>>,
 }
 
 impl<P: Preset> Drop for Context<P> {
@@ -69,9 +72,12 @@ impl<P: Preset> Context<P> {
         anchor_state: Arc<BeaconState<P>>,
         optimistic_merge_block_validation: bool,
     ) -> Self {
+        let (service_tx, service_rx) = futures::channel::mpsc::unbounded();
+
         let execution_engine = Arc::new(Mutex::new(MockExecutionEngine::new(
             true,
             optimistic_merge_block_validation,
+            Some(service_tx),
         )));
 
         let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
@@ -88,6 +94,7 @@ impl<P: Preset> Context<P> {
             controller: Some(controller),
             mutator_handle,
             p2p_rx,
+            service_rx,
             execution_engine,
         }
     }
@@ -300,7 +307,6 @@ impl<P: Preset> Context<P> {
         self.on_valid_block(block);
 
         let block_root = block.message().hash_tree_root();
-        let slot = block.message().slot();
         let identifiers = (0..blob_count)
             .map(|index| BlobIdentifier {
                 block_root,
@@ -308,12 +314,16 @@ impl<P: Preset> Context<P> {
             })
             .collect::<Vec<_>>();
 
-        match self.next_p2p_message() {
-            Some(P2pMessage::BlobsNeeded(blob_identifiers, blob_slot, _)) => {
+        match self.next_execution_service_message() {
+            Some(ExecutionServiceMessage::GetBlobs {
+                block: block_with_missing_blobs,
+                blob_identifiers,
+                peer_id: _,
+            }) => {
                 assert_eq!(blob_identifiers, identifiers);
-                assert_eq!(blob_slot, slot);
+                assert_eq!(block_with_missing_blobs, *block);
             }
-            _ => panic!("P2pMessage::BlobsNeeded expected"),
+            _ => panic!("ExecutionServiceMessage::GetBlobs expected"),
         }
     }
 
@@ -562,6 +572,10 @@ impl<P: Preset> Context<P> {
         self.controller().wait_for_tasks();
 
         self.next_p2p_message()
+    }
+
+    fn next_execution_service_message(&mut self) -> Option<ExecutionServiceMessage<P>> {
+        self.service_rx.try_next().ok().flatten()
     }
 
     fn next_p2p_message(&mut self) -> Option<P2pMessage<P>> {
