@@ -433,6 +433,8 @@ impl Config {
             capella_fork_version: H32(hex!("90000072")),
             deneb_fork_epoch: 132_608,
             deneb_fork_version: H32(hex!("90000073")),
+            electra_fork_epoch: 222_464,
+            electra_fork_version: H32(hex!("90000074")),
 
             // Deposit contract
             deposit_chain_id: 11_155_111,
@@ -539,6 +541,8 @@ impl Config {
             capella_fork_version: H32(hex!("04017000")),
             deneb_fork_epoch: 29_696,
             deneb_fork_version: H32(hex!("05017000")),
+            electra_fork_epoch: 115_968,
+            electra_fork_version: H32(hex!("06017000")),
 
             // Validator cycle
             ejection_balance: 28_000_000_000,
