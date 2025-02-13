@@ -94,6 +94,5 @@ network-holesky     = ['network-any', 'preset-mainnet']
 default-networks = [
     'network-mainnet',
     'network-sepolia',
-    'network-shadow',
     'network-holesky',
 ]
