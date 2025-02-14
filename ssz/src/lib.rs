@@ -14,7 +14,7 @@ pub use crate::{
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
     dynamic_list::DynamicList,
-    error::{IndexError, PushError, ReadError, WriteError},
+    error::{IndexError, PushError, ReadError, SizeError, WriteError},
     hc::Hc,
     merkle_tree::{mix_in_length, MerkleTree, ProofWithLength},
     persistent_list::PersistentList,

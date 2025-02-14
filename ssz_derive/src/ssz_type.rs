@@ -2,7 +2,7 @@ use darling::{ast::Data, FromDeriveInput};
 use easy_ext::ext;
 use itertools::Itertools as _;
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, ToTokens as _, TokenStreamExt as _};
+use quote::{format_ident, quote, TokenStreamExt as _};
 use syn::{
     parse_quote,
     punctuated::Punctuated,
@@ -184,20 +184,23 @@ impl SszType {
             self.single_unskipped_field()?;
         }
 
-        let mut size_exprs = self
+        let size_exprs = self
             .unskipped_fields()?
-            .map(|(_, ssz_field)| ssz_field.size_expr(ssz));
+            .map(|(_, ssz_field)| ssz_field.size_expr(ssz))
+            .collect_vec();
 
-        let mut tokens = size_exprs
-            .next()
-            .ok_or_else(|| Error::new(Span::call_site(), "struct has no unskipped fields"))?
-            .into_token_stream();
-
-        for size_expr in size_exprs {
-            tokens.append_all(quote! { .add(#size_expr) });
+        if size_exprs.is_empty() {
+            return Err(Error::new(
+                Span::call_site(),
+                "struct has no unskipped fields",
+            ));
         }
 
-        Ok(parse_quote! { #tokens })
+        Ok(parse_quote! {
+            #ssz::Size::for_container([
+                #(#size_exprs,)*
+            ])
+        })
     }
 
     #[expect(

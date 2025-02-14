@@ -235,8 +235,8 @@ impl<T: Serialize, N, B: BundleSize<T>> Serialize for PersistentList<T, N, B> {
     }
 }
 
-impl<T: SszSize, N, B> SszSize for PersistentList<T, N, B> {
-    const SIZE: Size = Size::Variable { minimum_size: 0 };
+impl<T: SszSize, N: Unsigned, B> SszSize for PersistentList<T, N, B> {
+    const SIZE: Size = Size::for_list(T::SIZE, N::USIZE);
 }
 
 impl<C, T: SszRead<C>, N: Unsigned, B: BundleSize<T>> SszRead<C> for PersistentList<T, N, B> {
@@ -246,7 +246,7 @@ impl<C, T: SszRead<C>, N: Unsigned, B: BundleSize<T>> SszRead<C> for PersistentL
     }
 }
 
-impl<T: SszWrite, N, B: BundleSize<T>> SszWrite for PersistentList<T, N, B> {
+impl<T: SszWrite, N: Unsigned, B: BundleSize<T>> SszWrite for PersistentList<T, N, B> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         shared::write_list(bytes, self)
     }

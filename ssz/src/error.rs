@@ -6,6 +6,12 @@ use crate::{
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
+pub enum SizeError {
+    #[error("maximum size does not fit in usize")]
+    MaximumSizeDoesNotFitInUsize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
 pub enum ReadError {
     #[error("expected fixed-size value of {expected} bytes, found {actual} bytes")]
     FixedSizeMismatch { expected: usize, actual: usize },
