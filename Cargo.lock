@@ -903,7 +903,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2 1.0.92",
@@ -1140,7 +1140,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "ff",
  "group",
@@ -1568,7 +1568,7 @@ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 [[package]]
 name = "constantine-core"
 version = "0.1.0"
-source = "git+https://github.com/mratsim/constantine.git?branch=constantine-public-sys#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
+source = "git+https://github.com/mratsim/constantine.git?rev=3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
 dependencies = [
  "constantine-sys",
 ]
@@ -1576,7 +1576,7 @@ dependencies = [
 [[package]]
 name = "constantine-ethereum-kzg"
 version = "0.1.0"
-source = "git+https://github.com/mratsim/constantine.git?branch=constantine-public-sys#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
+source = "git+https://github.com/mratsim/constantine.git?rev=3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
 dependencies = [
  "constantine-core",
  "constantine-sys",
@@ -1585,7 +1585,7 @@ dependencies = [
 [[package]]
 name = "constantine-sys"
 version = "0.1.0"
-source = "git+https://github.com/mratsim/constantine.git?branch=constantine-public-sys#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
+source = "git+https://github.com/mratsim/constantine.git?rev=3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe#3ed6eeac4f0a9b0092bb4234b61768dfde25cdbe"
 
 [[package]]
 name = "conv"
@@ -4592,7 +4592,7 @@ dependencies = [
 [[package]]
 name = "kzg"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "sha2 0.10.8",
  "siphasher 1.0.1",
@@ -4683,7 +4683,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5290,7 +5290,7 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 [[package]]
 name = "mcl_rust"
 version = "1.0.2"
-source = "git+https://github.com/herumi/mcl-rust.git#db8e9a639d27fffb167bc48159ef2e3178b347dc"
+source = "git+https://github.com/herumi/mcl-rust.git?rev=db8e9a639d27fffb167bc48159ef2e3178b347dc#db8e9a639d27fffb167bc48159ef2e3178b347dc"
 dependencies = [
  "cc",
 ]
@@ -7068,7 +7068,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-arkworks5"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -7085,7 +7085,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-blst"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "blst",
  "hex",
@@ -7099,7 +7099,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-constantine"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "blst",
  "constantine-core",
@@ -7116,7 +7116,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-mcl"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "blst",
  "hex",
@@ -7131,7 +7131,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-zkcrypto"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#09e1b73f25726977b5ab231559562173a5267de4"
+source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
  "bls12_381 0.8.0 (git+https://github.com/grandinetech/rust-kzg.git)",
  "byteorder",

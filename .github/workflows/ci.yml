@@ -11,9 +11,9 @@ jobs:
           - os: ubuntu-latest
             backend: blst
           - os: windows-latest
-            backend: zkcrypto,constantine
+            backend: blst
           - os: macos-latest
-            backend: arkworks,mcl
+            backend: blst
 
     runs-on: ${{ matrix.os }}
 
