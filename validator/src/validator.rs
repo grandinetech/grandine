@@ -38,7 +38,7 @@ use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
-use log::{debug, error, info, log, warn, Level};
+use log::{debug, error, info, warn};
 use once_cell::sync::OnceCell;
 use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
@@ -484,14 +484,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             && self.registered_validators.is_empty()
             && self.block_producer.no_prepared_proposers().await;
 
-        log!(
-            if no_validators {
-                Level::Debug
-            } else {
-                Level::Info
-            },
-            "{kind:?} tick in slot {slot}",
-        );
+        debug!("{kind:?} tick in slot {slot}");
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
 

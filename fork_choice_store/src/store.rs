@@ -2026,17 +2026,27 @@ impl<P: Preset> Store<P> {
         let justified_checkpoint_updated = old_justified_checkpoint != self.justified_checkpoint;
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
-        // Temporary logging for debugging
-        if let Some(post_deneb_block_body) = chain_link.block.message().body().post_deneb() {
-            if self.should_check_data_availability_at_slot(chain_link.slot()) {
-                let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
+        let log_imported_block_info = || {
+            if let Some(post_deneb_block_body) = chain_link.block.message().body().post_deneb() {
+                if self.should_check_data_availability_at_slot(chain_link.slot()) {
+                    let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
 
-                log::info!(
-                    "imported {blob_count}/{blob_count} blobs for beacon block: {block_root:?}, slot: {}",
-                    chain_link.slot()
-                );
+                    log::info!(
+                        "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
+                        chain_link.slot(),
+                    );
+
+                    return;
+                }
             }
-        }
+
+            log::info!(
+                "imported beacon block (slot: {}, {block_root:?})",
+                chain_link.slot(),
+            );
+        };
+
+        log_imported_block_info();
 
         self.insert_block(chain_link)?;
 

@@ -368,7 +368,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     metrics.observe_block_duration_to_slot(block_slot_timestamp);
                                 }
 
-                                info!(
+                                debug!(
                                     "received beacon block as gossip (slot: {block_slot}, root: {block_root:?}, \
                                     peer_id: {peer_id})"
                                 );
