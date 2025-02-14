@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use eth1_api::{Eth1Api, Eth1ApiToMetrics, Eth1Block};
 use futures::channel::mpsc::UnboundedSender;
-use log::{info, warn};
+use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use reqwest::Client;
 use std_ext::ArcExt as _;
@@ -100,7 +100,7 @@ impl DownloadManager {
                 .await
                 .context(Error::ConnectionError)?;
 
-            info!(
+            debug!(
                 "downloaded {} Eth1 blocks from block {from_block} to block {to_block}",
                 blocks.len(),
             );
@@ -148,7 +148,7 @@ impl DownloadManager {
         let mut from_block = starting_block_number + 1;
 
         if from_block <= latest_block_number {
-            info!(
+            debug!(
                 "will download Eth1 deposits from block {} to block {}",
                 from_block, latest_block_number,
             );
@@ -157,7 +157,7 @@ impl DownloadManager {
         while from_block <= latest_block_number {
             let to_block = latest_block_number.min(from_block + DEPOSIT_BATCH_SIZE - 1);
 
-            info!("downloading Eth1 deposits from block {from_block} to block {to_block}");
+            debug!("downloading Eth1 deposits from block {from_block} to block {to_block}");
 
             let deposit_event_map = self.api.get_deposit_events(from_block..=to_block).await?;
             let deposit_events = deposit_event_map.values().flatten().collect();

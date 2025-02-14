@@ -8,7 +8,7 @@ use futures::{
     channel::mpsc::UnboundedSender,
     stream::{Stream, TryStreamExt as _},
 };
-use log::{error, info};
+use log::{debug, error};
 use prometheus_metrics::Metrics;
 use reqwest::Client;
 use std_ext::ArcExt as _;
@@ -194,7 +194,7 @@ async fn download_deposits_and_blocks(
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     metrics: Option<Arc<Metrics>>,
 ) -> Result<()> {
-    info!(
+    debug!(
         "started new Eth1 deposit download task (deposit contract {:?})",
         chain_config.deposit_contract_address,
     );
@@ -209,7 +209,7 @@ async fn download_deposits_and_blocks(
     );
 
     loop {
-        info!("started Eth1 deposit download task");
+        debug!("started Eth1 deposit download task");
 
         match download_manager.download_and_store_deposits().await {
             Ok(block_number) => {
@@ -228,7 +228,7 @@ async fn download_deposits_and_blocks(
     }
 
     loop {
-        info!("started Eth1 block download task");
+        debug!("started Eth1 block download task");
 
         if let Err(error) = download_manager.download_and_store_blocks().await {
             handle_error(&error);

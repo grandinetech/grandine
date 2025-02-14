@@ -1601,7 +1601,7 @@ impl<P: Preset> Network<P> {
 
     fn check_status(&self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
         if local.fork_digest != remote.fork_digest {
-            warn!(
+            debug!(
                 "local fork digest doesn't match remote fork digest \
                 (local: {local:?}, remote: {remote:?}, peer_id: {peer_id}); \
                 disconnecting from peer",
@@ -1660,7 +1660,7 @@ impl<P: Preset> Network<P> {
 
         if let Some(root) = local_finalized_root_at_remote_finalized_epoch {
             if root != remote.finalized_root {
-                warn!(
+                debug!(
                     "peer {peer_id} has different block finalized at epoch {} ({root:?} != {:?})",
                     remote.finalized_epoch, remote.finalized_root,
                 );
@@ -1932,7 +1932,7 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
                             if let Err(error) = service.send_request(peer_id, request_id, request) {
-                                warn!("Unable to send request to peer: {peer_id}: {error:?}");
+                                debug!("Unable to send request to peer: {peer_id}: {error:?}");
                             }
                         }
                         ServiceInboundMessage::SendResponse(peer_id, peer_request_id, request_id, response) => {
