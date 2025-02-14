@@ -11,6 +11,7 @@ use eth1_api::ApiController;
 use features::Feature::DebugAttestationPacker;
 use fork_choice_control::Wait;
 use helper_functions::accessors;
+use log::warn;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
@@ -283,7 +284,15 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
             prepared_proposer_indices,
         } = self;
 
-        let beacon_state = controller.preprocessed_state_at_current_slot()?;
+        let beacon_state = match controller.preprocessed_state_at_current_slot() {
+            Ok(state) => state,
+            Err(error) => {
+                warn!(
+                    "failed get preprocessed state at current slot needed for validating registered validator pubkeys: {error}",
+                );
+                return Ok(());
+            }
+        };
 
         let validator_indices = pubkeys
             .into_iter()

@@ -300,7 +300,7 @@ pub trait Eth1Storage {
         &self,
         finalized_deposit_index: DepositIndex,
         deposit_requests_start_index: Option<DepositIndex>,
-    ) -> Result<()> {
+    ) {
         features::log!(
             DebugEth1,
             "Finalizing deposits: {finalized_deposit_index}, \
@@ -326,7 +326,7 @@ pub trait Eth1Storage {
         };
 
         let Some(block_position) = position else {
-            return Ok(());
+            return;
         };
 
         features::log!(
@@ -361,11 +361,8 @@ pub trait Eth1Storage {
             if let Err(error) = self.add_deposits(deposit_events, last_block.number) {
                 warn!("{error:?}");
                 new_finalized_blocks.append(&mut unfinalized_blocks);
-                return Ok(());
             }
         }
-
-        Ok(())
     }
 }
 

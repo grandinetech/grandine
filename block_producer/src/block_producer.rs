@@ -288,7 +288,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         &self,
         finalized_deposit_index: DepositIndex,
         deposit_requests_start_index: Option<DepositIndex>,
-    ) -> Result<()> {
+    ) {
         self.producer_context
             .eth1_chain
             .finalize_deposits(finalized_deposit_index, deposit_requests_start_index)

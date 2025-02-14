@@ -232,8 +232,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    pub async fn run(self) -> Result<()> {
+        self.run_internal().await;
+
+        Ok(())
+    }
+
     #[expect(clippy::too_many_lines)]
-    pub async fn run(mut self) -> Result<()> {
+    async fn run_internal(mut self) {
         loop {
             let mut slasher_to_validator_rx = self
                 .slasher_to_validator_rx
@@ -244,16 +250,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             select! {
                 message = self.internal_rx.select_next_some() => match message {
                     InternalMessage::DoppelgangerProtectionResult(result) => {
-                        result?;
+                        if let Err(error) = result {
+                            panic!("Doppelganger protection error: {error}");
+                        }
                     }
                 },
 
                 message = self.fork_choice_rx.select_next_some() => match message {
                     ValidatorMessage::Tick(wait_group, tick) => {
-                        self.handle_tick(wait_group, tick).await?;
+                        if let Err(error) = self.handle_tick(wait_group, tick).await {
+                            panic!("error while handling tick: {error:?}");
+                        }
                     }
                     ValidatorMessage::FinalizedEth1Data(finalized_eth1_data, deposit_requests_start_index) => {
-                        self.block_producer.finalize_deposits(finalized_eth1_data, deposit_requests_start_index)?;
+                        self.block_producer.finalize_deposits(finalized_eth1_data, deposit_requests_start_index);
                     },
                     ValidatorMessage::Head(wait_group, head) => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
@@ -261,7 +271,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
                         }
 
-                        self.attest_gossip_block(&wait_group, head).await?;
+                        self.attest_gossip_block(&wait_group, head).await;
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
@@ -283,7 +293,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
-                            let proposer_index = slot_head.proposer_index()?;
+                            let proposer_index = match slot_head.proposer_index() {
+                                Ok(proposer_index) => proposer_index,
+                                Err(error) => {
+                                    error!("failed to compute proposer index while preparing execution payload: {error:?}");
+                                    continue;
+                                }
+                            };
 
                             let block_build_context = self.block_producer.new_build_context(
                                 slot_head.beacon_state.clone_arc(),
@@ -339,10 +355,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
-                        let outcome = self
+                        let outcome = match self
                             .block_producer
                             .handle_external_attester_slashing(*slashing.clone())
-                            .await?;
+                            .await {
+                                Ok(outcome) => outcome,
+                                Err(error) => {
+                                    warn!("failed to handle attester slashing: {error}");
+                                    continue;
+                                }
+                            };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
                             self.event_channels.send_attester_slashing_event(&slashing);
@@ -351,10 +373,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
-                        let outcome = self
+                        let outcome = match self
                             .block_producer
                             .handle_external_proposer_slashing(*slashing)
-                            .await?;
+                            .await {
+                                Ok(outcome) => outcome,
+                                Err(error) => {
+                                    warn!("failed to handle proposer slashing: {error}");
+                                    continue;
+                                }
+                            };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
                             self.event_channels.send_proposer_slashing_event(&slashing);
@@ -363,10 +391,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
-                        let outcome = self
+                        let outcome = match self
                             .block_producer
                             .handle_external_voluntary_exit(*voluntary_exit)
-                            .await?;
+                            .await {
+                                Ok(outcome) => outcome,
+                                Err(error) => {
+                                    warn!("failed to handle voluntary exit: {error}");
+                                    continue;
+                                }
+                            };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
                             self.event_channels.send_voluntary_exit_event(&voluntary_exit);
@@ -447,7 +481,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                 }
 
-                complete => break Ok(()),
+                complete => break,
             }
         }
     }
@@ -585,11 +619,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
-                self.attest_and_start_aggregating(&wait_group, &slot_head)
-                    .await?;
+                if let Err(error) = self
+                    .attest_and_start_aggregating(&wait_group, &slot_head)
+                    .await
+                {
+                    error!("failed to produce and publish own attestations: {error:?}");
+                }
 
-                self.publish_sync_committee_messages(&wait_group, &slot_head)
-                    .await?;
+                if let Err(error) = self
+                    .publish_sync_committee_messages(&wait_group, &slot_head)
+                    .await
+                {
+                    error!("failed to produce and publish own sync_committee messages: {error:?}");
+                }
             }
             TickKind::Aggregate => {
                 let _timer = self
@@ -757,13 +799,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        let beacon_block_option = block_build_context
+        let beacon_block_option = match block_build_context
             .build_blinded_beacon_block(
                 randao_reveal,
                 execution_payload_header_handle,
                 local_execution_payload_handle,
             )
-            .await?;
+            .await
+        {
+            Ok(block_opt) => block_opt,
+            Err(error) => {
+                warn!("failed to produce beacon block: {error}");
+                return Ok(());
+            }
+        };
 
         let Some((
             WithBlobsAndMev {
@@ -1261,13 +1310,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) -> Result<()> {
+    async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) {
         let Some(last_tick) = self.last_tick else {
-            return Ok(());
+            return;
         };
 
         if !(last_tick.slot == head.slot() && last_tick.is_before_attesting_interval()) {
-            return Ok(());
+            return;
         }
 
         let slot_head = SlotHead {
@@ -1283,19 +1332,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This noticeably improves rewards in Goerli.
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishAttestationsEarly.is_enabled() {
-            self.attest_and_start_aggregating(wait_group, &slot_head)
-                .await?;
+            if let Err(error) = self
+                .attest_and_start_aggregating(wait_group, &slot_head)
+                .await
+            {
+                error!("failed to produce and publish own attestations: {error:?}");
+            }
         }
 
         // Publish sync committee messages late by default.
         // This noticeably improves rewards in Goerli.
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishSyncCommitteeMessagesEarly.is_enabled() {
-            self.publish_sync_committee_messages(wait_group, &slot_head)
-                .await?;
+            if let Err(error) = self
+                .publish_sync_committee_messages(wait_group, &slot_head)
+                .await
+            {
+                error!("failed to produce and publish own sync_committee messages: {error:?}");
+            }
         }
-
-        Ok(())
     }
 
     fn next_graffiti(&mut self) -> H256 {
