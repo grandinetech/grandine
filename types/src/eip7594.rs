@@ -57,16 +57,6 @@ impl<P: Preset> DataColumnSidecar<P> {
     pub const fn slot(&self) -> u64 {
         self.signed_block_header.message.slot
     }
-
-    #[must_use]
-    pub fn full() -> Self {
-        Self {
-            column: DataColumn::<P>::full(Box::default()),
-            kzg_commitments: ContiguousList::full(KzgCommitment::repeat_byte(u8::MAX)),
-            kzg_proofs: ContiguousList::full(KzgProof::repeat_byte(u8::MAX)),
-            ..Default::default()
-        }
-    }
 }
 
 #[expect(clippy::missing_fields_in_debug)]

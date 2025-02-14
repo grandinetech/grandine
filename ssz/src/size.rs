@@ -1,23 +1,123 @@
-use crate::consts::BYTES_PER_LENGTH_OFFSET;
+use crate::{consts::BYTES_PER_LENGTH_OFFSET, error::SizeError};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Size {
-    Fixed { size: usize },
-    Variable { minimum_size: usize },
+    Fixed {
+        size: usize,
+    },
+    Variable {
+        minimum: usize,
+        maximum: Result<usize, SizeError>,
+    },
 }
 
 impl Size {
     #[must_use]
-    pub const fn for_untagged_union<const N: usize>(sizes: [Self; N]) -> Self {
-        let mut size = sizes[0];
-        let mut index = 1;
+    pub const fn for_vector(element_size: Self, element_count: usize) -> Self {
+        match element_size {
+            Self::Fixed { size } => Self::Fixed {
+                size: element_count * size,
+            },
+            Self::Variable { minimum, maximum } => Self::Variable {
+                minimum: element_count * (BYTES_PER_LENGTH_OFFSET + minimum),
+                maximum: result_mul(
+                    Ok(element_count),
+                    result_add(Ok(BYTES_PER_LENGTH_OFFSET), maximum),
+                ),
+            },
+        }
+        .validate()
+    }
 
-        while index < sizes.len() {
-            size = size.untagged_union(sizes[index]);
+    #[must_use]
+    pub const fn for_list(element_size: Self, max_elements: usize) -> Self {
+        match element_size {
+            Self::Fixed { size } => Self::Variable {
+                minimum: 0,
+                maximum: result_mul(Ok(max_elements), Ok(size)),
+            },
+            // Every list type is variable-size even if its maximum size is zero.
+            Self::Variable {
+                minimum: _,
+                maximum,
+            } => Self::Variable {
+                minimum: 0,
+                maximum: result_mul(
+                    Ok(max_elements),
+                    result_add(Ok(BYTES_PER_LENGTH_OFFSET), maximum),
+                ),
+            },
+        }
+        .validate()
+    }
+
+    #[must_use]
+    pub const fn for_container<const N: usize>(field_sizes: [Self; N]) -> Self {
+        assert!(
+            !field_sizes.is_empty(),
+            "containers with no fields are illegal according to the SSZ specification",
+        );
+
+        let mut container_size = Self::Fixed { size: 0 };
+        let mut index = 0;
+
+        while index < field_sizes.len() {
+            // Unlike `Size::untagged_union`, the operation here makes little sense on its own.
+            container_size = match (container_size, field_sizes[index].validate()) {
+                (Self::Fixed { size }, Self::Fixed { size: other_size }) => Self::Fixed {
+                    size: size + other_size,
+                },
+                (Self::Fixed { size }, Self::Variable { minimum, maximum }) => Self::Variable {
+                    minimum: size + BYTES_PER_LENGTH_OFFSET + minimum,
+                    maximum: result_add(result_add(Ok(size), Ok(BYTES_PER_LENGTH_OFFSET)), maximum),
+                },
+                (Self::Variable { minimum, maximum }, Self::Fixed { size }) => Self::Variable {
+                    minimum: minimum + size,
+                    maximum: result_add(maximum, Ok(size)),
+                },
+                (
+                    Self::Variable { minimum, maximum },
+                    Self::Variable {
+                        minimum: other_minimum_size,
+                        maximum: other_maximum_size,
+                    },
+                ) => Self::Variable {
+                    minimum: minimum + BYTES_PER_LENGTH_OFFSET + other_minimum_size,
+                    maximum: result_add(
+                        result_add(maximum, Ok(BYTES_PER_LENGTH_OFFSET)),
+                        other_maximum_size,
+                    ),
+                },
+            };
+
             index += 1;
         }
 
-        size
+        container_size.validate()
+    }
+
+    #[must_use]
+    pub const fn for_untagged_union<const N: usize>(variant_sizes: [Self; N]) -> Self {
+        assert!(
+            !variant_sizes.is_empty(),
+            "untagged unions should have at least one variant",
+        );
+
+        let mut union_size = variant_sizes[0].validate();
+        let mut index = 1;
+
+        while index < variant_sizes.len() {
+            union_size = union_size.untagged_union(variant_sizes[index].validate());
+            index += 1;
+        }
+
+        union_size.validate()
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn is_fixed(self) -> bool {
+        matches!(self, Self::Fixed { .. })
     }
 
     // The `#[inline]` attribute produces a measurable speedup. This is most likely because the
@@ -33,88 +133,83 @@ impl Size {
         }
     }
 
-    // This cannot be an `Add` impl because the `const_trait_impl` feature is not stable.
-    // See <https://github.com/rust-lang/rust/issues/67792>.
     #[inline]
     #[must_use]
-    pub const fn add(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Fixed { size: self_size }, Self::Fixed { size: other_size }) => Self::Fixed {
-                size: self_size + other_size,
-            },
-            (Self::Fixed { size }, Self::Variable { minimum_size })
-            | (Self::Variable { minimum_size }, Self::Fixed { size }) => Self::Variable {
-                minimum_size: size + minimum_size,
-            },
-            (
-                Self::Variable {
-                    minimum_size: self_minimum_size,
-                },
-                Self::Variable {
-                    minimum_size: other_minimum_size,
-                },
-            ) => Self::Variable {
-                minimum_size: self_minimum_size + other_minimum_size,
-            },
-        }
-    }
-
-    // This cannot be a `Mul` impl because the `const_trait_impl` feature is not stable.
-    // See <https://github.com/rust-lang/rust/issues/67792>.
-    #[inline]
-    #[must_use]
-    pub const fn mul(self, scalar: usize) -> Self {
+    pub const fn minimum(self) -> usize {
         match self {
-            Self::Fixed { size } => Self::Fixed {
-                size: scalar * size,
-            },
-            Self::Variable { minimum_size } => Self::Variable {
-                minimum_size: scalar * minimum_size,
-            },
+            Self::Fixed { size } => size,
+            Self::Variable {
+                minimum,
+                maximum: _,
+            } => minimum,
         }
     }
 
     #[inline]
-    #[must_use]
-    pub const fn untagged_union(self, other: Self) -> Self {
+    pub const fn maximum(self) -> Result<usize, SizeError> {
+        match self {
+            Self::Fixed { size } => Ok(size),
+            Self::Variable {
+                minimum: _,
+                maximum,
+            } => maximum,
+        }
+    }
+
+    const fn untagged_union(self, other: Self) -> Self {
         match (self, other) {
             (Self::Fixed { size: self_size }, Self::Fixed { size: other_size }) => {
                 if self_size == other_size {
                     Self::Fixed { size: self_size }
                 } else {
                     Self::Variable {
-                        minimum_size: min_usize(self_size, other_size),
+                        minimum: usize_min(self_size, other_size),
+                        maximum: Ok(usize_max(self_size, other_size)),
                     }
                 }
             }
-            (Self::Fixed { size }, Self::Variable { minimum_size })
-            | (Self::Variable { minimum_size }, Self::Fixed { size }) => Self::Variable {
-                minimum_size: min_usize(size, minimum_size),
+            (Self::Fixed { size }, Self::Variable { minimum, maximum })
+            | (Self::Variable { minimum, maximum }, Self::Fixed { size }) => Self::Variable {
+                minimum: usize_min(size, minimum),
+                maximum: result_max(Ok(size), maximum),
             },
             (
                 Self::Variable {
-                    minimum_size: self_minimum_size,
+                    minimum: self_minimum_size,
+                    maximum: self_maximum_size,
                 },
                 Self::Variable {
-                    minimum_size: other_minimum_size,
+                    minimum: other_minimum_size,
+                    maximum: other_maximum_size,
                 },
             ) => Self::Variable {
-                minimum_size: min_usize(self_minimum_size, other_minimum_size),
+                minimum: usize_min(self_minimum_size, other_minimum_size),
+                maximum: result_max(self_maximum_size, other_maximum_size),
             },
         }
     }
 
-    #[inline]
-    #[must_use]
-    pub const fn get(self) -> usize {
+    const fn validate(self) -> Self {
         match self {
-            Self::Fixed { size } => size,
-            Self::Variable { minimum_size } => minimum_size,
+            Self::Fixed { size } => assert!(
+                size > 0,
+                "empty fixed-size types are illegal according to the SSZ specification",
+            ),
+            Self::Variable { minimum, maximum } => match maximum {
+                Ok(maximum) => assert!(
+                    minimum <= maximum,
+                    "the minimum size of a variable-size type \
+                     should not be greater than its maximum size",
+                ),
+                Err(SizeError::MaximumSizeDoesNotFitInUsize) => {}
+            },
         }
+
+        self
     }
 }
 
-const fn min_usize(a: usize, b: usize) -> usize {
+const fn usize_min(a: usize, b: usize) -> usize {
     if a < b {
         a
     } else {
@@ -122,20 +217,196 @@ const fn min_usize(a: usize, b: usize) -> usize {
     }
 }
 
+const fn usize_max(a: usize, b: usize) -> usize {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+const fn result_max(
+    a_result: Result<usize, SizeError>,
+    b_result: Result<usize, SizeError>,
+) -> Result<usize, SizeError> {
+    let a = match a_result {
+        Ok(a) => a,
+        Err(error) => return Err(error),
+    };
+
+    let b = match b_result {
+        Ok(b) => b,
+        Err(error) => return Err(error),
+    };
+
+    if a > b {
+        Ok(a)
+    } else {
+        Ok(b)
+    }
+}
+
+const fn result_add(
+    a_result: Result<usize, SizeError>,
+    b_result: Result<usize, SizeError>,
+) -> Result<usize, SizeError> {
+    let a = match a_result {
+        Ok(a) => a,
+        Err(error) => return Err(error),
+    };
+
+    let b = match b_result {
+        Ok(b) => b,
+        Err(error) => return Err(error),
+    };
+
+    match a.checked_add(b) {
+        Some(sum) => Ok(sum),
+        None => Err(SizeError::MaximumSizeDoesNotFitInUsize),
+    }
+}
+
+const fn result_mul(
+    a_result: Result<usize, SizeError>,
+    b_result: Result<usize, SizeError>,
+) -> Result<usize, SizeError> {
+    let a = match a_result {
+        Ok(a) => a,
+        Err(error) => return Err(error),
+    };
+
+    let b = match b_result {
+        Ok(b) => b,
+        Err(error) => return Err(error),
+    };
+
+    match a.checked_mul(b) {
+        Some(product) => Ok(product),
+        None => Err(SizeError::MaximumSizeDoesNotFitInUsize),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use ssz_derive::Ssz;
     use test_case::test_case;
+    use typenum::{U0, U1};
+
+    use crate::{
+        bit_list::BitList, bit_vector::BitVector, byte_list::ByteList, byte_vector::ByteVector,
+        contiguous_list::ContiguousList, contiguous_vector::ContiguousVector,
+        persistent_list::PersistentList, persistent_vector::PersistentVector,
+        porcelain::SszSize as _,
+    };
 
     use super::*;
 
-    #[test_case([Size::Fixed { size: 1 }, Size::Fixed { size: 1 }] => Size::Fixed { size: 1 })]
-    #[test_case([Size::Fixed { size: 2 }, Size::Fixed { size: 3 }] => Size::Variable { minimum_size: 2 })]
-    #[test_case([Size::Fixed { size: 3 }, Size::Fixed { size: 2 }] => Size::Variable { minimum_size: 2 })]
-    #[test_case([Size::Fixed { size: 4 }, Size::Variable { minimum_size: 5 }] => Size::Variable { minimum_size: 4 })]
-    #[test_case([Size::Fixed { size: 5 }, Size::Variable { minimum_size: 4 }] => Size::Variable { minimum_size: 4 })]
-    #[test_case([Size::Variable { minimum_size: 6 }, Size::Variable { minimum_size: 7 }] => Size::Variable { minimum_size: 6 })]
-    #[test_case([Size::Variable { minimum_size: 7 }, Size::Variable { minimum_size: 6 }] => Size::Variable { minimum_size: 6 })]
-    fn size_untagged_union_determines_minimum_size<const N: usize>(sizes: [Size; N]) -> Size {
+    type Fixed = u8;
+    type Variable = ContiguousList<u8, U1>;
+
+    #[derive(Ssz)]
+    #[ssz(
+        derive_hash = false,
+        derive_read = false,
+        derive_write = false,
+        internal
+    )]
+    struct FixedContainer {
+        _a: Fixed,
+        _b: Fixed,
+    }
+
+    #[derive(Ssz)]
+    #[ssz(
+        derive_hash = false,
+        derive_read = false,
+        derive_write = false,
+        internal
+    )]
+    struct MixedContainer {
+        _a: Fixed,
+        _b: Variable,
+    }
+
+    #[derive(Ssz)]
+    #[ssz(
+        derive_hash = false,
+        derive_read = false,
+        derive_write = false,
+        internal
+    )]
+    struct VariableContainer {
+        _a: Variable,
+        _b: Variable,
+    }
+
+    // Assert about the size of `Fixed` as a sanity check even though it is not a composite type.
+    #[test_case(Fixed::SIZE, fixed(1))]
+    #[test_case(Variable::SIZE, variable(0, 1))]
+    #[test_case(BitVector::<U1>::SIZE, fixed(1))]
+    #[test_case(BitList::<U0>::SIZE, variable(1, 1))]
+    #[test_case(BitList::<U1>::SIZE, variable(1, 1))]
+    #[test_case(ByteVector::<U1>::SIZE, fixed(1))]
+    #[test_case(ByteList::<U0>::SIZE, variable(0, 0))]
+    #[test_case(ByteList::<U1>::SIZE, variable(0, 1))]
+    #[test_case(ContiguousVector::<Fixed, U1>::SIZE, fixed(1))]
+    #[test_case(ContiguousVector::<Variable, U1>::SIZE, variable(4, 5))]
+    #[test_case(ContiguousList::<Fixed, U0>::SIZE, variable(0, 0))]
+    #[test_case(ContiguousList::<Fixed, U1>::SIZE, variable(0, 1))]
+    #[test_case(ContiguousList::<Variable, U0>::SIZE, variable(0, 0))]
+    #[test_case(ContiguousList::<Variable, U1>::SIZE, variable(0, 5))]
+    // Assert that persistent collections have the same sizes as the corresponding contiguous ones.
+    #[test_case(ContiguousVector::<Fixed, U1>::SIZE, PersistentVector::<Fixed, U1>::SIZE)]
+    #[test_case(ContiguousVector::<Variable, U1>::SIZE, PersistentVector::<Variable, U1>::SIZE)]
+    #[test_case(ContiguousList::<Fixed, U0>::SIZE, PersistentList::<Fixed, U0>::SIZE)]
+    #[test_case(ContiguousList::<Fixed, U1>::SIZE, PersistentList::<Fixed, U1>::SIZE)]
+    #[test_case(ContiguousList::<Variable, U0>::SIZE, PersistentList::<Variable, U0>::SIZE)]
+    #[test_case(ContiguousList::<Variable, U1>::SIZE, PersistentList::<Variable, U1>::SIZE)]
+    #[test_case(FixedContainer::SIZE, fixed(2))]
+    #[test_case(MixedContainer::SIZE, variable(5, 6))]
+    #[test_case(VariableContainer::SIZE, variable(8, 10))]
+    fn composite_type_size(actual: Size, expected: Size) {
+        assert_eq!(actual, expected);
+    }
+
+    #[test_case([fixed(1), fixed(1)] => fixed(1))]
+    #[test_case([fixed(2), fixed(3)] => variable(2, 3))]
+    #[test_case([fixed(3), fixed(2)] => variable(2, 3))]
+    #[test_case([fixed(4), variable(5, 5)] => variable(4, 5))]
+    #[test_case([fixed(5), variable(5, 5)] => variable(5, 5))]
+    #[test_case([fixed(6), variable(5, 5)] => variable(5, 6))]
+    #[test_case([fixed(7), variable(8, 9)] => variable(7, 9))]
+    #[test_case([fixed(8), variable(7, 9)] => variable(7, 9))]
+    #[test_case([fixed(9), variable(7, 8)] => variable(7, 9))]
+    #[test_case([variable(10, 10), variable(10, 10)] => variable(10, 10))]
+    #[test_case([variable(11, 11), variable(10, 10)] => variable(10, 11))]
+    #[test_case([variable(12, 12), variable(13, 15)] => variable(12, 15))]
+    #[test_case([variable(13, 13), variable(13, 15)] => variable(13, 15))]
+    #[test_case([variable(14, 14), variable(13, 15)] => variable(13, 15))]
+    #[test_case([variable(15, 15), variable(13, 15)] => variable(13, 15))]
+    #[test_case([variable(16, 16), variable(13, 15)] => variable(13, 16))]
+    #[test_case([variable(17, 19), variable(20, 24)] => variable(17, 24))]
+    #[test_case([variable(18, 20), variable(20, 24)] => variable(18, 24))]
+    #[test_case([variable(19, 21), variable(20, 24)] => variable(19, 24))]
+    #[test_case([variable(20, 22), variable(20, 24)] => variable(20, 24))]
+    #[test_case([variable(21, 23), variable(20, 24)] => variable(20, 24))]
+    #[test_case([variable(22, 24), variable(20, 24)] => variable(20, 24))]
+    #[test_case([variable(23, 25), variable(20, 24)] => variable(20, 25))]
+    #[test_case([variable(24, 26), variable(20, 24)] => variable(20, 26))]
+    #[test_case([variable(25, 27), variable(20, 24)] => variable(20, 27))]
+    fn size_for_untagged_union<const N: usize>(sizes: [Size; N]) -> Size {
         Size::for_untagged_union(sizes)
+    }
+
+    const fn fixed(size: usize) -> Size {
+        Size::Fixed { size }.validate()
+    }
+
+    const fn variable(minimum: usize, maximum: usize) -> Size {
+        Size::Variable {
+            minimum,
+            maximum: Ok(maximum),
+        }
+        .validate()
     }
 }

@@ -98,8 +98,8 @@ impl<'de, T: Deserialize<'de>, N: Unsigned> Deserialize<'de> for ContiguousList<
     }
 }
 
-impl<T: SszSize, N> SszSize for ContiguousList<T, N> {
-    const SIZE: Size = Size::Variable { minimum_size: 0 };
+impl<T: SszSize, N: Unsigned> SszSize for ContiguousList<T, N> {
+    const SIZE: Size = Size::for_list(T::SIZE, N::USIZE);
 }
 
 impl<C, T: SszRead<C>, N: Unsigned> SszRead<C> for ContiguousList<T, N> {
@@ -109,7 +109,7 @@ impl<C, T: SszRead<C>, N: Unsigned> SszRead<C> for ContiguousList<T, N> {
     }
 }
 
-impl<T: SszWrite, N> SszWrite for ContiguousList<T, N> {
+impl<T: SszWrite, N: Unsigned> SszWrite for ContiguousList<T, N> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         shared::write_list(bytes, self)
     }

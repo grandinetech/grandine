@@ -241,7 +241,7 @@ where
 }
 
 impl<T: SszSize, N: Unsigned + NonZero, B: BundleSize<T>> SszSize for PersistentVector<T, N, B> {
-    const SIZE: Size = T::SIZE.mul(N::USIZE);
+    const SIZE: Size = Size::for_vector(T::SIZE, N::USIZE);
 }
 
 impl<C, T, N, B> SszRead<C> for PersistentVector<T, N, B>

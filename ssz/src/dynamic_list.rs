@@ -58,7 +58,7 @@ impl<T: Serialize> Serialize for DynamicList<T> {
 }
 
 impl<T: SszSize> SszSize for DynamicList<T> {
-    const SIZE: Size = Size::Variable { minimum_size: 0 };
+    const SIZE: Size = Size::for_list(T::SIZE, usize::MAX);
 }
 
 impl<T: SszReadDefault> SszRead<usize> for DynamicList<T> {

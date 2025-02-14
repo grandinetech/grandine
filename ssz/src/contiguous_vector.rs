@@ -114,7 +114,7 @@ impl<'de, T: Deserialize<'de>, N: ArrayLength<T>> Deserialize<'de> for Contiguou
 }
 
 impl<T: SszSize, N: ContiguousVectorElements<T>> SszSize for ContiguousVector<T, N> {
-    const SIZE: Size = T::SIZE.mul(N::USIZE);
+    const SIZE: Size = Size::for_vector(T::SIZE, N::USIZE);
 }
 
 impl<C, T: SszRead<C>, N: ContiguousVectorElements<T>> SszRead<C> for ContiguousVector<T, N> {

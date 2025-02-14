@@ -130,7 +130,7 @@ impl<'de, N: Unsigned> Deserialize<'de> for BitList<N> {
 }
 
 // `BitBox` serializes itself as a struct with multiple fields.
-impl<N> Serialize for BitList<N> {
+impl<N: Unsigned> Serialize for BitList<N> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut ssz_bytes = vec![];
         self.write_variable(&mut ssz_bytes)
@@ -139,8 +139,11 @@ impl<N> Serialize for BitList<N> {
     }
 }
 
-impl<N> SszSize for BitList<N> {
-    const SIZE: Size = Size::Variable { minimum_size: 1 };
+impl<N: Unsigned> SszSize for BitList<N> {
+    const SIZE: Size = Size::Variable {
+        minimum: 1,
+        maximum: Ok(bytes_with_delimiting_bit(N::USIZE)),
+    };
 }
 
 impl<C, N: Unsigned> SszRead<C> for BitList<N> {
@@ -151,7 +154,7 @@ impl<C, N: Unsigned> SszRead<C> for BitList<N> {
     }
 }
 
-impl<N> SszWrite for BitList<N> {
+impl<N: Unsigned> SszWrite for BitList<N> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         let length_before = bytes.len();
         let length_after = length_before + bytes_with_delimiting_bit(self.len());
