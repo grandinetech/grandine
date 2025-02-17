@@ -10,6 +10,7 @@ use bls::{traits::Signature as _, PublicKeyBytes};
 use eth1_api::ApiController;
 use features::Feature::DebugAttestationPacker;
 use fork_choice_control::Wait;
+use fork_choice_store::StateCacheError;
 use helper_functions::accessors;
 use log::warn;
 use prometheus_metrics::Metrics;
@@ -287,10 +288,14 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
         let beacon_state = match controller.preprocessed_state_at_current_slot() {
             Ok(state) => state,
             Err(error) => {
-                warn!(
-                    "failed get preprocessed state at current slot needed for validating registered validator pubkeys: {error}",
-                );
-                return Ok(());
+                if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
+                    controller.head_state().value
+                } else {
+                    warn!(
+                        "failed get preprocessed state at current slot needed for validating registered validator pubkeys: {error}",
+                    );
+                    return Ok(());
+                }
             }
         };
 

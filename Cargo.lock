@@ -5819,6 +5819,7 @@ dependencies = [
  "eth2_libp2p",
  "features",
  "fork_choice_control",
+ "fork_choice_store",
  "futures",
  "good_lp",
  "helper_functions",

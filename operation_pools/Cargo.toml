@@ -17,6 +17,7 @@ eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
 futures = { workspace = true }
 good_lp = { workspace = true }
 helper_functions = { workspace = true }
