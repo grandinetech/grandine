@@ -811,6 +811,56 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
         .into_response())
 }
 
+/// `GET /eth/v1/beacon/states/{state_id}/pending_deposits`
+pub async fn state_pending_deposits<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = state.phase();
+    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+
+    Ok(
+        EthResponse::json_or_ssz(state.pending_deposits(), &headers)?
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized)
+            .version(version)
+            .into_response(),
+    )
+}
+
+/// `GET /eth/v1/beacon/states/{state_id}/pending_partial_withdrawals`
+pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = state.phase();
+    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+
+    Ok(
+        EthResponse::json_or_ssz(state.pending_partial_withdrawals(), &headers)?
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized)
+            .version(version)
+            .into_response(),
+    )
+}
+
 /// `GET /eth/v1/beacon/states/{state_id}/randao`
 pub async fn state_randao<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
