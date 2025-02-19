@@ -9,11 +9,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            backend: arkworks,blst,constantine,mcl,zkcrypto
+            backend: arkworks,blst,constantine,mcl
           - os: windows-latest
-            backend: arkworks,blst,constantine,mcl,zkcrypto
+            backend: arkworks,constantine,zkcrypto
           - os: macos-latest
-            backend: arkworks,blst,constantine,mcl,zkcrypto
+            backend: arkworks,blst,mcl,zkcrypto
 
     runs-on: ${{ matrix.os }}
 
