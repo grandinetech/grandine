@@ -35,7 +35,7 @@ pub trait CachedPublicKey<C = ()>:
 #[macro_export]
 macro_rules! impl_cached_public_key {
     ($trait:ty, $name:ident, $pkb:ty, $pk:ty) => {
-        #[derive(Default, Debug, derivative::Derivative, serde::Deserialize, serde::Serialize)]
+        #[derive(Default, derivative::Derivative, serde::Deserialize, serde::Serialize)]
         #[derivative(PartialEq, Eq)]
         #[serde(transparent)]
         pub struct $name {
@@ -103,6 +103,14 @@ macro_rules! impl_cached_public_key {
             #[inline]
             fn hash_tree_root(&self) -> ssz::H256 {
                 self.bytes.hash_tree_root()
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("CachedPublicKey")
+                    .field("bytes", &self.bytes)
+                    .finish()
             }
         }
 
