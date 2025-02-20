@@ -995,7 +995,7 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
     Ok(())
 }
 
-fn process_withdrawal_request<P: Preset>(
+pub fn process_withdrawal_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     withdrawal_request: WithdrawalRequest,
@@ -1084,7 +1084,7 @@ fn process_withdrawal_request<P: Preset>(
     Ok(())
 }
 
-fn process_deposit_request<P: Preset>(
+pub fn process_deposit_request<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     deposit_request: DepositRequest,
 ) -> Result<()> {

@@ -1,17 +1,30 @@
+use core::ops::{Add as _, Rem as _};
+
 use anyhow::{ensure, Result};
-use helper_functions::{accessors, misc, slot_report::SlotReport, verifier::Verifier};
+use helper_functions::{
+    accessors, misc,
+    mutators::{balance, decrease_balance},
+    slot_report::SlotReport,
+    verifier::Verifier,
+};
+use ssz::{ContiguousList, PersistentList, SszHash as _};
+use tap::TryConv as _;
+use try_from_iterator::TryFromIterator as _;
+use typenum::{NonZero, Unsigned as _};
 use types::{
+    capella::containers::Withdrawal,
     config::Config,
     electra::{
         beacon_state::BeaconState,
         containers::{BlindedBeaconBlock, BlindedBeaconBlockBody},
     },
     preset::Preset,
+    traits::{PostCapellaExecutionPayloadHeader, PostElectraBeaconState},
 };
 
 use super::block_processing;
 use crate::{
-    altair, capella,
+    altair,
     unphased::{self, Error},
 };
 
@@ -35,7 +48,7 @@ pub fn custom_process_blinded_block<P: Preset>(
     unphased::process_block_header(state, block)?;
 
     // > [New in Capella]
-    capella::process_withdrawals_root(state, &block.body.execution_payload_header)?;
+    process_withdrawals_root(state, &block.body.execution_payload_header)?;
 
     // > [Modified in Capella]
     process_execution_payload(config, state, &block.body)?;
@@ -50,6 +63,21 @@ pub fn custom_process_blinded_block<P: Preset>(
         &mut verifier,
         &mut slot_report,
     )?;
+
+    // > [New in Electra:EIP6110]
+    for deposit_request in &block.body.execution_requests.deposits {
+        block_processing::process_deposit_request(state, *deposit_request)?;
+    }
+
+    // > [New in Electra:EIP7002:EIP7251]
+    for withdrawal_request in &block.body.execution_requests.withdrawals {
+        block_processing::process_withdrawal_request(config, state, *withdrawal_request)?;
+    }
+
+    // > [New in Electra:EIP7251]
+    for consolidation_request in &block.body.execution_requests.consolidations {
+        block_processing::process_consolidation_request(config, state, *consolidation_request)?;
+    }
 
     altair::process_sync_aggregate(
         config,
@@ -92,6 +120,77 @@ fn process_execution_payload<P: Preset>(
     );
 
     state.latest_execution_payload_header = payload_header.clone();
+
+    Ok(())
+}
+
+pub fn process_withdrawals_root<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+    payload_header: &impl PostCapellaExecutionPayloadHeader<P>,
+) -> Result<()>
+where
+    P::MaxWithdrawalsPerPayload: NonZero,
+{
+    let (expected_withdrawals, processed_partial_withdrawals_count) =
+        block_processing::get_expected_withdrawals(state)?;
+    let expected_withdrawals =
+        expected_withdrawals.try_conv::<ContiguousList<_, P::MaxWithdrawalsPerPayload>>()?;
+
+    let computed = expected_withdrawals.hash_tree_root();
+    let in_block = payload_header.withdrawals_root();
+
+    ensure!(
+        computed == in_block,
+        Error::<P>::WithdrawalRootMismatch { computed, in_block },
+    );
+
+    for withdrawal in expected_withdrawals.iter().copied() {
+        let Withdrawal {
+            amount,
+            validator_index,
+            ..
+        } = withdrawal;
+
+        decrease_balance(balance(state, validator_index)?, amount);
+    }
+
+    // > Update pending partial withdrawals [New in Electra:EIP7251]
+    *state.pending_partial_withdrawals_mut() = PersistentList::try_from_iter(
+        state
+            .pending_partial_withdrawals()
+            .into_iter()
+            .copied()
+            .skip(processed_partial_withdrawals_count),
+    )?;
+
+    // > Update the next withdrawal index if this block contained withdrawals
+    if let Some(latest_withdrawal) = expected_withdrawals.last() {
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
+    }
+
+    // > Update the next validator index to start the next withdrawal sweep
+    if expected_withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
+        // > Next sweep starts after the latest withdrawal's validator index
+        let next_validator_index = expected_withdrawals
+            .last()
+            .expect(
+                "the NonZero bound on P::MaxWithdrawalsPerPayload \
+                 ensures that expected_withdrawals is not empty",
+            )
+            .validator_index
+            .add(1)
+            .rem(state.validators().len_u64());
+
+        *state.next_withdrawal_validator_index_mut() = next_validator_index;
+    } else {
+        // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
+        let next_index =
+            state.next_withdrawal_validator_index() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP;
+
+        let next_validator_index = next_index % state.validators().len_u64();
+
+        *state.next_withdrawal_validator_index_mut() = next_validator_index;
+    }
 
     Ok(())
 }
