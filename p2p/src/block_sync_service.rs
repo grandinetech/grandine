@@ -503,23 +503,51 @@ impl<P: Preset> BlockSyncService<P> {
 
     pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch>) -> Result<()> {
         for batch in batches {
-            let request_id = self.request_id()?;
             let SyncBatch {
                 target,
                 direction,
                 peer_id,
-                start_slot,
-                count,
+                mut start_slot,
+                mut count,
                 ..
             } = batch;
 
-            SyncToP2p::ReportPeer(
-                peer_id,
-                PeerAction::MidToleranceError,
-                ReportSource::SyncService,
-                PeerReportReason::ExpiredSyncBatch,
-            )
-            .send(&self.sync_to_p2p_tx);
+            let mut should_penalize_peer = true;
+
+            if direction == SyncDirection::Back && target == SyncTarget::BlobSidecar {
+                let blob_serve_range_slot =
+                    misc::blob_serve_range_slot::<P>(self.controller.chain_config(), self.slot);
+
+                if start_slot + count < blob_serve_range_slot {
+                    debug!(
+                        "skipping batch retry: blob back-sync batch is no longer relevant: \
+                         {start_slot} + {count} < {blob_serve_range_slot}"
+                    );
+
+                    continue;
+                }
+
+                if start_slot < blob_serve_range_slot {
+                    count = (start_slot + count)
+                        .checked_sub(blob_serve_range_slot)
+                        .unwrap_or(1);
+
+                    start_slot = blob_serve_range_slot;
+                    should_penalize_peer = false;
+                }
+            }
+
+            let request_id = self.request_id()?;
+
+            if should_penalize_peer {
+                SyncToP2p::ReportPeer(
+                    peer_id,
+                    PeerAction::MidToleranceError,
+                    ReportSource::SyncService,
+                    PeerReportReason::ExpiredSyncBatch,
+                )
+                .send(&self.sync_to_p2p_tx);
+            }
 
             let peer =
                 self.sync_manager
