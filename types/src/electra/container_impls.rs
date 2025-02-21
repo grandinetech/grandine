@@ -1,16 +1,30 @@
-use ssz::ContiguousList;
+use anyhow::{ensure, Error as AnyhowError, Result};
+use ssz::{BitList, BitVector, ContiguousList, ReadError};
+use thiserror::Error;
+use typenum::Unsigned as _;
 
 use crate::{
+    cache::IndexSlice,
     deneb::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
         primitives::KzgCommitment,
     },
     electra::containers::{
-        BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody, ExecutionRequests,
+        Attestation, BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
+        ExecutionRequests, IndexedAttestation, SingleAttestation,
     },
-    phase0::primitives::H256,
+    phase0::{
+        containers::{Attestation as Phase0Attestation, AttestationData},
+        primitives::H256,
+    },
     preset::Preset,
 };
+
+#[derive(Debug, Error)]
+pub enum AttestationError {
+    #[error("invalid aggregation bits for conversion")]
+    InvalidAggregationBits(#[source] ReadError),
+}
 
 impl<P: Preset> BeaconBlock<P> {
     pub fn with_execution_payload_header_and_kzg_commitments(
@@ -122,5 +136,130 @@ impl<P: Preset> BlindedBeaconBlock<P> {
     pub const fn with_state_root(mut self, state_root: H256) -> Self {
         self.state_root = state_root;
         self
+    }
+}
+
+impl<P: Preset> TryFrom<Phase0Attestation<P>> for Attestation<P> {
+    type Error = AnyhowError;
+
+    fn try_from(phase0_attestation: Phase0Attestation<P>) -> Result<Self> {
+        let Phase0Attestation {
+            aggregation_bits,
+            data,
+            signature,
+        } = phase0_attestation;
+
+        let aggregation_bits: Vec<u8> = aggregation_bits.into();
+        let mut committee_bits = BitVector::default();
+        committee_bits.set(data.index.try_into()?, true);
+
+        Ok(Self {
+            aggregation_bits: aggregation_bits
+                .try_into()
+                .map_err(AttestationError::InvalidAggregationBits)?,
+            data: AttestationData { index: 0, ..data },
+            committee_bits,
+            signature,
+        })
+    }
+}
+
+impl<P: Preset> TryFrom<SingleAttestation> for IndexedAttestation<P> {
+    type Error = AnyhowError;
+
+    fn try_from(single_attestation: SingleAttestation) -> Result<Self> {
+        let SingleAttestation {
+            committee_index,
+            attester_index,
+            data,
+            signature,
+        } = single_attestation;
+
+        ensure!(
+            committee_index < P::MaxCommitteesPerSlot::U64,
+            AnyhowError::msg(format!("invalid committee_index: {committee_index}"))
+        );
+
+        Ok(Self {
+            attesting_indices: ContiguousList::try_from([attester_index])?,
+            data,
+            signature,
+        })
+    }
+}
+
+impl SingleAttestation {
+    pub fn try_into_electra_attestation<P: Preset>(
+        self,
+        beacon_committee: IndexSlice,
+    ) -> Result<Attestation<P>> {
+        let Self {
+            committee_index,
+            attester_index,
+            data,
+            signature,
+        } = self;
+
+        ensure!(
+            committee_index < P::MaxCommitteesPerSlot::U64,
+            AnyhowError::msg(format!("invalid committee_index: {committee_index}"))
+        );
+
+        let mut committee_bits = BitVector::default();
+        let index = committee_index.try_into()?;
+        committee_bits.set(index, true);
+
+        let mut aggregation_bits = BitList::with_length(beacon_committee.len());
+
+        let position = beacon_committee
+            .into_iter()
+            .position(|index| index == attester_index)
+            .ok_or_else(|| AnyhowError::msg(format!("{attester_index} not in committee")))?;
+
+        aggregation_bits.set(position, true);
+
+        Ok(Attestation {
+            aggregation_bits,
+            data,
+            signature,
+            committee_bits,
+        })
+    }
+
+    pub fn try_into_phase0_attestation<P: Preset>(
+        self,
+        beacon_committee: IndexSlice,
+    ) -> Result<Phase0Attestation<P>> {
+        let Self {
+            committee_index,
+            attester_index,
+            data,
+            signature,
+        } = self;
+
+        let data = AttestationData {
+            index: committee_index,
+            ..data
+        };
+
+        ensure!(
+            committee_index < P::MaxCommitteesPerSlot::U64,
+            AnyhowError::msg(format!("invalid committee_index: {committee_index}"))
+        );
+
+        let mut aggregation_bits = BitList::with_length(beacon_committee.len());
+
+        let position = beacon_committee
+            .into_iter()
+            .position(|index| index == attester_index)
+            .ok_or_else(|| AnyhowError::msg(format!("{attester_index} not in committee")))?;
+
+        aggregation_bits.set(position, true);
+
+        Ok(Phase0Attestation {
+            aggregation_bits,
+            data,
+            signature,
+        })
     }
 }

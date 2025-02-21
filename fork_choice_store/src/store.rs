@@ -41,6 +41,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment},
     },
+    electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     nonstandard::{BlobSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -1279,7 +1280,7 @@ impl<P: Preset> Store<P> {
 
         let index = aggregate
             .committee_bits()
-            .and_then(|bits| misc::get_committee_indices::<P>(*bits).next())
+            .and_then(|bits| misc::get_committee_indices::<P>(bits).next())
             .unwrap_or(index);
 
         let committee = accessors::beacon_committee(&target_state, slot, index)?;
@@ -1634,6 +1635,23 @@ impl<P: Preset> Store<P> {
             Attestation::Electra(attestation) => {
                 let indexed_attestation =
                     electra::get_indexed_attestation(target_state, attestation)?;
+
+                if validate_indexed {
+                    predicates::validate_constructed_indexed_attestation(
+                        &self.chain_config,
+                        target_state,
+                        &indexed_attestation,
+                        SingleVerifier,
+                    )?;
+                }
+
+                Ok(AttestingIndices::Electra(
+                    indexed_attestation.attesting_indices,
+                ))
+            }
+            Attestation::Single(attestation) => {
+                let indexed_attestation: ElectraIndexedAttestation<P> =
+                    (*attestation).try_into()?;
 
                 if validate_indexed {
                     predicates::validate_constructed_indexed_attestation(

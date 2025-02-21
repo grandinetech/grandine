@@ -60,7 +60,7 @@ use types::{
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock, SingleAttestation,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -1554,22 +1554,8 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
 pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJson(attestations): EthJson<Vec<SingleAttestation<P>>>,
+    EthJson(attestations): EthJson<Vec<Arc<Attestation<P>>>>,
 ) -> Result<(), Error> {
-    let attestations = attestations
-        .into_iter()
-        .map(|attestation| {
-            let attestation = match attestation {
-                SingleAttestation::Phase0(attestatation) => Attestation::Phase0(attestatation),
-                SingleAttestation::Electra(single_attestation) => {
-                    operation_pools::try_convert_to_attestation(&controller, single_attestation)?
-                }
-            };
-
-            Ok(Arc::new(attestation))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
     submit_attestations_to_pool(controller, api_to_p2p_tx, attestations).await
 }
 

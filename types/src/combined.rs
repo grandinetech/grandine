@@ -75,8 +75,7 @@ use crate::{
             LightClientUpdate as ElectraLightClientUpdate,
             SignedAggregateAndProof as ElectraSignedAggregateAndProof,
             SignedBeaconBlock as ElectraSignedBeaconBlock,
-            SignedBlindedBeaconBlock as ElectraSignedBlindedBeaconBlock,
-            SingleAttestation as ElectraSingleAttestation,
+            SignedBlindedBeaconBlock as ElectraSignedBlindedBeaconBlock, SingleAttestation,
         },
     },
     nonstandard::Phase,
@@ -1490,6 +1489,7 @@ impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {
 pub enum Attestation<P: Preset> {
     Phase0(Phase0Attestation<P>),
     Electra(ElectraAttestation<P>),
+    Single(SingleAttestation),
 }
 
 impl<P: Preset> SszSize for Attestation<P> {
@@ -1529,6 +1529,7 @@ impl<P: Preset> SszWrite for Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.write_variable(bytes),
             Self::Electra(attestation) => attestation.write_variable(bytes),
+            Self::Single(attestation) => attestation.write_variable(bytes),
         }
     }
 }
@@ -1540,6 +1541,7 @@ impl<P: Preset> SszHash for Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.hash_tree_root(),
             Self::Electra(attestation) => attestation.hash_tree_root(),
+            Self::Single(attestation) => attestation.hash_tree_root(),
         }
     }
 }
@@ -1549,13 +1551,23 @@ impl<P: Preset> Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.data,
             Self::Electra(attestation) => attestation.data,
+            Self::Single(attestation) => attestation.data,
         }
     }
 
-    pub const fn committee_bits(&self) -> Option<&BitVector<P::MaxCommitteesPerSlot>> {
+    pub fn committee_bits(&self) -> Option<BitVector<P::MaxCommitteesPerSlot>> {
         match self {
             Self::Phase0(_) => None,
-            Self::Electra(attestation) => Some(&attestation.committee_bits),
+            Self::Electra(attestation) => Some(attestation.committee_bits),
+            Self::Single(attestation) => {
+                let committee_index: usize = attestation
+                    .committee_index
+                    .try_into()
+                    .expect("committee index should fit in usize");
+                let mut bits = BitVector::default();
+                bits.set(committee_index, true);
+                Some(bits)
+            }
         }
     }
 
@@ -1563,6 +1575,7 @@ impl<P: Preset> Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.aggregation_bits.count_ones(),
             Self::Electra(attestation) => attestation.aggregation_bits.count_ones(),
+            Self::Single(_) => 1,
         }
     }
 
@@ -1570,16 +1583,9 @@ impl<P: Preset> Attestation<P> {
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Phase0(_) => Phase::Phase0,
-            Self::Electra(_) => Phase::Electra,
+            Self::Electra(_) | Self::Single(_) => Phase::Electra,
         }
     }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize)]
-#[serde(bound = "", untagged)]
-pub enum SingleAttestation<P: Preset> {
-    Phase0(Phase0Attestation<P>),
-    Electra(ElectraSingleAttestation),
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, From, Serialize)]

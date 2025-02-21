@@ -29,6 +29,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof},
     config::Config,
+    electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     preset::Preset,
 };
 
@@ -459,6 +460,21 @@ fn attestation_batch_triples<'a, P: Preset>(
                 }
                 Attestation::Electra(attestation) => {
                     let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    let mut triple = Triple::default();
+
+                    predicates::validate_constructed_indexed_attestation(
+                        config,
+                        state,
+                        &indexed_attestation,
+                        &mut triple,
+                    )?;
+
+                    triple
+                }
+                Attestation::Single(attestation) => {
+                    let indexed_attestation: ElectraIndexedAttestation<P> =
+                        (*attestation).try_into()?;
 
                     let mut triple = Triple::default();
 
