@@ -13,6 +13,7 @@ use ssz::{ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tokio::sync::{Mutex, RwLock};
 use types::{
+    config::Config as ChainConfig,
     phase0::{
         containers::{Attestation, AttestationData},
         primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
@@ -26,8 +27,8 @@ use crate::attestation_agg_pool::types::{Aggregate, AggregateMap, AttestationMap
 #[expect(type_alias_bounds)]
 type AttestationsWithSlot<P: Preset> = (ContiguousList<Attestation<P>, P::MaxAttestations>, Slot);
 
-#[derive(Default)]
 pub struct Pool<P: Preset> {
+    chain_config: Arc<ChainConfig>,
     aggregates: RwLock<BTreeMap<Epoch, AggregateMap<P>>>,
     data_root_to_data_map: RwLock<BTreeMap<Epoch, HashMap<H256, AttestationData>>>,
     // The type of the inner map does not affect the result of attestation packing,
@@ -40,6 +41,19 @@ pub struct Pool<P: Preset> {
 }
 
 impl<P: Preset> Pool<P> {
+    pub fn new(chain_config: Arc<ChainConfig>) -> Self {
+        Self {
+            chain_config,
+            aggregates: RwLock::default(),
+            data_root_to_data_map: RwLock::default(),
+            singular_attestations: RwLock::default(),
+            best_proposable_attestations: Mutex::default(),
+            committees_with_aggregators: RwLock::default(),
+            proposer_indices: RwLock::default(),
+            registered_validator_indices: RwLock::default(),
+        }
+    }
+
     pub async fn on_slot(&self, slot: Slot) {
         if misc::is_epoch_start::<P>(slot) {
             let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
@@ -204,7 +218,10 @@ impl<P: Preset> Pool<P> {
             .filter(|attestation| {
                 let mut data = attestation.data;
                 let data_committee_index = data.index;
-                data.index = 0;
+
+                if epoch >= self.chain_config.electra_fork_epoch {
+                    data.index = 0;
+                }
 
                 data_committee_index == committee_index
                     && data.hash_tree_root() == attestation_data_root
