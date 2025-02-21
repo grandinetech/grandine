@@ -8,6 +8,7 @@ members = [
     'binary_utils',
     'block_producer',
     'bls',
+    'bls/bls-arkworks',
     'bls/bls-blst',
     'bls/bls-core',
     'bls/bls-zkcrypto',
@@ -284,6 +285,10 @@ aes = { version = '0.8', features = ['zeroize'] }
 alloy-rlp = '0.3.9'
 anyhow = { version = '1', features = ['backtrace'] }
 arc-swap = '1'
+ark-bls12-381 = { version = '0.5.0', default-features = false, features = [ "curve" ] }
+ark-ec = '0.5.0'
+ark-ff = '0.5.0'
+ark-serialize = '0.5.0'
 assert-json-diff = '2'
 async-channel = '1'
 async-trait = '0.1'
@@ -294,7 +299,7 @@ base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
-bls12_381 = { git = "https://github.com/zkcrypto/bls12_381.git" }
+bls12_381 = { git = 'https://github.com/zkcrypto/bls12_381.git' }
 blst = { version = '0.3', features = ['portable'] }
 bstr = '1'
 build-time = '0.1'
@@ -470,6 +475,7 @@ attestation_verifier = { path = 'attestation_verifier' }
 binary_utils = { path = 'binary_utils' }
 block_producer = { path = 'block_producer' }
 bls = { path = 'bls' }
+bls-arkworks = { path = 'bls/bls-arkworks' }
 bls-blst = { path = 'bls/bls-blst' }
 bls-core = { path = 'bls/bls-core' }
 bls-zkcrypto = { path = 'bls/bls-zkcrypto' }

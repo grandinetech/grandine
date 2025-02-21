@@ -7,10 +7,12 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [features]
+arkworks = ["dep:bls-arkworks"]
 blst = ["dep:bls-blst"]
 zkcrypto = ["dep:bls-zkcrypto"]
 
 [dependencies]
 bls-core = { workspace = true }
+bls-arkworks = { workspace = true, optional = true }
 bls-blst = { workspace = true, optional = true }
 bls-zkcrypto = { workspace = true, optional = true }

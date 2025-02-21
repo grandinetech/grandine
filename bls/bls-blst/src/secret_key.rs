@@ -18,7 +18,8 @@ impl_secret_key!(
     RawSecretKey,
     SecretKeyBytes,
     PublicKey,
-    Signature
+    Signature,
+    |scalar: &RawSecretKey| scalar.to_bytes()
 );
 
 impl TryFrom<SecretKeyBytes> for SecretKey {

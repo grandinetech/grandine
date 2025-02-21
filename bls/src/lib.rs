@@ -16,6 +16,9 @@ macro_rules! implement_backend {
     };
 }
 
+#[cfg(feature = "arkworks")]
+implement_backend!(bls_arkworks);
+
 #[cfg(feature = "blst")]
 implement_backend!(bls_blst);
 
