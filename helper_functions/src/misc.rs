@@ -642,6 +642,7 @@ pub fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeInde
         Attestation::Electra(attestation) => get_committee_indices::<P>(attestation.committee_bits)
             .next()
             .unwrap_or_default(),
+        Attestation::Single(attestation) => attestation.committee_index,
     }
 }
 

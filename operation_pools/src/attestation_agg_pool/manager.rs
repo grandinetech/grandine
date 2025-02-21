@@ -150,7 +150,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
     }
 
     pub fn insert_attestation(&self, wait_group: W, attestation: &CombinedAttestation<P>) {
-        match convert_attestation_for_pool((*attestation).clone()) {
+        match convert_attestation_for_pool(&self.controller, (*attestation).clone()) {
             Ok(attestation) => {
                 self.spawn_detached(InsertAttestationTask {
                     wait_group,

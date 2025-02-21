@@ -13,6 +13,7 @@ use prometheus_metrics::Metrics;
 use types::{
     altair::containers::SyncCommitteeMessage,
     combined::{Attestation, BeaconState, SignedBeaconBlock},
+    electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     phase0::primitives::{Epoch, ValidatorIndex},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -151,6 +152,14 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                 }
                 Attestation::Electra(attestation) => {
                     let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    for validator_index in indexed_attestation.attesting_indices {
+                        self.set(epoch, validator_index)?;
+                    }
+                }
+                Attestation::Single(attestation) => {
+                    let indexed_attestation: ElectraIndexedAttestation<P> =
+                        (*attestation).try_into()?;
 
                     for validator_index in indexed_attestation.attesting_indices {
                         self.set(epoch, validator_index)?;

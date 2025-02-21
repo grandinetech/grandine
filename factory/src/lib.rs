@@ -420,6 +420,9 @@ fn block<P: Preset>(
         .partition_map(|attestation| match attestation {
             Attestation::Phase0(attestation) => Either::Left(attestation),
             Attestation::Electra(attestation) => Either::Right(attestation),
+            Attestation::Single(_) => {
+                unreachable!("block should not contain SingleAttestation type attestations")
+            }
         });
 
     ensure!(

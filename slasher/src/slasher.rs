@@ -150,7 +150,8 @@ impl<P: Preset> Slasher<P> {
     fn process_attestation(&self, attestation: &Attestation<P>) -> Result<()> {
         let attestation = match attestation {
             Attestation::Phase0(attestation) => attestation,
-            Attestation::Electra(_) => return Ok(()),
+            // TODO:
+            Attestation::Electra(_) | Attestation::Single(_) => return Ok(()),
         };
 
         let target = attestation.data.target;

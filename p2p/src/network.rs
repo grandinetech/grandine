@@ -601,6 +601,12 @@ impl<P: Preset> Network<P> {
                     single_attestation,
                 ));
             }
+            Attestation::Single(single_attestation) => {
+                self.publish(PubsubMessage::SingleAttestation(
+                    subnet_id,
+                    *single_attestation,
+                ));
+            }
         }
     }
 
@@ -1439,16 +1445,7 @@ impl<P: Preset> Network<P> {
                     {single_attestation:?} from {source}",
                 );
 
-                let attestation = match operation_pools::try_convert_to_attestation(
-                    &self.controller,
-                    single_attestation,
-                ) {
-                    Ok(attestation) => Arc::new(attestation),
-                    Err(error) => {
-                        warn!("cannot convert single attestation to attestation: {error:?}");
-                        return;
-                    }
-                };
+                let attestation = Arc::new(Attestation::Single(single_attestation));
 
                 if let Some(network_to_slasher_tx) = &self.channels.network_to_slasher_tx {
                     P2pToSlasher::Attestation(attestation.clone_arc()).send(network_to_slasher_tx);
