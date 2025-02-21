@@ -53,11 +53,13 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         dedicated_executor: Arc<DedicatedExecutor>,
         metrics: Option<Arc<Metrics>>,
     ) -> Arc<Self> {
+        let chain_config = controller.chain_config().clone_arc();
+
         Arc::new(Self {
             controller,
             dedicated_executor,
             metrics,
-            pool: Arc::new(Pool::default()),
+            pool: Arc::new(Pool::new(chain_config)),
         })
     }
 
