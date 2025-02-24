@@ -6,7 +6,7 @@ use dedicated_executor::DedicatedExecutor;
 use log::{info, warn};
 use web3::{api::Namespace as _, helpers::CallFuture, Error, Transport as _};
 
-use crate::{eth1_api::ENGINE_GET_EL_BLOBS_V1, Eth1Api};
+use crate::{eth1_api::CAPABILITIES, Eth1Api};
 
 const ENGINE_EXCHANGE_CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -24,7 +24,7 @@ pub fn spawn_exchange_capabilities_task(
 }
 
 async fn exchange_capabilities(eth1_api: &Eth1Api) -> Result<()> {
-    let params = vec![serde_json::to_value([ENGINE_GET_EL_BLOBS_V1])?];
+    let params = vec![serde_json::to_value(CAPABILITIES)?];
     let method = "engine_exchangeCapabilities";
 
     for endpoint in eth1_api.endpoints.endpoints_for_request(None) {

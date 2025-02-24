@@ -50,7 +50,33 @@ const ENGINE_GET_BLOBS_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
+pub const ENGINE_FORKCHOICE_UPDATED_V1: &str = "engine_forkchoiceUpdatedV1";
+pub const ENGINE_FORKCHOICE_UPDATED_V2: &str = "engine_forkchoiceUpdatedV2";
+pub const ENGINE_FORKCHOICE_UPDATED_V3: &str = "engine_forkchoiceUpdatedV3";
 pub const ENGINE_GET_EL_BLOBS_V1: &str = "engine_getBlobsV1";
+pub const ENGINE_GET_PAYLOAD_V1: &str = "engine_getPayloadV1";
+pub const ENGINE_GET_PAYLOAD_V2: &str = "engine_getPayloadV2";
+pub const ENGINE_GET_PAYLOAD_V3: &str = "engine_getPayloadV3";
+pub const ENGINE_GET_PAYLOAD_V4: &str = "engine_getPayloadV4";
+pub const ENGINE_NEW_PAYLOAD_V1: &str = "engine_newPayloadV1";
+pub const ENGINE_NEW_PAYLOAD_V2: &str = "engine_newPayloadV2";
+pub const ENGINE_NEW_PAYLOAD_V3: &str = "engine_newPayloadV3";
+pub const ENGINE_NEW_PAYLOAD_V4: &str = "engine_newPayloadV4";
+
+pub const CAPABILITIES: &[&str] = &[
+    ENGINE_FORKCHOICE_UPDATED_V1,
+    ENGINE_FORKCHOICE_UPDATED_V2,
+    ENGINE_FORKCHOICE_UPDATED_V3,
+    ENGINE_GET_EL_BLOBS_V1,
+    ENGINE_GET_PAYLOAD_V1,
+    ENGINE_GET_PAYLOAD_V2,
+    ENGINE_GET_PAYLOAD_V3,
+    ENGINE_GET_PAYLOAD_V4,
+    ENGINE_NEW_PAYLOAD_V1,
+    ENGINE_NEW_PAYLOAD_V2,
+    ENGINE_NEW_PAYLOAD_V3,
+    ENGINE_NEW_PAYLOAD_V4,
+];
 
 #[expect(clippy::struct_field_names)]
 pub struct Eth1Api {
@@ -233,7 +259,7 @@ impl Eth1Api {
                 let payload_v1 = ExecutionPayloadV1::from(payload);
                 let params = vec![serde_json::to_value(payload_v1)?];
                 self.execute(
-                    "engine_newPayloadV1",
+                    ENGINE_NEW_PAYLOAD_V1,
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
                     None,
@@ -244,7 +270,7 @@ impl Eth1Api {
                 let payload_v2 = ExecutionPayloadV2::from(payload);
                 let params = vec![serde_json::to_value(payload_v2)?];
                 self.execute(
-                    "engine_newPayloadV2",
+                    ENGINE_NEW_PAYLOAD_V2,
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
                     None,
@@ -265,7 +291,7 @@ impl Eth1Api {
                     serde_json::to_value(parent_beacon_block_root)?,
                 ];
                 self.execute(
-                    "engine_newPayloadV3",
+                    ENGINE_NEW_PAYLOAD_V3,
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
                     None,
@@ -291,7 +317,7 @@ impl Eth1Api {
                 ];
 
                 self.execute(
-                    "engine_newPayloadV4",
+                    ENGINE_NEW_PAYLOAD_V4,
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
                     None,
@@ -340,7 +366,7 @@ impl Eth1Api {
         } = match phase {
             Phase::Bellatrix => {
                 self.execute(
-                    "engine_forkchoiceUpdatedV1",
+                    ENGINE_FORKCHOICE_UPDATED_V1,
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
                     None,
@@ -349,7 +375,7 @@ impl Eth1Api {
             }
             Phase::Capella => {
                 self.execute(
-                    "engine_forkchoiceUpdatedV2",
+                    ENGINE_FORKCHOICE_UPDATED_V2,
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
                     None,
@@ -358,7 +384,7 @@ impl Eth1Api {
             }
             Phase::Deneb => {
                 self.execute(
-                    "engine_forkchoiceUpdatedV3",
+                    ENGINE_FORKCHOICE_UPDATED_V3,
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
                     None,
@@ -367,7 +393,7 @@ impl Eth1Api {
             }
             Phase::Electra => {
                 self.execute(
-                    "engine_forkchoiceUpdatedV3",
+                    ENGINE_FORKCHOICE_UPDATED_V3,
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
                     None,
@@ -421,7 +447,7 @@ impl Eth1Api {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV1Response<P>>(
-                    "engine_getPayloadV1",
+                    ENGINE_GET_PAYLOAD_V1,
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
                     None,
@@ -433,7 +459,7 @@ impl Eth1Api {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV2Response<P>>(
-                    "engine_getPayloadV2",
+                    ENGINE_GET_PAYLOAD_V2,
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
                     None,
@@ -445,7 +471,7 @@ impl Eth1Api {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV3Response<P>>(
-                    "engine_getPayloadV3",
+                    ENGINE_GET_PAYLOAD_V3,
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
                     None,
@@ -457,7 +483,7 @@ impl Eth1Api {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV4Response<P>>(
-                    "engine_getPayloadV4",
+                    ENGINE_GET_PAYLOAD_V4,
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
                     None,
