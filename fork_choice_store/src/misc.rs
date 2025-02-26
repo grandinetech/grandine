@@ -16,12 +16,13 @@ use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
+use log::error;
 use serde::{Serialize, Serializer};
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
 use thiserror::Error;
-use transition_functions::{combined, unphased::StateRootPolicy};
+use transition_functions::unphased::StateRootPolicy;
 use types::{
     combined::{
         Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
@@ -85,32 +86,8 @@ impl<P: Preset> ChainLink<P> {
     }
 
     #[must_use]
-    pub fn state(&self, store: &Store<P>) -> Arc<BeaconState<P>> {
-        if let Some(state) = &self.state {
-            return state.clone_arc();
-        }
-
-        let mut blocks_to_process = vec![];
-
-        let mut state = store
-            .chain_ending_with(self.block_root)
-            .find_map(|chain_link| {
-                if chain_link.state.is_none() {
-                    blocks_to_process.push(&chain_link.block);
-                }
-
-                chain_link.state.clone()
-            })
-            .expect("at least one ancestor should have a state in memory");
-
-        assert!(!blocks_to_process.is_empty());
-
-        for block in blocks_to_process.into_iter().rev() {
-            combined::trusted_state_transition(store.chain_config(), state.make_mut(), block)
-                .expect("state transition should succeed because block is already in store");
-        }
-
-        state
+    pub fn state<S: Storage<P>>(&self, store: &Store<P, S>) -> Arc<BeaconState<P>> {
+        store.load_beacon_state(self.block_root, &self.state)
     }
 
     // TODO(feature/deneb): Confirm that post-Deneb states are always post-Merge. See:
@@ -862,4 +839,8 @@ fn fmt_block_concisely(
 
 fn fmt_as_wildcard<T>(_: T, formatter: &mut Formatter) -> FmtResult {
     formatter.write_str("_")
+}
+
+pub trait Storage<P: Preset> {
+    fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>>;
 }

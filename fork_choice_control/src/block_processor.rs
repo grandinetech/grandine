@@ -27,6 +27,8 @@ use types::{
     traits::{BeaconBlock as _, SignedBeaconBlock as _},
 };
 
+use crate::Storage;
+
 #[derive(Constructor)]
 pub struct BlockProcessor<P: Preset> {
     chain_config: Arc<ChainConfig>,
@@ -158,7 +160,7 @@ impl<P: Preset> BlockProcessor<P> {
 
     pub fn validate_block_for_gossip(
         &self,
-        store: &Store<P>,
+        store: &Store<P, Storage<P>>,
         block: &Arc<SignedBeaconBlock<P>>,
     ) -> Result<Option<BlockAction<P>>> {
         store.validate_block_for_gossip(block, |parent| {
@@ -178,7 +180,7 @@ impl<P: Preset> BlockProcessor<P> {
 
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, Storage<P>>,
         block: &Arc<SignedBeaconBlock<P>>,
         state_root_policy: StateRootPolicy,
         execution_engine: E,

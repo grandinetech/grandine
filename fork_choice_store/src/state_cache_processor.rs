@@ -16,7 +16,7 @@ use types::{
     traits::BeaconState as _,
 };
 
-use crate::Store;
+use crate::{Storage, Store};
 
 const ALLOWED_EMPTY_SLOTS_MULTIPLIER: u64 = 2;
 
@@ -32,9 +32,9 @@ impl<P: Preset> StateCacheProcessor<P> {
         }
     }
 
-    pub fn before_or_at_slot(
+    pub fn before_or_at_slot<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
@@ -46,9 +46,9 @@ impl<P: Preset> StateCacheProcessor<P> {
             .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
     }
 
-    pub fn existing_state_at_slot(
+    pub fn existing_state_at_slot<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
@@ -71,9 +71,9 @@ impl<P: Preset> StateCacheProcessor<P> {
         self.state_cache.prune(last_pruned_slot, preserved_states)
     }
 
-    pub fn try_state_at_slot(
+    pub fn try_state_at_slot<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
@@ -85,9 +85,9 @@ impl<P: Preset> StateCacheProcessor<P> {
         )
     }
 
-    pub fn state_at_slot(
+    pub fn state_at_slot<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
@@ -96,9 +96,9 @@ impl<P: Preset> StateCacheProcessor<P> {
             .map_err(Into::into)
     }
 
-    pub fn state_at_slot_quiet(
+    pub fn state_at_slot_quiet<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
@@ -107,9 +107,9 @@ impl<P: Preset> StateCacheProcessor<P> {
             .map_err(Into::into)
     }
 
-    pub fn process_slots(
+    pub fn process_slots<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         state: Arc<BeaconState<P>>,
         block_root: H256,
         slot: Slot,
@@ -130,9 +130,9 @@ impl<P: Preset> StateCacheProcessor<P> {
         Ok(post_state)
     }
 
-    fn try_get_state_at_slot(
+    fn try_get_state_at_slot<S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
         warn_on_slot_processing: bool,
@@ -168,8 +168,8 @@ impl<P: Preset> StateCacheProcessor<P> {
     }
 }
 
-fn process_slots<P: Preset>(
-    store: &Store<P>,
+fn process_slots<P: Preset, S: Storage<P>>(
+    store: &Store<P, S>,
     mut state: Arc<BeaconState<P>>,
     block_root: H256,
     slot: Slot,
@@ -205,12 +205,12 @@ fn process_slots<P: Preset>(
     Ok(state)
 }
 
-fn should_print_slot_processing_warning<P: Preset>(store: &Store<P>) -> bool {
+fn should_print_slot_processing_warning<P: Preset, S: Storage<P>>(store: &Store<P, S>) -> bool {
     Feature::WarnOnStateCacheSlotProcessing.is_enabled() && store.is_forward_synced()
 }
 
-fn store_state_before_or_at_slot<P: Preset>(
-    store: &Store<P>,
+fn store_state_before_or_at_slot<P: Preset, S: Storage<P>>(
+    store: &Store<P, S>,
     block_root: H256,
     slot: Slot,
 ) -> Option<Arc<BeaconState<P>>> {
