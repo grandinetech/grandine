@@ -540,7 +540,7 @@ impl SyncManager {
     }
 
     pub fn random_peer(&self, use_black_list: bool) -> Option<PeerId> {
-        let chain_id = self.chain_with_max_peer_count(use_black_list)?;
+        let chain_id = self.chain_to_sync(use_black_list)?;
 
         let busy_peers = self
             .blob_requests
@@ -653,7 +653,7 @@ impl SyncManager {
     }
 
     fn find_chain_to_sync(&mut self, use_black_list: bool) -> Option<ChainId> {
-        match self.chain_with_max_peer_count(use_black_list) {
+        match self.chain_to_sync(use_black_list) {
             Some(chain_id) => {
                 self.log(
                     Level::Debug,
@@ -693,11 +693,10 @@ impl SyncManager {
         peers
     }
 
-    fn chain_with_max_peer_count(&self, use_black_list: bool) -> Option<ChainId> {
+    fn chain_to_sync(&self, use_black_list: bool) -> Option<ChainId> {
         self.chains_with_peer_counts(use_black_list)
-            .into_iter()
-            .max_by_key(|(_, peer_count)| *peer_count)
-            .map(|(chain_id, _)| chain_id)
+            .into_keys()
+            .choose(&mut thread_rng())
     }
 
     fn peers(&self, use_black_list: bool) -> impl Iterator<Item = (&PeerId, &StatusMessage)> {

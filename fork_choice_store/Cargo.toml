@@ -19,6 +19,7 @@ features = { workspace = true }
 futures = { workspace = true }
 hash_hasher = { workspace = true }
 helper_functions = { workspace = true }
+hex-literal = { workspace = true }
 im = { workspace = true }
 itertools = { workspace = true }
 kzg_utils = { workspace = true }

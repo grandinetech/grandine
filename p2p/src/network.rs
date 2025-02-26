@@ -327,6 +327,14 @@ impl<P: Preset> Network<P> {
                         P2pMessage::PublishBlobSidecar(blob_sidecar) => {
                             self.publish_blob_sidecar(blob_sidecar);
                         },
+                        P2pMessage::PenalizePeer(peer_id, mutator_rejection_reason) => {
+                            self.report_peer(
+                                peer_id,
+                                PeerAction::LowToleranceError,
+                                ReportSource::Processor,
+                                mutator_rejection_reason,
+                            );
+                        }
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
                             if let MutatorRejectionReason::InvalidBlobSidecar {
                                 blob_identifier,

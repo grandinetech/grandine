@@ -2984,6 +2984,7 @@ dependencies = [
  "futures",
  "hash_hasher",
  "helper_functions",
+ "hex-literal",
  "im",
  "itertools 0.13.0",
  "kzg_utils",

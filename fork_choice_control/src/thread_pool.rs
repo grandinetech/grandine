@@ -11,7 +11,7 @@
 // - Represent priorities with numbers and add some randomness to them.
 // - Store task submission times and give very old tasks a higher priority.
 
-use std::{collections::VecDeque, sync::Arc, thread::Builder};
+use std::{collections::VecDeque, sync::Arc, thread::Builder, time::Instant};
 
 use anyhow::Result;
 use derivative::Derivative;
@@ -19,8 +19,9 @@ use derive_more::From;
 use execution_engine::ExecutionEngine;
 use log::debug;
 use parking_lot::{Condvar, Mutex};
+use ssz::SszHash as _;
 use std_ext::ArcExt as _;
-use types::preset::Preset;
+use types::{preset::Preset, traits::SignedBeaconBlock as _};
 
 use crate::{
     tasks::{
@@ -122,6 +123,39 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, 
     }
 }
 
+impl<P: Preset, E, W> HighPriorityTask<P, E, W> {
+    pub fn task_name(&self) -> String {
+        match self {
+            Self::Block(task) => format!(
+                "BlockTask (block root: {:?}, slot: {})",
+                task.block.hash_tree_root(),
+                task.block.message().slot(),
+            ),
+            Self::BlockForGossip(task) => format!(
+                "BlockVerifyForGossipTask (block root: {:?}, slot: {})",
+                task.block.hash_tree_root(),
+                task.block.message().slot(),
+            ),
+            Self::BlobSidecar(task) => format!(
+                "BlobSidecarTask (block root: {:?}, index: {}, slot: {})",
+                task.blob_sidecar
+                    .signed_block_header
+                    .message
+                    .hash_tree_root(),
+                task.blob_sidecar.index,
+                task.blob_sidecar.signed_block_header.message.slot,
+            ),
+            Self::CheckpointState(task) => {
+                format!("CheckpointStateTask (checkpoint: {:?})", task.checkpoint)
+            }
+            Self::PreprocessState(task) => format!(
+                "PreprocessStateTask (head block root: {:?}, next slot: {})",
+                task.head_block_root, task.next_slot
+            ),
+        }
+    }
+}
+
 #[derive(From)]
 enum LowPriorityTask<P: Preset, W> {
     AggregateAndProof(AggregateAndProofTask<P, W>),
@@ -139,6 +173,30 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::BlockAttestations(task) => task.run(),
             Self::AttesterSlashing(task) => task.run(),
             Self::PersistBlobSidecarsTask(task) => task.run(),
+        }
+    }
+}
+
+impl<P: Preset, W> LowPriorityTask<P, W> {
+    pub fn task_name(&self) -> String {
+        match self {
+            Self::AggregateAndProof(task) => format!(
+                "AggregateAndProofTask (aggregate and proof: {:?}, origin: {:?})",
+                task.aggregate_and_proof, task.origin,
+            ),
+            Self::Attestation(task) => {
+                format!("AttestationTask (attestation item: {:?})", task.attestation,)
+            }
+            Self::BlockAttestations(task) => format!(
+                "BlockAttestationsTask (block root: {:?}, slot: {})",
+                task.block.hash_tree_root(),
+                task.block.message().slot(),
+            ),
+            Self::AttesterSlashing(task) => format!(
+                "AttesterSlashingTask (attester slashing: {:?})",
+                task.attester_slashing
+            ),
+            Self::PersistBlobSidecarsTask(_task) => "PersistBlobSidecarsTask".into(),
         }
     }
 }
@@ -220,15 +278,45 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
 
             if let Some(task) = critical.high_priority_tasks.pop_front() {
                 drop(critical);
-                debug!("thread {} received high priority task", thread_name());
+
+                let started_at = Instant::now();
+
+                debug!(
+                    "thread {} starting high priority task {}",
+                    thread_name(),
+                    task.task_name(),
+                );
+
                 task.run_and_handle_panics();
+
+                debug!(
+                    "thread {} finished high priority task in {} ms",
+                    thread_name(),
+                    started_at.elapsed().as_millis()
+                );
+
                 continue 'outer;
             }
 
             if let Some(task) = critical.low_priority_tasks.pop_front() {
                 drop(critical);
-                debug!("thread {} received low priority task", thread_name());
+
+                let started_at = Instant::now();
+
+                debug!(
+                    "thread {} starting low priority task {}",
+                    thread_name(),
+                    task.task_name()
+                );
+
                 task.run_and_handle_panics();
+
+                debug!(
+                    "thread {} finished low priority task in {} ms",
+                    thread_name(),
+                    started_at.elapsed().as_millis()
+                );
+
                 continue 'outer;
             }
 

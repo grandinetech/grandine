@@ -171,6 +171,7 @@ pub enum P2pMessage<P: Preset> {
     Accept(GossipId),
     Ignore(GossipId),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
+    PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),

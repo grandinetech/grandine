@@ -640,12 +640,24 @@ where
             Err(error) => {
                 warn!("block rejected (error: {error}, origin: {origin:?})");
 
-                let (gossip_id, sender) = origin.split();
+                let sender = match origin {
+                    BlockOrigin::Gossip(gossip_id) => {
+                        P2pMessage::Reject(Some(gossip_id), MutatorRejectionReason::InvalidBlock)
+                            .send(&self.p2p_tx);
 
-                if gossip_id.is_some() {
-                    P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidBlock)
-                        .send(&self.p2p_tx);
-                }
+                        None
+                    }
+                    BlockOrigin::Api(sender) => sender,
+                    BlockOrigin::Requested(peer_id) => {
+                        if let Some(peer_id) = peer_id {
+                            P2pMessage::PenalizePeer(peer_id, MutatorRejectionReason::InvalidBlock)
+                                .send(&self.p2p_tx);
+                        }
+
+                        None
+                    }
+                    BlockOrigin::Own | BlockOrigin::Persisted => None,
+                };
 
                 if let Some(block_root) = rejected_block_root {
                     self.store_mut().register_rejected_block(block_root);

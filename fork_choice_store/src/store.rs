@@ -210,6 +210,7 @@ pub struct Store<P: Preset> {
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
+    blacklisted_blocks: HashSet<H256>,
 }
 
 impl<P: Preset> Store<P> {
@@ -254,6 +255,12 @@ impl<P: Preset> Store<P> {
         let validator_count = anchor_state.validators().len_usize();
         let latest_messages = core::iter::repeat_n(None, validator_count).collect();
 
+        let mut blacklisted_blocks = HashSet::new();
+
+        blacklisted_blocks.insert(H256(hex_literal::hex!(
+            "2db899881ed8546476d0b92c6aa9110bea9a4cd0dbeb5519eb0ea69575f1f359"
+        )));
+
         Self {
             chain_config,
             store_config,
@@ -284,6 +291,7 @@ impl<P: Preset> Store<P> {
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
+            blacklisted_blocks,
         }
     }
 
@@ -1080,6 +1088,11 @@ impl<P: Preset> Store<P> {
         ) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
     ) -> Result<BlockAction<P>> {
         let block_root = block.message().hash_tree_root();
+
+        if self.blacklisted_blocks.contains(&block_root) {
+            bail!("blacklisted block: {block_root:?}");
+        }
+
         let block_action = self.validate_gossip_rules(block, block_root);
 
         if let Some(action) = block_action {
@@ -1769,28 +1782,6 @@ impl<P: Preset> Store<P> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
-        let state = match state_fn() {
-            Ok(state) => state,
-            Err(error) => {
-                if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
-                    return Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar));
-                }
-
-                bail!(error);
-            }
-        };
-
-        // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
-        SingleVerifier.verify_singular(
-            blob_sidecar
-                .signed_block_header
-                .message
-                .signing_root(&self.chain_config, &state),
-            blob_sidecar.signed_block_header.signature,
-            accessors::public_key(&state, block_header.proposer_index)?,
-            SignatureKind::BlockInBlobSidecar,
-        )?;
-
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 1/2:
         // Since our fork choice store's implementation doesn't preserve invalid blocks,
@@ -1859,6 +1850,28 @@ impl<P: Preset> Store<P> {
             .unwrap_or(false),
             Error::BlobSidecarInvalid { blob_sidecar }
         );
+
+        let state = match state_fn() {
+            Ok(state) => state,
+            Err(error) => {
+                if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
+                    return Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar));
+                }
+
+                bail!(error);
+            }
+        };
+
+        // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
+        SingleVerifier.verify_singular(
+            blob_sidecar
+                .signed_block_header
+                .message
+                .signing_root(&self.chain_config, &state),
+            blob_sidecar.signed_block_header.signature,
+            accessors::public_key(&state, block_header.proposer_index)?,
+            SignatureKind::BlockInBlobSidecar,
+        )?;
 
         if !origin.is_from_back_sync() {
             // [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the current shuffling

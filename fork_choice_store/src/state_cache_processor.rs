@@ -18,7 +18,7 @@ use types::{
 
 use crate::Store;
 
-const ALLOWED_EMPTY_SLOTS_MULTIPLIER: u64 = 2;
+const ALLOWED_EMPTY_SLOTS_MULTIPLIER: u64 = 1_000_000;
 
 pub struct StateCacheProcessor<P: Preset> {
     state_cache: StateCache<P>,
