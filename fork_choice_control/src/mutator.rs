@@ -298,6 +298,12 @@ where
             let origin = BlockOrigin::Persisted;
             let submission_time = Instant::now();
 
+            info!(
+                "loading unfinalized block from storage (block root: {:?}, slot {})",
+                block.message().hash_tree_root(),
+                block.message().slot(),
+            );
+
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
             // Other validations may be performed in parallel, but they take very little time.
@@ -465,6 +471,10 @@ where
             ) {
                 self.prepare_execution_payload_for_next_slot(&state);
             }
+        }
+
+        if tick.is_middle_of_epoch::<P>() {
+            self.save_unfinalized_chain_to_storage();
         }
 
         Ok(())
@@ -2362,6 +2372,38 @@ where
         }
 
         Ok(())
+    }
+
+    fn save_unfinalized_chain_to_storage(&self) {
+        let store = self.owned_store();
+        let storage = self.storage.clone_arc();
+
+        let spawn_result = Builder::new()
+            .name("u-chain-saver".to_owned())
+            .spawn(move || {
+                info!("saving unfinalized blocks to storage…");
+
+                match storage.append(
+                    store.unfinalized_canonical_chain(),
+                    core::iter::empty(),
+                    &store,
+                ) {
+                    Ok(slots) => {
+                        info!(
+                            "saved {} unfinalized blocks to storage: {:?}",
+                            slots.unfinalized.len(),
+                            slots.unfinalized,
+                        );
+                    }
+                    Err(error) => {
+                        warn!("failed to save unfinalized blocks to storage: {error:?}");
+                    }
+                }
+            });
+
+        if let Err(error) = spawn_result {
+            warn!("failed to spawn a task to save unfinalized chain to storage: {error:?}");
+        }
     }
 
     fn prune_old_records(&self) -> Result<()> {

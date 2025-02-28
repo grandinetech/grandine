@@ -72,6 +72,7 @@ use serde::Deserialize;
 use strum::AsRefStr;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
+use typenum::Unsigned as _;
 use types::{
     config::Config,
     phase0::{
@@ -128,6 +129,12 @@ impl Tick {
                 | TickKind::ProposeThird
                 | TickKind::ProposeFourth,
         )
+    }
+
+    #[must_use]
+    pub fn is_middle_of_epoch<P: Preset>(self) -> bool {
+        misc::slots_since_epoch_start::<P>(self.slot) == P::SlotsPerEpoch::U64 / 2
+            && self.is_start_of_slot()
     }
 
     #[must_use]

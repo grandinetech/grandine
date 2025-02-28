@@ -265,10 +265,10 @@ impl<P: Preset> Storage<P> {
             let state_slot = chain_link.slot();
 
             if !self.prune_storage_enabled() {
-                if finalized {
+                if finalized && !self.contains_finalized_block(block_root)? {
                     slots.finalized.push(state_slot);
                     batch.push(serialize(FinalizedBlockByRoot(block_root), block)?);
-                } else {
+                } else if !self.contains_unfinalized_block(block_root)? {
                     slots.unfinalized.push(state_slot);
                     batch.push(serialize(UnfinalizedBlockByRoot(block_root), block)?);
                 }
