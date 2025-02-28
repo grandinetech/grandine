@@ -62,7 +62,7 @@ use crate::{
 
 pub struct Controller<P: Preset, E, A, W: Wait> {
     // The latest consistent snapshot of the store.
-    store_snapshot: Arc<ArcSwap<Store<P>>>,
+    store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
     block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
     state_cache: Arc<StateCacheProcessor<P>>,
@@ -115,6 +115,7 @@ where
             store_config,
             anchor_block,
             anchor_state,
+            storage.clone_arc(),
             finished_initial_forward_sync,
             finished_back_sync,
         );
@@ -546,11 +547,11 @@ where
         self.store_snapshot().store_config()
     }
 
-    pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P>>> {
+    pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P, Storage<P>>>> {
         self.store_snapshot.load()
     }
 
-    pub(crate) fn owned_store_snapshot(&self) -> Arc<Store<P>> {
+    pub(crate) fn owned_store_snapshot(&self) -> Arc<Store<P, Storage<P>>> {
         self.store_snapshot.load_full()
     }
 

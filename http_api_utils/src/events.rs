@@ -3,7 +3,7 @@ use axum::{response::sse::Event, Error};
 use execution_engine::{
     PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, WithdrawalV1,
 };
-use fork_choice_store::{ChainLink, Store};
+use fork_choice_store::{ChainLink, Storage, Store};
 use helper_functions::misc;
 use log::warn;
 use serde::Serialize;
@@ -154,7 +154,11 @@ impl EventChannels {
         }
     }
 
-    pub fn send_chain_reorg_event<P: Preset>(&self, store: &Store<P>, old_head: &ChainLink<P>) {
+    pub fn send_chain_reorg_event<P: Preset, S: Storage<P>>(
+        &self,
+        store: &Store<P, S>,
+        old_head: &ChainLink<P>,
+    ) {
         if let Err(error) = self.send_chain_reorg_event_internal(store, old_head) {
             warn!("unable to send chain reorg event: {error}");
         }
@@ -302,9 +306,9 @@ impl EventChannels {
         Ok(())
     }
 
-    fn send_chain_reorg_event_internal<P: Preset>(
+    fn send_chain_reorg_event_internal<P: Preset, S: Storage<P>>(
         &self,
-        store: &Store<P>,
+        store: &Store<P, S>,
         old_head: &ChainLink<P>,
     ) -> Result<()> {
         if self.chain_reorgs.receiver_count() > 0 {
@@ -481,7 +485,7 @@ impl ChainReorgEvent {
     //
     // [Eth Beacon Node API specification]: https://ethereum.github.io/beacon-APIs/
     #[must_use]
-    fn new<P: Preset>(store: &Store<P>, old_head: &ChainLink<P>) -> Self {
+    fn new<P: Preset, S: Storage<P>>(store: &Store<P, S>, old_head: &ChainLink<P>) -> Self {
         let new_head = store.head();
         let old_slot = old_head.slot();
         let new_slot = new_head.slot();

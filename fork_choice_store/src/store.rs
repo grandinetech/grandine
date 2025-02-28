@@ -61,7 +61,7 @@ use crate::{
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
         BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, Difference,
         DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId,
+        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId, Storage,
         UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
@@ -76,7 +76,7 @@ use crate::{
 ///
 /// [`Store`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#store
 #[derive(Clone)]
-pub struct Store<P: Preset> {
+pub struct Store<P: Preset, S: Storage<P>> {
     chain_config: Arc<ChainConfig>,
     store_config: StoreConfig,
     // The fork choice rule does not need a precise timestamp.
@@ -138,7 +138,7 @@ pub struct Store<P: Preset> {
     // function problem described above as well as additional ones:
     // - The optimization only applies if the first slot in the epoch as attested to was empty.
     // - Obtaining active balances from the justified state requires it to be in the right epoch.
-    checkpoint_states: HashMap<Checkpoint, Arc<BeaconState<P>>>,
+    checkpoint_states: HashMap<Checkpoint, Option<Arc<BeaconState<P>>>>,
     // TODO(Grandine Team): Process current slot attestations incrementally to speed up
     //                      `Store::apply_tick`. Update the comment to match the new design.
     //
@@ -207,13 +207,14 @@ pub struct Store<P: Preset> {
         HashMap<(Slot, ValidatorIndex, BlobIndex), HashMap<H256, KzgCommitment>>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
+    storage: Arc<S>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
     blacklisted_blocks: HashSet<H256>,
 }
 
-impl<P: Preset> Store<P> {
+impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// [`get_forkchoice_store`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_forkchoice_store)
     #[must_use]
     pub fn new(
@@ -221,6 +222,7 @@ impl<P: Preset> Store<P> {
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        storage: Arc<S>,
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
     ) -> Self {
@@ -279,7 +281,7 @@ impl<P: Preset> Store<P> {
             justified_active_balances: Self::active_balances(&anchor_state),
             timely_proposer_score: OnceLock::new(),
             latest_messages,
-            checkpoint_states: HashMap::unit(checkpoint, anchor_state),
+            checkpoint_states: HashMap::unit(checkpoint, Some(anchor_state)),
             current_slot_attestations: vector![],
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
@@ -288,6 +290,7 @@ impl<P: Preset> Store<P> {
             state_cache: Arc::new(StateCacheProcessor::new(
                 store_config.state_cache_lock_timeout,
             )),
+            storage,
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
@@ -905,26 +908,30 @@ impl<P: Preset> Store<P> {
         })
     }
 
-    fn justified_state(&self) -> &BeaconState<P> {
-        self.checkpoint_states
-            .get(&self.justified_checkpoint)
-            .expect(
-                "the waiting mechanism in the mutator combined with the checks in \
-                 Store::validate_block should ensure that the justified state exists",
-            )
+    fn justified_state(&self) -> Arc<BeaconState<P>> {
+        self.checkpoint_state(self.justified_checkpoint).expect(
+            "the waiting mechanism in the mutator combined with the checks in \
+             Store::validate_block should ensure that the justified state exists",
+        )
     }
 
     pub fn contains_checkpoint_state(&self, checkpoint: Checkpoint) -> bool {
         self.checkpoint_states.contains_key(&checkpoint)
     }
 
-    pub fn checkpoint_state(&self, checkpoint: Checkpoint) -> Option<&Arc<BeaconState<P>>> {
-        self.checkpoint_states.get(&checkpoint)
+    pub fn checkpoint_state(&self, checkpoint: Checkpoint) -> Option<Arc<BeaconState<P>>> {
+        if let Some(checkpoint_state_opt) = self.checkpoint_states.get(&checkpoint) {
+            return self
+                .load_beacon_state(checkpoint.root, checkpoint_state_opt)
+                .into();
+        }
+
+        None
     }
 
     pub fn insert_checkpoint_state(&mut self, checkpoint: Checkpoint, state: Arc<BeaconState<P>>) {
         self.checkpoint_states
-            .insert(checkpoint, state)
+            .insert(checkpoint, Some(state))
             .expect_none(
                 "the state corresponding to a particular checkpoint should only be inserted once; \
                  the mutator should only spawn one CheckpointStateTask per checkpoint",
@@ -1257,7 +1264,7 @@ impl<P: Preset> Store<P> {
         // Computing the target state is potentially resource intensive, so validations that don't
         // need it should be performed first.
         let target_state = if Feature::CacheTargetStates.is_enabled() {
-            let Some(state) = self.checkpoint_states.get(&target) else {
+            let Some(state) = self.checkpoint_state(target) else {
                 return Ok(AggregateAndProofAction::WaitForTargetState(
                     aggregate_and_proof,
                 ));
@@ -1415,7 +1422,7 @@ impl<P: Preset> Store<P> {
         // Computing the target state is potentially resource intensive, so validations that don't
         // need it should be performed first.
         let target_state = if Feature::CacheTargetStates.is_enabled() {
-            let Some(state) = self.checkpoint_states.get(&target) else {
+            let Some(state) = self.checkpoint_state(target) else {
                 return Ok(AttestationAction::WaitForTargetState(attestation));
             };
 
@@ -1692,13 +1699,13 @@ impl<P: Preset> Store<P> {
                 if origin.verify_signatures() {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
-                        self.justified_state(),
+                        &self.justified_state(),
                         attester_slashing,
                     )
                 } else {
                     unphased::validate_attester_slashing_with_verifier(
                         &self.chain_config,
-                        self.justified_state(),
+                        &self.justified_state(),
                         attester_slashing,
                         NullVerifier,
                     )
@@ -1708,13 +1715,13 @@ impl<P: Preset> Store<P> {
                 if origin.verify_signatures() {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
-                        self.justified_state(),
+                        &self.justified_state(),
                         attester_slashing,
                     )
                 } else {
                     unphased::validate_attester_slashing_with_verifier(
                         &self.chain_config,
-                        self.justified_state(),
+                        &self.justified_state(),
                         attester_slashing,
                         NullVerifier,
                     )
@@ -2457,12 +2464,36 @@ impl<P: Preset> Store<P> {
             .retain(|target, _| finalized_epoch <= target.epoch);
     }
 
-    pub fn unload_old_states(&mut self, unfinalized_states_in_memory: Slot) {
+    pub fn unload_checkpoint_states(
+        &mut self,
+        unfinalized_states_in_memory: Slot,
+    ) -> Vec<(Arc<BeaconState<P>>, H256)> {
+        let head_slot = self.head().slot();
+        let mut to_persist = vec![];
+
+        for (checkpoint, state_opt) in self.checkpoint_states.iter_mut() {
+            let checkpoint_slot = misc::compute_start_slot_at_epoch::<P>(checkpoint.epoch);
+
+            if head_slot.saturating_sub(checkpoint_slot) < unfinalized_states_in_memory {
+                continue;
+            }
+
+            if let Some(state) = state_opt.take() {
+                to_persist.push((state, checkpoint.root));
+            }
+        }
+
+        to_persist
+    }
+
+    pub fn unload_old_states(&mut self, unfinalized_states_in_memory: Slot) -> Vec<ChainLink<P>> {
         let head_slot = self.head().slot();
 
         // `OrdMap` has no `iter_mut` or `values_mut` methods or `IntoIterator` impl for `&mut`.
         // See <https://github.com/bodil/im-rs/issues/138>.
         let segment_ids = self.unfinalized.keys().copied().collect_vec();
+
+        let mut to_persist = vec![];
 
         for segment_id in segment_ids {
             for unfinalized_block in &mut self.unfinalized[&segment_id] {
@@ -2477,20 +2508,25 @@ impl<P: Preset> Store<P> {
                 // (as long as the justified block is not orphaned, which is possible according to
                 // the Fork Choice specification). It is not sufficient because it does not prevent
                 // `ChainLink`s with unloaded states from becoming justified or finalized later.
-                if misc::is_epoch_start::<P>(chain_link.slot()) {
-                    continue;
+                if let Some(state) = chain_link.state.take() {
+                    if misc::is_epoch_start::<P>(chain_link.slot()) {
+                        to_persist.push(ChainLink {
+                            state: Some(state),
+                            ..chain_link.clone()
+                        });
+                    }
                 }
-
-                chain_link.state.take();
             }
         }
+
+        to_persist
     }
 
     fn update_balances_after_justification(&mut self) -> Result<()> {
         // `Store.timely_proposer_score` is derived from `Store.justified_active_balances`.
         self.timely_proposer_score.take();
 
-        let new_balances = Self::active_balances(self.justified_state());
+        let new_balances = Self::active_balances(&self.justified_state());
         let old_balances = core::mem::replace(&mut self.justified_active_balances, new_balances);
         let new_balances = self.justified_active_balances.as_ref();
 
@@ -2946,12 +2982,75 @@ impl<P: Preset> Store<P> {
         PayloadStatus::Valid
     }
 
+    pub fn load_beacon_state(
+        &self,
+        block_root: H256,
+        state: &Option<Arc<BeaconState<P>>>,
+    ) -> Arc<BeaconState<P>> {
+        if let Some(state) =
+            state
+                .clone()
+                .or_else(|| match self.stored_state_by_block_root(block_root) {
+                    Ok(state_opt) => state_opt,
+                    Err(error) => {
+                        error!("failed to load persisted beacon state: {error:?}");
+                        None
+                    }
+                })
+        {
+            return state;
+        }
+
+        self.load_beacon_state_by_state_transition(block_root)
+    }
+
+    fn load_beacon_state_by_state_transition(&self, block_root: H256) -> Arc<BeaconState<P>> {
+        let mut blocks_to_process = vec![];
+
+        let mut state = self
+            .chain_ending_with(block_root)
+            .find_map(|chain_link| {
+                let state = chain_link.state.clone().or_else(|| {
+                    match self.stored_state_by_block_root(chain_link.block_root) {
+                        Ok(state_opt) => state_opt,
+                        Err(error) => {
+                            error!("failed to load persisted beacon state: {error:?}");
+                            None
+                        }
+                    }
+                });
+
+                if state.is_none() {
+                    blocks_to_process.push(&chain_link.block);
+                }
+
+                state
+            })
+            .expect("at least one ancestor should have a state in memory or persisted");
+
+        assert!(!blocks_to_process.is_empty());
+
+        for block in blocks_to_process.into_iter().rev() {
+            combined::trusted_state_transition(self.chain_config(), state.make_mut(), block)
+                .expect("state transition should succeed because block is already in store");
+        }
+
+        state
+    }
+
     pub fn state_before_or_at_slot(
         &self,
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
         self.state_cache.before_or_at_slot(self, block_root, slot)
+    }
+
+    pub fn stored_state_by_block_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
+        self.storage.stored_state_by_block_root(block_root)
     }
 
     #[must_use]

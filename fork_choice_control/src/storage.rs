@@ -53,9 +53,10 @@ pub enum StateLoadStrategy<P: Preset> {
 }
 
 #[expect(clippy::struct_field_names)]
+#[derive(Clone)]
 pub struct Storage<P> {
     config: Arc<Config>,
-    pub(crate) database: Database,
+    pub(crate) database: Arc<Database>,
     pub(crate) archival_epoch_interval: NonZeroU64,
     storage_mode: StorageMode,
     phantom: PhantomData<P>,
@@ -63,7 +64,7 @@ pub struct Storage<P> {
 
 impl<P: Preset> Storage<P> {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         config: Arc<Config>,
         database: Database,
         archival_epoch_interval: NonZeroU64,
@@ -71,7 +72,7 @@ impl<P: Preset> Storage<P> {
     ) -> Self {
         Self {
             config,
-            database,
+            database: Arc::new(database),
             archival_epoch_interval,
             storage_mode,
             phantom: PhantomData,
@@ -232,7 +233,7 @@ impl<P: Preset> Storage<P> {
         &self,
         unfinalized: impl Iterator<Item = &'cl ChainLink<P>>,
         finalized: impl DoubleEndedIterator<Item = &'cl ChainLink<P>>,
-        store: &Store<P>,
+        store: &Store<P, Self>,
     ) -> Result<AppendedBlockSlots> {
         let mut slots = AppendedBlockSlots::default();
         let mut store_head_slot = 0;
@@ -363,6 +364,25 @@ impl<P: Preset> Storage<P> {
         Ok(persisted_blob_ids)
     }
 
+    pub(crate) fn append_states(
+        &self,
+        states_with_block_roots: impl Iterator<Item = (Arc<BeaconState<P>>, H256)>,
+    ) -> Result<Vec<Slot>> {
+        let mut slots = vec![];
+        let mut batch = vec![];
+
+        for (state, block_root) in states_with_block_roots {
+            if !self.contains_key(StateByBlockRoot(block_root))? {
+                slots.push(state.slot());
+                batch.push(serialize(StateByBlockRoot(block_root), state)?);
+            }
+        }
+
+        self.database.put_batch(batch)?;
+
+        Ok(slots)
+    }
+
     pub(crate) fn blob_sidecar_by_id(
         &self,
         blob_id: BlobIdentifier,
@@ -480,7 +500,7 @@ impl<P: Preset> Storage<P> {
         Ok(None)
     }
 
-    pub(crate) fn genesis_block_root(&self, store: &Store<P>) -> Result<H256> {
+    pub(crate) fn genesis_block_root(&self, store: &Store<P, Self>) -> Result<H256> {
         self.block_root_by_slot_with_store(store, GENESIS_SLOT)?
             .ok_or(Error::GenesisBlockRootNotFound)
             .map_err(Into::into)
@@ -523,7 +543,7 @@ impl<P: Preset> Storage<P> {
     // Like `block_root_by_slot`, but looks for the root in `store` first.
     pub(crate) fn block_root_by_slot_with_store(
         &self,
-        store: &Store<P>,
+        store: &Store<P, Self>,
         slot: Slot,
     ) -> Result<Option<H256>> {
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
@@ -641,7 +661,7 @@ impl<P: Preset> Storage<P> {
 
     pub(crate) fn dependent_root(
         &self,
-        store: &Store<P>,
+        store: &Store<P, Self>,
         state: &BeaconState<P>,
         epoch: Epoch,
     ) -> Result<H256> {
@@ -877,6 +897,12 @@ impl<P: Preset> Storage<P> {
                 .take_while(|(key_bytes, _)| BlobSidecarByBlobId::has_prefix(key_bytes))
                 .count()
         })
+    }
+}
+
+impl<P: Preset> fork_choice_store::Storage<P> for Storage<P> {
+    fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
+        self.state_by_block_root(block_root)
     }
 }
 
