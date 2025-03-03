@@ -146,9 +146,7 @@ pub enum MutatorMessage<P: Preset, W> {
     // It doesn't make sense for this to have a `wait_group` field because this is only sent when
     // the corresponding `Controller` is dropped. There is no way to call
     // `Controller::wait_for_tasks` after that.
-    Stop {
-        save_to_storage: bool,
-    },
+    Stop,
 }
 
 impl<P: Preset, W> MutatorMessage<P, W> {

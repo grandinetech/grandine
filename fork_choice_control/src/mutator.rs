@@ -269,8 +269,8 @@ where
                     execution_block_hash,
                     payload_status,
                 ),
-                MutatorMessage::Stop { save_to_storage } => {
-                    break self.handle_stop(save_to_storage);
+                MutatorMessage::Stop => {
+                    break Ok(());
                 }
             }
         }
@@ -1379,26 +1379,6 @@ where
             self.notify_about_reorganization(wait_group.clone(), old_head);
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
-    }
-
-    fn handle_stop(&self, save_to_storage: bool) -> Result<()> {
-        if save_to_storage {
-            let slots = self.storage.append(
-                self.store.unfinalized_canonical_chain(),
-                self.store.finalized().iter(),
-                &self.store,
-            )?;
-
-            info!(
-                "chain saved (finalized blocks: {}, unfinalized blocks: {})",
-                slots.finalized.len(),
-                slots.unfinalized.len(),
-            );
-
-            debug!("appended block slots: {slots:?}");
-        }
-
-        Ok(())
     }
 
     #[expect(clippy::cognitive_complexity)]
