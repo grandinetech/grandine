@@ -16,7 +16,7 @@ use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
 use fork_choice_store::{
     ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
-    BlockAction, Store, StoreConfig, ValidAttestation,
+    BlockAction, DataAvailabilityPolicy, Store, StoreConfig, ValidAttestation,
 };
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
@@ -156,6 +156,7 @@ fn process_block<P: Preset>(store: &mut Store<P>, block: &Arc<SignedBeaconBlock<
     let block_action = store.validate_block(
         block,
         StateRootPolicy::Trust,
+        DataAvailabilityPolicy::Check,
         NullExecutionEngine,
         NullVerifier,
     )?;

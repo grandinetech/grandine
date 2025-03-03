@@ -218,6 +218,16 @@ impl BlockOrigin {
         }
     }
 
+    #[must_use]
+    pub const fn data_availability_policy(&self) -> DataAvailabilityPolicy {
+        match self {
+            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) | Self::Own => {
+                DataAvailabilityPolicy::Check
+            }
+            Self::Persisted => DataAvailabilityPolicy::Trust,
+        }
+    }
+
     // TODO: use Debug instead
     #[must_use]
     pub const fn metrics_label(&self) -> &str {
@@ -862,4 +872,17 @@ fn fmt_block_concisely(
 
 fn fmt_as_wildcard<T>(_: T, formatter: &mut Formatter) -> FmtResult {
     formatter.write_str("_")
+}
+
+#[derive(Clone, Copy)]
+pub enum DataAvailabilityPolicy {
+    Check,
+    Trust,
+}
+
+impl DataAvailabilityPolicy {
+    #[must_use]
+    pub const fn check(self) -> bool {
+        matches!(self, Self::Check)
+    }
 }

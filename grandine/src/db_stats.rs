@@ -79,7 +79,7 @@ pub fn print<P: Preset>(
             unfinalized_block_root_entries.track(&key, length);
         } else if FinalizedBlockByRoot::has_prefix(&key) {
             finalized_block_root_entries.track(&key, length);
-        } else  if StateByBlockRoot::has_prefix(&key) {
+        } else if StateByBlockRoot::has_prefix(&key) {
             state_by_block_root_entries.track(&key, length);
         } else if SlotByStateRoot::has_prefix(&key) {
             slot_by_state_root_entries.track(&key, length);
