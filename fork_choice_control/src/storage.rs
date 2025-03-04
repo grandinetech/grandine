@@ -1,4 +1,4 @@
-use core::{marker::PhantomData, num::NonZeroU64};
+use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{bail, ensure, Context as _, Error as AnyhowError, Result};
@@ -261,7 +261,6 @@ impl<P: Preset> Storage<P> {
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
             let block = &chain_link.block;
-            let state = chain_link.state(store);
             let state_slot = chain_link.slot();
 
             if !self.prune_storage_enabled() {
@@ -284,6 +283,8 @@ impl<P: Preset> Storage<P> {
                     )?);
                 }
 
+                let state = OnceCell::new();
+
                 if !checkpoint_state_appended {
                     let append_state = misc::is_epoch_start::<P>(state_slot);
 
@@ -302,7 +303,7 @@ impl<P: Preset> Storage<P> {
                             StateCheckpoint {
                                 block_root,
                                 head_slot: store_head_slot,
-                                state: state.clone_arc(),
+                                state: state.get_or_init(|| chain_link.state(store)).clone_arc(),
                             },
                         )?);
 
@@ -318,7 +319,10 @@ impl<P: Preset> Storage<P> {
                     if append_state {
                         info!("saving state in slot {state_slot}");
 
-                        batch.push(serialize(StateByBlockRoot(block_root), state)?);
+                        batch.push(serialize(
+                            StateByBlockRoot(block_root),
+                            state.get_or_init(|| chain_link.state(store)),
+                        )?);
 
                         archival_state_appended = true;
                     }
