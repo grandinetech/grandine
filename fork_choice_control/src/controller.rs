@@ -76,7 +76,8 @@ pub struct Controller<P: Preset, E, A, W: Wait> {
 
 impl<P: Preset, E, A, W: Wait> Drop for Controller<P, E, A, W> {
     fn drop(&mut self) {
-        MutatorMessage::Stop.send(&self.mutator_tx);
+        let save_to_storage = !std::thread::panicking();
+        MutatorMessage::Stop { save_to_storage }.send(&self.mutator_tx);
     }
 }
 
@@ -604,7 +605,8 @@ impl<P: Preset, W> MutatorHandle<P, W> {
     }
 
     fn stop(&self) {
-        MutatorMessage::Stop.send(&self.mutator_tx);
+        let save_to_storage = !std::thread::panicking();
+        MutatorMessage::Stop { save_to_storage }.send(&self.mutator_tx);
     }
 
     fn join_internal(&mut self) -> Result<()> {
