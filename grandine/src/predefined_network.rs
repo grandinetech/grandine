@@ -33,6 +33,8 @@ pub enum PredefinedNetwork {
     Sepolia,
     #[cfg(any(feature = "network-holesky", test))]
     Holesky,
+    #[cfg(any(feature = "network-hoodi", test))]
+    Hoodi,
 }
 
 impl PredefinedNetwork {
@@ -112,6 +114,18 @@ impl PredefinedNetwork {
         "enr:-Le4QLoE1wFHSlGcm48a9ZESb_MRLqPPu6G0vHqu4MaUcQNDHS69tsy-zkN0K6pglyzX8m24mkb-LtBcbjAYdP1uxm4BhGV0aDKQabfZdAQBcAAAAQAAAAAAAIJpZIJ2NIJpcIQ5gR6Wg2lwNpAgAUHQBwEQAAAAAAAAADR-iXNlY3AyNTZrMaEDPMSNdcL92uNIyCsS177Z6KTXlbZakQqxv3aQcWawNXeDdWRwgiMohHVkcDaCI4I",
     ];
 
+    /// [Hoodi bootnode ENRs](https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/bootstrap_nodes.yaml)
+    #[cfg(any(feature = "network-hoodi", test))]
+    const HOODI_BOOTNODES: &'static [&'static str] = &[
+        // EF
+        "enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
+        "enr:-Ku4QLVumWTwyOUVS4ajqq8ZuZz2ik6t3Gtq0Ozxqecj0qNZWpMnudcvTs-4jrlwYRQMQwBS8Pvtmu4ZPP2Lx3i2t7YBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhNEmfKCJc2VjcDI1NmsxoQLdRlI8aCa_ELwTJhVN8k7km7IDc3pYu-FMYBs5_FiigIN1ZHCCIyk",
+        "enr:-LK4QAYuLujoiaqCAs0-qNWj9oFws1B4iy-Hff1bRB7wpQCYSS-IIMxLWCn7sWloTJzC1SiH8Y7lMQ5I36ynGV1ASj4Eh2F0dG5ldHOIYAAAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQOmI5MlAu3f5WEThAYOqoygpS2wYn0XS5NV2aYq7T0a04N0Y3CCIyiDdWRwgiMo",
+        "enr:-Ku4QIC89sMC0o-irosD4_23lJJ4qCGOvdUz7SmoShWx0k6AaxCFTKviEHa-sa7-EzsiXpDp0qP0xzX6nKdXJX3X-IQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQK_m0f1DzDc9Cjrspm36zuRa7072HSiMGYWLsKiVSbP34N1ZHCCIyk",
+        "enr:-Ku4QNkWjw5tNzo8DtWqKm7CnDdIq_y7xppD6c1EZSwjB8rMOkSFA1wJPLoKrq5UvA7wcxIotH6Usx3PAugEN2JMncIBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbHuBeJc2VjcDI1NmsxoQP3FwrhFYB60djwRjAoOjttq6du94DtkQuaN99wvgqaIYN1ZHCCIyk",
+        "enr:-OS4QMJGE13xEROqvKN1xnnt7U-noc51VXyM6wFMuL9LMhQDfo1p1dF_zFdS4OsnXz_vIYk-nQWnqJMWRDKvkSK6_CwDh2F0dG5ldHOIAAAAADAAAACGY2xpZW502IpMaWdodGhvdXNljDcuMC4wLWJldGEuM4RldGgykNLxmX9gAAkQAAgAAAAAAACCaWSCdjSCaXCEhse4F4RxdWljgiMqiXNlY3AyNTZrMaECef77P8k5l3PC_raLw42OAzdXfxeQ-58BJriNaqiRGJSIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg",
+    ];
+
     #[must_use]
     pub fn chain_config(self) -> ChainConfig {
         match self {
@@ -123,6 +137,8 @@ impl PredefinedNetwork {
             Self::Sepolia => ChainConfig::sepolia(),
             #[cfg(any(feature = "network-holesky", test))]
             Self::Holesky => ChainConfig::holesky(),
+            #[cfg(any(feature = "network-hoodi", test))]
+            Self::Hoodi => ChainConfig::hoodi(),
         }
     }
 
@@ -138,6 +154,7 @@ impl PredefinedNetwork {
             feature = "network-goerli",
             feature = "network-sepolia",
             feature = "network-holesky",
+            feature = "network-hoodi",
             test
         ))]
         let load_genesis_checkpoint = |default_download_url: &str| {
@@ -177,6 +194,13 @@ impl PredefinedNetwork {
             .await
             .map(AnchorCheckpointProvider::Custom)
             .context("failed to load Holesky genesis state")?,
+            #[cfg(any(feature = "network-hoodi", test))]
+            Self::Hoodi => load_genesis_checkpoint(
+                "https://github.com/eth-clients/hoodi/raw/2b03cffba84b50759b3476a69334fac8412e217c/metadata/genesis.ssz",
+            )
+            .await
+            .map(AnchorCheckpointProvider::Custom)
+            .context("failed to load Hoodi genesis state")?,
         }
         .pipe(Ok)
     }
@@ -200,6 +224,8 @@ impl PredefinedNetwork {
             },
             #[cfg(any(feature = "network-holesky", test))]
             Self::Holesky => DepositTree::default(),
+            #[cfg(any(feature = "network-hoodi", test))]
+            Self::Hoodi => DepositTree::default(),
         }
     }
 
@@ -263,6 +289,8 @@ impl PredefinedNetwork {
             Self::Sepolia => Self::SEPOLIA_BOOTNODES,
             #[cfg(any(feature = "network-holesky", test))]
             Self::Holesky => Self::HOLESKY_BOOTNODES,
+            #[cfg(any(feature = "network-hoodi", test))]
+            Self::Hoodi => Self::HOODI_BOOTNODES,
         }
         .iter()
         .copied()

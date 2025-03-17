@@ -843,6 +843,8 @@ enum Network {
     Sepolia,
     #[cfg(any(feature = "network-holesky", test))]
     Holesky,
+    #[cfg(any(feature = "network-hoodi", test))]
+    Hoodi,
     Custom,
 }
 
@@ -863,6 +865,8 @@ impl Network {
             Self::Sepolia => Some(PredefinedNetwork::Sepolia),
             #[cfg(any(feature = "network-holesky", test))]
             Self::Holesky => Some(PredefinedNetwork::Holesky),
+            #[cfg(any(feature = "network-hoodi", test))]
+            Self::Hoodi => Some(PredefinedNetwork::Hoodi),
             Self::Custom => None,
         }
     }
