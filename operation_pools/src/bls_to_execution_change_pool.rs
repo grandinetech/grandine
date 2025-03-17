@@ -208,7 +208,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
         &mut self,
         signed_bls_to_execution_change: SignedBlsToExecutionChange,
     ) -> Result<ValidationOutcome> {
-        let state = self.controller.preprocessed_state_at_current_slot()?;
+        let state = self.controller.preprocessed_state_at_current_slot()?.value;
 
         let Some(state) = state.post_capella() else {
             warn!(

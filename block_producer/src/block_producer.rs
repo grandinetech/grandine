@@ -360,7 +360,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         let state = self
             .producer_context
             .controller
-            .preprocessed_state_at_current_slot()?;
+            .preprocessed_state_at_current_slot()?
+            .value;
 
         // TODO(feature/electra): implement trait for types::combined::AttesterSlashing
         let result = match slashing {
@@ -414,7 +415,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         let state = self
             .producer_context
             .controller
-            .preprocessed_state_at_current_slot()?;
+            .preprocessed_state_at_current_slot()?
+            .value;
 
         let outcome = match unphased::validate_proposer_slashing(
             &self.producer_context.chain_config,
@@ -454,7 +456,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         let state = self
             .producer_context
             .controller
-            .preprocessed_state_at_current_slot()?;
+            .preprocessed_state_at_current_slot()?
+            .value;
 
         let result = match state.as_ref() {
             BeaconState::Phase0(_)

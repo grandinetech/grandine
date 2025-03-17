@@ -1566,7 +1566,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(json_vec): EthJson<Vec<Value>>,
 ) -> Result<(), Error> {
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot()?.value;
 
     let Some(state) = state.post_altair() else {
         return Ok(());
@@ -1988,22 +1988,15 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 /// `POST /eth/v1/validator/duties/sync/{epoch}`
 pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorSyncDutyResponse>>, Error> {
-    let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-
     let WithStatus {
         value: state,
         status,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
-    } = state_id::state(
-        &StateId::Slot(start_slot),
-        &controller,
-        &anchor_checkpoint_provider,
-    )?;
+    } = controller.preprocessed_state_at_current_slot()?;
 
     let Some(state) = state.post_altair() else {
         return Ok(EthResponse::json(vec![]).execution_optimistic(status.is_optimistic()));
@@ -2421,7 +2414,7 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
     State(subnet_service_tx): State<UnboundedSender<ToSubnetService>>,
     EthJson(subscriptions): EthJson<Vec<BeaconCommitteeSubscription>>,
 ) -> Result<(), Error> {
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot()?.value;
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     subscriptions.iter().try_for_each(|subscription| {
@@ -2628,7 +2621,7 @@ pub async fn validator_liveness<P: Preset, W: Wait>(
     EthJson(validators): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorLivenessResponse>>, Error> {
     let api_to_liveness_tx = api_to_liveness_tx.ok_or(Error::LivenessTrackingNotEnabled)?;
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot()?.value;
 
     accessors::attestation_epoch(&state, epoch).map_err(Error::InvalidEpoch)?;
 
@@ -3002,7 +2995,7 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
         .into_iter()
         .map(|target| {
             if controller.head_block_root().value == target.root {
-                let state = controller.preprocessed_state_at_current_slot()?;
+                let state = controller.preprocessed_state_at_current_slot()?.value;
 
                 if accessors::get_current_epoch(&state) == target.epoch {
                     return Ok(state);
