@@ -92,9 +92,11 @@ network-mainnet     = ['network-any', 'preset-mainnet']
 network-sepolia     = ['network-any', 'preset-mainnet']
 network-shadow      = ['network-any', 'preset-mainnet']
 network-holesky     = ['network-any', 'preset-mainnet']
+network-hoodi       = ['network-any', 'preset-mainnet']
 
 default-networks = [
     'network-mainnet',
     'network-sepolia',
     'network-holesky',
+    'network-hoodi',
 ]

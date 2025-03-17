@@ -603,6 +603,54 @@ impl Config {
         }
     }
 
+    /// [Hoodi configuration](https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/config.yaml)
+    #[must_use]
+    pub fn hoodi() -> Self {
+        Self {
+            // Meta
+            config_name: Cow::Borrowed("hoodi"),
+
+            // Genesis
+            genesis_delay: 600,
+            genesis_fork_version: H32(hex!("10000910")),
+            min_genesis_time: 1_742_212_800,
+
+            // Forking
+            altair_fork_epoch: 0,
+            altair_fork_version: H32(hex!("20000910")),
+            bellatrix_fork_epoch: 0,
+            bellatrix_fork_version: H32(hex!("30000910")),
+            capella_fork_epoch: 0,
+            capella_fork_version: H32(hex!("40000910")),
+            deneb_fork_epoch: 0,
+            deneb_fork_version: H32(hex!("50000910")),
+            electra_fork_epoch: 2048,
+            electra_fork_version: H32(hex!("60000910")),
+
+            // Time parameters
+            seconds_per_eth1_block: 12,
+
+            // Deposit contract
+            deposit_chain_id: 560_048,
+            deposit_contract_address: ExecutionAddress::from_slice(
+                &hex::decode("00000000219ab540356cBB839Cbe05303d7705Fa")
+                    .expect("Hoodi deposit contract address contains invalid bytes"),
+            ),
+            deposit_network_id: 560_048,
+
+            // Networking
+            data_column_sidecar_subnet_count: 128,
+
+            // Transition
+            terminal_total_difficulty: Difficulty::ZERO,
+
+            // Custody
+            samples_per_slot: 8,
+
+            ..Self::default()
+        }
+    }
+
     /// Modifies `self` to start in `phase` but never upgrade.
     ///
     /// This is needed to run `consensus-spec-tests`.

@@ -18,6 +18,7 @@ enum-iterator = { workspace = true }
 enum-map = { workspace = true }
 ethereum-types = { workspace = true }
 generic-array = { workspace = true }
+hex = { workspace = true }
 hex-literal = { workspace = true }
 im = { workspace = true }
 nonzero_ext = { workspace = true }
