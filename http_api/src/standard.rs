@@ -1736,7 +1736,7 @@ pub async fn beacon_state<P: Preset, W: Wait>(
         value: state,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = state_id::present_state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = state.phase();
 
