@@ -101,7 +101,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                             let result = self
                                 .controller
                                 .preprocessed_state_at_current_slot()
-                                .map(|state| self.process_attestation(&attestation, &state));
+                                .map(|state| self.process_attestation(&attestation, &state.value));
 
                             if let Err(error) = result {
                                 warn!("Error while tracking liveness from attestation: {error:?}");

@@ -475,12 +475,19 @@ where
             .collect()
     }
 
-    pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
+    pub fn preprocessed_state_at_current_slot(&self) -> Result<WithStatus<Arc<BeaconState<P>>>> {
         let store = self.store_snapshot();
         let head = store.head();
 
-        self.state_cache()
-            .state_at_slot(&store, head.block_root, store.slot())
+        let state = self
+            .state_cache()
+            .state_at_slot(&store, head.block_root, store.slot())?;
+
+        Ok(WithStatus {
+            value: state,
+            status: head.payload_status,
+            finalized: store.is_slot_finalized(head.slot()),
+        })
     }
 
     pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {

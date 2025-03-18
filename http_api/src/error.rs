@@ -114,6 +114,8 @@ pub enum Error {
     ProposalSlotNotLaterThanStateSlot,
     #[error("slot does not belong in epoch")]
     SlotNotInEpoch,
+    #[error("state is in the future")]
+    StateInFuture,
     #[error("state not found")]
     StateNotFound,
     #[error("head is not available")]
@@ -223,6 +225,7 @@ impl Error {
             | Self::ExecutionPayloadNotAvailable
             | Self::LivenessTrackingNotEnabled
             | Self::SlotHeadNotAvailable
+            | Self::StateInFuture
             | Self::TaskJoinFailed(_)
             | Self::UnableToProduceAttestation { .. }
             | Self::UnableToProduceBeaconBlock

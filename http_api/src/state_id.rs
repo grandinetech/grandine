@@ -8,6 +8,20 @@ use types::{combined::BeaconState, nonstandard::WithStatus, preset::Preset};
 
 use crate::error::Error;
 
+pub fn present_state<P: Preset, W: Wait>(
+    state_id: &StateId,
+    controller: &ApiController<P, W>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+) -> Result<WithStatus<Arc<BeaconState<P>>>, Error> {
+    if let StateId::Slot(slot) = state_id {
+        if *slot > controller.slot() {
+            return Err(Error::StateInFuture);
+        }
+    }
+
+    state(state_id, controller, anchor_checkpoint_provider)
+}
+
 pub fn state<P: Preset, W: Wait>(
     state_id: &StateId,
     controller: &ApiController<P, W>,

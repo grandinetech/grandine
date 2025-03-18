@@ -286,7 +286,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
         } = self;
 
         let beacon_state = match controller.preprocessed_state_at_current_slot() {
-            Ok(state) => state,
+            Ok(state) => state.value,
             Err(error) => {
                 if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
                     controller.head_state().value

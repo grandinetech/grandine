@@ -1953,7 +1953,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
             None => match self.controller.preprocessed_state_at_current_slot() {
-                Ok(state) => state,
+                Ok(state) => state.value,
                 Err(error) => {
                     let is_too_many_empty_slots = matches!(
                         error.downcast_ref(),
