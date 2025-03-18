@@ -415,10 +415,7 @@ semver = '1'
 serde = { version = '1', features = ['derive', 'rc'] }
 serde-aux = '4'
 serde_json = { version = '1', features = ['preserve_order'] }
-# TODO: check if serde_qs has merged axum v0.8 support
-# https://github.com/samscott89/serde_qs/pull/118
-# serde_qs = { version = '0.13', features = ['axum'] }
-serde_qs = { git = 'https://github.com/Atrox/serde_qs', rev = '2cfa3ee0af44ad8e78ed6bd6d0e7ac913f51f382', features = ['axum'] }
+serde_qs = { version = '0.14', features = ['axum'] }
 serde_repr = '0.1'
 serde_with = '3'
 # TODO: replace serde_yaml with alternative, since it is deprecated:
