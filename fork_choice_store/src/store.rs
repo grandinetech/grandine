@@ -1726,7 +1726,7 @@ impl<P: Preset> Store<P> {
         let max_blobs_per_block = self
             .chain_config()
             .phase_at_slot::<P>(block_header.slot)
-            .max_blobs_per_block::<P>();
+            .max_blobs_per_block(&self.chain_config);
 
         ensure!(
             blob_sidecar.index < max_blobs_per_block,

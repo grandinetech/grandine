@@ -217,7 +217,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     );
 
     // > [Modified in Electra:EIP7691] Verify commitments are under limit
-    let maximum = P::MaxBlobsPerBlockElectra::USIZE;
+    let maximum = config.max_blobs_per_block_electra;
     let in_block = body.blob_kzg_commitments.len();
 
     ensure!(

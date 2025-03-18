@@ -215,7 +215,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     );
 
     // > [New in Deneb:EIP4844] Verify commitments are under limit
-    let maximum = P::MaxBlobsPerBlock::USIZE;
+    let maximum = config.max_blobs_per_block;
     let in_block = body.blob_kzg_commitments.len();
 
     ensure!(
