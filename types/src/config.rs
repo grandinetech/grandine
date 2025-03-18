@@ -131,6 +131,10 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub ttfb_timeout: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub max_blobs_per_block: usize,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_blobs_per_block_electra: usize,
+    #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blocks: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blocks_deneb: u64,
@@ -238,6 +242,8 @@ impl Default for Config {
             resp_timeout: 10,
             subnets_per_node: 2,
             ttfb_timeout: 5,
+            max_blobs_per_block: 6,
+            max_blobs_per_block_electra: 9,
             max_request_blocks: 1024,
             max_request_blocks_deneb: 128,
             max_request_blob_sidecars: 768,

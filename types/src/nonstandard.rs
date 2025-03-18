@@ -12,7 +12,6 @@ use smallvec::SmallVec;
 use ssz::ContiguousList;
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
-use typenum::Unsigned as _;
 
 use crate::{
     altair::{
@@ -21,6 +20,7 @@ use crate::{
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
     combined::{Attestation, BeaconState, SignedBeaconBlock},
+    config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
@@ -65,13 +65,17 @@ pub enum Phase {
 
 impl Phase {
     #[must_use]
-    pub const fn max_blobs_per_block<P: Preset>(self) -> u64 {
-        match self {
+    pub fn max_blobs_per_block(self, config: &Config) -> u64 {
+        let max_blobs = match self {
             Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella | Self::Deneb => {
-                P::MaxBlobsPerBlock::U64
+                config.max_blobs_per_block
             }
-            Self::Electra => P::MaxBlobsPerBlockElectra::U64,
-        }
+            Self::Electra => config.max_blobs_per_block_electra,
+        };
+
+        max_blobs
+            .try_into()
+            .expect("number of max blobs in block should fit in u64")
     }
 }
 
