@@ -30,11 +30,11 @@ pub enum Error<P: Preset> {
     },
     #[error(
         "attestation votes for a block from the future \
-         (attestation: {attestation:?}, block: {block:?})"
+         (attestation: {attestation:?}, block at slot: {slot:?})"
     )]
     AttestationForFutureBlock {
         attestation: Arc<Attestation<P>>,
-        block: Arc<SignedBeaconBlock<P>>,
+        slot: Slot,
     },
     #[error("attestation votes for a checkpoint in the wrong epoch: {attestation:?}")]
     AttestationTargetsWrongEpoch { attestation: Arc<Attestation<P>> },

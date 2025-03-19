@@ -246,7 +246,7 @@ impl<P: Preset> Storage<P> {
 
         let mut chain = unfinalized
             .chain(finalized)
-            .filter(|(chain_link, is_finalized)| *is_finalized || chain_link.is_valid())
+            .filter(|(chain_link, is_finalized)| *is_finalized || !chain_link.is_invalid())
             .peekable();
 
         if let Some(StateCheckpoint { head_slot, .. }) = self.load_state_checkpoint()? {
@@ -261,7 +261,13 @@ impl<P: Preset> Storage<P> {
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
-            let block = &chain_link.block;
+            let block = chain_link.block(store);
+
+            let Some(block) = block.as_ref() else {
+                warn!("chain_link block not available for append to storage action");
+                continue;
+            };
+
             let state_slot = chain_link.slot();
 
             if !self.prune_storage_enabled() {
@@ -366,6 +372,26 @@ impl<P: Preset> Storage<P> {
         self.database.put_batch(batch)?;
 
         Ok(persisted_blob_ids)
+    }
+
+    pub(crate) fn append_unfinalized_blocks(
+        &self,
+        blocks_with_block_roots: impl Iterator<Item = (Arc<SignedBeaconBlock<P>>, H256)>,
+    ) -> Result<Vec<Slot>> {
+        let mut slots = vec![];
+        let mut batch = vec![];
+
+        for (block, block_root) in blocks_with_block_roots {
+            let slot = block.message().slot();
+
+            slots.push(slot);
+            batch.push(serialize(BlockRootBySlot(slot), block_root)?);
+            batch.push(serialize(UnfinalizedBlockByRoot(block_root), block)?);
+        }
+
+        self.database.put_batch(batch)?;
+
+        Ok(slots)
     }
 
     pub(crate) fn append_states(
@@ -519,7 +545,7 @@ impl<P: Preset> Storage<P> {
 
         for slot in &slots {
             if let Some(block_root) = self.block_root_by_slot(*slot)? {
-                // remove only if slot -> root points to unfinalized block
+                // remove only if slot -> root points to an unfinalized block
                 if !self.contains_finalized_block(block_root)? {
                     keys_to_remove
                         .push(serialize_key(BlockRootBySlot(*slot)).as_bytes().to_owned());
@@ -822,15 +848,11 @@ impl<P: Preset> Storage<P> {
     }
 
     fn contains_key(&self, key: impl Display) -> Result<bool> {
-        let key_string = key.to_string();
-
-        self.database.contains_key(key_string)
+        self.database.contains_key(serialize_key(key))
     }
 
     fn get<V: SszRead<Config>>(&self, key: impl Display) -> Result<Option<V>> {
-        let key_string = key.to_string();
-
-        if let Some(value_bytes) = self.database.get(key_string)? {
+        if let Some(value_bytes) = self.database.get(serialize_key(key))? {
             let value = V::from_ssz(&self.config, value_bytes)?;
             return Ok(Some(value));
         }
@@ -946,6 +968,14 @@ impl<P: Preset> Storage<P> {
 }
 
 impl<P: Preset> fork_choice_store::Storage<P> for Storage<P> {
+    fn stored_block(&self, block_root: H256) -> Result<Option<Arc<SignedBeaconBlock<P>>>> {
+        if let Some(block) = self.unfinalized_block_by_root(block_root)? {
+            return Ok(Some(block));
+        }
+
+        self.finalized_block_by_root(block_root)
+    }
+
     fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
         self.state_by_block_root(block_root)
     }

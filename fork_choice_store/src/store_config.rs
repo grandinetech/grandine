@@ -37,7 +37,7 @@ impl StoreConfig {
     pub fn min_unfinalized_states_in_memory(chain_config: &ChainConfig) -> u64 {
         // The minimum was chosen arbitrarily to protect users from bugs based on the intuition
         // that blocks older than 2 epochs should rarely be needed in well-behaved networks.
-        // We did find a bug in `ChainLink::unload_old_states` while implementing in-memory mode.
+        // We did find a bug in `ChainLink::unload_old_blocks_and_states` while implementing in-memory mode.
         chain_config
             .preset_base
             .phase0_preset()

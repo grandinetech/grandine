@@ -85,7 +85,12 @@ where
 
     #[must_use]
     pub fn anchor_block(&self) -> Arc<SignedBeaconBlock<P>> {
-        self.store_snapshot().anchor().block.clone_arc()
+        let store = self.store_snapshot();
+
+        self.store_snapshot()
+            .anchor()
+            .block(&store)
+            .expect("anchor block must be available")
     }
 
     /// Returns the post-state of the justified block.
@@ -134,7 +139,9 @@ where
         let chain_link = store.last_finalized();
 
         WithStatus {
-            value: chain_link.block.clone_arc(),
+            value: chain_link
+                .block(&store)
+                .expect("last finalized block must be available"),
             status: chain_link.payload_status,
             finalized: true,
         }
@@ -202,7 +209,7 @@ where
                 ForkChoiceNode {
                     slot: chain_link.slot(),
                     block_root: chain_link.block_root,
-                    parent_root: chain_link.block.message().parent_root(),
+                    parent_root: chain_link.parent_root,
                     justified_epoch: chain_link.current_justified_checkpoint.epoch,
                     finalized_epoch: chain_link.finalized_checkpoint.epoch,
                     validity: chain_link.payload_status,
@@ -254,7 +261,7 @@ where
         let head = store.head();
 
         WithStatus {
-            value: head.block.clone_arc(),
+            value: head.block(&store).expect("head block must be available"),
             status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         }
@@ -280,6 +287,14 @@ where
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
         self.store_snapshot().is_forward_synced()
+    }
+
+    #[must_use]
+    pub fn block_by_chain_link(
+        &self,
+        chain_link: &ChainLink<P>,
+    ) -> Option<Arc<SignedBeaconBlock<P>>> {
+        chain_link.block(&self.store_snapshot())
     }
 
     #[must_use]
@@ -368,7 +383,7 @@ where
         block_root: H256,
     ) -> Result<Option<WithStatus<Arc<SignedBeaconBlock<P>>>>> {
         if let Some(with_status) = self.store_snapshot().block(block_root) {
-            return Ok(Some(with_status.cloned()));
+            return Ok(Some(with_status));
         }
 
         if let Some(block) = self.storage().finalized_block_by_root(block_root)? {
@@ -387,14 +402,15 @@ where
 
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
             if chain_link.slot() == slot {
-                let block = chain_link.block.clone_arc();
-                let root = chain_link.block_root;
+                if let Some(block) = chain_link.block(&store) {
+                    let root = chain_link.block_root;
 
-                return Ok(Some(WithStatus {
-                    value: BlockWithRoot { block, root },
-                    status: chain_link.payload_status,
-                    finalized: store.is_slot_finalized(chain_link.slot()),
-                }));
+                    return Ok(Some(WithStatus {
+                        value: BlockWithRoot { block, root },
+                        status: chain_link.payload_status,
+                        finalized: store.is_slot_finalized(chain_link.slot()),
+                    }));
+                }
             }
         }
 
@@ -587,7 +603,7 @@ where
         blob_sidecar: Arc<BlobSidecar<P>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
-        parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        parent_fn: impl FnOnce() -> Option<(Slot, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         self.store_snapshot().validate_blob_sidecar_with_state(
@@ -906,6 +922,7 @@ impl<P: Preset> Snapshot<'_, P> {
 
     // This returns blocks ordered oldest to newest, as mandated for `BeaconBlocksByRange`.
     pub fn blocks_by_range(&self, range: Range<Slot>) -> Result<Vec<BlockWithRoot<P>>> {
+        let store = &self.store_snapshot;
         let Range { start, end } = range;
 
         let mut blocks = self
@@ -913,9 +930,11 @@ impl<P: Preset> Snapshot<'_, P> {
             .canonical_chain()
             .skip_while(|chain_link| end <= chain_link.slot())
             .take_while(|chain_link| start <= chain_link.slot())
-            .map(|chain_link| BlockWithRoot {
-                block: chain_link.block.clone_arc(),
-                root: chain_link.block_root,
+            .filter_map(|chain_link| {
+                chain_link.block(store).map(|block| BlockWithRoot {
+                    block,
+                    root: chain_link.block_root,
+                })
             })
             .collect_vec();
 

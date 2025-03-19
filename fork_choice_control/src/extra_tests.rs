@@ -625,7 +625,7 @@ fn finalizes_and_prunes_many_segments_correctly() {
     });
 }
 
-// This covers a bug we found in `Store::unload_old_states` while implementing in-memory mode.
+// This covers a bug we found in `Store::unload_old_blocks_and_states` while implementing in-memory mode.
 // The bug would cause blocks to become anchors while having unloaded post-states, making it
 // impossible to access their post-states or compute the post-states of their descendants.
 //

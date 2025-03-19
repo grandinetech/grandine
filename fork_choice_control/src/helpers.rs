@@ -113,9 +113,14 @@ impl<P: Preset> Context<P> {
             .genesis()
             .expect("store was created using genesis as the anchor");
 
+        let block = self
+            .controller()
+            .block_by_chain_link(&chain_link)
+            .expect("genesis block must be available");
+
         let state = self.controller().state_by_chain_link(&chain_link);
 
-        (chain_link.block, state)
+        (block, state)
     }
 
     #[must_use]

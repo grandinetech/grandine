@@ -327,7 +327,57 @@ where
         Ok(())
     }
 
-    #[expect(clippy::too_many_lines)]
+    fn notify_optimistic_payload(&self) -> Result<()> {
+        let head = self.store.head();
+
+        if head.is_optimistic() {
+            let Some(block) = head.block(&self.store) else {
+                warn!("head block not available for optimistic payload notification");
+                return Ok(());
+            };
+
+            if let Some(execution_payload) = block.as_ref().clone().execution_payload() {
+                let mut params = None;
+
+                if let Some(body) = block.message().body().post_electra() {
+                    let versioned_hashes = body
+                        .blob_kzg_commitments()
+                        .iter()
+                        .copied()
+                        .map(misc::kzg_commitment_to_versioned_hash)
+                        .collect();
+
+                    params = Some(ExecutionPayloadParams::Electra {
+                        versioned_hashes,
+                        parent_beacon_block_root: head.parent_root,
+                        execution_requests: body.execution_requests().clone(),
+                    });
+                } else if let Some(body) = block.message().body().post_deneb() {
+                    let versioned_hashes = body
+                        .blob_kzg_commitments()
+                        .iter()
+                        .copied()
+                        .map(misc::kzg_commitment_to_versioned_hash)
+                        .collect();
+
+                    params = Some(ExecutionPayloadParams::Deneb {
+                        versioned_hashes,
+                        parent_beacon_block_root: head.parent_root,
+                    });
+                }
+
+                self.execution_engine.notify_new_payload(
+                    head.block_root,
+                    execution_payload,
+                    params,
+                    None,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
@@ -362,47 +412,7 @@ where
         // Query the execution engine for the current status of the head
         // if it is still optimistic 1 second before the next interval.
         if tick.is_end_of_interval() {
-            let head = self.store.head();
-
-            if head.is_optimistic() {
-                if let Some(execution_payload) = head.block.as_ref().clone().execution_payload() {
-                    let mut params = None;
-
-                    if let Some(body) = head.block.message().body().post_electra() {
-                        let versioned_hashes = body
-                            .blob_kzg_commitments()
-                            .iter()
-                            .copied()
-                            .map(misc::kzg_commitment_to_versioned_hash)
-                            .collect();
-
-                        params = Some(ExecutionPayloadParams::Electra {
-                            versioned_hashes,
-                            parent_beacon_block_root: head.block.message().parent_root(),
-                            execution_requests: body.execution_requests().clone(),
-                        });
-                    } else if let Some(body) = head.block.message().body().post_deneb() {
-                        let versioned_hashes = body
-                            .blob_kzg_commitments()
-                            .iter()
-                            .copied()
-                            .map(misc::kzg_commitment_to_versioned_hash)
-                            .collect();
-
-                        params = Some(ExecutionPayloadParams::Deneb {
-                            versioned_hashes,
-                            parent_beacon_block_root: head.block.message().parent_root(),
-                        });
-                    }
-
-                    self.execution_engine.notify_new_payload(
-                        head.block_root,
-                        execution_payload,
-                        params,
-                        None,
-                    )?;
-                }
-            }
+            self.notify_optimistic_payload()?;
         }
 
         let Some(changes) = self.store_mut().apply_tick(tick)? else {
@@ -495,7 +505,7 @@ where
         match result {
             Ok(BlockAction::Accept(chain_link, attester_slashing_results)) => {
                 let block_root = chain_link.block_root;
-                let parent_root = chain_link.block.message().parent_root();
+                let parent_root = chain_link.parent_root;
 
                 if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
                     if let Some((payload_status, _)) = delayed.payload_status.take() {
@@ -506,8 +516,7 @@ where
 
                         if let Some(valid_hash) = payload_status.latest_valid_hash {
                             if let Some(parent) = self.store.chain_link(parent_root) {
-                                let parent_execution_block_hash =
-                                    parent.block.execution_block_hash();
+                                let parent_execution_block_hash = parent.execution_block_hash();
 
                                 self.store_mut().update_chain_payload_statuses(
                                     valid_hash,
@@ -538,12 +547,7 @@ where
 
                 info!(
                     "BlockAction::Accept (block root: {:?}, slot: {})",
-                    pending_chain_link
-                        .chain_link
-                        .block
-                        .message()
-                        .hash_tree_root(),
-                    pending_chain_link.chain_link.block.message().slot(),
+                    pending_chain_link.chain_link.block_root, pending_chain_link.chain_link.slot,
                 );
 
                 self.accept_block(&wait_group, pending_chain_link)?;
@@ -701,8 +705,8 @@ where
             )) => {
                 info!(
                     "BlockAction::WaitForJustifiedState (block root: {:?}, slot: {}, checkpoint: {checkpoint:?})",
-                    chain_link.block.message().hash_tree_root(),
-                    chain_link.block.message().slot(),
+                    chain_link.block_root,
+                    chain_link.slot,
                 );
 
                 let pending_chain_link = PendingChainLink {
@@ -1587,7 +1591,7 @@ where
         } = pending_chain_link;
 
         let block_root = chain_link.block_root;
-        let block = &chain_link.block;
+        let block_slot = chain_link.slot;
 
         // Check if the block is already present in the store.
         // This is done here primarily to avoid spawning redundant `BlockAttestationsTask`s.
@@ -1605,10 +1609,10 @@ where
 
         // A block may become orphaned while being processed.
         // The fork choice store is not designed to accommodate blocks like that.
-        if block.message().slot() <= self.store.finalized_slot() {
+        if block_slot <= self.store.finalized_slot() {
             debug!(
                 "block became orphaned while being processed \
-                 (block_root: {block_root:?}, block: {block:?}, \
+                 (block_root: {block_root:?}, block: {chain_link:?}, \
                   origin: {origin:?}, finalized slot: {})",
                 self.store.finalized_slot(),
             );
@@ -1624,24 +1628,21 @@ where
             return Ok(());
         }
 
-        debug!("block accepted (block_root: {block_root:?}, block: {block:?}, origin: {origin:?})");
-
-        let block_slot = chain_link.slot();
+        debug!("block accepted (block_root: {block_root:?}, block: {chain_link:?}, origin: {origin:?})");
 
         if let Some(existing_link) = self.store.chain_link_before_or_at(block_slot) {
             if block_slot == existing_link.slot() {
                 warn!(
                     "the store accepted a new block at slot {block_slot}, \
                     although it already contains one at the same slot on the canonical chain \
-                    (existing canonical block: {:?}, new block: {:?})",
-                    existing_link.block, chain_link.block,
+                    (existing canonical block: {existing_link:?}, new block: {chain_link:?})",
                 );
             }
         }
 
-        let block = block.clone_arc();
         let is_valid = chain_link.is_valid();
-        let changes = self.store_mut().apply_block(chain_link)?;
+        let execution_block_hash = chain_link.execution_block_hash;
+        let changes = self.store_mut().apply_block(chain_link.clone())?;
         let insertion_time = Instant::now();
 
         let unfinalized_states_in_memory = self.store.store_config().unfinalized_states_in_memory;
@@ -1650,8 +1651,8 @@ where
         let block_epoch = misc::compute_epoch_at_slot::<P>(block_slot);
         let parent_epoch = self
             .store
-            .chain_link(block.message().parent_root())
-            .map(|chain_link| misc::compute_epoch_at_slot::<P>(chain_link.slot()));
+            .chain_link(chain_link.parent_root)
+            .map(|chain_link| misc::compute_epoch_at_slot::<P>(chain_link.slot));
 
         self.print_collection_metrics();
 
@@ -1669,23 +1670,45 @@ where
             #[cfg(not(target_os = "windows"))]
             print_jemalloc_stats()?;
 
-            info!("unloading old beacon states (head slot: {head_slot})");
+            info!("unloading old beacon states and blocks (head slot: {head_slot})");
 
-            let unloaded = self
+            let (unloaded_unfinalized_links, unloaded_states) = self
                 .store_mut()
-                .unload_old_states(unfinalized_states_in_memory);
+                .unload_old_blocks_and_states(unfinalized_states_in_memory);
 
             let store = self.owned_store();
             let storage = self.storage.clone_arc();
             let wait_group = wait_group.clone();
 
-            if !unloaded.is_empty() {
+            if !unloaded_unfinalized_links.is_empty() || !unloaded_unfinalized_links.is_empty() {
                 Builder::new()
                 .name("store-unloader".to_owned())
                 .spawn(move || {
+                    debug!("persisting unloaded old unfinalized beacon blocks…");
+
+                    let unfinalized_blocks_with_block_roots = unloaded_unfinalized_links
+                        .iter()
+                        .filter_map(|chain_link| {
+                            chain_link.block(&store)
+                                .map(|block| (block, chain_link.block_root))
+                        });
+
+                    match storage.append_unfinalized_blocks(unfinalized_blocks_with_block_roots) {
+                        Ok(slots) => {
+                            debug!(
+                                "unloaded old unfinalized beacon blocks persisted \
+                                 (blocks slots: {slots:?})",
+                            )
+                        }
+                        Err(error) => {
+                            error!("persisting unloaded old unfinalized beacon states to storage \
+                                    failed: {error:?}")
+                        }
+                    }
+
                     debug!("persisting unloaded old beacon states…");
 
-                    let states_with_block_roots = unloaded
+                    let states_with_block_roots = unloaded_states
                         .iter()
                         .map(|chain_link| (chain_link.state(&store), chain_link.block_root));
 
@@ -1721,7 +1744,7 @@ where
                 .observe(processing_duration.as_secs_f64());
         }
 
-        if let Some(hash) = block.execution_block_hash() {
+        if let Some(hash) = execution_block_hash {
             if let Some(payload_statuses) = self.delayed_until_payload.remove(&hash) {
                 for (payload_status, _) in payload_statuses {
                     self.handle_notified_new_payload(wait_group, block_root, hash, payload_status);
@@ -1772,7 +1795,11 @@ where
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Accept));
         }
 
-        self.maybe_spawn_block_attestations_task(wait_group, block_root, &block);
+        if let Some(block) = chain_link.block(&self.store) {
+            self.maybe_spawn_block_attestations_task(wait_group, chain_link.block_root, &block);
+        } else {
+            warn!("chain_link block not available for block attestations task");
+        }
 
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
@@ -2055,7 +2082,7 @@ where
             head_block_hash,
             safe_block_hash,
             finalized_block_hash,
-            Either::Left(new_head.block.phase()),
+            Either::Left(self.store.chain_config().phase_at_slot::<P>(new_head.slot)),
             None,
         );
     }
@@ -2681,7 +2708,7 @@ where
             let mut archived = self.store_mut().archive_finalized(latest_archivable_index);
             archived.push_back(self.store.anchor().clone());
 
-            let last_finalized_slot = self.store.last_finalized().slot();
+            let last_finalized_slot = self.store.last_finalized().slot;
 
             Builder::new()
                 .name("store-archiver".to_owned())
@@ -2691,10 +2718,13 @@ where
                     match storage.append(core::iter::empty(), archived.iter(), &store) {
                         Ok(slots) => {
                             if let Some(chain_link) = archived.back() {
-                                let finalized_block = chain_link.block.clone_arc();
-
                                 if finished_loading_from_storage {
-                                    SyncMessage::Finalized(finalized_block).send(&sync_tx);
+                                    if let Some(finalized_block) = chain_link.block(&store) {
+                                        SyncMessage::Finalized(finalized_block.clone_arc())
+                                            .send(&sync_tx);
+                                    } else {
+                                        warn!("cannot get archived block for chain_link");
+                                    }
                                 }
                             }
 

@@ -265,8 +265,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::Head(wait_group, head) => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
-                            let state = self.controller.state_by_chain_link(&head);
-                            ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
+                            if let Some(block) = self.controller.block_by_chain_link(&head) {
+                                let state = self.controller.state_by_chain_link(&head);
+                                ValidatorToLiveness::Head(block, state).send(validator_to_liveness_tx);
+                            } else {
+                                warn!("cannot send liveness message: block not available");
+                            }
                         }
 
                         self.attest_gossip_block(&wait_group, head).await;

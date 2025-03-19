@@ -264,7 +264,7 @@ impl<P: Preset> Batch<P> {
                     blob_sidecar.clone_arc(),
                     true,
                     &BlobSidecarOrigin::BackSync,
-                    || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                    || Some((parent.message().slot(), PayloadStatus::Optimistic)),
                     || Some(head_state.clone_arc()),
                 )?;
 

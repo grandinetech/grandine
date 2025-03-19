@@ -28,7 +28,6 @@ use types::{
         },
     },
     preset::Preset,
-    traits::SignedBeaconBlock as _,
 };
 
 pub const DEFAULT_MAX_EVENTS: usize = 100;
@@ -487,8 +486,8 @@ impl ChainReorgEvent {
     #[must_use]
     fn new<P: Preset, S: Storage<P>>(store: &Store<P, S>, old_head: &ChainLink<P>) -> Self {
         let new_head = store.head();
-        let old_slot = old_head.slot();
-        let new_slot = new_head.slot();
+        let old_slot = old_head.slot;
+        let new_slot = new_head.slot;
 
         let depth = store
             .common_ancestor(old_head.block_root, new_head.block_root)
@@ -510,8 +509,8 @@ impl ChainReorgEvent {
             depth,
             old_head_block: old_head.block_root,
             new_head_block: new_head.block_root,
-            old_head_state: old_head.block.message().state_root(),
-            new_head_state: new_head.block.message().state_root(),
+            old_head_state: old_head.state_root,
+            new_head_state: new_head.state_root,
             epoch: misc::compute_epoch_at_slot::<P>(new_slot),
             execution_optimistic: new_head.is_optimistic(),
         }
@@ -546,12 +545,12 @@ impl HeadEvent {
             previous_duty_dependent_root,
         } = dependent_roots_bundle;
 
-        let slot = head.slot();
+        let slot = head.slot;
 
         Self {
             slot,
             block: head.block_root,
-            state: head.block.message().state_root(),
+            state: head.state_root,
             epoch_transition: misc::is_epoch_start::<P>(slot),
             previous_duty_dependent_root,
             current_duty_dependent_root,

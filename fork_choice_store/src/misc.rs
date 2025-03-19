@@ -11,7 +11,7 @@ use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
-use log::error;
+use log::{error, warn};
 use serde::{Serialize, Serializer};
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
@@ -29,7 +29,6 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
-    traits::SignedBeaconBlock as _,
 };
 
 use crate::{segment::Position, store::Store};
@@ -38,31 +37,26 @@ use crate::{segment::Position, store::Store};
 #[derivative(Debug(bound = ""))]
 pub struct ChainLink<P: Preset> {
     pub block_root: H256,
-    #[derivative(Debug(format_with = "fmt_block_concisely"))]
-    pub block: Arc<SignedBeaconBlock<P>>,
+    #[derivative(Debug(format_with = "fmt_as_wildcard"))]
+    pub block: Option<Arc<SignedBeaconBlock<P>>>,
     #[derivative(Debug(format_with = "fmt_as_wildcard"))]
     pub state: Option<Arc<BeaconState<P>>>,
+    pub execution_block_hash: Option<ExecutionBlockHash>,
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,
     pub unrealized_justified_checkpoint: Checkpoint,
     pub unrealized_finalized_checkpoint: Checkpoint,
+    pub parent_root: H256,
     pub payload_status: PayloadStatus,
+    pub proposer_index: ValidatorIndex,
+    pub slot: Slot,
+    pub state_root: H256,
 }
 
 impl<P: Preset> ChainLink<P> {
     #[must_use]
-    pub fn slot(&self) -> Slot {
-        self.block.message().slot()
-    }
-
-    #[must_use]
-    pub fn epoch(&self) -> Slot {
-        misc::compute_epoch_at_slot::<P>(self.slot())
-    }
-
-    #[must_use]
-    pub fn execution_block_hash(&self) -> Option<ExecutionBlockHash> {
-        self.block.execution_block_hash()
+    pub const fn execution_block_hash(&self) -> Option<ExecutionBlockHash> {
+        self.execution_block_hash
     }
 
     #[must_use]
@@ -78,6 +72,31 @@ impl<P: Preset> ChainLink<P> {
     #[must_use]
     pub const fn is_optimistic(&self) -> bool {
         self.payload_status.is_optimistic()
+    }
+
+    #[must_use]
+    pub const fn slot(&self) -> Slot {
+        self.slot
+    }
+
+    #[must_use]
+    pub fn epoch(&self) -> Slot {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+
+    pub fn block<S: Storage<P>>(&self, store: &Store<P, S>) -> Option<Arc<SignedBeaconBlock<P>>> {
+        self.block
+            .as_ref()
+            .map(|block| Some(block.clone_arc()))
+            .unwrap_or_else(|| {
+                store
+                    .load_beacon_block(self.block_root)
+                    .map_err(|error| {
+                        warn!("failed to load chain_link block due to error: {error:?}")
+                    })
+                    .ok()
+                    .flatten()
+            })
     }
 
     #[must_use]
@@ -114,8 +133,8 @@ impl<P: Preset> UnfinalizedBlock<P> {
     }
 
     #[must_use]
-    pub fn slot(&self) -> Slot {
-        self.chain_link.slot()
+    pub const fn slot(&self) -> Slot {
+        self.chain_link.slot
     }
 
     #[must_use]
@@ -831,19 +850,6 @@ impl<P: Preset, I> AttestationValidationError<P, I> {
     }
 }
 
-fn fmt_block_concisely(
-    block: &SignedBeaconBlock<impl Preset>,
-    formatter: &mut Formatter,
-) -> FmtResult {
-    formatter
-        .debug_struct("SignedBeaconBlock")
-        .field("phase", &block.phase())
-        .field("slot", &block.message().slot())
-        .field("parent_root", &block.message().parent_root())
-        .field("state_root", &block.message().state_root())
-        .finish_non_exhaustive()
-}
-
 fn fmt_as_wildcard<T>(_: T, formatter: &mut Formatter) -> FmtResult {
     formatter.write_str("_")
 }
@@ -862,5 +868,6 @@ impl DataAvailabilityPolicy {
 }
 
 pub trait Storage<P: Preset> {
+    fn stored_block(&self, block_root: H256) -> Result<Option<Arc<SignedBeaconBlock<P>>>>;
     fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>>;
 }

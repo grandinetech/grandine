@@ -248,15 +248,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             root: block_root,
         };
 
+        let message = anchor_block.message();
+
         let anchor = ChainLink {
             block_root,
-            block: anchor_block,
             state: Some(anchor_state.clone_arc()),
+            execution_block_hash: anchor_block.execution_block_hash(),
             current_justified_checkpoint: checkpoint,
             finalized_checkpoint: checkpoint,
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
+            parent_root: message.parent_root(),
             payload_status: Self::initial_payload_status(&anchor_state),
+            proposer_index: message.proposer_index(),
+            slot: message.slot(),
+            state_root: message.state_root(),
+            block: Some(anchor_block),
         };
 
         let validator_count = anchor_state.validators().len_usize();
@@ -338,7 +345,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn anchor_epoch(&self) -> Epoch {
-        Self::epoch_at_slot(self.anchor().slot())
+        Self::epoch_at_slot(self.anchor().slot)
     }
 
     #[must_use]
@@ -427,14 +434,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Some(&self.finalized[*index])
     }
 
-    #[must_use]
-    pub fn block(&self, block_root: H256) -> Option<WithStatus<&Arc<SignedBeaconBlock<P>>>> {
-        let chain_link = self.chain_link(block_root)?;
-
-        Some(WithStatus {
-            value: &chain_link.block,
-            status: chain_link.payload_status,
-            finalized: self.is_slot_finalized(chain_link.slot()),
+    pub fn block(&self, block_root: H256) -> Option<WithStatus<Arc<SignedBeaconBlock<P>>>> {
+        self.chain_link(block_root).and_then(|chain_link| {
+            chain_link.block(self).map(|value| WithStatus {
+                value,
+                status: chain_link.payload_status,
+                finalized: self.is_slot_finalized(chain_link.slot),
+            })
         })
     }
 
@@ -474,8 +480,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let chain_link = &self.unfinalized[segment_id][*position].chain_link;
 
-            chain_link.block.message().slot() == slot
-                && chain_link.block.message().proposer_index() == proposer_index
+            chain_link.slot == slot
+                && chain_link.proposer_index == proposer_index
                 && chain_link.block_root != block_root
         })
     }
@@ -483,11 +489,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn state_by_state_root(&self, state_root: H256) -> Option<WithStatus<Arc<BeaconState<P>>>> {
         self.canonical_chain()
-            .find(|chain_link| chain_link.block.message().state_root() == state_root)
+            .find(|chain_link| chain_link.state_root == state_root)
             .map(|chain_link| WithStatus {
                 value: chain_link.state(self),
                 status: chain_link.payload_status,
-                finalized: self.is_slot_finalized(chain_link.slot()),
+                finalized: self.is_slot_finalized(chain_link.slot),
             })
     }
 
@@ -715,22 +721,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     fn is_root(&self, segment: &Segment<P>) -> bool {
-        segment
-            .first_block()
-            .chain_link
-            .block
-            .message()
-            .parent_root()
-            == self.last_finalized().block_root
+        segment.first_block().chain_link.parent_root == self.last_finalized().block_root
     }
 
     fn parent_location(&self, segment: &Segment<P>) -> Option<Location> {
-        let parent_root = segment
-            .first_block()
-            .chain_link
-            .block
-            .message()
-            .parent_root();
+        let parent_root = segment.first_block().chain_link.parent_root;
         self.unfinalized_locations.get(&parent_root).copied()
     }
 
@@ -902,7 +897,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         itertools::merge_join_by(
             self.chain_ending_with(a_root),
             self.chain_ending_with(b_root),
-            |a, b| a.slot().cmp(&b.slot()).reverse(),
+            |a, b| a.slot.cmp(&b.slot).reverse(),
         )
         .find_map(|either_or_both| match either_or_both {
             EitherOrBoth::Both(a, b) => core::ptr::eq(a, b).then_some(a),
@@ -949,7 +944,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > As per EIP-3675, before a post-transition block is finalized,
         // > `notify_forkchoice_updated` MUST be called with `finalized_block_hash = Hash32()`.
         self.last_finalized()
-            .execution_block_hash()
+            .execution_block_hash
             .unwrap_or_default()
     }
 
@@ -975,7 +970,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             "processing slots for beacon state not found in state cache before state transition \
                             (block root: {block_root:?}, parent block root: {:?}, from slot {} to {})\n{}",
                             parent.block_root,
-                            parent.slot(),
+                            parent.slot,
                             block.message().slot(),
                             Backtrace::force_capture(),
                         );
@@ -1057,7 +1052,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > Check block is a descendant of the finalized block at the checkpoint finalized slot
         //
         // Checking the slot is sufficient because orphans are pruned as soon as possible.
-        if parent.slot() < self.finalized_slot() {
+        if parent.slot < self.finalized_slot() {
             return Some(BlockAction::Ignore(false, block_root));
         }
 
@@ -1163,16 +1158,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         let payload_status = Self::initial_payload_status(&state);
+        let message = block.message();
 
         let chain_link = ChainLink {
             block_root,
-            block: block.clone_arc(),
+            block: Some(block.clone_arc()),
             state: Some(state),
+            execution_block_hash: block.execution_block_hash(),
             current_justified_checkpoint: justified_checkpoint,
             finalized_checkpoint,
             unrealized_justified_checkpoint,
             unrealized_finalized_checkpoint,
+            parent_root: message.parent_root(),
             payload_status,
+            proposer_index: message.proposer_index(),
+            slot: message.slot(),
+            state_root: message.state_root(),
         };
 
         // Ensure that the new justified state is present in the store when
@@ -1613,7 +1614,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > Attestations must be for a known block.
         // > If block is unknown, delay consideration until the block is found
-        let Some(ghost_vote_block) = self.block(beacon_block_root).map(WithStatus::value) else {
+        let Some(ghost_vote) = self.chain_link(beacon_block_root) else {
             if Feature::IgnoreAttestationsForUnknownBlocks.is_enabled() {
                 return Ok(PartialAttestationAction::Ignore);
             }
@@ -1626,10 +1627,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         //
         // This validation is present in the fork choice rule but not the Networking specification.
         ensure!(
-            ghost_vote_block.message().slot() <= slot,
+            ghost_vote.slot <= slot,
             Error::AttestationForFutureBlock {
                 attestation: attestation.clone_arc(),
-                block: ghost_vote_block.clone_arc(),
+                slot: ghost_vote.slot,
             },
         );
 
@@ -1760,7 +1761,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
-        parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        parent_info: impl FnOnce() -> Option<(Slot, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
@@ -1850,7 +1851,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources)
         // (a client MAY queue sidecars for processing once the parent block is retrieved).
-        let Some((parent, parent_payload_status)) = parent_info() else {
+        let Some((parent_slot, parent_payload_status)) = parent_info() else {
             return Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar));
         };
 
@@ -1862,8 +1863,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The sidecar is from a higher slot than the sidecar's block's parent (defined by block_header.parent_root).
-        let parent_slot = parent.message().slot();
-
         ensure!(
             block_header.slot > parent_slot,
             Error::BlobSidecarNotNewerThanBlockParent {
@@ -1937,7 +1936,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let parent_info = || {
             self.chain_link(block_header.parent_root)
-                .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+                .map(|chain_link| (chain_link.slot, chain_link.payload_status))
         };
 
         if let Some(state) = state {
@@ -2077,7 +2076,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `Store::insert_block` can leave the `Store` in an inconsistent state if
         // `Store::insert_block` fails, but only if segment IDs or positions in a segment run out,
         // which is extremely unlikely and at which point the `Store` is unusable anyway.
-        if self.slot() == chain_link.slot() && is_before_attesting_interval && is_first_block {
+        if self.slot() == chain_link.slot && is_before_attesting_interval && is_first_block {
             self.proposer_boost_root = block_root;
         }
 
@@ -2107,22 +2106,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
         let log_imported_block_info = || {
-            if let Some(post_deneb_block_body) = chain_link.block.message().body().post_deneb() {
-                if self.should_check_data_availability_at_slot(chain_link.slot()) {
-                    let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
+            let block = chain_link.block(self);
 
-                    log::info!(
-                        "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
-                        chain_link.slot(),
-                    );
+            if let Some(block) = block {
+                if let Some(post_deneb_block_body) = block.message().body().post_deneb() {
+                    if self.should_check_data_availability_at_slot(chain_link.slot) {
+                        let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
 
-                    return;
+                        log::info!(
+                            "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
+                            chain_link.slot,
+                        );
+
+                        return;
+                    }
                 }
             }
 
             log::info!(
                 "imported beacon block (slot: {}, {block_root:?})",
-                chain_link.slot(),
+                chain_link.slot,
             );
         };
 
@@ -2156,7 +2159,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.prune_after_finalization();
         }
 
-        if !self.finished_initial_forward_sync && self.head().slot() >= self.slot() {
+        if !self.finished_initial_forward_sync && self.head().slot >= self.slot() {
             self.finished_initial_forward_sync = true;
             self.state_cache.set_log_lock_timeouts(true);
         }
@@ -2302,9 +2305,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     fn insert_block(&mut self, chain_link: ChainLink<P>) -> Result<()> {
         let block_root = chain_link.block_root;
-        let block = &chain_link.block;
-        let parent_root = block.message().parent_root();
-        let execution_block_hash = block.execution_block_hash();
+        let parent_root = chain_link.parent_root;
+        let execution_block_hash = chain_link.execution_block_hash;
 
         let new_block_location;
 
@@ -2427,7 +2429,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     "roots of unfinalized blocks should be present in self.unfinalized_locations",
                 );
 
-                if let Some(block_hash) = unfinalized_block.chain_link.execution_block_hash() {
+                if let Some(block_hash) = unfinalized_block.chain_link.execution_block_hash {
                     execution_payload_locations.remove(&block_hash);
                 }
 
@@ -2510,14 +2512,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|target, _| finalized_epoch <= target.epoch);
     }
 
-    pub fn unload_old_states(&mut self, unfinalized_states_in_memory: Slot) -> Vec<ChainLink<P>> {
-        let head_slot = self.head().slot();
+    pub fn unload_old_blocks_and_states(
+        &mut self,
+        unfinalized_states_in_memory: Slot,
+    ) -> (Vec<ChainLink<P>>, Vec<ChainLink<P>>) {
+        let head_slot = self.head().slot;
 
         // `OrdMap` has no `iter_mut` or `values_mut` methods or `IntoIterator` impl for `&mut`.
         // See <https://github.com/bodil/im-rs/issues/138>.
         let segment_ids = self.unfinalized.keys().copied().collect_vec();
 
-        let mut to_persist = vec![];
+        let mut blocks_to_persist = vec![];
+        let mut states_to_persist = vec![];
 
         for segment_id in segment_ids {
             let segment = &self.unfinalized[&segment_id];
@@ -2533,10 +2539,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 if far_ahead_non_canonical_segment {
                     // Keep only one epoch of states in memory for far ahead (relative to head) non-canonical chains
-                    if chain_link.slot() + P::SlotsPerEpoch::U64 > segment_last_slot {
+                    if chain_link.slot + P::SlotsPerEpoch::U64 > segment_last_slot {
                         break;
                     }
-                } else if chain_link.slot() + unfinalized_states_in_memory > head_slot {
+                } else if chain_link.slot + unfinalized_states_in_memory > head_slot {
                     break;
                 }
 
@@ -2552,19 +2558,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         chain_link.slot()
                     );
 
-                    if misc::is_epoch_start::<P>(chain_link.slot()) {
-                        to_persist.push(ChainLink {
+                    if misc::is_epoch_start::<P>(chain_link.slot) {
+                        states_to_persist.push(ChainLink {
                             state: Some(state),
                             ..chain_link.clone()
                         });
                     }
                 }
+
+                if let Some(block) = chain_link.block.take() {
+                    blocks_to_persist.push(ChainLink {
+                        block: Some(block),
+                        ..chain_link.clone()
+                    });
+                }
             }
         }
 
-        log::info!("will persist {} unloaded states", to_persist.len());
+        log::info!(
+            "will persist {} unloaded states, {} unloaded blocks",
+            states_to_persist.len(),
+            blocks_to_persist.len(),
+        );
 
-        to_persist
+        (blocks_to_persist, states_to_persist)
     }
 
     fn update_balances_after_justification(&mut self) -> Result<()> {
@@ -3022,9 +3039,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .enumerate()
             .rev()
             .take_while(|(_, chain_link)| {
-                next_archivable_epoch <= Self::epoch_at_slot(chain_link.slot())
+                next_archivable_epoch <= Self::epoch_at_slot(chain_link.slot)
             })
-            .find(|(_, chain_link)| misc::is_epoch_start::<P>(chain_link.slot()))
+            .find(|(_, chain_link)| misc::is_epoch_start::<P>(chain_link.slot))
             .map(|(index, _)| index)
     }
 
@@ -3060,6 +3077,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         PayloadStatus::Valid
+    }
+
+    pub fn load_beacon_block(&self, block_root: H256) -> Result<Option<Arc<SignedBeaconBlock<P>>>> {
+        self.storage.stored_block(block_root)
     }
 
     pub fn load_beacon_state(
@@ -3122,7 +3143,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 });
 
                 if state.is_none() {
-                    blocks_to_process.push(&chain_link.block);
+                    if let Some(block) = chain_link.block(self) {
+                        blocks_to_process.push(block);
+                    }
                 }
 
                 state
@@ -3132,7 +3155,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         assert!(!blocks_to_process.is_empty());
 
         for block in blocks_to_process.into_iter().rev() {
-            combined::trusted_state_transition(self.chain_config(), state.make_mut(), block)
+            combined::trusted_state_transition(self.chain_config(), state.make_mut(), &block)
                 .expect("state transition should succeed because block is already in store");
         }
 
@@ -3156,7 +3179,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
-        self.head().slot() + self.store_config.max_empty_slots >= self.slot()
+        self.head().slot + self.store_config.max_empty_slots >= self.slot()
             && self.finished_initial_forward_sync
     }
 
