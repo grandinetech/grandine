@@ -80,7 +80,7 @@ pub use crate::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-        ChainLink, PartialBlockAction, PayloadAction, ValidAttestation,
+        ChainLink, DataAvailabilityPolicy, PartialBlockAction, PayloadAction, ValidAttestation,
     },
     segment::Segment,
     state_cache_processor::{Error as StateCacheError, StateCacheProcessor},
