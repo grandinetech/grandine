@@ -112,6 +112,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     storage: Arc<Storage<P>>,
     thread_pool: ThreadPool<P, E, W>,
     metrics: Option<Arc<Metrics>>,
+    finished_loading_from_storage: bool,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
     attestation_verifier_tx: TS,
@@ -168,6 +169,7 @@ where
             storage,
             thread_pool,
             metrics,
+            finished_loading_from_storage: false,
             mutator_tx,
             mutator_rx,
             attestation_verifier_tx,
@@ -283,6 +285,7 @@ where
         let wait_group = W::default();
 
         let Some(last_block) = blocks.next_back().transpose()? else {
+            self.finished_loading_from_storage = true;
             return Ok(());
         };
 
@@ -319,6 +322,8 @@ where
                 rejected_block_root,
             )?;
         }
+
+        self.finished_loading_from_storage = true;
 
         Ok(())
     }
@@ -412,8 +417,8 @@ where
 
         self.update_store_snapshot();
 
-        ValidatorMessage::Tick(wait_group.clone(), tick).send(&self.validator_tx);
-        PoolMessage::Tick(tick).send(&self.pool_tx);
+        self.send_to_validator(ValidatorMessage::Tick(wait_group.clone(), tick));
+        self.send_to_pool(PoolMessage::Tick(tick));
 
         if changes.is_slot_updated() {
             let slot = tick.slot;
@@ -424,9 +429,9 @@ where
                 self.retry_delayed(delayed, wait_group);
             }
 
-            PoolMessage::Slot(slot).send(&self.pool_tx);
-            P2pMessage::Slot(slot).send(&self.p2p_tx);
-            SubnetMessage::Slot(wait_group.clone(), slot).send(&self.subnet_tx);
+            self.send_to_pool(PoolMessage::Slot(slot));
+            self.send_to_p2p(P2pMessage::Slot(slot));
+            self.send_to_subnet_service(SubnetMessage::Slot(wait_group.clone(), slot));
 
             self.track_collection_metrics();
         }
@@ -503,7 +508,7 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
                 reply_block_validation_result_to_http_api(
@@ -529,7 +534,7 @@ where
                     debug!("block delayed until blobs: {pending_block:?}");
 
                     if let Some(gossip_id) = pending_block.origin.gossip_id() {
-                        P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                        self.send_to_p2p(P2pMessage::Accept(gossip_id));
                     }
 
                     let pending_block = reply_delayed_block_validation_result(
@@ -574,7 +579,7 @@ where
 
                     let peer_id = pending_block.origin.peer_id();
 
-                    P2pMessage::BlockNeeded(parent_root, peer_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
 
                     self.delay_block_until_parent(pending_block);
                 }
@@ -643,8 +648,10 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if gossip_id.is_some() {
-                    P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidBlock)
-                        .send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidBlock,
+                    ));
                 }
 
                 if let Some(block_root) = rejected_block_root {
@@ -685,17 +692,19 @@ where
                 if origin.send_to_validator() {
                     let attestation = Arc::new(aggregate_and_proof.message().aggregate());
 
-                    ValidatorMessage::ValidAttestation(wait_group.clone(), attestation)
-                        .send(&self.validator_tx);
+                    self.send_to_validator(ValidatorMessage::ValidAttestation(
+                        wait_group.clone(),
+                        attestation,
+                    ));
                 }
 
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     if is_subset_aggregate {
-                        P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                        self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                     } else {
-                        P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                        self.send_to_p2p(P2pMessage::Accept(gossip_id));
                     }
                 }
 
@@ -724,7 +733,7 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
@@ -796,8 +805,10 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if gossip_id.is_some() {
-                    P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidAggregateAndProof)
-                        .send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidAggregateAndProof,
+                    ));
                 }
 
                 reply_to_http_api(sender, Err(error));
@@ -819,6 +830,7 @@ where
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     fn handle_attestation(
         &mut self,
         wait_group: &W,
@@ -843,8 +855,10 @@ where
                 if attestation.origin.send_to_validator() {
                     let attestation = attestation.item.clone_arc();
 
-                    ValidatorMessage::ValidAttestation(wait_group.clone(), attestation)
-                        .send(&self.validator_tx);
+                    self.send_to_validator(ValidatorMessage::ValidAttestation(
+                        wait_group.clone(),
+                        attestation,
+                    ));
                 }
 
                 let is_from_block = attestation.origin.is_from_block();
@@ -858,7 +872,7 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
                 }
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
@@ -886,7 +900,7 @@ where
                 let (gossip_id, sender) = attestation.origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
@@ -941,8 +955,10 @@ where
                 let (gossip_id, sender) = attestation.origin.split();
 
                 if gossip_id.is_some() {
-                    P2pMessage::Reject(gossip_id, MutatorRejectionReason::InvalidAttestation)
-                        .send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidAttestation,
+                    ));
                 }
 
                 reply_to_http_api(sender, Err(anyhow!(source)));
@@ -1070,13 +1086,13 @@ where
         match result {
             Ok(BlobSidecarAction::Accept(blob_sidecar)) => {
                 if origin.is_from_el() {
-                    P2pMessage::PublishBlobSidecar(blob_sidecar.clone_arc()).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::PublishBlobSidecar(blob_sidecar.clone_arc()));
                 }
 
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
                 }
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
@@ -1087,7 +1103,7 @@ where
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
-                    P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
@@ -1109,7 +1125,7 @@ where
 
                     let peer_id = pending_blob_sidecar.origin.peer_id();
 
-                    P2pMessage::BlockNeeded(parent_root, peer_id).send(&self.p2p_tx);
+                    self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
 
                     let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
                         pending_blob_sidecar,
@@ -1147,11 +1163,10 @@ where
 
                 let (gossip_id, sender) = origin.split();
 
-                P2pMessage::Reject(
+                self.send_to_p2p(P2pMessage::Reject(
                     gossip_id,
                     MutatorRejectionReason::InvalidBlobSidecar { blob_identifier },
-                )
-                .send(&self.p2p_tx);
+                ));
 
                 reply_to_http_api(sender, Err(error));
             }
@@ -1348,7 +1363,7 @@ where
             if !head_changed {
                 // The call to `Store::notify_about_reorganization` below sends
                 // a `ValidatorMessage::Head` message if the head changed.
-                ValidatorMessage::Head(wait_group.clone(), head.clone()).send(&self.validator_tx);
+                self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
             }
         }
 
@@ -1401,7 +1416,7 @@ where
             let (gossip_id, sender) = origin.split();
 
             if let Some(gossip_id) = gossip_id {
-                P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                self.send_to_p2p(P2pMessage::Ignore(gossip_id));
             }
 
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(true)));
@@ -1422,7 +1437,7 @@ where
             let (gossip_id, sender) = origin.split();
 
             if let Some(gossip_id) = gossip_id {
-                P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                self.send_to_p2p(P2pMessage::Ignore(gossip_id));
             }
 
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
@@ -1510,7 +1525,7 @@ where
             let (gossip_id, sender) = origin.split();
 
             if let Some(gossip_id) = gossip_id {
-                P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+                self.send_to_p2p(P2pMessage::Ignore(gossip_id));
             }
 
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
@@ -1518,7 +1533,7 @@ where
             let (gossip_id, sender) = origin.split();
 
             if let Some(gossip_id) = gossip_id {
-                P2pMessage::Accept(gossip_id).send(&self.p2p_tx);
+                self.send_to_p2p(P2pMessage::Accept(gossip_id));
             }
 
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Accept));
@@ -1581,7 +1596,7 @@ where
             .flatten();
 
         for gossip_id in pruned_gossip_ids {
-            P2pMessage::Ignore(gossip_id).send(&self.p2p_tx);
+            self.send_to_p2p(P2pMessage::Ignore(gossip_id));
         }
 
         match changes {
@@ -1593,7 +1608,7 @@ where
                     Self::track_head_metrics(&new_head, metrics);
                 }
 
-                P2pMessage::HeadState(state).send(&self.p2p_tx);
+                self.send_to_p2p(P2pMessage::HeadState(state));
 
                 // Do not send API events about optimistic blocks.
                 // Vouch treats all head events as non-optimistic.
@@ -1601,8 +1616,10 @@ where
                     self.event_channels
                         .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
 
-                    ValidatorMessage::Head(wait_group.clone(), new_head.clone())
-                        .send(&self.validator_tx);
+                    self.send_to_validator(ValidatorMessage::Head(
+                        wait_group.clone(),
+                        new_head.clone(),
+                    ));
                 }
 
                 self.notify_forkchoice_updated(&new_head);
@@ -1675,7 +1692,7 @@ where
             head.block_root,
         );
 
-        P2pMessage::FinalizedCheckpoint(finalized_checkpoint).send(&self.p2p_tx);
+        self.send_to_p2p(P2pMessage::FinalizedCheckpoint(finalized_checkpoint));
 
         if let Some(metrics) = self.metrics.as_ref() {
             let state = head.state(&self.store);
@@ -1688,11 +1705,10 @@ where
 
         let finalized_state = self.store.last_finalized().state(&self.store);
 
-        ValidatorMessage::FinalizedEth1Data(
+        self.send_to_validator(ValidatorMessage::FinalizedEth1Data(
             finalized_state.eth1_deposit_index(),
             finalized_state.deposit_requests_start_index(),
-        )
-        .send(&self.validator_tx);
+        ));
 
         self.event_channels.send_finalized_checkpoint_event(
             head.block_root,
@@ -1722,10 +1738,10 @@ where
             Self::track_head_metrics(&new_head, metrics);
         }
 
-        P2pMessage::HeadState(state).send(&self.p2p_tx);
+        self.send_to_p2p(P2pMessage::HeadState(state));
 
         if new_head.is_valid() {
-            ValidatorMessage::Head(wait_group, new_head.clone()).send(&self.validator_tx);
+            self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
         }
 
         self.notify_forkchoice_updated(&new_head);
@@ -1823,7 +1839,7 @@ where
                 .gossip_id_ref()
                 .map(|gossip_id| gossip_id.source);
 
-            P2pMessage::BlockNeeded(block_root, peer_id).send(&self.p2p_tx);
+            self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
 
             self.delayed_until_block
                 .entry(block_root)
@@ -1852,7 +1868,7 @@ where
                 .gossip_id_ref()
                 .map(|gossid_id| gossid_id.source);
 
-            P2pMessage::BlockNeeded(block_root, peer_id).send(&self.p2p_tx);
+            self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
 
             // Attestations produced by the application itself should never be delayed.
             assert!(!matches!(
@@ -2033,11 +2049,10 @@ where
         debug!("retrying delayed attestation: {attestation:?}");
 
         if attestation.verify_signatures() {
-            AttestationVerifierMessage::Attestation {
+            self.send_to_attestation_verifier(AttestationVerifierMessage::Attestation {
                 wait_group,
                 attestation,
-            }
-            .send(&self.attestation_verifier_tx);
+            });
         } else {
             self.spawn(AttestationTask {
                 store_snapshot: self.owned_store(),
@@ -2067,12 +2082,11 @@ where
             origin,
         } = pending_aggregate_and_proof;
 
-        AttestationVerifierMessage::AggregateAndProof {
+        self.send_to_attestation_verifier(AttestationVerifierMessage::AggregateAndProof {
             wait_group,
             aggregate_and_proof,
             origin,
-        }
-        .send(&self.attestation_verifier_tx);
+        });
     }
 
     fn retry_blob_sidecar(&self, wait_group: W, pending_blob_sidecar: PendingBlobSidecar<P>) {
@@ -2279,12 +2293,11 @@ where
         let safe_block_hash = self.store.safe_execution_payload_hash();
         let finalized_block_hash = self.store.finalized_execution_payload_hash();
 
-        ValidatorMessage::PrepareExecutionPayload(
+        self.send_to_validator(ValidatorMessage::PrepareExecutionPayload(
             state.slot(),
             safe_block_hash,
             finalized_block_hash,
-        )
-        .send(&self.validator_tx);
+        ));
     }
 
     fn spawn_checkpoint_state_task(&self, wait_group: W, checkpoint: Checkpoint) {
@@ -2321,6 +2334,7 @@ where
             let storage = self.storage.clone_arc();
             let sync_tx = self.sync_tx.clone();
             let wait_group = wait_group.clone();
+            let finished_loading_from_storage = self.finished_loading_from_storage;
 
             let mut archived = self.store_mut().archive_finalized(latest_archivable_index);
             archived.push_back(self.store.anchor().clone());
@@ -2334,7 +2348,10 @@ where
                         Ok(slots) => {
                             if let Some(chain_link) = archived.back() {
                                 let finalized_block = chain_link.block.clone_arc();
-                                SyncMessage::Finalized(finalized_block).send(&sync_tx);
+
+                                if finished_loading_from_storage {
+                                    SyncMessage::Finalized(finalized_block).send(&sync_tx);
+                                }
                             }
 
                             debug!(
@@ -2434,6 +2451,36 @@ where
 
     fn owned_mutator_tx(&self) -> Sender<MutatorMessage<P, W>> {
         self.mutator_tx.clone()
+    }
+
+    fn send_to_attestation_verifier(&self, message: AttestationVerifierMessage<P, W>) {
+        if self.finished_loading_from_storage {
+            message.send(&self.attestation_verifier_tx);
+        }
+    }
+
+    fn send_to_p2p(&self, message: P2pMessage<P>) {
+        if self.finished_loading_from_storage {
+            message.send(&self.p2p_tx);
+        }
+    }
+
+    fn send_to_pool(&self, message: PoolMessage) {
+        if self.finished_loading_from_storage {
+            message.send(&self.pool_tx);
+        }
+    }
+
+    fn send_to_subnet_service(&self, message: SubnetMessage<W>) {
+        if self.finished_loading_from_storage {
+            message.send(&self.subnet_tx);
+        }
+    }
+
+    fn send_to_validator(&self, message: ValidatorMessage<P, W>) {
+        if self.finished_loading_from_storage {
+            message.send(&self.validator_tx);
+        }
     }
 
     fn track_epoch_transition_metrics(head_state: &Arc<BeaconState<P>>, metrics: &Arc<Metrics>) {
