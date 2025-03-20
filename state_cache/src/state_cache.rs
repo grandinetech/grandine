@@ -34,6 +34,12 @@ pub struct StateCache<P: Preset> {
     try_lock_timeout: Duration,
 }
 
+#[derive(Clone, Copy)]
+pub struct QueryOptions {
+    pub ignore_missing_rewards: bool,
+    pub store_result_state: bool,
+}
+
 impl<P: Preset> StateCache<P> {
     #[must_use]
     pub fn new(try_lock_timeout: Duration) -> Self {
@@ -60,11 +66,11 @@ impl<P: Preset> StateCache<P> {
         Ok(state_with_rewards)
     }
 
-    pub fn get_or_insert_with(
+    pub fn get_or_process_with(
         &self,
         block_root: H256,
         slot: Slot,
-        ignore_missing_rewards: bool,
+        options: QueryOptions,
         f: impl FnOnce() -> Result<StateWithRewards<P>>,
     ) -> Result<StateWithRewards<P>> {
         let state_map_lock = match self.get_or_init_by_root(block_root) {
@@ -95,7 +101,7 @@ impl<P: Preset> StateCache<P> {
 
         if let Some((state, rewards)) = pre_state {
             if state.slot() >= slot {
-                if rewards.is_some() || ignore_missing_rewards {
+                if rewards.is_some() || options.ignore_missing_rewards {
                     return Ok((state.clone_arc(), *rewards));
                 }
 
@@ -108,16 +114,18 @@ impl<P: Preset> StateCache<P> {
 
         let (post_state, rewards) = f()?;
 
-        state_map_guard.insert(post_state.slot(), (post_state.clone_arc(), rewards));
+        if options.store_result_state {
+            state_map_guard.insert(post_state.slot(), (post_state.clone_arc(), rewards));
+        }
 
         Ok((post_state, rewards))
     }
 
-    pub fn get_or_try_insert_with(
+    pub fn get_or_try_process_with(
         &self,
         block_root: H256,
         slot: Slot,
-        ignore_missing_rewards: bool,
+        options: QueryOptions,
         f: impl FnOnce(Option<&StateWithRewards<P>>) -> Result<Option<StateWithRewards<P>>>,
     ) -> Result<Option<StateWithRewards<P>>> {
         let state_map_lock = match self.get_or_init_by_root(block_root) {
@@ -148,7 +156,7 @@ impl<P: Preset> StateCache<P> {
 
         if let Some((state, rewards)) = pre_state {
             if state.slot() >= slot {
-                if rewards.is_some() || ignore_missing_rewards {
+                if rewards.is_some() || options.ignore_missing_rewards {
                     return Ok(Some((state.clone_arc(), *rewards)));
                 }
 
@@ -161,7 +169,9 @@ impl<P: Preset> StateCache<P> {
 
         match f(pre_state)? {
             Some((post_state, rewards)) => {
-                state_map_guard.insert(post_state.slot(), (post_state.clone_arc(), rewards));
+                if options.store_result_state {
+                    state_map_guard.insert(post_state.slot(), (post_state.clone_arc(), rewards));
+                }
 
                 Ok(Some((post_state, rewards)))
             }
@@ -313,10 +323,15 @@ mod tests {
     }
 
     #[test]
-    fn test_state_cache_get_or_insert_with() -> Result<()> {
+    fn test_state_cache_get_or_process_with() -> Result<()> {
         let cache = new_test_cache()?;
 
-        cache.get_or_insert_with(ROOT_2, 1, true, || Ok((state_at_slot(1), None)))?;
+        let options = QueryOptions {
+            ignore_missing_rewards: true,
+            store_result_state: true,
+        };
+
+        cache.get_or_process_with(ROOT_2, 1, options, || Ok((state_at_slot(1), None)))?;
 
         assert_eq!(
             cache.before_or_at_slot(ROOT_2, 1)?,
@@ -328,7 +343,7 @@ mod tests {
         );
         assert_eq!(cache.len()?, 5);
 
-        cache.get_or_try_insert_with(ROOT_1, 2, true, |pre_state| {
+        cache.get_or_try_process_with(ROOT_1, 2, options, |pre_state| {
             assert_eq!(pre_state, Some(&(state_at_slot(1), None)));
 
             Ok(Some((state_at_slot(2), None)))

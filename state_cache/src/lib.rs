@@ -1,3 +1,3 @@
-pub use state_cache::{StateCache, StateWithRewards};
+pub use state_cache::{QueryOptions, StateCache, StateWithRewards};
 
 mod state_cache;
