@@ -723,21 +723,24 @@ impl<P: Preset> Storage<P> {
 
             let block_root = H256::from_ssz_default(value_bytes)?;
 
-            if let Some(state) = self.state_by_block_root(block_root)? {
-                let slot = state.slot();
+            if self.contains_key(StateByBlockRoot(block_root))? {
+                let Some(block) = self.finalized_block_by_root(block_root)? else {
+                    // States are also persisted from unfinalized chain
+                    continue;
+                };
 
-                ensure!(
-                    misc::is_epoch_start::<P>(slot),
-                    Error::PersistedSlotCannotContainAnchor { slot },
-                );
+                if let Some(state) = self.state_by_block_root(block_root)? {
+                    let slot = state.slot();
 
-                let block = self
-                    .finalized_block_by_root(block_root)?
-                    .ok_or(Error::BlockNotFound { block_root })?;
+                    ensure!(
+                        misc::is_epoch_start::<P>(slot),
+                        Error::PersistedSlotCannotContainAnchor { slot },
+                    );
 
-                let blocks = self.blocks_by_roots(block_roots);
+                    let blocks = self.blocks_by_roots(block_roots);
 
-                return Ok(OptionalStateStorage::Full((state, block, blocks)));
+                    return Ok(OptionalStateStorage::Full((state, block, blocks)));
+                }
             }
 
             block_roots.push(block_root);
