@@ -45,6 +45,7 @@ use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -296,7 +297,7 @@ where
 
         self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
 
-        for result in blocks.chain(core::iter::once(Ok(last_block))) {
+        for (index, result) in blocks.chain(core::iter::once(Ok(last_block))).enumerate() {
             let block = result?;
             let origin = BlockOrigin::Persisted;
             let submission_time = Instant::now();
@@ -322,6 +323,10 @@ where
                 submission_time,
                 rejected_block_root,
             )?;
+
+            if index % (P::SlotsPerEpoch::USIZE / 4) == 0 {
+                self.store.prune_state_cache(true);
+            }
         }
 
         self.finished_loading_from_storage = true;

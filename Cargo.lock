@@ -2964,6 +2964,7 @@ dependencies = [
  "thiserror 1.0.69",
  "transition_functions",
  "tynm",
+ "typenum",
  "types",
  "unwrap_none",
 ]
