@@ -4,7 +4,7 @@ use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 use anyhow::{bail, Result};
 use features::Feature;
 use log::warn;
-use state_cache::{StateCache, StateWithRewards};
+use state_cache::{QueryOptions, StateCache, StateWithRewards};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use thiserror::Error;
@@ -63,8 +63,13 @@ impl<P: Preset> StateCacheProcessor<P> {
         ignore_missing_rewards: bool,
         f: impl FnOnce() -> Result<StateWithRewards<P>>,
     ) -> Result<StateWithRewards<P>> {
+        let options = QueryOptions {
+            ignore_missing_rewards,
+            store_result_state: true,
+        };
+
         self.state_cache
-            .get_or_insert_with(block_root, slot, ignore_missing_rewards, f)
+            .get_or_process_with(block_root, slot, options, f)
     }
 
     pub fn prune(&self, last_pruned_slot: Slot, preserved_states: &HashSet<H256>) -> Result<()> {
@@ -137,21 +142,13 @@ impl<P: Preset> StateCacheProcessor<P> {
         slot: Slot,
         warn_on_slot_processing: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
-        if !store.is_forward_synced() {
-            return match self.before_or_at_slot(store, block_root, slot) {
-                Some(state) => Ok(Some(process_slots(
-                    store,
-                    state,
-                    block_root,
-                    slot,
-                    warn_on_slot_processing,
-                )?)),
-                None => Ok(None),
-            };
-        }
+        let options = QueryOptions {
+            ignore_missing_rewards: true,
+            store_result_state: store.is_forward_synced(),
+        };
 
         self.state_cache
-            .get_or_try_insert_with(block_root, slot, true, |pre_state| {
+            .get_or_try_process_with(block_root, slot, options, |pre_state| {
                 let Some(state) = pre_state
                     .map(|(state, _)| state.clone_arc())
                     .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
