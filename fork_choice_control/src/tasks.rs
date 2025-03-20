@@ -90,6 +90,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                     &store_snapshot,
                     &block,
                     origin.state_root_policy(),
+                    origin.data_availability_policy(),
                     execution_engine,
                     MultiVerifier::default(),
                 )
@@ -100,6 +101,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                         &store_snapshot,
                         &block,
                         origin.state_root_policy(),
+                        origin.data_availability_policy(),
                         execution_engine,
                         NullVerifier,
                     )
@@ -108,6 +110,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                         &store_snapshot,
                         &block,
                         origin.state_root_policy(),
+                        origin.data_availability_policy(),
                         execution_engine,
                         MultiVerifier::default(),
                     )
@@ -117,6 +120,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 &store_snapshot,
                 &block,
                 origin.state_root_policy(),
+                origin.data_availability_policy(),
                 NullExecutionEngine,
                 NullVerifier,
             ),

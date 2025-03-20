@@ -308,6 +308,7 @@ where
                 &self.store,
                 &block,
                 origin.state_root_policy(),
+                origin.data_availability_policy(),
                 &self.execution_engine,
                 NullVerifier,
             );

@@ -4,7 +4,8 @@ use anyhow::Result;
 use derive_more::Constructor;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
-    validate_merge_block, BlockAction, PartialBlockAction, StateCacheProcessor, Store,
+    validate_merge_block, BlockAction, DataAvailabilityPolicy, PartialBlockAction,
+    StateCacheProcessor, Store,
 };
 use helper_functions::{
     predicates,
@@ -181,54 +182,63 @@ impl<P: Preset> BlockProcessor<P> {
         store: &Store<P>,
         block: &Arc<SignedBeaconBlock<P>>,
         state_root_policy: StateRootPolicy,
+        data_availability_policy: DataAvailabilityPolicy,
         execution_engine: E,
         verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
-        store.validate_block_with_custom_state_transition(block, |block_root, parent| {
-            // > Make a copy of the state to avoid mutability issues
-            let state = self
-                .state_cache
-                .before_or_at_slot(store, parent.block_root, block.message().slot())
-                .unwrap_or_else(|| parent.state(store));
+        store.validate_block_with_custom_state_transition(
+            block,
+            data_availability_policy,
+            |block_root, parent| {
+                // > Make a copy of the state to avoid mutability issues
+                let state = self
+                    .state_cache
+                    .before_or_at_slot(store, parent.block_root, block.message().slot())
+                    .unwrap_or_else(|| parent.state(store));
 
-            // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
-            // See <https://github.com/ethereum/consensus-specs/pull/3232>.
-            // It is unclear when modifications to fork choice logic should come into effect.
-            // We check the phase of the block rather than the current slot.
-            if block.phase() < Phase::Capella {
-                // > [New in Bellatrix]
-                //
-                // The Fork Choice specification does this after the state transition.
-                // We don't because that would require keeping around a clone of the pre-state.
-                if let Some(body) = block
-                    .message()
-                    .body()
-                    .post_bellatrix()
-                    .filter(|body| predicates::is_merge_transition_block(&state, *body))
-                {
-                    match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
+                // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
+                // See <https://github.com/ethereum/consensus-specs/pull/3232>.
+                // It is unclear when modifications to fork choice logic should come into effect.
+                // We check the phase of the block rather than the current slot.
+                if block.phase() < Phase::Capella {
+                    // > [New in Bellatrix]
+                    //
+                    // The Fork Choice specification does this after the state transition.
+                    // We don't because that would require keeping around a clone of the pre-state.
+                    if let Some(body) = block
+                        .message()
+                        .body()
+                        .post_bellatrix()
+                        .filter(|body| predicates::is_merge_transition_block(&state, *body))
                     {
-                        PartialBlockAction::Accept => {}
-                        PartialBlockAction::Ignore => {
-                            return Ok((state, Some(BlockAction::Ignore(false))))
+                        match validate_merge_block(
+                            &self.chain_config,
+                            block,
+                            body,
+                            &execution_engine,
+                        )? {
+                            PartialBlockAction::Accept => {}
+                            PartialBlockAction::Ignore => {
+                                return Ok((state, Some(BlockAction::Ignore(false))))
+                            }
                         }
                     }
                 }
-            }
 
-            let state = self.perform_state_transition(
-                state,
-                block,
-                block_root,
-                ProcessSlots::IfNeeded,
-                state_root_policy,
-                execution_engine,
-                verifier,
-                NullSlotReport,
-            )?;
+                let state = self.perform_state_transition(
+                    state,
+                    block,
+                    block_root,
+                    ProcessSlots::IfNeeded,
+                    state_root_policy,
+                    execution_engine,
+                    verifier,
+                    NullSlotReport,
+                )?;
 
-            Ok((state, None))
-        })
+                Ok((state, None))
+            },
+        )
     }
 }
 

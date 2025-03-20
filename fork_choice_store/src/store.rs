@@ -59,10 +59,10 @@ use crate::{
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
-        BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink, Difference,
-        DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId,
-        UnfinalizedBlock, ValidAttestation,
+        BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink,
+        DataAvailabilityPolicy, Difference, DifferenceAtLocation, DissolvedDifference,
+        LatestMessage, Location, PartialAttestationAction, PartialBlockAction, PayloadAction,
+        Score, SegmentId, UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -944,10 +944,11 @@ impl<P: Preset> Store<P> {
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
         state_root_policy: StateRootPolicy,
+        data_availability_policy: DataAvailabilityPolicy,
         execution_engine: impl ExecutionEngine<P> + Send,
         verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
-        self.validate_block_with_custom_state_transition(block, |block_root, parent| {
+        self.validate_block_with_custom_state_transition(block, data_availability_policy, |block_root, parent| {
             // > Make a copy of the state to avoid mutability issues
             let mut state = self
                 .state_cache
@@ -1074,6 +1075,7 @@ impl<P: Preset> Store<P> {
     pub fn validate_block_with_custom_state_transition(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
+        data_availability_policy: DataAvailabilityPolicy,
         state_transition: impl FnOnce(
             H256,
             &ChainLink<P>,
@@ -1099,6 +1101,7 @@ impl<P: Preset> Store<P> {
         }
 
         if self.should_check_data_availability_at_slot(block.message().slot())
+            && data_availability_policy.check()
             && !self.indices_of_missing_blobs(block).is_empty()
         {
             return Ok(BlockAction::DelayUntilBlobs(block.clone_arc()));
