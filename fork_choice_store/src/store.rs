@@ -2548,7 +2548,7 @@ impl<P: Preset> Store<P> {
             .prune(self.finalized_epoch());
     }
 
-    fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) {
+    pub fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) {
         let retain_slots =
             self.store_config.max_epochs_to_retain_states_in_cache * P::SlotsPerEpoch::U64;
 
