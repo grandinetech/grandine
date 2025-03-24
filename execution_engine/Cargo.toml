@@ -19,6 +19,7 @@ serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
+typenum = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
