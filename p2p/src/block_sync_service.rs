@@ -344,12 +344,15 @@ impl<P: Preset> BlockSyncService<P> {
                                 SyncDirection::Forward => {
                                     let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
 
-                                    if self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot) {
+                                    if !self.controller.contains_block(blob_identifier.block_root)
+                                        && self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot)
+                                    {
                                         let block_seen = self
                                             .received_block_roots
                                             .contains_key(&blob_identifier.block_root);
 
-                                        self.controller.on_requested_blob_sidecar(blob_sidecar, block_seen, peer_id);
+                                        self.controller
+                                            .on_requested_blob_sidecar(blob_sidecar, block_seen, peer_id);
                                     }
                                 }
                                 SyncDirection::Back => {
@@ -445,6 +448,8 @@ impl<P: Preset> BlockSyncService<P> {
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
+                            // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
+                            // Grandine should not dismiss newer valid blob sidecars with the same blob identifier
                             self.received_blob_sidecars.remove(&blob_identifier);
                         }
                     }
@@ -697,7 +702,10 @@ impl<P: Preset> BlockSyncService<P> {
 
         let identifiers = identifiers
             .into_iter()
-            .filter(|blob_identifier| !self.received_blob_sidecars.contains_key(blob_identifier))
+            .filter(|blob_identifier| {
+                !self.received_blob_sidecars.contains_key(blob_identifier)
+                    && !self.controller.contains_block(blob_identifier.block_root)
+            })
             .collect::<Vec<_>>();
 
         if identifiers.is_empty() {

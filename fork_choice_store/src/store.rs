@@ -1724,6 +1724,13 @@ impl<P: Preset> Store<P> {
         state_fn: impl FnOnce() -> Result<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
+        let block_root = block_header.hash_tree_root();
+
+        // No need to validate and import blob sidecars for blocks that are already in fork choice,
+        // i.e. already have all the blobs validated
+        if self.contains_block(block_root) {
+            return Ok(BlobSidecarAction::Ignore(false));
+        }
 
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
         let max_blobs_per_block = self
