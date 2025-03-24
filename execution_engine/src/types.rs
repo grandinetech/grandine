@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use ethereum_types::H64;
 use serde::{
-    de::{Error as _, Visitor},
+    de::Visitor,
     ser::{Error as _, SerializeSeq as _},
     Deserialize, Deserializer, Serialize,
 };
-use ssz::{ByteList, ByteVector, ContiguousList, SszReadDefault as _, SszWrite as _};
+use ssz::{ByteList, ByteVector, ContiguousList, SszReadDefault, SszWrite as _};
+use typenum::Unsigned;
 use types::{
     bellatrix::{
         containers::ExecutionPayload as BellatrixExecutionPayload,
@@ -36,9 +37,37 @@ use types::{
     preset::Preset,
 };
 
-const DEPOSIT_REQUEST_TYPE: &str = "0x00";
-const WITHDRAWAL_REQUEST_TYPE: &str = "0x01";
-const CONSOLIDATION_REQUEST_TYPE: &str = "0x02";
+const SUPPORTED_REQUEST_TYPES: &[&str; 3] = &[
+    RequestType::Deposits.request_type(),
+    RequestType::Withdrawals.request_type(),
+    RequestType::Consolidations.request_type(),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RequestType {
+    Deposits,
+    Withdrawals,
+    Consolidations,
+}
+
+impl RequestType {
+    #[must_use]
+    pub const fn request_type(self) -> &'static str {
+        match self {
+            Self::Deposits => "0x00",
+            Self::Withdrawals => "0x01",
+            Self::Consolidations => "0x02",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Deposits => "deposit",
+            Self::Withdrawals => "withdrawal",
+            Self::Consolidations => "consolidation",
+        }
+    }
+}
 
 /// [`ExecutionPayloadV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#executionpayloadv1)
 #[derive(Deserialize, Serialize)]
@@ -718,7 +747,8 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
         if !deposit_requests.is_empty() {
             let bytes = deposit_requests.to_ssz().map_err(S::Error::custom)?;
             seq.serialize_element(&format_args!(
-                "{DEPOSIT_REQUEST_TYPE}{}",
+                "{}{}",
+                RequestType::Deposits.request_type(),
                 const_hex::encode(bytes).as_str()
             ))?;
         }
@@ -726,7 +756,8 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
         if !withdrawal_requests.is_empty() {
             let bytes = withdrawal_requests.to_ssz().map_err(S::Error::custom)?;
             seq.serialize_element(&format_args!(
-                "{WITHDRAWAL_REQUEST_TYPE}{}",
+                "{}{}",
+                RequestType::Withdrawals.request_type(),
                 const_hex::encode(bytes).as_str()
             ))?;
         }
@@ -735,7 +766,8 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
             let bytes = consolidation_requests.to_ssz().map_err(S::Error::custom)?;
 
             seq.serialize_element(&format_args!(
-                "{CONSOLIDATION_REQUEST_TYPE}{}",
+                "{}{}",
+                RequestType::Consolidations.request_type(),
                 const_hex::encode(bytes).as_str(),
             ))?;
         }
@@ -753,6 +785,48 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
             _phantom_data: PhantomData<P>,
         }
 
+        fn decode_requests<B, E, T, N>(
+            bytes: B,
+            request_type: RequestType,
+            prev_request_type: &mut Option<RequestType>,
+        ) -> Result<ContiguousList<T, N>, E>
+        where
+            E: serde::de::Error,
+            B: AsRef<[u8]>,
+            N: Unsigned,
+            T: SszReadDefault,
+        {
+            if let Some(prev_request_type) = prev_request_type {
+                if *prev_request_type >= request_type {
+                    return Err(serde::de::Error::invalid_value(
+                        serde::de::Unexpected::Bytes(bytes.as_ref()),
+                        &format!(
+                            "{} requests to be unique and in ascending order",
+                            request_type.label(),
+                        )
+                        .as_str(),
+                    ));
+                }
+            }
+
+            *prev_request_type = Some(request_type);
+
+            let bytes = hex::decode(bytes).map_err(serde::de::Error::custom)?;
+
+            if bytes.is_empty() {
+                return Err(serde::de::Error::invalid_value(
+                    serde::de::Unexpected::Bytes(&bytes),
+                    &format!(
+                        "empty {} requests to be excluded from the response",
+                        request_type.label(),
+                    )
+                    .as_str(),
+                ));
+            }
+
+            ContiguousList::from_ssz_default(bytes).map_err(serde::de::Error::custom)
+        }
+
         impl<'de, P: Preset> Visitor<'de> for RawExecutionRequestsVisitor<P> {
             type Value = RawExecutionRequests<P>;
 
@@ -764,45 +838,48 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
             where
                 A: serde::de::SeqAccess<'de>,
             {
+                let mut prev_request_type = None;
                 let mut deposit_requests = ContiguousList::default();
                 let mut withdrawal_requests = ContiguousList::default();
                 let mut consolidation_requests = ContiguousList::default();
 
                 while let Some(next_element) = seq.next_element::<String>()? {
-                    if let Some(digits) = next_element.strip_prefix(DEPOSIT_REQUEST_TYPE) {
-                        let bytes = hex::decode(digits).map_err(A::Error::custom)?;
-
+                    if let Some(digits) =
+                        next_element.strip_prefix(RequestType::Deposits.request_type())
+                    {
                         deposit_requests =
-                            ContiguousList::from_ssz_default(bytes).map_err(A::Error::custom)?;
+                            decode_requests(digits, RequestType::Deposits, &mut prev_request_type)?;
 
                         continue;
                     }
 
-                    if let Some(digits) = next_element.strip_prefix(WITHDRAWAL_REQUEST_TYPE) {
-                        let bytes = hex::decode(digits).map_err(A::Error::custom)?;
-
-                        withdrawal_requests =
-                            ContiguousList::from_ssz_default(bytes).map_err(A::Error::custom)?;
+                    if let Some(digits) =
+                        next_element.strip_prefix(RequestType::Withdrawals.request_type())
+                    {
+                        withdrawal_requests = decode_requests(
+                            digits,
+                            RequestType::Withdrawals,
+                            &mut prev_request_type,
+                        )?;
 
                         continue;
                     }
 
-                    if let Some(digits) = next_element.strip_prefix(CONSOLIDATION_REQUEST_TYPE) {
-                        let bytes = hex::decode(digits).map_err(A::Error::custom)?;
-
-                        consolidation_requests =
-                            ContiguousList::from_ssz_default(bytes).map_err(A::Error::custom)?;
+                    if let Some(digits) =
+                        next_element.strip_prefix(RequestType::Consolidations.request_type())
+                    {
+                        consolidation_requests = decode_requests(
+                            digits,
+                            RequestType::Consolidations,
+                            &mut prev_request_type,
+                        )?;
 
                         continue;
                     }
 
                     return Err(serde::de::Error::unknown_variant(
                         &next_element,
-                        &[
-                            DEPOSIT_REQUEST_TYPE,
-                            WITHDRAWAL_REQUEST_TYPE,
-                            CONSOLIDATION_REQUEST_TYPE,
-                        ],
+                        SUPPORTED_REQUEST_TYPES,
                     ));
                 }
 
@@ -1292,5 +1369,78 @@ mod tests {
             Some(Wei::MAX),
             None,
         )
+    }
+
+    #[test]
+    fn test_empty_deposit_requests() {
+        let incorrect = json!(["0x00"]);
+        let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(incorrect)
+            .expect_err("deserializing empty deposit requests should return an error");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid value: byte array, expected empty deposit requests \
+             to be excluded from the response",
+        );
+    }
+
+    #[test]
+    fn test_empty_withdrawal_requests() {
+        let incorrect = json!(["0x01"]);
+        let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(incorrect)
+            .expect_err("deserializing empty withdrawal requests should return an error");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid value: byte array, expected empty withdrawal requests \
+             to be excluded from the response",
+        );
+    }
+
+    #[test]
+    fn test_empty_consolidation_requests() {
+        let incorrect = json!(["0x02"]);
+        let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(incorrect)
+            .expect_err("deserializing empty consolidation requests should return an error");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid value: byte array, expected empty consolidation requests \
+             to be excluded from the response",
+        );
+    }
+
+    #[test]
+    fn test_duplicate_execution_requests() {
+        let incorrect = json!([
+            "0x010202020202020202020202020202020202020202aaf9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68800409452a3030000",
+            "0x010202020202020202020202020202020202020202aaf9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68800409452a3030000",
+        ]);
+
+        let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(incorrect)
+            .expect_err("deserializing duplicate execution requests should return an error");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid value: byte array, expected withdrawal requests to be unique \
+             and in ascending order",
+        );
+    }
+
+    #[test]
+    fn test_execution_requests_incorrect_ordering() {
+        let incorrect = json!([
+            "0x020303030303030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "0x0092f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68802000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b000000000000000090a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d602000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e00100000000000000",
+        ]);
+
+        let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(incorrect)
+            .expect_err("deserializing out of order execution requests should result in an error");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid value: byte array, expected deposit requests to be unique \
+             and in ascending order",
+        );
     }
 }
