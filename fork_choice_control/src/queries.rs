@@ -359,6 +359,10 @@ where
         Ok(None)
     }
 
+    pub fn contains_block(&self, block_root: H256) -> bool {
+        self.store_snapshot().contains_block(block_root)
+    }
+
     pub fn block_by_root(
         &self,
         block_root: H256,
