@@ -48,6 +48,7 @@ pub enum P2pToSync<P: Preset> {
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
+    Stop,
 }
 
 impl<P: Preset> P2pToSync<P> {
@@ -88,6 +89,7 @@ impl<P: Preset> ApiToP2p<P> {
 
 pub enum SyncToApi {
     SyncStatus(bool),
+    Stop,
 }
 
 impl SyncToApi {
@@ -100,6 +102,7 @@ impl SyncToApi {
 
 pub enum SyncToMetrics {
     SyncStatus(bool),
+    Stop,
 }
 
 impl SyncToMetrics {
@@ -205,6 +208,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     UpdateEnrSubnet(Subnet, bool),
     UpdateFork(EnrForkId),
     UpdateGossipsubParameters(u64, Slot),
+    Stop,
 }
 
 impl<P: Preset> ServiceInboundMessage<P> {

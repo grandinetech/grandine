@@ -107,6 +107,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                                 warn!("Error while tracking liveness from attestation: {error:?}");
                             }
                         }
+                        ValidatorToLiveness::Stop => break Ok(()),
                     }
                 }
             }

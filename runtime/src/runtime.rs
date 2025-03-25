@@ -19,10 +19,13 @@ use eth1_api::{
 use fork_choice_control::{Controller, StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
 use futures::{
-    channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    channel::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
     future::Either,
     lock::Mutex,
-    stream::TryStreamExt as _,
+    stream::StreamExt as _,
 };
 use genesis::AnchorCheckpointProvider;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
@@ -643,7 +646,9 @@ pub async fn run_after_genesis<P: Preset>(
     };
 
     let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
-    let run_clock = run_clock(controller.clone_arc());
+
+    let (stop_clock_tx, stop_clock_rx) = oneshot::channel();
+    let run_clock = run_clock(controller.clone_arc(), stop_clock_rx);
 
     let run_slasher = match slasher {
         Some(slasher) => Either::Left(slasher.run()),
@@ -674,7 +679,7 @@ pub async fn run_after_genesis<P: Preset>(
     let run_validator_api = match validator_api_config {
         Some(validator_api_config) => Either::Left(run_validator_api(
             validator_api_config,
-            controller,
+            controller.clone_arc(),
             directories.clone_arc(),
             keymanager,
             signer,
@@ -689,8 +694,8 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(execution_blob_fetcher.run()) => result,
         result = spawn_fallible(validator.run()) => result,
         result = spawn_fallible(attestation_verifier.run()) => result,
-        result = spawn_fallible(block_sync_service.run()) => result.map(from_never),
-        result = spawn_fallible(network.run()) => result.map(from_never),
+        result = spawn_fallible(block_sync_service.run()) => result,
+        result = spawn_fallible(network.run()) => result,
         result = spawn_fallible(http_api.run()) => result,
         result = spawn_fallible(run_clock) => result,
         result = spawn_fallible(run_slasher) => result.map(from_never),
@@ -704,16 +709,32 @@ pub async fn run_after_genesis<P: Preset>(
         result = wait_for_signal() => result,
     }?;
 
+    if stop_clock_tx.send(()).is_err() {
+        warn!("failed to send the message to stop the clock");
+    }
+
+    controller.stop();
+
     info!("saving current chain before exit…");
 
     Ok(())
 }
 
-async fn run_clock<P: Preset>(controller: RealController<P>) -> Result<()> {
-    let mut ticks = clock::ticks(controller.chain_config(), controller.genesis_time())?;
+async fn run_clock<P: Preset>(
+    controller: RealController<P>,
+    mut stop_clock_rx: oneshot::Receiver<()>,
+) -> Result<()> {
+    let mut ticks = clock::ticks(controller.chain_config(), controller.genesis_time())?.fuse();
 
-    while let Some(tick) = ticks.try_next().await? {
-        controller.on_tick(tick);
+    loop {
+        select! {
+            tick = ticks.select_next_some() => {
+                controller.on_tick(tick?);
+            }
+            _ = &mut stop_clock_rx => {
+                break;
+            }
+        }
     }
 
     Ok(())

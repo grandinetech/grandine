@@ -35,6 +35,7 @@ pub enum ExecutionServiceMessage<P: Preset> {
         params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
     },
+    Stop,
 }
 
 impl<P: Preset> ExecutionServiceMessage<P> {

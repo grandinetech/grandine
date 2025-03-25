@@ -110,6 +110,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                             self.attestations.push(attestation);
                             self.spawn_verify_batch_tasks(&wait_group);
                         }
+                        AttestationVerifierMessage::Stop => break Ok(()),
                     }
                 }
             }

@@ -38,6 +38,7 @@ pub enum Eth1ApiToBlobFetcher<P: Preset> {
         blob_identifiers: Vec<BlobIdentifier>,
         peer_id: Option<PeerId>,
     },
+    Stop,
 }
 
 impl<P: Preset> Eth1ApiToBlobFetcher<P> {

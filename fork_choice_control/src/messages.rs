@@ -50,6 +50,7 @@ pub enum AttestationVerifierMessage<P: Preset, W> {
         wait_group: W,
         attestation: AttestationItem<P, GossipId>,
     },
+    Stop,
 }
 
 impl<P: Preset, W> AttestationVerifierMessage<P, W> {
@@ -175,6 +176,7 @@ pub enum P2pMessage<P: Preset> {
     BlockNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
+    Stop,
 }
 
 impl<P: Preset> P2pMessage<P> {
@@ -189,6 +191,7 @@ impl<P: Preset> P2pMessage<P> {
 pub enum PoolMessage {
     Slot(Slot),
     Tick(Tick),
+    Stop,
 }
 
 impl PoolMessage {
@@ -205,6 +208,7 @@ pub enum ValidatorMessage<P: Preset, W> {
     Head(W, ChainLink<P>),
     ValidAttestation(W, Arc<Attestation<P>>),
     PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),
+    Stop,
 }
 
 impl<P: Preset, W> ValidatorMessage<P, W> {
@@ -218,6 +222,7 @@ impl<P: Preset, W> ValidatorMessage<P, W> {
 
 pub enum SubnetMessage<W> {
     Slot(W, Slot),
+    Stop,
 }
 
 impl<W> SubnetMessage<W> {

@@ -1,5 +1,4 @@
 use core::{
-    convert::Infallible as Never,
     fmt::Debug,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -226,7 +225,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub async fn run(mut self) -> Result<Never> {
+    pub async fn run(mut self) -> Result<()> {
         let mut interval =
             IntervalStream::new(tokio::time::interval(NETWORK_EVENT_INTERVAL)).fuse();
 
@@ -452,10 +451,21 @@ impl<P: Preset> BlockSyncService<P> {
                             // Grandine should not dismiss newer valid blob sidecars with the same blob identifier
                             self.received_blob_sidecars.remove(&blob_identifier);
                         }
+                        P2pToSync::Stop => {
+                            SyncToApi::Stop.send(&self.sync_to_api_tx);
+
+                            if let Some(sync_to_metrics_tx) = &self.sync_to_metrics_tx {
+                                SyncToMetrics::Stop.send(sync_to_metrics_tx);
+                            }
+
+                            break;
+                        }
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
     pub fn check_back_sync_progress(&mut self) -> Result<()> {

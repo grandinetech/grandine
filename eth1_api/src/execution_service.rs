@@ -138,6 +138,11 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                         }
                     }
                 }
+                ExecutionServiceMessage::Stop => {
+                    Eth1ApiToBlobFetcher::Stop.send(&self.blob_fetcher_tx);
+
+                    break;
+                }
             }
         }
 

@@ -45,6 +45,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 } => {
                     self.get_blobs(block, blob_identifiers, peer_id).await;
                 }
+                Eth1ApiToBlobFetcher::Stop => break,
             }
         }
 

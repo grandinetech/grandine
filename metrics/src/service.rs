@@ -249,6 +249,7 @@ impl<P: Preset> MetricsService<P> {
                 sync_message = self.channels.sync_to_metrics_rx.select_next_some() => {
                     match sync_message {
                         SyncToMetrics::SyncStatus(is_synced) => self.is_synced = is_synced,
+                        SyncToMetrics::Stop => break Ok(()),
                     }
                 },
 

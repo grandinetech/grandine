@@ -1,4 +1,4 @@
-use core::{cmp::Ordering, convert::Infallible as Never, time::Duration};
+use core::{cmp::Ordering, time::Duration};
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
@@ -206,7 +206,7 @@ impl<P: Preset> Network<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub async fn run(mut self) -> Result<Never> {
+    pub async fn run(mut self) -> Result<()> {
         let mut gossipsub_parameter_update_interval =
             IntervalStream::new(tokio::time::interval(GOSSIPSUB_PARAMETER_UPDATE_INTERVAL)).fuse();
 
@@ -361,6 +361,11 @@ impl<P: Preset> Network<P> {
                         P2pMessage::HeadState(_state) => {
                             // This message is only used in tests
                         }
+                        P2pMessage::Stop => {
+                            ServiceInboundMessage::Stop.send(&self.network_to_service_tx);
+                            P2pToSync::Stop.send(&self.channels.p2p_to_sync_tx);
+                            break;
+                        }
                     }
                 },
 
@@ -451,6 +456,8 @@ impl<P: Preset> Network<P> {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn on_slot(&self, slot: Slot) {
@@ -1963,6 +1970,7 @@ fn run_network_service<P: Preset>(
                                 warn!("unable to update gossipsub scoring parameters: {error:?}");
                             }
                         }
+                        ServiceInboundMessage::Stop => break,
                     }
                 }
             }

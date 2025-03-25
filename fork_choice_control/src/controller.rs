@@ -534,6 +534,11 @@ where
         self.thread_pool.spawn(task);
     }
 
+    pub fn stop(&self) {
+        let save_to_storage = !std::thread::panicking();
+        MutatorMessage::Stop { save_to_storage }.send(&self.mutator_tx);
+    }
+
     pub const fn block_processor(&self) -> &Arc<BlockProcessor<P>> {
         &self.block_processor
     }
