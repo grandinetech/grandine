@@ -58,26 +58,23 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
         loop {
             select! {
                 message = self.fork_choice_rx.select_next_some() => {
-                    self.handle_fork_choice_message(message)
+                    match message {
+                        SubnetMessage::Slot(wait_group, slot) => {
+                            if let Err(error) = self.on_slot(slot) {
+                                warn!("failed to advance slot in subnet service: {error}");
+                            }
+
+                            // `wait_group` must not be dropped before the message is handled.
+                            // Values ignored with `_` or `..` in `match` arms are dropped after the `match`
+                            // expression, so using `wait_group` explicitly is unnecessary.
+                            // We do it anyway because temporary scope rules are confusing.
+                            drop(wait_group);
+                        }
+                        SubnetMessage::Stop => break Ok(()),
+                    }
                 }
                 message = self.rx.select_next_some() => self.handle_other_message(message),
                 complete => break Ok(()),
-            }
-        }
-    }
-
-    fn handle_fork_choice_message(&mut self, message: SubnetMessage<W>) {
-        match message {
-            SubnetMessage::Slot(wait_group, slot) => {
-                if let Err(error) = self.on_slot(slot) {
-                    warn!("failed to advance slot in subnet service: {error}");
-                }
-
-                // `wait_group` must not be dropped before the message is handled.
-                // Values ignored with `_` or `..` in `match` arms are dropped after the `match`
-                // expression, so using `wait_group` explicitly is unnecessary.
-                // We do it anyway because temporary scope rules are confusing.
-                drop(wait_group);
             }
         }
     }

@@ -60,6 +60,8 @@ pub trait ExecutionEngine<P: Preset> {
 
     /// [`get_pow_block`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/fork-choice.md#get_pow_block)
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock>;
+
+    fn stop(&self);
 }
 
 impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
@@ -111,6 +113,10 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
 
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         (*self).pow_block(block_hash)
+    }
+
+    fn stop(&self) {
+        (*self).stop()
     }
 }
 
@@ -164,6 +170,10 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
 
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         self.as_ref().pow_block(block_hash)
+    }
+
+    fn stop(&self) {
+        self.as_ref().stop()
     }
 }
 
@@ -229,6 +239,12 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
             .expect("execution engine mutex is poisoned")
             .pow_block(block_hash)
     }
+
+    fn stop(&self) {
+        self.lock()
+            .expect("execution engine mutex is poisoned")
+            .stop()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -274,6 +290,8 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
     fn pow_block(&self, _block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         None
     }
+
+    fn stop(&self) {}
 }
 
 pub struct MockExecutionEngine<P: Preset> {
@@ -332,6 +350,8 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         self.pow_blocks.get(&block_hash).copied()
     }
+
+    fn stop(&self) {}
 }
 
 impl<P: Preset> MockExecutionEngine<P> {

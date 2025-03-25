@@ -42,6 +42,11 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
                     self.attestation_agg_pool.on_tick(tick).await
                 }
+                PoolMessage::Stop => {
+                    self.bls_to_execution_change_pool.stop();
+
+                    break;
+                }
             }
         }
 

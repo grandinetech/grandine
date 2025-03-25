@@ -93,6 +93,10 @@ impl BlsToExecutionChangePool {
         PoolMessage::RequestSignedBlsToExecutionChanges(sender).send(&self.tx);
         receiver.await.map_err(Into::into)
     }
+
+    pub fn stop(&self) {
+        PoolMessage::Stop.send(&self.tx)
+    }
 }
 
 pub struct Service<P: Preset, W: Wait> {
@@ -143,6 +147,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
                                 .collect_vec(),
                         )
                         .is_ok(),
+                    PoolMessage::Stop => break,
                 };
 
             if !success {
@@ -264,6 +269,7 @@ enum PoolMessage {
         Option<Sender<PoolAdditionOutcome>>,
     ),
     RequestSignedBlsToExecutionChanges(Sender<Vec<SignedBlsToExecutionChange>>),
+    Stop,
 }
 
 impl PoolMessage {

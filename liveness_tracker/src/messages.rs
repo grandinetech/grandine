@@ -31,6 +31,7 @@ pub enum ValidatorToLiveness<P: Preset> {
     Epoch(Epoch),
     Head(Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>),
     ValidAttestation(Arc<Attestation<P>>),
+    Stop,
 }
 
 impl<P: Preset> ValidatorToLiveness<P> {

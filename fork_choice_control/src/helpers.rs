@@ -582,7 +582,10 @@ impl<P: Preset> Context<P> {
         loop {
             let option = self.next_p2p_message_verbose();
 
-            if let Some(P2pMessage::FinalizedCheckpoint(_) | P2pMessage::HeadState(_)) = option {
+            if let Some(
+                P2pMessage::FinalizedCheckpoint(_) | P2pMessage::HeadState(_) | P2pMessage::Stop,
+            ) = option
+            {
                 continue;
             }
 

@@ -161,6 +161,7 @@ async fn handle_sync_statuses(
             message = sync_to_api_rx.select_next_some() => {
                 match message {
                     SyncToApi::SyncStatus(status) => is_synced.set(status),
+                    SyncToApi::Stop => break Ok(()),
                 }
             }
 

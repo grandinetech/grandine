@@ -139,6 +139,10 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
             }
         }
     }
+
+    fn stop(&self) {
+        ExecutionServiceMessage::Stop.send(&self.execution_service_tx);
+    }
 }
 
 impl<P: Preset> Eth1ExecutionEngine<P> {

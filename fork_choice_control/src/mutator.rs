@@ -1380,6 +1380,16 @@ where
     }
 
     fn handle_stop(&self, save_to_storage: bool) -> Result<()> {
+        // Send messages to services directly (i.e. not using wrapper methods)
+        // to ensure the messages are sent unconditionally
+        AttestationVerifierMessage::Stop.send(&self.attestation_verifier_tx);
+        P2pMessage::Stop.send(&self.p2p_tx);
+        PoolMessage::Stop.send(&self.pool_tx);
+        SubnetMessage::Stop.send(&self.subnet_tx);
+        ValidatorMessage::Stop.send(&self.validator_tx);
+
+        self.execution_engine.stop();
+
         if save_to_storage {
             let slots = self.storage.append(
                 self.store.unfinalized_canonical_chain(),

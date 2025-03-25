@@ -343,6 +343,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             ).await;
                         }
                     }
+                    ValidatorMessage::Stop => {
+                        if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
+                            ValidatorToLiveness::Stop.send(validator_to_liveness_tx);
+                        }
+
+                        break;
+                    }
                 },
 
                 slashing = slasher_to_validator_rx.select_next_some() => match slashing {
