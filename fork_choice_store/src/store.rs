@@ -1947,7 +1947,9 @@ impl<P: Preset> Store<P> {
         let mut finalized_checkpoint_updated = false;
 
         // > If a new epoch, pull-up justification and finalization from previous epoch
-        if new_tick.epoch::<P>() > old_tick.epoch::<P>() {
+        let is_new_epoch = new_tick.epoch::<P>() > old_tick.epoch::<P>();
+
+        if is_new_epoch {
             let old_justified_checkpoint = self.justified_checkpoint;
             let old_finalized_checkpoint = self.finalized_checkpoint;
 
@@ -1967,7 +1969,6 @@ impl<P: Preset> Store<P> {
 
             if finalized_checkpoint_updated {
                 self.extend_latest_messages_after_finalization();
-                self.prune_after_finalization();
             }
         }
 
@@ -1976,6 +1977,13 @@ impl<P: Preset> Store<P> {
 
         self.apply_balance_differences(differences)?;
         self.update_head_segment_id();
+
+        // Pruning the state cache requires the head slot, which depends on head_segment_id
+        // pointing to the correct head. Therefore, prune state cache after the head_segment_id
+        // is updated.
+        if is_new_epoch && finalized_checkpoint_updated {
+            self.prune_after_finalization();
+        }
 
         self.blob_cache.on_slot(new_tick.slot);
         self.prune_state_cache(true);
@@ -2082,11 +2090,6 @@ impl<P: Preset> Store<P> {
             self.update_balances_after_justification()?;
         }
 
-        if finalized_checkpoint_updated {
-            self.extend_latest_messages_after_finalization();
-            self.prune_after_finalization();
-        }
-
         // The head segment does not need to be updated every time a block is added.
         // As of `consensus-specs` 1.1.7 it appears to be necessary only in the following cases:
         // - The block causes a new viable segment to be added.
@@ -2100,6 +2103,14 @@ impl<P: Preset> Store<P> {
         // while the cost of it is negligible. Being too clever about it forced us to do some
         // debugging when implementing proposer score boosting.
         self.update_head_segment_id();
+
+        // Pruning the state cache requires the head slot, which depends on head_segment_id
+        // pointing to the correct head. Therefore, prune state cache after the head_segment_id
+        // is updated.
+        if finalized_checkpoint_updated {
+            self.extend_latest_messages_after_finalization();
+            self.prune_after_finalization();
+        }
 
         if !self.finished_initial_forward_sync && self.head().slot() >= self.slot() {
             self.finished_initial_forward_sync = true;
@@ -2560,6 +2571,7 @@ impl<P: Preset> Store<P> {
             self.store_config.max_epochs_to_retain_states_in_cache * P::SlotsPerEpoch::U64;
 
         let prune_slot = self
+            .head()
             .slot()
             .saturating_sub(retain_slots)
             .max(self.finalized_slot());

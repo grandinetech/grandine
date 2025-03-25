@@ -17,7 +17,7 @@ pub fn spawn_exchange_capabilities_task(
     dedicated_executor
         .spawn(async move {
             if let Err(error) = exchange_capabilities(&eth1_api).await {
-                warn!("exhcange capabilities task failed: {error:?}");
+                warn!("exchange capabilities task failed: {error:?}");
             }
         })
         .detach();
