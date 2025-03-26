@@ -35,7 +35,7 @@ impl DatabaseMode {
     #[must_use]
     pub const fn mode_permissions(self) -> u16 {
         match self {
-            // <https://erthink.github.io/libmdbx/group__c__opening.html#gabb7dd3b10dd31639ba252df545e11768>
+            // <https://libmdbx.dqdkfa.ru/group__c__opening.html#gabb7dd3b10dd31639ba252df545e11768>
             // The UNIX permissions to set on created files. Zero value means to open existing, but do not create.
             Self::ReadOnly => 0,
             Self::ReadWrite => 0o600,
