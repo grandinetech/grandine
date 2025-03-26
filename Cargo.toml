@@ -388,7 +388,8 @@ pbkdf2 = '0.12'
 primitive-types = '0.12'
 proc-macro-crate = '3'
 proc-macro2 = '1'
-prometheus = '0.13'
+# Due to vulnerability in dependency use unreleased version, upgrade to '>0.13.4' once it's released
+prometheus = { git = 'https://github.com/tikv/rust-prometheus.git', rev = 'e17c5ced2bc0f8ea436aaf1acc830a30ab15ada3' }
 prometheus-client = '0.22'
 psutil = '3'
 quick-protobuf = '0.8'
