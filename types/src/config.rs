@@ -826,6 +826,27 @@ impl Config {
         }
     }
 
+    #[must_use]
+    pub fn max_message_size(&self) -> usize {
+        core::cmp::max(
+            self.max_payload_size_compressed()
+                .checked_add(1024)
+                .expect("max_message_size should not overflow"),
+            1024 * 1024,
+        )
+    }
+
+    #[must_use]
+    pub fn max_payload_size_compressed(&self) -> usize {
+        Self::max_compressed_len(self.max_payload_size)
+            .expect("max_compressed_len for max_payload_size should not overflow")
+    }
+
+    #[must_use]
+    pub fn max_compressed_len(n: usize) -> Option<usize> {
+        32_usize.checked_add(n)?.checked_add(n / 6)
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }
