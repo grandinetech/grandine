@@ -454,9 +454,6 @@ impl<P: Preset> Storage<P> {
             let key = FinalizedBlockByRoot(block_root).to_string();
             self.database.delete(key)?;
 
-            let key = UnfinalizedBlockByRoot(block_root).to_string();
-            self.database.delete(key)?;
-
             let key = StateByBlockRoot(block_root).to_string();
             self.database.delete(key)?;
         }
@@ -494,6 +491,47 @@ impl<P: Preset> Storage<P> {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn prune_unfinalized_blocks(&self, last_finalized_slot: Slot) -> Result<Vec<Slot>> {
+        let mut slots = vec![];
+        let mut keys_to_remove = vec![];
+
+        let results = self
+            .database
+            .iterator_ascending(serialize_key(UnfinalizedBlockByRoot(H256::zero()))..)?;
+
+        for result in results {
+            let (key_bytes, value_bytes) = result?;
+
+            if !UnfinalizedBlockByRoot::has_prefix(&key_bytes) {
+                break;
+            }
+
+            let unfinalized_block = SignedBeaconBlock::<P>::from_ssz(&self.config, value_bytes)?;
+            let block_slot = unfinalized_block.message().slot();
+
+            if block_slot <= last_finalized_slot {
+                slots.push(block_slot);
+                keys_to_remove.push(key_bytes.into_owned());
+            }
+        }
+
+        for slot in &slots {
+            if let Some(block_root) = self.block_root_by_slot(*slot)? {
+                // remove only if slot -> root points to unfinalized block
+                if !self.contains_finalized_block(block_root)? {
+                    keys_to_remove
+                        .push(serialize_key(BlockRootBySlot(*slot)).as_bytes().to_owned());
+                }
+            }
+        }
+
+        for key in keys_to_remove {
+            self.database.delete(key)?;
+        }
+
+        Ok(slots)
     }
 
     pub(crate) fn checkpoint_state_slot(&self) -> Result<Option<Slot>> {
@@ -1122,10 +1160,91 @@ mod tests {
     use database::DatabaseMode;
     use tempfile::TempDir;
     use types::{
-        phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock, preset::Mainnet,
+        phase0::containers::{
+            BeaconBlock as Phase0BeaconBlock, SignedBeaconBlock as Phase0SignedBeaconBlock,
+        },
+        preset::Mainnet,
     };
 
     use super::*;
+
+    fn block_with_slot(slot: Slot) -> SignedBeaconBlock<Mainnet> {
+        SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock {
+            message: Phase0BeaconBlock {
+                slot,
+                ..Phase0BeaconBlock::default()
+            },
+            ..Phase0SignedBeaconBlock::default()
+        })
+    }
+
+    #[test]
+    fn test_prune_unfinalized_blocks() -> Result<()> {
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+        )?;
+
+        let block_1 = block_with_slot(1);
+        let block_3 = block_with_slot(3);
+        let block_5 = block_with_slot(5);
+        let block_6 = block_with_slot(6);
+        let block_10 = block_with_slot(10);
+
+        database.put_batch(vec![
+            // Slot 1
+            serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
+            serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block_1)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
+            // Slot 3
+            serialize(BlockRootBySlot(3), H256::repeat_byte(3))?,
+            serialize(FinalizedBlockByRoot(H256::repeat_byte(3)), &block_3)?,
+            // Slot 5
+            serialize(BlockRootBySlot(5), H256::repeat_byte(5))?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(5)), &block_5)?,
+            //Slot 6
+            serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
+            serialize(FinalizedBlockByRoot(H256::repeat_byte(6)), &block_6)?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(6)), &block_6)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(6)), 6_u64)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(6)), 6_u64)?,
+            // Slot 10, test case that "10" < "3" is not true
+            serialize(BlockRootBySlot(10), H256::repeat_byte(10))?,
+            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(10)), &block_10)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(10)), 10_u64)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(10)), 10_u64)?,
+        ])?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            database,
+            nonzero!(64_u64),
+            StorageMode::Standard,
+        );
+
+        // slots 1, 3, 10
+        assert_eq!(storage.finalized_block_count()?, 3);
+        // slots 1, 3, 5, 6, 10
+        assert_eq!(storage.unfinalized_block_count()?, 3);
+        assert_eq!(storage.block_root_by_slot_count()?, 5);
+        assert_eq!(storage.slot_by_state_root_count()?, 3);
+        assert_eq!(storage.state_count()?, 3);
+
+        storage.prune_unfinalized_blocks(6)?;
+
+        // slots 1, 3, 10
+        assert_eq!(storage.finalized_block_count()?, 3);
+        // slots 10
+        assert_eq!(storage.unfinalized_block_count()?, 1);
+        assert_eq!(storage.block_root_by_slot_count()?, 4);
+        assert_eq!(storage.slot_by_state_root_count()?, 3);
+        assert_eq!(storage.state_count()?, 3);
+
+        Ok(())
+    }
 
     #[test]
     fn test_prune_old_blocks_and_states() -> Result<()> {
@@ -1142,7 +1261,6 @@ mod tests {
             // Slot 1
             serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
             serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
             serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
             serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
             // Slot 3
@@ -1171,7 +1289,7 @@ mod tests {
         );
 
         assert_eq!(storage.finalized_block_count()?, 2);
-        assert_eq!(storage.unfinalized_block_count()?, 4);
+        assert_eq!(storage.unfinalized_block_count()?, 3);
         assert_eq!(storage.block_root_by_slot_count()?, 5);
         assert_eq!(storage.slot_by_state_root_count()?, 3);
         assert_eq!(storage.state_count()?, 3);

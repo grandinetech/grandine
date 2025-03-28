@@ -2384,6 +2384,8 @@ where
             let mut archived = self.store_mut().archive_finalized(latest_archivable_index);
             archived.push_back(self.store.anchor().clone());
 
+            let last_finalized_slot = self.store.last_finalized().slot();
+
             Builder::new()
                 .name("store-archiver".to_owned())
                 .spawn(move || {
@@ -2405,6 +2407,19 @@ where
                             )
                         }
                         Err(error) => error!("saving to storage failed: {error:?}"),
+                    }
+
+                    debug!("removing unfinalized blocks");
+
+                    if !storage.archive_storage_enabled() {
+                        match storage.prune_unfinalized_blocks(last_finalized_slot) {
+                            Ok(slots) => {
+                                debug!(
+                                    "unfinalized block pruning complete: pruned slots: {slots:?}"
+                                );
+                            }
+                            Err(error) => error!("unfinalized block pruning failed: {error:?}"),
+                        }
                     }
 
                     drop(wait_group);
