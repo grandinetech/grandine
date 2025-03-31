@@ -41,10 +41,12 @@ pub enum StateLoadStrategy<P: Preset> {
     Auto {
         state_slot: Option<Slot>,
         checkpoint_sync_url: Option<RedactingUrl>,
+        checkpoint_sync_slot: Option<Slot>,
         anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     },
     Remote {
         checkpoint_sync_url: RedactingUrl,
+        checkpoint_sync_slot: Option<Slot>,
     },
     Anchor {
         block: Arc<SignedBeaconBlock<P>>,
@@ -108,6 +110,7 @@ impl<P: Preset> Storage<P> {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
+                checkpoint_sync_slot,
                 anchor_checkpoint_provider,
             } => 'block: {
                 // Attempt to load local state first: either latest or from specified slot.
@@ -124,9 +127,14 @@ impl<P: Preset> Storage<P> {
                             info!("anchor checkpoint is already loaded from remote checkpoint sync server");
                             Ok(checkpoint)
                         } else {
-                            checkpoint_sync::load_finalized_from_remote(&self.config, client, &url)
-                                .await
-                                .context(Error::CheckpointSyncFailed)
+                            checkpoint_sync::load_from_remote(
+                                &self.config,
+                                client,
+                                &url,
+                                checkpoint_sync_slot,
+                            )
+                            .await
+                            .context(Error::CheckpointSyncFailed)
                         };
 
                         match result {
@@ -174,15 +182,16 @@ impl<P: Preset> Storage<P> {
             }
             StateLoadStrategy::Remote {
                 checkpoint_sync_url,
+                checkpoint_sync_slot,
             } => {
-                let FinalizedCheckpoint { block, state } =
-                    checkpoint_sync::load_finalized_from_remote(
-                        &self.config,
-                        client,
-                        &checkpoint_sync_url,
-                    )
-                    .await
-                    .context(Error::CheckpointSyncFailed)?;
+                let FinalizedCheckpoint { block, state } = checkpoint_sync::load_from_remote(
+                    &self.config,
+                    client,
+                    &checkpoint_sync_url,
+                    checkpoint_sync_slot,
+                )
+                .await
+                .context(Error::CheckpointSyncFailed)?;
 
                 anchor_block = block;
                 anchor_state = state;

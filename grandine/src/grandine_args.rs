@@ -259,6 +259,11 @@ struct BeaconNodeOptions {
     #[clap(long)]
     checkpoint_sync_url: Option<RedactingUrl>,
 
+    /// Load checkpoint state at specified slot instead of recent finalized one. Requires --checkpoint-sync-url
+    /// [default: None]
+    #[clap(long, requires = "checkpoint_sync_url")]
+    checkpoint_sync_slot: Option<Slot>,
+
     /// Force checkpoint sync. Requires --checkpoint-sync-url
     /// [default: disabled]
     #[clap(long, requires = "checkpoint_sync_url")]
@@ -913,6 +918,7 @@ impl GrandineArgs {
             max_empty_slots,
             max_events,
             checkpoint_sync_url,
+            checkpoint_sync_slot,
             eth1_rpc_urls,
             force_checkpoint_sync,
             data_dir,
@@ -1287,6 +1293,7 @@ impl GrandineArgs {
             genesis_state_file,
             genesis_state_download_url,
             checkpoint_sync_url,
+            checkpoint_sync_slot,
             force_checkpoint_sync,
             back_sync_enabled,
             eth1_rpc_urls,
