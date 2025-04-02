@@ -81,8 +81,8 @@ use crate::{
 
 #[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
-    store: Arc<Store<P>>,
-    store_snapshot: Arc<ArcSwap<Store<P>>>,
+    store: Arc<Store<P, Storage<P>>>,
+    store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     block_processor: Arc<BlockProcessor<P>>,
     event_channels: Arc<EventChannels>,
@@ -138,7 +138,7 @@ where
 {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
-        store_snapshot: Arc<ArcSwap<Store<P>>>,
+        store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
         state_cache: Arc<StateCacheProcessor<P>>,
         block_processor: Arc<BlockProcessor<P>>,
         event_channels: Arc<EventChannels>,
@@ -1487,8 +1487,37 @@ where
         if misc::is_epoch_start::<P>(block.message().slot()) {
             info!("unloading old beacon states (head slot: {head_slot})");
 
-            self.store_mut()
+            let unloaded = self
+                .store_mut()
                 .unload_old_states(unfinalized_states_in_memory);
+
+            let store = self.owned_store();
+            let storage = self.storage.clone_arc();
+            let wait_group = wait_group.clone();
+
+            Builder::new()
+                .name("store-unloader".to_owned())
+                .spawn(move || {
+                    debug!("persisting unloaded old beacon states…");
+
+                    let states_with_block_roots = unloaded
+                        .iter()
+                        .map(|chain_link| (chain_link.state(&store), chain_link.block_root));
+
+                    match storage.append_states(states_with_block_roots) {
+                        Ok(slots) => {
+                            debug!(
+                                "unloaded old beacon states persisted \
+                                 (state slots: {slots:?})",
+                            )
+                        }
+                        Err(error) => {
+                            error!("persisting unloaded old beacon states to storage failed: {error:?}")
+                        }
+                    }
+
+                    drop(wait_group);
+                })?;
         }
 
         let processing_duration = insertion_time.duration_since(submission_time);
@@ -2452,7 +2481,7 @@ where
         self.thread_pool.spawn(task);
     }
 
-    fn store_mut(&mut self) -> &mut Store<P> {
+    fn store_mut(&mut self) -> &mut Store<P, Storage<P>> {
         self.store.make_mut()
     }
 
@@ -2461,7 +2490,7 @@ where
     // faster to clone a `Store` with all the `Arc`s inside it and allocate another `Arc`.
     //
     // As a result, this method should only be called when `Mutator.store` is in a consistent state.
-    fn owned_store(&self) -> Arc<Store<P>> {
+    fn owned_store(&self) -> Arc<Store<P, Storage<P>>> {
         self.store.clone_arc()
     }
 

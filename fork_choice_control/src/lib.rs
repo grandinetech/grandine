@@ -10,9 +10,6 @@
 //! - Notifying other components of the application about changes to the fork choice store.
 //! - Testing.
 //!
-//! This crate exists primarily to separate [`fork_choice_store`] from persistence.
-//! [`fork_choice_store`] should never depend on [`storage`] or any other databases.
-//!
 //! [`storage`]: ::storage
 
 pub use crate::{

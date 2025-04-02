@@ -11,9 +11,11 @@ use allocator as _;
 use anyhow::Result;
 use clock::Tick;
 use criterion::{BatchSize, Criterion, Throughput};
+use database::Database;
 use easy_ext::ext;
 use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
+use fork_choice_control::{Storage, StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL};
 use fork_choice_store::{
     ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
     BlockAction, DataAvailabilityPolicy, Store, StoreConfig, ValidAttestation,
@@ -63,11 +65,19 @@ impl Criterion {
                     .into_iter()
                     .exactly_one()?;
 
+                let storage = Arc::new(Storage::new(
+                    config.clone_arc(),
+                    Database::in_memory(),
+                    DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+                    StorageMode::Standard,
+                ));
+
                 let mut store = Store::new(
                     config.clone_arc(),
                     StoreConfig::default(),
                     anchor_block,
                     anchor_state,
+                    storage,
                     false,
                     false,
                 );
@@ -138,7 +148,7 @@ impl Criterion {
     }
 }
 
-fn process_slot(store: &mut Store<impl Preset>, slot: Slot) -> Result<()> {
+fn process_slot<P: Preset>(store: &mut Store<P, Storage<P>>, slot: Slot) -> Result<()> {
     let Some(changes) = store.apply_tick(Tick::start_of_slot(slot))? else {
         panic!("tick at slot {slot} should be later than the current one")
     };
@@ -150,7 +160,10 @@ fn process_slot(store: &mut Store<impl Preset>, slot: Slot) -> Result<()> {
     Ok(())
 }
 
-fn process_block<P: Preset>(store: &mut Store<P>, block: &Arc<SignedBeaconBlock<P>>) -> Result<()> {
+fn process_block<P: Preset>(
+    store: &mut Store<P, Storage<P>>,
+    block: &Arc<SignedBeaconBlock<P>>,
+) -> Result<()> {
     let slot = block.message().slot();
 
     let block_action = store.validate_block(
@@ -193,7 +206,7 @@ fn process_block<P: Preset>(store: &mut Store<P>, block: &Arc<SignedBeaconBlock<
 }
 
 fn process_attestation<P: Preset>(
-    store: &mut Store<P>,
+    store: &mut Store<P, Storage<P>>,
     attestation: Arc<Attestation<P>>,
 ) -> Result<()> {
     let slot = attestation.data().slot;
