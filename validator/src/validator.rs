@@ -1957,6 +1957,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn update_subnet_subscriptions(&mut self, wait_group: &W, slot_head: Option<&SlotHead<P>>) {
+        if !self.controller.is_forward_synced() {
+            return;
+        }
+
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
             None => match self.controller.preprocessed_state_at_current_slot() {
