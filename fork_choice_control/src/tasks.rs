@@ -54,7 +54,7 @@ pub trait Run {
 //                      the tasks to contain `*Pending` structs instead of duplicating their fields.
 
 pub struct BlockTask<P: Preset, E, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub block_processor: Arc<BlockProcessor<P>>,
     pub execution_engine: E,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
@@ -140,7 +140,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
 }
 
 pub struct BlockVerifyForGossipTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub block_processor: Arc<BlockProcessor<P>>,
     pub wait_group: W,
     pub block: Arc<SignedBeaconBlock<P>>,
@@ -174,7 +174,7 @@ impl<P: Preset, W> Run for BlockVerifyForGossipTask<P, W> {
 }
 
 pub struct AggregateAndProofTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -210,7 +210,7 @@ impl<P: Preset, W> Run for AggregateAndProofTask<P, W> {
 }
 
 pub struct AttestationTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub attestation: AttestationItem<P, GossipId>,
@@ -242,7 +242,7 @@ impl<P: Preset, W> Run for AttestationTask<P, W> {
 
 // TODO(Grandine Team): Merge this with `BlockTask` and benchmark.
 pub struct BlockAttestationsTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub block: Arc<SignedBeaconBlock<P>>,
@@ -285,7 +285,7 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
 }
 
 pub struct AttesterSlashingTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub attester_slashing: Box<AttesterSlashing<P>>,
@@ -320,7 +320,7 @@ impl<P: Preset, W> Run for AttesterSlashingTask<P, W> {
 }
 
 pub struct BlobSidecarTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub blob_sidecar: Arc<BlobSidecar<P>>,
@@ -366,7 +366,7 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
 }
 
 pub struct PersistBlobSidecarsTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub storage: Arc<Storage<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
@@ -405,7 +405,7 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
 }
 
 pub struct CheckpointStateTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub state_cache: Arc<StateCacheProcessor<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
@@ -449,7 +449,7 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
 }
 
 pub struct PreprocessStateTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P>>,
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub state_cache: Arc<StateCacheProcessor<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub head_block_root: H256,

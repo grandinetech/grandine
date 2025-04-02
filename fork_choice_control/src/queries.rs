@@ -758,7 +758,7 @@ pub struct BlockWithRoot<P: Preset> {
 pub struct Snapshot<'storage, P: Preset> {
     // Use a `Guard` instead of an owned snapshot unlike in tasks based on the intuition that
     // `Snapshot`s will be less common than tasks.
-    store_snapshot: Guard<Arc<Store<P>>>,
+    store_snapshot: Guard<Arc<Store<P, Storage<P>>>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: &'storage Storage<P>,
 }

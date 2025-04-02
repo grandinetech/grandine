@@ -821,6 +821,7 @@ dependencies = [
  "bls",
  "clock",
  "criterion",
+ "database",
  "easy-ext",
  "eth2_cache_utils",
  "eth2_libp2p",
