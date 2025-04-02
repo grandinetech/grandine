@@ -36,14 +36,15 @@ use crate::{
         pool_attester_slashings, pool_attester_slashings_v2, pool_bls_to_execution_changes,
         pool_proposer_slashings, pool_voluntary_exits, post_state_validators,
         publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        state_committees, state_finality_checkpoints, state_fork, state_pending_deposits,
-        state_pending_partial_withdrawals, state_randao, state_root, state_sync_committees,
-        state_validator, state_validator_balances, state_validator_identities,
-        submit_pool_attestations, submit_pool_attestations_v2, submit_pool_attester_slashing,
-        submit_pool_attester_slashing_v2, submit_pool_bls_to_execution_change,
-        submit_pool_proposer_slashing, submit_pool_sync_committees, submit_pool_voluntary_exit,
-        sync_committee_rewards, validator_aggregate_attestation,
-        validator_aggregate_attestation_v2, validator_attestation_data, validator_attester_duties,
+        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
+        state_pending_deposits, state_pending_partial_withdrawals, state_randao, state_root,
+        state_sync_committees, state_validator, state_validator_balances,
+        state_validator_identities, submit_pool_attestations, submit_pool_attestations_v2,
+        submit_pool_attester_slashing, submit_pool_attester_slashing_v2,
+        submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
+        submit_pool_sync_committees, submit_pool_voluntary_exit, sync_committee_rewards,
+        validator_aggregate_attestation, validator_aggregate_attestation_v2,
+        validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
         validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_publish_aggregate_and_proofs,
@@ -347,6 +348,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .route(
             "/eth/v1/beacon/states/{state_id}/sync_committees",
             get(state_sync_committees),
+        )
+        .route(
+            "/eth/v1/beacon/states/{state_id}/pending_consolidations",
+            get(state_pending_consolidations),
         )
         .route(
             "/eth/v1/beacon/states/{state_id}/pending_deposits",
