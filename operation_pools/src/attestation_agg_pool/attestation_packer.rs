@@ -582,6 +582,15 @@ impl<P: Preset> AttestationPacker<P> {
             Err(_) => return false,
         };
 
+        // Pre-Electra attestations must not be included in Electra blocks,
+        // as this would result in an invalid block due to signature mismatches.
+        if self.state.is_post_electra()
+            && misc::compute_epoch_at_slot::<P>(attestation.data.slot)
+                < self.config.electra_fork_epoch
+        {
+            return false;
+        }
+
         attestation.data.source.root == expected_justified_checkpoint.root
     }
 
