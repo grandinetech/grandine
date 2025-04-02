@@ -1,9 +1,10 @@
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{bail, Error as AnyhowError, Result};
 use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
 use ssz::ReadError;
 use thiserror::Error;
+use typenum::Unsigned as _;
 use types::{
     combined::Attestation,
     electra::containers::{Attestation as ElectraAttestation, SingleAttestation},
@@ -12,17 +13,25 @@ use types::{
 };
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum Error<P: Preset> {
     #[error("invalid committee index for conversion")]
     InvalidCommitteeIndex,
     #[error("invalid aggregation bits for conversion")]
     InvalidAggregationBits(#[source] ReadError),
+    #[error("attestation is not relevant anymore: {attestation:?}")]
+    Irrelevant { attestation: Box<Attestation<P>> },
 }
 
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     attestation: Attestation<P>,
 ) -> Result<Phase0Attestation<P>> {
+    if attestation.data().slot + P::SlotsPerEpoch::U64 < controller.slot() {
+        bail!(Error::Irrelevant {
+            attestation: Box::new(attestation)
+        });
+    }
+
     let attestation = match attestation {
         Attestation::Phase0(attestation) => attestation,
         Attestation::Electra(attestation) => {
@@ -37,22 +46,19 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
 
             let index = misc::get_committee_indices::<P>(committee_bits)
                 .next()
-                .ok_or(Error::InvalidCommitteeIndex)?;
+                .ok_or(Error::<P>::InvalidCommitteeIndex)?;
 
             Phase0Attestation {
                 aggregation_bits: aggregation_bits
                     .try_into()
-                    .map_err(Error::InvalidAggregationBits)?,
+                    .map_err(Error::<P>::InvalidAggregationBits)?,
                 data: AttestationData { index, ..data },
                 signature,
             }
         }
         Attestation::Single(attestation) => {
             let slot = attestation.data.slot;
-            let state = controller
-                .state_at_slot(slot)?
-                .ok_or_else(|| AnyhowError::msg(format!("state not available at slot: {slot:?}")))?
-                .value;
+            let state = controller.head_state().value;
             let committee = accessors::beacon_committee(&state, slot, attestation.committee_index)?;
 
             attestation.try_into_phase0_attestation(committee)?
@@ -84,10 +90,7 @@ pub fn try_convert_to_single_attestation<P: Preset>(
         .next()
         .unwrap_or_default();
 
-    let state = controller
-        .state_at_slot(data.slot)?
-        .ok_or_else(|| AnyhowError::msg(format!("state not available at slot: {:?}", data.slot)))?
-        .value;
+    let state = controller.head_state().value;
 
     let committee = accessors::beacon_committee(&state, data.slot, committee_index)?;
 
