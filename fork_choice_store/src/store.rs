@@ -1911,7 +1911,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
             || {
                 self.state_cache
-                    .try_state_at_slot(self, block_header.parent_root, block_header.slot)
+                    // TODO: this is a temporary measure to allow chain to progress during long periods without blocks.
+                    // Refactor blob processing so that blobs wait until required state is ready.
+                    .try_state_at_slot_for_block_sync(self, block_header.parent_root, block_header.slot)
                     .transpose()
                     .unwrap_or_else(|| {
                         self.state_cache.state_at_slot(

@@ -19,6 +19,7 @@ use types::{
 use crate::{Storage, Store};
 
 const ALLOWED_EMPTY_SLOTS_MULTIPLIER: u64 = 2;
+const ALLOWED_EMPTY_SLOTS_MULTIPLIER_FOR_BLOCK_SYNC: u64 = 100;
 
 pub struct StateCacheProcessor<P: Preset> {
     state_cache: StateCache<P>,
@@ -86,6 +87,27 @@ impl<P: Preset> StateCacheProcessor<P> {
             store,
             block_root,
             slot,
+            ALLOWED_EMPTY_SLOTS_MULTIPLIER,
+            should_print_slot_processing_warning(store),
+        )
+    }
+
+    // Processing long slot distances are expensive and should not be allowed.
+    // (especially when the processed state is needed for things like attestations
+    // - that could lead to excessive mem and CPU usage and result in DoS).
+    // The exception is block sync - which should be allowed, because it's
+    // the only way for the chain to progress in long periods without blocks.
+    pub fn try_state_at_slot_for_block_sync<S: Storage<P>>(
+        &self,
+        store: &Store<P, S>,
+        block_root: H256,
+        slot: Slot,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
+        self.try_get_state_at_slot(
+            store,
+            block_root,
+            slot,
+            ALLOWED_EMPTY_SLOTS_MULTIPLIER_FOR_BLOCK_SYNC,
             should_print_slot_processing_warning(store),
         )
     }
@@ -107,9 +129,15 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
-        self.try_get_state_at_slot(store, block_root, slot, false)?
-            .ok_or(Error::StateNotFound { block_root })
-            .map_err(Into::into)
+        self.try_get_state_at_slot(
+            store,
+            block_root,
+            slot,
+            ALLOWED_EMPTY_SLOTS_MULTIPLIER,
+            false,
+        )?
+        .ok_or(Error::StateNotFound { block_root })
+        .map_err(Into::into)
     }
 
     pub fn process_slots<S: Storage<P>>(
@@ -124,6 +152,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             state,
             block_root,
             slot,
+            ALLOWED_EMPTY_SLOTS_MULTIPLIER,
             should_print_slot_processing_warning(store),
         )?;
 
@@ -140,6 +169,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
+        allowed_empty_slots_multiplier: u64,
         warn_on_slot_processing: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         let options = QueryOptions {
@@ -156,7 +186,14 @@ impl<P: Preset> StateCacheProcessor<P> {
                     return Ok(None);
                 };
 
-                let state = process_slots(store, state, block_root, slot, warn_on_slot_processing)?;
+                let state = process_slots(
+                    store,
+                    state,
+                    block_root,
+                    slot,
+                    allowed_empty_slots_multiplier,
+                    warn_on_slot_processing,
+                )?;
 
                 Ok(Some((state, None)))
             })?
@@ -170,34 +207,39 @@ fn process_slots<P: Preset, S: Storage<P>>(
     mut state: Arc<BeaconState<P>>,
     block_root: H256,
     slot: Slot,
+    allowed_empty_slots_multiplier: u64,
     warn_on_slot_processing: bool,
 ) -> Result<Arc<BeaconState<P>>> {
-    if state.slot() < slot {
-        if warn_on_slot_processing && store.is_forward_synced() {
-            // `Backtrace::force_capture` can be costly and a warning may be excessive,
-            // but this is controlled by a `Feature` that should be disabled by default.
-            warn!(
-                "processing slots for beacon state not found in state cache \
-                 (block root: {block_root:?}, from slot {} to {slot})\n{}",
-                state.slot(),
-                Backtrace::force_capture(),
-            );
-        }
+    let from_slot = state.slot();
 
-        let state_slot = state.slot();
-        let max_empty_slots = store.store_config().max_empty_slots * ALLOWED_EMPTY_SLOTS_MULTIPLIER;
-        let is_forward_synced = store.is_forward_synced();
-
-        if !is_forward_synced && state_slot + max_empty_slots < slot {
-            bail!(Error::StateFarBehind {
-                state_slot,
-                max_empty_slots,
-                slot,
-            });
-        }
-
-        combined::process_slots(store.chain_config(), state.make_mut(), slot)?;
+    if from_slot >= slot {
+        return Ok(state);
     }
+
+    let max_empty_slots = store.store_config().max_empty_slots * allowed_empty_slots_multiplier;
+
+    if from_slot + max_empty_slots < slot {
+        bail!(Error::StateFarBehind {
+            state_slot: from_slot,
+            max_empty_slots,
+            slot,
+        });
+    }
+
+    // Log state cache misses after chain is forward synced - mostly to catch cases when
+    // some other than preprocessed next slot state is needed.
+    // With exception of chain reorgs, this is the symptom that state cache is not used optimally.
+    if warn_on_slot_processing && store.is_forward_synced() {
+        // `Backtrace::force_capture` can be costly and a warning may be excessive,
+        // but this is controlled by a `Feature` that should be disabled by default.
+        warn!(
+            "processing slots for beacon state not found in state cache \
+             (block root: {block_root:?}, from slot {from_slot} to {slot})\n{}",
+            Backtrace::force_capture(),
+        );
+    }
+
+    combined::process_slots(store.chain_config(), state.make_mut(), slot)?;
 
     Ok(state)
 }
