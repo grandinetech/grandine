@@ -651,14 +651,30 @@ where
             Err(error) => {
                 warn!("block rejected (error: {error}, origin: {origin:?})");
 
-                let (gossip_id, sender) = origin.split();
+                let sender = match origin {
+                    BlockOrigin::Gossip(gossip_id) => {
+                        self.send_to_p2p(P2pMessage::Reject(
+                            Some(gossip_id),
+                            MutatorRejectionReason::InvalidBlock,
+                        ));
 
-                if gossip_id.is_some() {
-                    self.send_to_p2p(P2pMessage::Reject(
-                        gossip_id,
-                        MutatorRejectionReason::InvalidBlock,
-                    ));
-                }
+                        None
+                    }
+                    BlockOrigin::Api(sender) => sender,
+                    BlockOrigin::Requested(peer_id) => {
+                        if let Some(peer_id) = peer_id {
+                            // During block sync (and especially during non-finality events)
+                            // it's important to drop peers that send invalid blocks
+                            self.send_to_p2p(P2pMessage::PenalizePeer(
+                                peer_id,
+                                MutatorRejectionReason::InvalidBlock,
+                            ));
+                        }
+
+                        None
+                    }
+                    BlockOrigin::Own | BlockOrigin::Persisted => None,
+                };
 
                 if let Some(block_root) = rejected_block_root {
                     self.store_mut().register_rejected_block(block_root);
