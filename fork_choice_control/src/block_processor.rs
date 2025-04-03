@@ -195,7 +195,11 @@ impl<P: Preset> BlockProcessor<P> {
                 // > Make a copy of the state to avoid mutability issues
                 let state = self
                     .state_cache
-                    .before_or_at_slot(store, parent.block_root, block.message().slot())
+                    .try_state_at_slot_for_block_sync(
+                        store,
+                        parent.block_root,
+                        block.message().slot(),
+                    )?
                     .unwrap_or_else(|| parent.state(store));
 
                 // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
