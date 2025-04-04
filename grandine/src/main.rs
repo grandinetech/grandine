@@ -1,5 +1,6 @@
 use core::{future::Future, net::SocketAddr, panic::AssertUnwindSafe, pin::pin};
 use std::{
+    collections::HashSet,
     net::{TcpListener, UdpSocket},
     path::PathBuf,
     process::ExitCode,
@@ -34,7 +35,7 @@ use thiserror::Error;
 use tokio::runtime::Builder;
 use types::{
     config::Config as ChainConfig,
-    phase0::primitives::{ExecutionBlockNumber, Slot},
+    phase0::primitives::{ExecutionBlockNumber, Slot, H256},
     preset::{Preset, PresetName},
     redacting_url::RedactingUrl,
     traits::BeaconState as _,
@@ -104,6 +105,7 @@ struct Context {
     detect_doppelgangers: bool,
     slashing_protection_history_limit: u64,
     validator_enabled: bool,
+    blacklisted_blocks: HashSet<H256>,
 }
 
 impl Context {
@@ -187,6 +189,7 @@ impl Context {
             detect_doppelgangers,
             slashing_protection_history_limit,
             validator_enabled,
+            blacklisted_blocks,
         } = self;
 
         let StorageConfig { in_memory, .. } = storage_config;
@@ -305,6 +308,7 @@ impl Context {
             slasher_config,
             http_api_config,
             metrics_config,
+            blacklisted_blocks,
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
         )
@@ -393,6 +397,7 @@ fn try_main() -> Result<()> {
         in_memory,
         validator_api_config,
         kzg_backend,
+        blacklisted_blocks,
     } = config;
 
     features.into_iter().for_each(Feature::enable);
@@ -544,6 +549,7 @@ fn try_main() -> Result<()> {
         detect_doppelgangers,
         slashing_protection_history_limit,
         validator_enabled,
+        blacklisted_blocks,
     };
 
     match context.chain_config.preset_base {

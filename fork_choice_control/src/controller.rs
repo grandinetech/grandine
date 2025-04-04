@@ -10,6 +10,7 @@
 
 use core::{panic::AssertUnwindSafe, sync::atomic::AtomicBool};
 use std::{
+    collections::HashSet,
     sync::{mpsc::Sender, Arc},
     thread::{Builder, JoinHandle},
     time::Instant,
@@ -107,6 +108,7 @@ where
         storage: Arc<Storage<P>>,
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
         finished_back_sync: bool,
+        blacklisted_blocks: HashSet<H256>,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
 
@@ -118,6 +120,7 @@ where
             storage.clone_arc(),
             finished_initial_forward_sync,
             finished_back_sync,
+            blacklisted_blocks,
         );
 
         store.apply_tick(tick)?;

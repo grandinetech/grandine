@@ -192,6 +192,7 @@ impl<P: Preset> Context<P> {
             storage,
             core::iter::empty(),
             true,
+            [].into(),
         )?;
 
         for block in extra_blocks {

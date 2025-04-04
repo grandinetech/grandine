@@ -126,6 +126,7 @@ where
             storage,
             core::iter::empty(),
             true,
+            [].into(),
         )
         .expect("Controller::new should not fail in tests and benchmarks")
     }

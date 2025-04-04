@@ -397,6 +397,10 @@ struct BeaconNodeOptions {
 
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
+
+    // A list beacon block roots that beacon node rejects unconditionally
+    #[clap(long)]
+    blacklisted_blocks: Vec<H256>,
 }
 
 #[expect(
@@ -944,6 +948,7 @@ impl GrandineArgs {
             detect_doppelgangers,
             in_memory,
             kzg_backend,
+            blacklisted_blocks,
         } = beacon_node_options;
 
         // let SlasherOptions {
@@ -1326,6 +1331,7 @@ impl GrandineArgs {
             in_memory,
             validator_api_config,
             kzg_backend,
+            blacklisted_blocks: blacklisted_blocks.into_iter().collect(),
         })
     }
 

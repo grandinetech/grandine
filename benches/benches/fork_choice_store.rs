@@ -80,6 +80,7 @@ impl Criterion {
                     storage,
                     false,
                     false,
+                    [].into(),
                 );
 
                 for slot in (anchor_slot + 1)..=last_attestation_slot {
