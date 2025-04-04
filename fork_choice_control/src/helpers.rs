@@ -360,11 +360,12 @@ impl<P: Preset> Context<P> {
 
     pub fn on_notified_new_payload(
         &self,
+        beacon_block_root: Option<H256>,
         block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {
         self.controller()
-            .on_notified_new_payload(block_hash, payload_status);
+            .on_notified_new_payload(beacon_block_root, block_hash, payload_status);
         self.controller().wait_for_tasks();
     }
 
@@ -385,6 +386,7 @@ impl<P: Preset> Context<P> {
         let execution_block_hash = Self::execution_block_hash(block);
 
         self.on_notified_new_payload(
+            Some(block.message().hash_tree_root()),
             execution_block_hash,
             PayloadStatusV1 {
                 status: PayloadValidationStatus::Valid,
@@ -404,6 +406,7 @@ impl<P: Preset> Context<P> {
         latest_valid_block: Option<&SignedBeaconBlock<P>>,
     ) {
         self.on_notified_new_payload(
+            Some(block.message().hash_tree_root()),
             Self::execution_block_hash(block),
             PayloadStatusV1 {
                 status: PayloadValidationStatus::Invalid,

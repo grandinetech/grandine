@@ -37,7 +37,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     nonstandard::ValidationOutcome,
-    phase0::primitives::{ExecutionBlockHash, Slot, SubnetId},
+    phase0::primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -270,11 +270,13 @@ where
 
     pub fn on_notified_new_payload(
         &self,
+        beacon_block_root: Option<H256>,
         execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {
         MutatorMessage::NotifiedNewPayload {
             wait_group: self.owned_wait_group(),
+            beacon_block_root,
             execution_block_hash,
             payload_status,
         }

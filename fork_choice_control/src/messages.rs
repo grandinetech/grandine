@@ -134,6 +134,7 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     NotifiedNewPayload {
         wait_group: W,
+        beacon_block_root: Option<H256>,
         execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     },

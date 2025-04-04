@@ -40,7 +40,7 @@ pub async fn post_payload_status<P: Preset>(
         payload_status,
     } = payload_status_with_block_hash;
 
-    controller.on_notified_new_payload(block_hash, payload_status.into());
+    controller.on_notified_new_payload(None, block_hash, payload_status.into());
 }
 
 /// `POST /test/take_messages`
