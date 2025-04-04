@@ -134,8 +134,12 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             } = {
                 let timer = Instant::now();
 
+                // Temporarily disable the optimal attestation packer until it outperforms greedy mode again
+                // let outcome =
+                //     pack_attestations_optimally(&attestation_packer, &pool, &beacon_state).await;
+
                 let outcome =
-                    pack_attestations_optimally(&attestation_packer, &pool, &beacon_state).await;
+                    pack_attestations_greedily(&attestation_packer, &pool, &beacon_state).await;
 
                 features::log!(
                     DebugAttestationPacker,
@@ -329,6 +333,7 @@ fn aggregate_attestation<P: Preset>(
     Ok(())
 }
 
+#[expect(dead_code, reason = "temporary disabled")]
 async fn pack_attestations_optimally<P: Preset>(
     attestation_packer: &AttestationPacker<P>,
     pool: &Pool<P>,
