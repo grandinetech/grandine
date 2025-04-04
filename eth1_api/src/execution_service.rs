@@ -113,6 +113,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     match &response {
                         Ok(payload_status) => {
                             self.controller.on_notified_new_payload(
+                                Some(beacon_block_root),
                                 payload.block_hash(),
                                 payload_status.clone(),
                             );

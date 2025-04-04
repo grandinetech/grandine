@@ -3145,7 +3145,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         vec![]
     }
 
-    pub fn invalidate_block_and_descendant_payload_statuses(
+    pub fn invalidate_block_and_descendant_payloads(&mut self, block_root: H256) {
+        let invalidate_blocks_with_roots = self
+            .unfinalized
+            .values()
+            .filter_map(|segment| {
+                let chain_block_roots = self
+                    .unfinalized_chain_ending_with(segment, segment.last_position())
+                    .map(|chain_link| chain_link.block_root)
+                    .take_while_inclusive(|root| *root != block_root)
+                    .collect::<HashSet<H256>>();
+
+                chain_block_roots
+                    .contains(&block_root)
+                    .then_some(chain_block_roots)
+            })
+            .flatten()
+            .collect::<HashSet<H256>>();
+
+        for root in invalidate_blocks_with_roots {
+            if let Some(chain_link) = self.unfinalized_chain_link_mut(root) {
+                chain_link.payload_status = PayloadStatus::Invalid;
+            }
+        }
+
+        self.update_head_segment_id();
+    }
+
+    pub fn invalidate_execution_block_and_descendant_payloads(
         &mut self,
         block_hash: ExecutionBlockHash,
     ) -> PayloadAction {

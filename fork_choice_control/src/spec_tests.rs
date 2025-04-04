@@ -236,7 +236,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 block_hash,
                 payload_status,
             }) => {
-                context.on_notified_new_payload(block_hash, payload_status.into());
+                context.on_notified_new_payload(None, block_hash, payload_status.into());
             }
             Step::AttesterSlashing {
                 attester_slashing: file_name,
