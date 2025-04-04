@@ -1,5 +1,5 @@
 use core::{net::SocketAddr, time::Duration};
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
@@ -69,6 +69,7 @@ pub struct GrandineConfig {
     pub in_memory: bool,
     pub validator_api_config: Option<ValidatorApiConfig>,
     pub kzg_backend: KzgBackend,
+    pub blacklisted_blocks: HashSet<H256>,
 }
 
 impl GrandineConfig {

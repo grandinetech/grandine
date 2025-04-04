@@ -47,7 +47,7 @@ use std_ext::ArcExt as _;
 use tokio::select;
 use types::{
     config::Config as ChainConfig,
-    phase0::consts::GENESIS_SLOT,
+    phase0::{consts::GENESIS_SLOT, primitives::H256},
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
@@ -90,6 +90,7 @@ pub async fn run_after_genesis<P: Preset>(
     slasher_config: Option<SlasherConfig>,
     http_api_config: HttpApiConfig,
     metrics_config: MetricsConfig,
+    blacklisted_blocks: HashSet<H256>,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
 ) -> Result<()> {
@@ -258,6 +259,7 @@ pub async fn run_after_genesis<P: Preset>(
         storage.clone_arc(),
         unfinalized_blocks,
         !back_sync_enabled || is_anchor_genesis,
+        blacklisted_blocks,
     )?;
 
     let received_blob_sidecars = Arc::new(DashMap::new());

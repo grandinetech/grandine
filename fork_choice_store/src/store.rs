@@ -1,7 +1,10 @@
 use core::ops::{AddAssign as _, Bound, SubAssign as _};
 use std::{
     backtrace::Backtrace,
-    collections::binary_heap::{BinaryHeap, PeekMut},
+    collections::{
+        binary_heap::{BinaryHeap, PeekMut},
+        HashSet as StdHashSet,
+    },
     sync::{Arc, OnceLock},
 };
 
@@ -211,10 +214,12 @@ pub struct Store<P: Preset, S: Storage<P>> {
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
+    blacklisted_blocks: StdHashSet<H256>,
 }
 
 impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// [`get_forkchoice_store`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_forkchoice_store)
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         chain_config: Arc<ChainConfig>,
@@ -224,6 +229,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         storage: Arc<S>,
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
+        blacklisted_blocks: StdHashSet<H256>,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -287,6 +293,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
+            blacklisted_blocks,
         }
     }
 
@@ -1060,6 +1067,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_transition_for_gossip: impl FnOnce(&ChainLink<P>) -> Result<Option<BlockAction<P>>>,
     ) -> Result<Option<BlockAction<P>>> {
         let block_root = block.message().hash_tree_root();
+
+        if self.blacklisted_blocks.contains(&block_root) {
+            bail!("blacklisted beacon block: (block root: {block_root:?})");
+        }
+
         let block_action = self.validate_gossip_rules(block, block_root);
 
         if let Some(action) = block_action {
@@ -1085,6 +1097,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
     ) -> Result<BlockAction<P>> {
         let block_root = block.message().hash_tree_root();
+
+        if self.blacklisted_blocks.contains(&block_root) {
+            bail!("blacklisted beacon block: (block root: {block_root:?})");
+        }
+
         let block_action = self.validate_gossip_rules(block, block_root);
 
         if let Some(action) = block_action {
@@ -2219,7 +2236,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let index = usize::try_from(validator_index)?;
 
-            let Some(latest_message) = &self.latest_messages[index] else {
+            let Some(Some(latest_message)) = &self.latest_messages.get(index) else {
                 continue;
             };
 
@@ -2659,7 +2676,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let index = usize::try_from(validator_index)?;
                 let balance = self.justified_active_balance(index);
 
-                if let Some(old_message) = &self.latest_messages[index] {
+                if let Some(Some(old_message)) = &self.latest_messages.get(index) {
                     let LatestMessage {
                         epoch: old_epoch,
                         beacon_block_root: old_beacon_block_root,
@@ -2686,7 +2703,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // Note that we mutate `Store.latest_messages` as we go along.
                 // This prevents duplicate attestations from being counted more than once.
-                self.latest_messages[index] = Some(latest_message.clone_arc());
+                if index < self.latest_messages.len() {
+                    self.latest_messages[index] = Some(latest_message.clone_arc());
+                }
             }
         }
 
