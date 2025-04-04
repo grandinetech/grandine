@@ -681,7 +681,7 @@ impl<P: Preset> Network<P> {
             .aggregation_bits
             .none()
         {
-            error!(
+            warn!(
                 "attempted to publish sync committee contribution \
                 and proof with no participants: {contribution_and_proof:?}",
             );
