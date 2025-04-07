@@ -91,8 +91,6 @@ impl<P: Preset> PoolTask for ComputeProposerIndicesTask<P> {
 
         pool.compute_proposer_indices_for_epoch(&beacon_state, current_epoch)
             .await?;
-        pool.compute_proposer_indices_for_epoch(&beacon_state, current_epoch + 1)
-            .await?;
 
         Ok(())
     }
