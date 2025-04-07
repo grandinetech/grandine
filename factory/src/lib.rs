@@ -407,7 +407,7 @@ fn block<P: Preset>(
     mut execution_payload: Option<ExecutionPayload<P>>,
 ) -> Result<BlockWithState<P>> {
     let slot = advanced_state.slot();
-    let proposer_index = accessors::get_beacon_proposer_index(&advanced_state)?;
+    let proposer_index = accessors::get_beacon_proposer_index(config, &advanced_state)?;
     let secret_key = interop::secret_key(proposer_index);
     let parent_root = accessors::latest_block_root(&advanced_state);
 

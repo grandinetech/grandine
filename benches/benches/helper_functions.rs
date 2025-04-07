@@ -15,7 +15,7 @@ use helper_functions::accessors;
 use ssz::Hc;
 use std_ext::ArcExt as _;
 use types::{
-    altair::containers::SyncCommittee, cache::Cache, combined::BeaconState,
+    altair::containers::SyncCommittee, cache::Cache, combined::BeaconState, config::Config,
     phase0::primitives::ValidatorIndex, preset::Preset, traits::BeaconState as _,
 };
 
@@ -25,14 +25,17 @@ fn main() {
         .configure_from_args()
         .benchmark_get_beacon_proposer_index(
             "accessors::get_beacon_proposer_index with mainnet genesis state",
+            &Config::mainnet(),
             &mainnet::GENESIS_BEACON_STATE,
         )
         .benchmark_get_beacon_proposer_index(
             "accessors::get_beacon_proposer_index with Goerli genesis state",
+            &Config::goerli(),
             &goerli::GENESIS_BEACON_STATE,
         )
         .benchmark_get_beacon_proposer_index(
             "accessors::get_beacon_proposer_index with Medalla genesis state",
+            &Config::medalla(),
             &medalla::GENESIS_BEACON_STATE,
         )
         .benchmark_get_next_sync_committee(
@@ -47,6 +50,7 @@ impl Criterion {
     fn benchmark_get_beacon_proposer_index(
         &mut self,
         group_name: &str,
+        config: &Config,
         state: &LazyBeaconState<impl Preset>,
     ) -> &mut Self {
         self.benchmark_group(group_name)
@@ -54,9 +58,9 @@ impl Criterion {
             .bench_function("cached", |bencher| {
                 let state = state.force();
 
-                get_beacon_proposer_index(state);
+                get_beacon_proposer_index(config, state);
 
-                bencher.iter(|| get_beacon_proposer_index(state))
+                bencher.iter(|| get_beacon_proposer_index(config, state))
             })
             .bench_function("not cached", |bencher| {
                 bencher.iter_batched_ref(
@@ -65,7 +69,7 @@ impl Criterion {
                         *state.make_mut().cache_mut() = Cache::default();
                         state
                     },
-                    |state| get_beacon_proposer_index(state),
+                    |state| get_beacon_proposer_index(config, state),
                     BatchSize::SmallInput,
                 )
             });
@@ -105,13 +109,13 @@ impl Criterion {
     }
 }
 
-fn get_beacon_proposer_index(state: &BeaconState<impl Preset>) -> ValidatorIndex {
+fn get_beacon_proposer_index(config: &Config, state: &BeaconState<impl Preset>) -> ValidatorIndex {
     // Wrapping `state` in `core::hint::black_box` or `criterion::black_box` reduces throughput of
     // cached index benchmarks by 30-40% and 15-20% respectively. The states we use for benchmarking
     // are read from files at runtime, so it's unlikely that this is due to the functions preventing
     // some unrealistic optimization. The documentation for `criterion::black_box` does state it may
     // have overhead.
-    accessors::get_beacon_proposer_index(state)
+    accessors::get_beacon_proposer_index(config, state)
         .expect("proposer index should be computed successfully")
 }
 

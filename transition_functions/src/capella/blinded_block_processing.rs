@@ -43,7 +43,7 @@ pub fn custom_process_blinded_block<P: Preset>(
 
     debug_assert_eq!(state.slot, block.slot);
 
-    unphased::process_block_header(state, block)?;
+    unphased::process_block_header(config, state, block)?;
 
     // > [Modified in Capella] Removed `is_execution_enabled` check in Capella
     //

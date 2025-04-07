@@ -32,6 +32,7 @@ use typenum::Unsigned as _;
 use types::{
     altair::containers::SyncAggregate,
     combined::{BeaconState, SignedBeaconBlock},
+    config::Config,
     nonstandard::{
         AttestationEpoch, AttestationOutcome, GweiVec, RelativeEpoch, SlotVec, UsizeVec, WithStatus,
     },
@@ -480,7 +481,8 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         assert!(misc::is_epoch_start::<P>(state.slot()));
 
         // These must be computed before calling `combined::epoch_report`.
-        let previous_epoch_proposal_assignments = previous_epoch_proposal_assignments(&state)?;
+        let previous_epoch_proposal_assignments =
+            previous_epoch_proposal_assignments(controller.chain_config(), &state)?;
         let previous_epoch_block_roots = previous_epoch_block_roots(&state)?;
         let previous_epoch_attestation_assignments =
             previous_epoch_attestation_assignments(&state)?;
@@ -690,7 +692,9 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         let current_epoch = query.end;
 
         // These must be computed before calling `combined::epoch_report`.
-        let previous_epoch_proposal_assignments = previous_epoch_proposal_assignments(&state)?;
+        let previous_epoch_proposal_assignments =
+            previous_epoch_proposal_assignments(controller.chain_config(), &state)?;
+
         let previous_epoch_block_roots = previous_epoch_block_roots(&state)?;
         let previous_epoch_attestation_assignments =
             previous_epoch_attestation_assignments(&state)?;
@@ -928,23 +932,25 @@ pub async fn get_validator_registered<P: Preset, W: Wait>(
 }
 
 fn previous_epoch_proposal_assignments(
+    config: &Config,
     state: &BeaconState<impl Preset>,
 ) -> Result<HashMap<ValidatorIndex, SlotVec>> {
     if accessors::get_current_epoch(state) == GENESIS_EPOCH {
         return Ok(HashMap::new());
     }
 
-    proposal_assignments(state, accessors::get_previous_epoch(state))
+    proposal_assignments(config, state, accessors::get_previous_epoch(state))
 }
 
 fn proposal_assignments<P: Preset>(
+    config: &Config,
     state: &BeaconState<P>,
     epoch: Epoch,
 ) -> Result<HashMap<ValidatorIndex, SlotVec>> {
     let mut proposal_assignments = HashMap::<_, SlotVec>::with_capacity(P::SlotsPerEpoch::USIZE);
 
     for slot in misc::slots_in_epoch::<P>(epoch) {
-        let proposer_index = accessors::get_beacon_proposer_index_at_slot(state, slot)?;
+        let proposer_index = accessors::get_beacon_proposer_index_at_slot(config, state, slot)?;
 
         proposal_assignments
             .entry(proposer_index)
@@ -1182,11 +1188,11 @@ mod tests {
 
         combined::process_slots(&config, state.make_mut(), start_slot - 1)?;
 
-        let proposal_assignments_before_exit = current_epoch_proposal_assignments(&state)?;
+        let proposal_assignments_before_exit = current_epoch_proposal_assignments(&config, &state)?;
 
         combined::process_slots(&config, state.make_mut(), start_slot)?;
 
-        let proposal_assignments_after_exit = previous_epoch_proposal_assignments(&state)?;
+        let proposal_assignments_after_exit = previous_epoch_proposal_assignments(&config, &state)?;
 
         assert_eq!(
             proposal_assignments_before_exit,
@@ -1197,8 +1203,9 @@ mod tests {
     }
 
     fn current_epoch_proposal_assignments(
+        config: &Config,
         state: &BeaconState<impl Preset>,
     ) -> Result<HashMap<ValidatorIndex, SlotVec>> {
-        proposal_assignments(state, accessors::get_current_epoch(state))
+        proposal_assignments(config, state, accessors::get_current_epoch(state))
     }
 }

@@ -1973,6 +1973,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/validator/duties/proposer/{epoch}`
 pub async fn validator_proposer_duties<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     EthPath(epoch): EthPath<Epoch>,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
@@ -1987,7 +1988,9 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 
     let response = misc::slots_in_epoch::<P>(epoch)
         .map(|slot| {
-            let validator_index = accessors::get_beacon_proposer_index_at_slot(&state, slot)?;
+            let validator_index =
+                accessors::get_beacon_proposer_index_at_slot(&chain_config, &state, slot)?;
+
             let pubkey = accessors::public_key(&state, validator_index)?.to_bytes();
 
             Ok(ValidatorProposerDutyResponse {
@@ -2157,6 +2160,7 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/validator/blinded_blocks/{slot}`
 pub async fn validator_blinded_block<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
@@ -2175,7 +2179,8 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     let block_root = controller.head().value.block_root;
     let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
 
-    let Ok(proposer_index) = accessors::get_beacon_proposer_index(&beacon_state) else {
+    let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
+    else {
         // accessors::get_beacon_proposer_index can only fail if head state has no active validators.
         warn!("failed to produce blinded beacon block: head state has no active validators");
         return Err(Error::UnableToProduceBlindedBlock);
@@ -2219,6 +2224,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
 
 /// `GET /eth/v2/validator/blocks/{slot}`
 pub async fn validator_block<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
@@ -2237,7 +2243,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
 
     let block_root = controller.head().value.block_root;
     let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
-    let proposer_index = accessors::get_beacon_proposer_index(&beacon_state)?;
+    let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
     let graffiti = graffiti.unwrap_or_default();
 
     let block_build_context = block_producer.new_build_context(
@@ -2265,6 +2271,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
 
 /// `GET /eth/v3/validator/blocks/{slot}`
 pub async fn validator_block_v3<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
@@ -2285,7 +2292,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let block_root = controller.head().value.block_root;
     let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
 
-    let Ok(proposer_index) = accessors::get_beacon_proposer_index(&beacon_state) else {
+    let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
+    else {
         // accessors::get_beacon_proposer_index can only fail if head state has no active validators.
         warn!("failed to produce blinded beacon block: head state has no active validators");
         return Err(Error::UnableToProduceBeaconBlock);

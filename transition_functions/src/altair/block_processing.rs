@@ -86,7 +86,7 @@ pub fn process_block_for_gossip<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
-    unphased::process_block_header_for_gossip(state, &block.message)?;
+    unphased::process_block_header_for_gossip(config, state, &block.message)?;
 
     SingleVerifier.verify_singular(
         block.message.signing_root(config, state),
@@ -107,7 +107,7 @@ pub fn custom_process_block<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.slot);
 
-    unphased::process_block_header(state, block)?;
+    unphased::process_block_header(config, state, block)?;
     unphased::process_randao(config, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
@@ -202,7 +202,7 @@ fn process_operations<P: Preset, V: Verifier>(
     }
 
     for attestation in &body.attestations {
-        apply_attestation(state, attestation, &mut slot_report)?;
+        apply_attestation(config, state, attestation, &mut slot_report)?;
     }
 
     // The conditional is not needed for correctness.
@@ -271,6 +271,7 @@ fn process_attester_slashing<P: Preset>(
 }
 
 pub fn apply_attestation<P: Preset>(
+    config: &Config,
     state: &mut impl PostAltairBeaconState<P>,
     attestation: &Attestation<P>,
     mut slot_report: impl SlotReport,
@@ -315,7 +316,7 @@ pub fn apply_attestation<P: Preset>(
     }
 
     // > Reward proposer
-    let proposer_index = get_beacon_proposer_index(state)?;
+    let proposer_index = get_beacon_proposer_index(config, state)?;
     let proposer_reward_denominator =
         (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get() / PROPOSER_WEIGHT;
     let proposer_reward = proposer_reward_numerator / proposer_reward_denominator;
@@ -493,7 +494,7 @@ pub fn process_sync_aggregate<P: Preset>(
         participant_reward * PROPOSER_WEIGHT / (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT);
 
     // > Apply participant and proposer rewards
-    let proposer_index = get_beacon_proposer_index(state)?;
+    let proposer_index = get_beacon_proposer_index(config, state)?;
 
     let mut participation = 0;
 
@@ -660,7 +661,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |_, state, block: AltairBeaconBlock<_>, _| unphased::process_block_header(state, &block),
+        |config, state, block: AltairBeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/altair/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/altair/operations/block_header/*/*",
@@ -858,7 +859,7 @@ mod spec_tests {
             )?,
         }
 
-        apply_attestation(state, attestation, NullSlotReport)
+        apply_attestation(config, state, attestation, NullSlotReport)
     }
 
     fn process_deposit<P: Preset>(

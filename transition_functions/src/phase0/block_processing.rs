@@ -72,7 +72,7 @@ pub fn process_block_for_gossip<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
-    unphased::process_block_header_for_gossip(state, &block.message)?;
+    unphased::process_block_header_for_gossip(config, state, &block.message)?;
 
     SingleVerifier.verify_singular(
         block.message.signing_root(config, state),
@@ -93,7 +93,7 @@ pub fn custom_process_block<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.slot);
 
-    unphased::process_block_header(state, block)?;
+    unphased::process_block_header(config, state, block)?;
     unphased::process_randao(config, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
@@ -185,7 +185,7 @@ fn process_operations<P: Preset, V: Verifier>(
     }
 
     for attestation in &body.attestations {
-        apply_attestation(state, attestation)?;
+        apply_attestation(config, state, attestation)?;
     }
 
     // The conditional is not needed for correctness.
@@ -254,6 +254,7 @@ fn process_attester_slashing<P: Preset>(
 }
 
 fn apply_attestation<P: Preset>(
+    config: &Config,
     state: &mut BeaconState<P>,
     attestation: &Attestation<P>,
 ) -> Result<()> {
@@ -263,7 +264,7 @@ fn apply_attestation<P: Preset>(
         data,
         aggregation_bits: attestation.aggregation_bits.clone(),
         inclusion_delay: state.slot - data.slot,
-        proposer_index: get_beacon_proposer_index(state)?,
+        proposer_index: get_beacon_proposer_index(config, state)?,
     };
 
     let attestations = match attestation_epoch(state, data.target.epoch)? {
@@ -488,7 +489,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |_, state, block: Phase0BeaconBlock<_>, _| unphased::process_block_header(state, &block),
+        |config, state, block: Phase0BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/phase0/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/phase0/operations/block_header/*/*",
@@ -660,7 +661,7 @@ mod spec_tests {
             )?,
         }
 
-        apply_attestation(state, attestation)
+        apply_attestation(config, state, attestation)
     }
 
     fn process_deposit<P: Preset>(
