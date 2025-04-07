@@ -286,7 +286,7 @@ impl<P: Preset> Pool<P> {
             .map(|slot| {
                 Ok((
                     slot,
-                    accessors::get_beacon_proposer_index_at_slot(state, slot)?,
+                    accessors::get_beacon_proposer_index_at_slot(&self.chain_config, state, slot)?,
                 ))
             })
             .collect::<Result<Vec<_>>>()?;

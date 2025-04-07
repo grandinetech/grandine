@@ -80,7 +80,7 @@ pub fn process_block_for_gossip<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
-    unphased::process_block_header_for_gossip(state, &block.message)?;
+    unphased::process_block_header_for_gossip(config, state, &block.message)?;
 
     if is_execution_enabled(state, &block.message.body) {
         process_execution_payload_for_gossip(config, state, &block.message.body)?;
@@ -106,7 +106,7 @@ pub fn custom_process_block<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.slot);
 
-    unphased::process_block_header(state, block)?;
+    unphased::process_block_header(config, state, block)?;
 
     // > [New in Bellatrix]
     if is_execution_enabled(state, &block.body) {
@@ -272,7 +272,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     }
 
     for attestation in body.attestations() {
-        altair::apply_attestation(state, attestation, &mut slot_report)?;
+        altair::apply_attestation(config, state, attestation, &mut slot_report)?;
     }
 
     // The conditional is not needed for correctness.
@@ -426,7 +426,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |_, state, block: BeaconBlock<_>, _| unphased::process_block_header(state, &block),
+        |config, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/bellatrix/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/bellatrix/operations/block_header/*/*",
@@ -662,7 +662,7 @@ mod spec_tests {
             )?,
         }
 
-        altair::apply_attestation(state, attestation, NullSlotReport)
+        altair::apply_attestation(config, state, attestation, NullSlotReport)
     }
 
     fn process_deposit<P: Preset>(

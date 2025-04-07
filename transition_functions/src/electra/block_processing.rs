@@ -123,7 +123,7 @@ pub fn process_block_for_gossip<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
-    unphased::process_block_header_for_gossip(state, &block.message)?;
+    unphased::process_block_header_for_gossip(config, state, &block.message)?;
 
     process_execution_payload_for_gossip(config, state, &block.message.body)?;
 
@@ -152,7 +152,7 @@ pub fn custom_process_block<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.slot);
 
-    unphased::process_block_header(state, block)?;
+    unphased::process_block_header(config, state, block)?;
 
     // > [Modified in Electra:EIP7251]
     process_withdrawals(state, &block.body.execution_payload)?;
@@ -563,7 +563,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     }
 
     for attestation in body.attestations() {
-        apply_attestation(state, attestation, &mut slot_report)?;
+        apply_attestation(config, state, attestation, &mut slot_report)?;
     }
 
     // The conditional is not needed for correctness.
@@ -646,6 +646,7 @@ pub fn process_attester_slashing<P: Preset>(
 }
 
 pub fn apply_attestation<P: Preset>(
+    config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     attestation: &Attestation<P>,
     mut slot_report: impl SlotReport,
@@ -686,7 +687,7 @@ pub fn apply_attestation<P: Preset>(
     }
 
     // > Reward proposer
-    let proposer_index = get_beacon_proposer_index(state)?;
+    let proposer_index = get_beacon_proposer_index(config, state)?;
     let proposer_reward_denominator =
         (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get() / PROPOSER_WEIGHT;
     let proposer_reward = proposer_reward_numerator / proposer_reward_denominator;
@@ -1361,7 +1362,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |_, state, block: BeaconBlock<_>, _| unphased::process_block_header(state, &block),
+        |config, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/electra/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/electra/operations/block_header/*/*",
@@ -1665,7 +1666,7 @@ mod spec_tests {
             }
         }
 
-        apply_attestation(state, attestation, NullSlotReport)
+        apply_attestation(config, state, attestation, NullSlotReport)
     }
 
     fn process_deposit<P: Preset>(

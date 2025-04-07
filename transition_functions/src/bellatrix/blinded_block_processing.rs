@@ -25,7 +25,7 @@ pub fn custom_process_blinded_block<P: Preset>(
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.slot);
 
-    unphased::process_block_header(state, block)?;
+    unphased::process_block_header(config, state, block)?;
 
     // > [New in Bellatrix]
     //

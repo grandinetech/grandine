@@ -70,6 +70,7 @@ impl CombinedDeposit {
 }
 
 pub fn process_block_header_for_gossip<P: Preset>(
+    config: &Config,
     state: &impl BeaconState<P>,
     block: &impl BeaconBlock<P>,
 ) -> Result<()> {
@@ -95,7 +96,7 @@ pub fn process_block_header_for_gossip<P: Preset>(
     );
 
     // > Verify that proposer index is the correct index
-    let computed = get_beacon_proposer_index(state)?;
+    let computed = get_beacon_proposer_index(config, state)?;
     let in_block = block.proposer_index();
 
     ensure!(
@@ -116,10 +117,11 @@ pub fn process_block_header_for_gossip<P: Preset>(
 }
 
 pub fn process_block_header<P: Preset>(
+    config: &Config,
     state: &mut impl BeaconState<P>,
     block: &impl BeaconBlock<P>,
 ) -> Result<()> {
-    process_block_header_for_gossip(state, block)?;
+    process_block_header_for_gossip(config, state, block)?;
 
     // > Cache current block as the new latest block
     *state.latest_block_header_mut() = BeaconBlockHeader {
@@ -150,7 +152,7 @@ pub fn process_randao<P: Preset>(
     let randao_reveal = body.randao_reveal();
 
     // > Verify RANDAO reveal
-    let proposer_index = get_beacon_proposer_index(state)?;
+    let proposer_index = get_beacon_proposer_index(config, state)?;
     let public_key = &state.validators().get(proposer_index)?.pubkey;
 
     if !verifier.has_option(VerifierOption::SkipRandaoVerification) {

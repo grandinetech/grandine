@@ -454,11 +454,15 @@ pub fn beacon_committees<P: Preset>(
     }))
 }
 
-pub fn get_beacon_proposer_index<P: Preset>(state: &impl BeaconState<P>) -> Result<ValidatorIndex> {
-    get_or_try_init_beacon_proposer_index(state, true)
+pub fn get_beacon_proposer_index<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+) -> Result<ValidatorIndex> {
+    get_or_try_init_beacon_proposer_index(config, state, true)
 }
 
 pub fn get_or_try_init_beacon_proposer_index<P: Preset>(
+    config: &Config,
     state: &impl BeaconState<P>,
     report_cache_miss: bool,
 ) -> Result<ValidatorIndex> {
@@ -475,12 +479,13 @@ pub fn get_or_try_init_beacon_proposer_index<P: Preset>(
                 }
             }
 
-            get_beacon_proposer_index_at_slot(state, state.slot())
+            get_beacon_proposer_index_at_slot(config, state, state.slot())
         })
         .copied()
 }
 
 pub fn get_beacon_proposer_index_at_slot<P: Preset>(
+    config: &Config,
     state: &impl BeaconState<P>,
     slot: Slot,
 ) -> Result<ValidatorIndex> {
@@ -497,7 +502,7 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
     let indices = active_validator_indices_ordered(state, relative_epoch);
     let seed = hashing::hash_256_64(seed, slot);
 
-    misc::compute_proposer_index(state, indices, seed)
+    misc::compute_proposer_index(config, state, indices, seed, epoch)
 }
 
 pub fn get_domain<P: Preset>(

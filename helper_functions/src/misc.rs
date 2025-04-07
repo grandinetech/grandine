@@ -250,11 +250,13 @@ fn compute_proposer_index_post_electra<P: Preset>(
 }
 
 pub(crate) fn compute_proposer_index<P: Preset>(
+    config: &Config,
     state: &impl BeaconState<P>,
     indices: &PackedIndices,
     seed: H256,
+    epoch: Epoch,
 ) -> Result<ValidatorIndex> {
-    if state.is_post_electra() {
+    if state.is_post_electra() || epoch >= config.electra_fork_epoch {
         compute_proposer_index_post_electra(state, indices, seed)
     } else {
         compute_proposer_index_pre_electra(state, indices, seed)
@@ -738,9 +740,11 @@ mod tests {
         };
 
         let proposer_index = compute_proposer_index(
+            &Config::minimal(),
             &state,
             accessors::active_validator_indices_ordered(&state, RelativeEpoch::Current),
             H256::random(),
+            compute_epoch_at_slot::<Minimal>(state.slot()),
         )?;
 
         assert!(proposer_index < 2);

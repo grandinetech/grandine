@@ -1896,7 +1896,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // If the proposer_index cannot immediately be verified against the expected shuffling,
             // the sidecar MAY be queued for later processing while proposers for the block's branch are calculated --
             // in such a case do not REJECT, instead IGNORE this message.
-            let computed = accessors::get_beacon_proposer_index(&state)?;
+            let computed = accessors::get_beacon_proposer_index(&self.chain_config, &state)?;
 
             ensure!(
                 block_header.proposer_index == computed,

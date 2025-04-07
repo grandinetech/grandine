@@ -40,7 +40,7 @@ pub fn slash_validator<P: Preset>(
     decrease_balance(balance(state, slashed_index)?, slashing_penalty);
 
     // > Apply proposer and whistleblower rewards
-    let proposer_index = get_beacon_proposer_index(state)?;
+    let proposer_index = get_beacon_proposer_index(config, state)?;
     let whistleblower_index = whistleblower_index.unwrap_or(proposer_index);
     let whistleblower_reward = effective_balance / P::WHISTLEBLOWER_REWARD_QUOTIENT;
     let proposer_reward = whistleblower_reward * PROPOSER_WEIGHT / WEIGHT_DENOMINATOR;

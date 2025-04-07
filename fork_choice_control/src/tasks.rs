@@ -22,6 +22,7 @@ use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use types::{
     combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
@@ -474,7 +475,9 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
 
         match state_cache.state_at_slot_quiet(&store_snapshot, head_block_root, next_slot) {
             Ok(state) => {
-                if let Err(error) = initialize_preprocessed_state_cache(&state) {
+                if let Err(error) =
+                    initialize_preprocessed_state_cache(store_snapshot.chain_config(), &state)
+                {
                     warn!("failed to initialize preprocessed state's cache values: {error:?}");
                 }
 
@@ -487,8 +490,11 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
     }
 }
 
-fn initialize_preprocessed_state_cache<P: Preset>(state: &impl BeaconState<P>) -> Result<()> {
-    accessors::get_or_try_init_beacon_proposer_index(state, false)?;
+fn initialize_preprocessed_state_cache<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+) -> Result<()> {
+    accessors::get_or_try_init_beacon_proposer_index(config, state, false)?;
     accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Current, false);
     accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Next, false);
     accessors::get_or_init_total_active_balance(state, false);
