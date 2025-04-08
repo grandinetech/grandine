@@ -58,9 +58,14 @@ types = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
+hex-literal = { workspace = true }
 interop = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }
+
+[features]
+eth2-cache = []
