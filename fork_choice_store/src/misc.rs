@@ -87,7 +87,7 @@ impl<P: Preset> ChainLink<P> {
 
     #[must_use]
     pub fn state<S: Storage<P>>(&self, store: &Store<P, S>) -> Arc<BeaconState<P>> {
-        store.load_beacon_state(self.block_root, self.state.as_ref())
+        store.load_beacon_state(self.block_root, self.slot(), self.state.as_ref())
     }
 
     // TODO(feature/deneb): Confirm that post-Deneb states are always post-Merge. See:
