@@ -24,6 +24,7 @@ options=(
     --package bls
     --package builder_api
     --package clock
+    --package data_dumper
     --package database
     --package deposit_tree
     --package directories

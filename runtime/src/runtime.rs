@@ -8,6 +8,7 @@ use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
 use dashmap::DashMap;
+use data_dumper::DataDumper;
 use database::{Database, DatabaseMode};
 use dedicated_executor::DedicatedExecutor;
 use doppelganger_protection::DoppelgangerProtection;
@@ -370,6 +371,8 @@ pub async fn run_after_genesis<P: Preset>(
         storage_config.sync_database(None, DatabaseMode::ReadWrite)?
     };
 
+    let data_dumper = Arc::new(DataDumper::new(&controller.chain_config().config_name)?);
+
     let mut block_sync_service = BlockSyncService::new(
         chain_config.clone_arc(),
         block_sync_database,
@@ -382,6 +385,7 @@ pub async fn run_after_genesis<P: Preset>(
         storage_config.storage_mode,
         network_config.target_peers,
         received_blob_sidecars,
+        data_dumper.clone_arc(),
     )?;
 
     block_sync_service.try_to_spawn_back_sync_states_archiver()?;
@@ -611,6 +615,7 @@ pub async fn run_after_genesis<P: Preset>(
         bls_to_execution_change_pool.clone_arc(),
         metrics.clone(),
         registry.as_mut(),
+        data_dumper,
     )
     .await?;
 

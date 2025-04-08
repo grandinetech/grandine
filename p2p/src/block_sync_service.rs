@@ -7,6 +7,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use dashmap::DashMap;
+use data_dumper::DataDumper;
 use database::Database;
 use eth1_api::RealController;
 use eth2_libp2p::{PeerAction, PeerId, ReportSource};
@@ -80,6 +81,7 @@ pub struct BlockSyncService<P: Preset> {
     is_exiting: Arc<AtomicBool>,
     received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
+    data_dumper: Arc<DataDumper>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
     sync_to_p2p_tx: UnboundedSender<SyncToP2p>,
@@ -109,6 +111,7 @@ impl<P: Preset> BlockSyncService<P> {
         storage_mode: StorageMode,
         target_peers: usize,
         received_blob_sidecars: Arc<DashMap<BlobIdentifier, u64>>,
+        data_dumper: Arc<DataDumper>,
     ) -> Result<Self> {
         let database;
         let back_sync;
@@ -209,6 +212,7 @@ impl<P: Preset> BlockSyncService<P> {
             is_exiting: Arc::new(AtomicBool::new(false)),
             received_blob_sidecars,
             received_block_roots: HashMap::new(),
+            data_dumper,
             fork_choice_to_sync_rx,
             p2p_to_sync_rx,
             sync_to_p2p_tx,
@@ -309,6 +313,8 @@ impl<P: Preset> BlockSyncService<P> {
                             self.request_needed_block(block_root, peer_id)?;
                         }
                         P2pToSync::GossipBlobSidecar(blob_sidecar, subnet_id, gossip_id) => {
+                            self.data_dumper.dump_blob_sidecar(blob_sidecar.clone_arc());
+
                             let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
                             let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
 
@@ -346,6 +352,8 @@ impl<P: Preset> BlockSyncService<P> {
                                     if !self.controller.contains_block(blob_identifier.block_root)
                                         && self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot)
                                     {
+                                        self.data_dumper.dump_blob_sidecar(blob_sidecar.clone_arc());
+
                                         let block_seen = self
                                             .received_block_roots
                                             .contains_key(&blob_identifier.block_root);
@@ -366,6 +374,8 @@ impl<P: Preset> BlockSyncService<P> {
                             let block_slot = beacon_block.message().slot();
 
                             if self.register_new_received_block(block_root, block_slot) {
+                                self.data_dumper.dump_signed_beacon_block(beacon_block.clone_arc());
+
                                 let block_slot_timestamp = misc::compute_timestamp_at_slot(
                                     self.controller.chain_config(),
                                     &self.controller.head_state().value(),
@@ -402,6 +412,7 @@ impl<P: Preset> BlockSyncService<P> {
                             match request_direction {
                                 SyncDirection::Forward => {
                                     if self.register_new_received_block(block_root, block.message().slot()) {
+                                        self.data_dumper.dump_signed_beacon_block(block.clone_arc());
                                         self.controller.on_requested_block(block, Some(peer_id));
                                     }
                                 }

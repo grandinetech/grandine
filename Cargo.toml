@@ -13,6 +13,7 @@ members = [
     'bls/bls-zkcrypto',
     'builder_api',
     'clock',
+    'data_dumper',
     'database',
     'deposit_tree',
     'directories',
@@ -473,6 +474,7 @@ bls-core = { path = 'bls/bls-core' }
 bls-zkcrypto = { path = 'bls/bls-zkcrypto' }
 builder_api = { path = 'builder_api' }
 clock = { path = 'clock' }
+data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
 deposit_tree = { path = 'deposit_tree' }
 directories = { path = 'directories' }

@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use data_dumper::DataDumper;
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{BlobFetcherToP2p, RealController};
@@ -122,6 +123,7 @@ pub struct Network<P: Preset> {
     shutdown_rx: Receiver<ShutdownReason>,
     #[expect(dead_code)]
     port_mappings: Option<PortMappings>,
+    data_dumper: Arc<DataDumper>,
 }
 
 impl<P: Preset> Network<P> {
@@ -141,6 +143,7 @@ impl<P: Preset> Network<P> {
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         metrics: Option<Arc<Metrics>>,
         libp2p_registry: Option<&mut Registry>,
+        data_dumper: Arc<DataDumper>,
     ) -> Result<Self> {
         let chain_config = controller.chain_config();
         let head_state = controller.head_state().value;
@@ -200,6 +203,7 @@ impl<P: Preset> Network<P> {
             service_to_network_rx,
             shutdown_rx,
             port_mappings,
+            data_dumper,
         };
 
         Ok(network)
@@ -1413,6 +1417,9 @@ impl<P: Preset> Network<P> {
             }
             PubsubMessage::DataColumnSidecar(_) => {}
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
+                self.data_dumper
+                    .dump_signed_aggregate_and_proof(aggregate_and_proof.clone_arc());
+
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_gossip_object(&["aggregate_and_proof_attestation"]);
                 }
