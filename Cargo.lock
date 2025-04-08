@@ -1918,6 +1918,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "data_dumper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dedicated_executor",
+ "features",
+ "fs-err",
+ "log",
+ "num_cpus",
+ "ssz",
+ "types",
+]
+
+[[package]]
 name = "database"
 version = "0.0.0"
 dependencies = [
@@ -5901,6 +5915,7 @@ dependencies = [
  "bls",
  "cached",
  "dashmap",
+ "data_dumper",
  "database",
  "dedicated_executor",
  "derive_more 1.0.0",
@@ -7037,6 +7052,7 @@ dependencies = [
  "bytesize",
  "clock",
  "dashmap",
+ "data_dumper",
  "database",
  "dedicated_executor",
  "directories",

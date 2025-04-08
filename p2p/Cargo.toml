@@ -12,6 +12,7 @@ arithmetic = { workspace = true }
 bls = { workspace = true }
 cached = { workspace = true }
 dashmap = { workspace = true }
+data_dumper = { workspace = true }
 database = { workspace = true }
 dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
