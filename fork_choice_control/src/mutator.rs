@@ -2585,6 +2585,7 @@ where
         metrics.set_beacon_head_slot(head.slot());
     }
 
+    #[expect(clippy::too_many_lines)]
     fn track_collection_metrics(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
@@ -2603,6 +2604,16 @@ where
                 &type_name,
                 "delayed_until_block",
                 self.delayed_until_block.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_block_blob_sidecars",
+                self.delayed_until_block
+                    .values()
+                    .map(|delayed| delayed.blob_sidecars.len())
+                    .sum(),
             );
 
             metrics.set_collection_length(
@@ -2633,6 +2644,13 @@ where
                     .values()
                     .map(|delayed| delayed.aggregates.len())
                     .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_payload",
+                self.delayed_until_payload.len(),
             );
 
             metrics.set_collection_length(

@@ -2989,23 +2989,37 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn load_beacon_state(
         &self,
         block_root: H256,
+        slot: Slot,
         state: Option<&Arc<BeaconState<P>>>,
     ) -> Arc<BeaconState<P>> {
-        if let Some(state) =
-            state
-                .cloned()
-                .or_else(|| match self.stored_state_by_block_root(block_root) {
+        if let Some(state) = state {
+            return state.clone_arc();
+        }
+
+        let load_result = self
+            .state_cache
+            .get_or_insert_with(block_root, slot, true, || {
+                let stored_state_opt = match self.stored_state_by_block_root(block_root) {
                     Ok(state_opt) => state_opt,
                     Err(error) => {
                         error!("failed to load persisted beacon state: {error:?}");
                         None
                     }
-                })
-        {
-            return state;
-        }
+                };
 
-        self.load_beacon_state_by_state_transition(block_root)
+                let loaded_state = stored_state_opt
+                    .unwrap_or_else(|| self.load_beacon_state_by_state_transition(block_root));
+
+                Ok((loaded_state, None))
+            });
+
+        match load_result {
+            Ok(state_with_rewards) => state_with_rewards.0,
+            Err(error) => {
+                error!("failed to load beacon state: {error:?}");
+                self.load_beacon_state_by_state_transition(block_root)
+            }
+        }
     }
 
     fn load_beacon_state_by_state_transition(&self, block_root: H256) -> Arc<BeaconState<P>> {

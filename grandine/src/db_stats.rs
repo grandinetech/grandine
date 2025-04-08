@@ -75,10 +75,10 @@ pub fn print<P: Preset>(
 
         total_size += key.len() + length;
 
-        if FinalizedBlockByRoot::has_prefix(&key) {
-            finalized_block_root_entries.track(&key, length);
-        } else if UnfinalizedBlockByRoot::has_prefix(&key) {
+        if UnfinalizedBlockByRoot::has_prefix(&key) {
             unfinalized_block_root_entries.track(&key, length);
+        } else if FinalizedBlockByRoot::has_prefix(&key) {
+            finalized_block_root_entries.track(&key, length);
         } else if StateByBlockRoot::has_prefix(&key) {
             state_by_block_root_entries.track(&key, length);
         } else if SlotByStateRoot::has_prefix(&key) {
