@@ -75,39 +75,39 @@ impl<P: Preset> SszWrite for ValidatorBlindedBlock<P> {
 impl<P: Preset> ValidatorBlindedBlock<P> {
     #[must_use]
     pub fn into_blinded(self) -> Self {
-        let Self::BeaconBlock(block) = self else {
+        if let Self::BeaconBlock(block) = self {
+            let Some(body) = block.body().post_bellatrix() else {
+                return Self::BeaconBlock(block);
+            };
+
+            let execution_payload = block
+                .clone()
+                .execution_payload()
+                .expect("post-Bellatrix blocks should have execution payload");
+
+            let kzg_commitments = block
+                .body()
+                .post_deneb()
+                .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+                .cloned();
+
+            let execution_requests = block
+                .body()
+                .post_electra()
+                .map(PostElectraBeaconBlockBody::execution_requests)
+                .cloned();
+
+            let payload_header = body.execution_payload().to_header();
+            let blinded_block = block
+                .into_blinded(payload_header, kzg_commitments, execution_requests)
+                .expect("phases should match because payload header was taken from block");
+
+            return Self::BlindedBeaconBlock {
+                blinded_block,
+                execution_payload: Box::new(execution_payload),
+            };
+        } else {
             return self;
-        };
-
-        let Some(body) = block.body().post_bellatrix() else {
-            return Self::BeaconBlock(block);
-        };
-
-        let execution_payload = block
-            .clone()
-            .execution_payload()
-            .expect("post-Bellatrix blocks should have execution payload");
-
-        let kzg_commitments = block
-            .body()
-            .post_deneb()
-            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
-            .cloned();
-
-        let execution_requests = block
-            .body()
-            .post_electra()
-            .map(PostElectraBeaconBlockBody::execution_requests)
-            .cloned();
-
-        let payload_header = body.execution_payload().to_header();
-        let blinded_block = block
-            .into_blinded(payload_header, kzg_commitments, execution_requests)
-            .expect("phases should match because payload header was taken from block");
-
-        Self::BlindedBeaconBlock {
-            blinded_block,
-            execution_payload: Box::new(execution_payload),
         }
     }
 
