@@ -137,7 +137,7 @@ pub struct Validator<P: Preset, W: Wait> {
     own_singular_attestations: OnceCell<Vec<OwnAttestation<P>>>,
     own_sync_committee_members: OnceCell<Vec<SyncCommitteeMember>>,
     own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions<P>,
-    published_own_sync_committee_messages: bool,
+    published_own_sync_committee_messages_for: Option<SlotHead<P>>,
     own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
     validator_votes: HashMap<Epoch, Vec<ValidatorVote>>,
     builder_api: Option<Arc<BuilderApi>>,
@@ -211,7 +211,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_singular_attestations: OnceCell::new(),
             own_sync_committee_members: OnceCell::new(),
             own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions::default(),
-            published_own_sync_committee_messages: false,
+            published_own_sync_committee_messages_for: None,
             own_aggregators: BTreeMap::new(),
             validator_votes: HashMap::new(),
             builder_api,
@@ -619,7 +619,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.discard_previous_slot_attestations();
                 self.propose(wait_group, &slot_head).await?;
-                self.published_own_sync_committee_messages = false;
+                self.published_own_sync_committee_messages_for = None;
             }
             TickKind::Attest => {
                 let _timer = self
@@ -635,7 +635,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
 
                 if let Err(error) = self
-                    .publish_sync_committee_messages(&wait_group, &slot_head)
+                    .publish_sync_committee_messages(&wait_group, slot_head)
                     .await
                 {
                     error!("failed to produce and publish own sync_committee messages: {error:?}");
@@ -650,7 +650,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.publish_aggregates_and_proofs(&wait_group, &slot_head)
                     .await;
 
-                self.publish_contributions_and_proofs(&slot_head).await;
+                self.publish_contributions_and_proofs(
+                    self.published_own_sync_committee_messages_for
+                        .as_ref()
+                        .unwrap_or(&slot_head),
+                )
+                .await;
 
                 if misc::is_epoch_start::<P>(slot) {
                     let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
@@ -1230,7 +1235,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn publish_sync_committee_messages(
         &mut self,
         wait_group: &W,
-        slot_head: &SlotHead<P>,
+        slot_head: SlotHead<P>,
     ) -> Result<()> {
         // > To reduce complexity during the Altair fork, sync committees are not expected to
         // > produce signatures for `compute_epoch_at_slot(ALTAIR_FORK_EPOCH) - 1`.
@@ -1238,7 +1243,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        if self.published_own_sync_committee_messages {
+        if self
+            .published_own_sync_committee_messages_for
+            .as_ref()
+            .is_some_and(|published| published.slot() == slot_head.slot())
+        {
             return Ok(());
         }
 
@@ -1250,9 +1259,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        self.published_own_sync_committee_messages = true;
-
-        let own_messages = self.own_sync_committee_messages(slot_head).await?;
+        let own_messages = self.own_sync_committee_messages(&slot_head).await?;
 
         for (sync_subnet_id, messages) in own_messages {
             for sync_committee_message in &messages {
@@ -1275,6 +1282,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 slot_head.beacon_state.clone_arc(),
             );
         }
+
+        self.published_own_sync_committee_messages_for = Some(slot_head);
 
         Ok(())
     }
@@ -1353,7 +1362,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishSyncCommitteeMessagesEarly.is_enabled() {
             if let Err(error) = self
-                .publish_sync_committee_messages(wait_group, &slot_head)
+                .publish_sync_committee_messages(wait_group, slot_head)
                 .await
             {
                 error!("failed to produce and publish own sync_committee messages: {error:?}");
