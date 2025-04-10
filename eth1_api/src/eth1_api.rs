@@ -185,16 +185,13 @@ impl Eth1Api {
         let mut blocks = vec![];
 
         for block_number in block_number_range {
-            match self.get_block_by_number(block_number).await? {
-                Some(block) => {
-                    let deposit_events = deposit_data.remove(&block_number).unwrap_or_default();
-                    let eth1_block = Eth1Block {
-                        deposit_events: deposit_events.try_into()?,
-                        ..block
-                    };
-                    blocks.push(eth1_block);
-                }
-                None => continue,
+            if let Some(block) = self.get_block_by_number(block_number).await? {
+                let deposit_events = deposit_data.remove(&block_number).unwrap_or_default();
+                let eth1_block = Eth1Block {
+                    deposit_events: deposit_events.try_into()?,
+                    ..block
+                };
+                blocks.push(eth1_block);
             }
         }
 

@@ -36,12 +36,12 @@ pub fn balance<P: Preset>(
 }
 
 #[inline]
-pub fn increase_balance(balance: &mut Gwei, delta: Gwei) {
+pub const fn increase_balance(balance: &mut Gwei, delta: Gwei) {
     *balance += delta;
 }
 
 #[inline]
-pub fn decrease_balance(balance: &mut Gwei, delta: Gwei) {
+pub const fn decrease_balance(balance: &mut Gwei, delta: Gwei) {
     *balance = balance.saturating_sub(delta);
 }
 

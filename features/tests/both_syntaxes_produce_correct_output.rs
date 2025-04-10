@@ -16,11 +16,13 @@ fn both_syntaxes_produce_correct_output() {
     testing_logger::validate(|logs| {
         itertools::assert_equal(
             logs.iter().map(|log| log.body.as_str()),
-            core::iter::repeat([
-                "[LogBlockProcessingTime] Block processed in 1ms",
-                "[LogBlockProcessingTime] Block processed in 4ms",
-            ])
-            .take(3)
+            core::iter::repeat_n(
+                [
+                    "[LogBlockProcessingTime] Block processed in 1ms",
+                    "[LogBlockProcessingTime] Block processed in 4ms",
+                ],
+                3,
+            )
             .flatten(),
         );
 

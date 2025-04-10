@@ -250,6 +250,7 @@ impl Snapshot {
         }
     }
 
+    #[expect(clippy::needless_lifetimes, reason = "false positive")]
     pub async fn sign_without_slashing_protection<'block, P: Preset>(
         &self,
         message: SigningMessage<'block, P>,

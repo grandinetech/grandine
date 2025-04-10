@@ -61,7 +61,6 @@ use crate::misc::{MetricsConfig, StorageConfig};
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
 
-#[expect(clippy::module_name_repetitions)]
 #[expect(clippy::struct_excessive_bools)]
 pub struct RuntimeConfig {
     pub back_sync_enabled: bool,
@@ -323,30 +322,30 @@ pub async fn run_after_genesis<P: Preset>(
         )
     });
 
-    let (liveness_tracker, doppelganger_protection) = track_liveness
-        .then(|| {
-            let (api_tx, api_to_liveness_rx) = mpsc::unbounded();
-            let (pool_tx, pool_to_liveness_rx) = mpsc::unbounded();
-            let (validator_tx, validator_to_liveness_rx) = mpsc::unbounded();
+    let (liveness_tracker, doppelganger_protection) = if track_liveness {
+        let (api_tx, api_to_liveness_rx) = mpsc::unbounded();
+        let (pool_tx, pool_to_liveness_rx) = mpsc::unbounded();
+        let (validator_tx, validator_to_liveness_rx) = mpsc::unbounded();
 
-            api_to_liveness_tx = Some(api_tx.clone());
-            pool_to_liveness_tx = Some(pool_tx);
-            validator_to_liveness_tx = Some(validator_tx);
+        api_to_liveness_tx = Some(api_tx.clone());
+        pool_to_liveness_tx = Some(pool_tx);
+        validator_to_liveness_tx = Some(validator_tx);
 
-            let liveness_tracker = Some(LivenessTracker::new(
-                controller.clone_arc(),
-                metrics.clone(),
-                api_to_liveness_rx,
-                pool_to_liveness_rx,
-                validator_to_liveness_rx,
-            ));
+        let liveness_tracker = Some(LivenessTracker::new(
+            controller.clone_arc(),
+            metrics.clone(),
+            api_to_liveness_rx,
+            pool_to_liveness_rx,
+            validator_to_liveness_rx,
+        ));
 
-            let doppelganger_protection =
-                detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new(api_tx)));
+        let doppelganger_protection =
+            detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new(api_tx)));
 
-            (liveness_tracker, doppelganger_protection)
-        })
-        .unwrap_or((None, None));
+        (liveness_tracker, doppelganger_protection)
+    } else {
+        (None, None)
+    };
 
     if let Some(doppelganger_protection) = doppelganger_protection.as_ref() {
         signer.enable_doppelganger_protection(doppelganger_protection);

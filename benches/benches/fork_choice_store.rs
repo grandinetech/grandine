@@ -181,7 +181,7 @@ fn process_block<P: Preset>(
 
     if let ApplyBlockChanges::Reorganized { .. } = store.apply_block(chain_link)? {
         panic!("block at slot {slot} should not cause a reorganization")
-    };
+    }
 
     let checkpoint = store.unrealized_justified_checkpoint();
 

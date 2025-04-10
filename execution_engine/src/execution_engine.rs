@@ -1,5 +1,3 @@
-#![expect(clippy::module_name_repetitions)]
-
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

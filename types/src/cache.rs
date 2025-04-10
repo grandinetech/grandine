@@ -70,6 +70,7 @@ pub enum PackedIndices {
 }
 
 impl PackedIndices {
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[inline]
     #[must_use]
     pub fn len(&self) -> usize {

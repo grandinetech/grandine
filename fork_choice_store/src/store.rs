@@ -297,6 +297,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn chain_config(&self) -> &ChainConfig {
         &self.chain_config
@@ -1381,7 +1382,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     source,
                 })
             }
-        };
+        }
 
         let index = misc::committee_index(&attestation.item);
 
@@ -1589,7 +1590,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             return Ok(PartialAttestationAction::DelayUntilBlock(target.root));
-        };
+        }
 
         // > Attestations must be for a known block.
         // > If block is unknown, delay consideration until the block is found
@@ -2157,7 +2158,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     /// [`update_checkpoints`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#update_checkpoints)
-    fn update_checkpoints(
+    const fn update_checkpoints(
         &mut self,
         justified_checkpoint: Checkpoint,
         finalized_checkpoint: Checkpoint,
@@ -2174,7 +2175,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     /// [`update_unrealized_checkpoints`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#update_unrealized_checkpoints)
-    fn update_unrealized_checkpoints(
+    const fn update_unrealized_checkpoints(
         &mut self,
         unrealized_justified_checkpoint: Checkpoint,
         unrealized_finalized_checkpoint: Checkpoint,
@@ -3082,7 +3083,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.finished_back_sync
     }
 
-    pub fn set_back_synced(&mut self, finished_back_sync: bool) {
+    pub const fn set_back_synced(&mut self, finished_back_sync: bool) {
         self.finished_back_sync = finished_back_sync;
     }
 

@@ -267,7 +267,7 @@ impl SyncManager {
                                 .unwrap_or(1);
 
                             start_slot = blob_serve_range_slot;
-                        };
+                        }
 
                         let batch = SyncBatch {
                             target: SyncTarget::BlobSidecar,
@@ -701,9 +701,11 @@ impl SyncManager {
 
     fn peers(&self, use_black_list: bool) -> impl Iterator<Item = (&PeerId, &StatusMessage)> {
         self.peers.iter().filter(move |(&peer_id, _)| {
-            use_black_list
-                .then(|| !self.back_sync_black_list.contains(&peer_id))
-                .unwrap_or(true)
+            if use_black_list {
+                !self.back_sync_black_list.contains(&peer_id)
+            } else {
+                true
+            }
         })
     }
 
@@ -733,8 +735,7 @@ impl SyncManager {
     }
 
     fn peer_sync_batch_assignments(peers: &[PeerId]) -> impl Iterator<Item = PeerId> + '_ {
-        core::iter::repeat(peers)
-            .take(BATCHES_PER_PEER)
+        core::iter::repeat_n(peers, BATCHES_PER_PEER)
             .flatten()
             .copied()
     }

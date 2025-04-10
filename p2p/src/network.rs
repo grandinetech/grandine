@@ -416,7 +416,7 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
-                    };
+                    }
                 },
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {

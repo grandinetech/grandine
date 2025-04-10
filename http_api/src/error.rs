@@ -243,6 +243,7 @@ impl Error {
         }
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     fn failures(&self) -> &[IndexedError] {
         match self {
             Self::InvalidAggregatesAndProofs(failures)
@@ -256,7 +257,6 @@ impl Error {
     }
 }
 
-#[expect(clippy::module_name_repetitions)]
 #[derive(Debug, Serialize)]
 pub struct IndexedError {
     pub index: usize,

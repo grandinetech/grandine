@@ -39,6 +39,7 @@ impl<P: Preset> SlotHead<P> {
         self.beacon_state.slot()
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn phase(&self) -> Phase {
         self.beacon_state.phase()

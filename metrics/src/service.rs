@@ -45,7 +45,6 @@ pub struct MetricsServiceConfig {
     pub remote_metrics_url: Option<RedactingUrl>,
 }
 
-#[expect(clippy::module_name_repetitions)]
 pub struct MetricsService<P: Preset> {
     pub(crate) config: MetricsServiceConfig,
     pub(crate) controller: RealController<P>,

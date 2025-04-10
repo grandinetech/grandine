@@ -157,7 +157,7 @@ impl<P: Preset> BackSync<P> {
                 ) {
                     Ok(()) => info!("back-sync state archiver thread finished successfully"),
                     Err(error) => warn!("unable to archive back back-sync states: {error:?}"),
-                };
+                }
 
                 ArchiverToSync::BackSyncStatesArchived.send(&sync_tx);
             })?;
@@ -414,7 +414,6 @@ impl<P: Preset> From<&SignedBeaconBlock<P>> for SyncCheckpoint {
     }
 }
 
-#[expect(clippy::module_name_repetitions)]
 #[derive(Display)]
 #[display("{}{_0:020}", Self::PREFIX)]
 pub struct BackSyncDataBySlot(pub Slot);

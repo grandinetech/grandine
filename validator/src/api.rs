@@ -669,7 +669,6 @@ async fn authorize_token(
     Ok(response)
 }
 
-#[expect(clippy::module_name_repetitions)]
 pub async fn run_validator_api<P: Preset, W: Wait>(
     validator_api_config: ValidatorApiConfig,
     controller: ApiController<P, W>,
@@ -853,7 +852,7 @@ impl ApiToken {
     fn load(token_file_path: &Path) -> Result<Self> {
         let token = fs_err::read_to_string(token_file_path)?;
 
-        ensure!(token.bytes().len() >= 32, TokenLoadError::TokenTooShort);
+        ensure!(token.len() >= 32, TokenLoadError::TokenTooShort);
 
         let bytes = Zeroizing::new(hex::decode(token)?);
 

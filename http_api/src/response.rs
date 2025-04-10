@@ -25,7 +25,6 @@ pub enum JsonOrSsz {
     Ssz,
 }
 
-#[expect(clippy::module_name_repetitions)]
 #[derive(Serialize)]
 pub struct EthResponse<T, M = (), F = AlwaysJson> {
     data: T,

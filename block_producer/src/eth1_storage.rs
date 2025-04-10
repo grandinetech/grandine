@@ -139,11 +139,11 @@ pub trait Eth1Storage {
             unfinalized_blocks.last().map(|block| block.number),
         );
 
-        let candidate_eth1_blocks = unfinalized_blocks
+        let mut candidate_eth1_blocks = unfinalized_blocks
             .iter()
             .filter(|eth1_block| is_candidate_block(config, eth1_block, period_start));
 
-        if let Some(eth1_block) = candidate_eth1_blocks.last() {
+        if let Some(eth1_block) = candidate_eth1_blocks.next_back() {
             let eth1_blocks_to_catch_up = match unfinalized_blocks
                 .iter()
                 .position(|block| block.hash == eth1_block.hash)

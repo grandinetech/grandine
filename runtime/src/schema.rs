@@ -104,7 +104,7 @@ pub fn initialize(data_directory: impl AsRef<Path>) -> Result<()> {
                         .matches(&version),
                     Error::IncompatibleVersion { version },
                 );
-            };
+            }
 
             // Set the schema version to the current one even if it's older.
             // The application can only write data conforming to the current schema.

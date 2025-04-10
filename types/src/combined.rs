@@ -335,6 +335,7 @@ impl<P: Preset> BeaconState<P> {
         }
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     pub fn deposit_requests_start_index(&self) -> Option<DepositIndex> {
         match self {
             Self::Phase0(_)
@@ -598,7 +599,7 @@ impl<P: Preset> BeaconBlock<P> {
     }
 
     #[must_use]
-    pub fn with_state_root(mut self, state_root: H256) -> Self {
+    pub const fn with_state_root(mut self, state_root: H256) -> Self {
         match &mut self {
             Self::Phase0(block) => block.state_root = state_root,
             Self::Altair(block) => block.state_root = state_root,
@@ -951,7 +952,7 @@ impl<P: Preset> BlindedBeaconBlock<P> {
     }
 
     #[must_use]
-    pub fn with_state_root(mut self, state_root: H256) -> Self {
+    pub const fn with_state_root(mut self, state_root: H256) -> Self {
         match &mut self {
             Self::Bellatrix(block) => block.state_root = state_root,
             Self::Capella(block) => block.state_root = state_root,
