@@ -6,7 +6,9 @@
 //! [`eth2-cache`]:        ../../../eth2-cache/
 //! [`predefined_chains`]: ../predefined_chains/index.html
 
-pub use generic::{LazyBeaconBlock, LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars};
+pub use generic::{
+    LazyAttestations, LazyBeaconBlock, LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars,
+};
 
 pub mod goerli;
 pub mod holesky;

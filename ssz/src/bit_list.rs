@@ -200,7 +200,10 @@ impl<N> BitList<N> {
     {
         assert!(length <= N::USIZE);
 
-        Self::from_bit_box(bitbox![_, _; u8::from(value); length])
+        let mut bits = bitbox![_, _; u8::from(value); length];
+        bits.fill_uninitialized(false);
+
+        Self::from_bit_box(bits)
     }
 
     pub fn concatenate<'lists>(
@@ -283,9 +286,7 @@ impl<N> BitList<N> {
         Self::from_bit_box(bits.into_boxed_bitslice())
     }
 
-    fn from_bit_box(mut bits: BitBox<u8>) -> Self {
-        bits.fill_uninitialized(false);
-
+    const fn from_bit_box(bits: BitBox<u8>) -> Self {
         Self {
             bits,
             phantom: PhantomData,
@@ -325,7 +326,7 @@ mod tests {
 
     // `BitVec::repeat` sets all bits in its buffer (including unused ones) to the same value.
     // The documentation for `BitBox::fill_uninitialized` does imply it could do that.
-    // Remove the call to `BitBox::fill_uninitialized` in `BitList::from_bit_box` to see this fail.
+    // Remove the call to `BitBox::fill_uninitialized` in `BitList::new` to see this fail.
     #[test]
     fn bit_list_new_with_true_clears_unused_bits() {
         assert_eq!(BitList::<U1>::new(true, 1).bits.as_raw_slice(), [1]);

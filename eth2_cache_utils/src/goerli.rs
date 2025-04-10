@@ -14,7 +14,7 @@ use types::{
     preset::Mainnet,
 };
 
-use crate::generic::{self, LazyBeaconBlocks, LazyBeaconState};
+use crate::generic::{self, LazyAttestations, LazyBeaconBlocks, LazyBeaconState};
 
 const CASE: Case = Case {
     case_path_relative_to_workspace_root: "eth2-cache/prater",
@@ -34,6 +34,9 @@ pub static BEACON_BLOCKS_UP_TO_SLOT_2048: LazyBeaconBlocks<Mainnet> =
 
 pub static BEACON_BLOCKS_UP_TO_SLOT_8192: LazyBeaconBlocks<Mainnet> =
     LazyBeaconBlocks::new(7874, || beacon_blocks(GENESIS_SLOT..=8192, 6));
+
+pub static AGGREGATE_ATTESTATIONS_FROM_EPOCH_17119: LazyAttestations<Mainnet> =
+    LazyAttestations::new(1640, || attestations("aggregate_attestations", 17119));
 
 #[must_use]
 pub fn beacon_blocks(

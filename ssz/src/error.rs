@@ -1,5 +1,7 @@
 #![expect(clippy::module_name_repetitions)]
 
+use core::convert::Infallible;
+
 use thiserror::Error;
 
 use crate::{
@@ -51,6 +53,12 @@ pub enum ReadError {
     //                      worsen performance.
     #[error("{message}")]
     Custom { message: &'static str },
+}
+
+impl From<Infallible> for ReadError {
+    fn from(infallible: Infallible) -> Self {
+        match infallible {}
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
