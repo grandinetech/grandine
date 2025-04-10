@@ -301,7 +301,7 @@ bstr = '1'
 build-time = '0.1'
 byteorder = '1'
 bytes = '1'
-bytesize = { version = '1', features = ['serde'] }
+bytesize = { version = '2', features = ['serde'] }
 cached = '0.53'
 chrono = '0.4'
 clap = { version = '4', features = ['derive'] }
@@ -322,7 +322,7 @@ derive_more = { version = '1', features = ["full"] }
 dirs = '5'
 discv5 = { version = '0.9', features = ['libp2p'] }
 drain_filter_polyfill = '0.1'
-duplicate = '1'
+duplicate = '2'
 easy-ext = '1'
 either = '1'
 enum-iterator = '2'
@@ -333,7 +333,7 @@ ethereum-types = '0.14'
 ff = "0.13.0"
 fixed-hash = '0.8.0'
 fnv = '1'
-fs-err = { version = '2', features = ['tokio'] }
+fs-err = { version = '3', features = ['tokio'] }
 fs_extra = '1'
 futures = '0.3'
 futures-ticker = '0.0.3'
@@ -360,13 +360,13 @@ im = '15'
 impl-serde = '0.4'
 integer-sqrt = '0.1'
 instant = '0.1'
-itertools = '0.13'
+itertools = '0.14'
 jemalloc-ctl = '0.5'
 jemallocator = '0.5'
 jwt-simple = { version = '0.12', default-features = false, features = ['pure-rust'] }
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 lazy_static = '1'
-libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'c228fe15808c3acbf18dc3af1a03ef5cbdcda07a' }
+libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '44ab192899a898e2499ef20870629bb7a765f2a2' }
 libp2p = { version = '0.55', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
 libp2p-mplex = '0.43'
 log = '0.4'
@@ -389,8 +389,7 @@ pbkdf2 = '0.12'
 primitive-types = '0.12'
 proc-macro-crate = '3'
 proc-macro2 = '1'
-# Due to vulnerability in dependency use unreleased version, upgrade to '>0.13.4' once it's released
-prometheus = { git = 'https://github.com/tikv/rust-prometheus.git', rev = 'e17c5ced2bc0f8ea436aaf1acc830a30ab15ada3' }
+prometheus = '0.14'
 prometheus-client = '0.22'
 psutil = '3'
 quick-protobuf = '0.8'
@@ -401,12 +400,11 @@ quote = '1'
 rand = '0.8'
 rayon = '1'
 rc-box = '1'
-# Currently refinery does not support rusqlite version 0.32
-refinery = { git = 'https://github.com/manuteleco/refinery.git', rev = '63f3c39a8adb40e9e7b7f9c8b21a4fee2d685e3d', features = ['rusqlite'] }
+refinery = { version = '0.8',  features = ['rusqlite'] }
 regex = '1'
 replace_with = '0.1'
 reqwest = { version = '0.12', features = ['json', 'native-tls-vendored'] }
-rusqlite = { version = '0.32', features = ['bundled'] }
+rusqlite = { version = '0.33', features = ['bundled'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-constantine = { git = 'https://github.com/grandinetech/rust-kzg.git' }
@@ -435,7 +433,7 @@ snap = '1'
 static_assertions = '1'
 strum = { version = '0.26', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
-sysinfo = '0.33'
+sysinfo = '0.34'
 tap = '1'
 tempfile = '3'
 test-case = '3'
@@ -448,7 +446,7 @@ tokio-io-timeout = '1'
 tokio-stream = { version = '0.1', features = ['sync'] }
 tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.5', features = ['timeout'] }
-tower-http = { version = '0.5', features = ['cors', 'trace'] }
+tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
 triomphe = '0.1'
 tynm = '0.1'
@@ -461,6 +459,7 @@ uuid = { version = '1', features = ['serde', 'v4'] }
 variant_count = '1'
 void = '1'
 web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
+winsafe = { version = '0', features = ['kernel', 'psapi'] }
 zeroize = { version = '1', features = ['derive', 'serde'] }
 
 allocator = { path = 'allocator' }
@@ -525,7 +524,6 @@ try_from_iterator = { path = 'try_from_iterator' }
 types = { path = 'types' }
 validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
-winsafe = { git = 'https://github.com/rodrigocfd/winsafe', features = ['kernel', 'psapi'] }
 
 # Banned crates
 #

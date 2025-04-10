@@ -909,12 +909,10 @@ mod tests {
 
     #[test]
     fn test_api_token_load_non_existing_file() {
-        assert_eq!(
-            ApiToken::load(Path::new("nonexisting-token.txt"))
-                .expect_err("opening non-existing file should fail")
-                .to_string(),
-            "failed to open file `nonexisting-token.txt`"
-        )
+        assert!(ApiToken::load(Path::new("nonexisting-token.txt"))
+            .expect_err("opening non-existing file should fail")
+            .to_string()
+            .contains("failed to open file `nonexisting-token.txt`"))
     }
 
     #[test]

@@ -316,7 +316,7 @@ impl SystemMetrics {
 
         Self {
             // CPU
-            cpu_cores: system.physical_core_count().unwrap_or_default(),
+            cpu_cores: System::physical_core_count().unwrap_or_default(),
             cpu_threads: system.cpus().len(),
             cpu_node_system_seconds_total: cpu_metric.system_seconds,
             cpu_node_user_seconds_total: cpu_metric.user_seconds,
