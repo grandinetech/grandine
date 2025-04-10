@@ -124,14 +124,11 @@ impl StorageConfig {
     }
 
     pub fn print_db_sizes(&self) {
-        info!(
-            "Eth2 database upper limit: {}",
-            self.db_size.to_string_as(true)
-        );
+        info!("Eth2 database upper limit: {}", self.db_size.display().si());
 
         info!(
             "Eth1 database upper limit: {}",
-            self.eth1_db_size.to_string_as(true),
+            self.eth1_db_size.display().si(),
         );
     }
 }

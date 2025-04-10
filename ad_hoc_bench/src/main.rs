@@ -448,8 +448,9 @@ fn print_jemalloc_stats() -> Result<()> {
     Ok(())
 }
 #[cfg(not(target_os = "windows"))]
-fn human_readable_size(result: jemalloc_ctl::Result<usize>) -> Result<String> {
+fn human_readable_size(result: jemalloc_ctl::Result<usize>) -> Result<bytesize::Display> {
     let size = result.map_err(anyhow::Error::msg)?;
     let size = size.try_into()?;
-    Ok(bytesize::ByteSize(size).to_string_as(true))
+
+    Ok(bytesize::ByteSize(size).display().si())
 }

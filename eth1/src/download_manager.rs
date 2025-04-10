@@ -149,8 +149,7 @@ impl DownloadManager {
 
         if from_block <= latest_block_number {
             debug!(
-                "will download Eth1 deposits from block {} to block {}",
-                from_block, latest_block_number,
+                "will download Eth1 deposits from block {from_block} to block {latest_block_number}",
             );
         }
 

@@ -39,9 +39,9 @@ impl EntriesInfo {
     }
 
     fn print_report(&self) -> Result<()> {
-        let key_size = ByteSize(self.key_size.try_into()?).to_string_as(true);
-        let value_size = ByteSize(self.value_size.try_into()?).to_string_as(true);
-        let total_size = ByteSize(self.total_size().try_into()?).to_string_as(true);
+        let key_size = ByteSize(self.key_size.try_into()?).display().si();
+        let value_size = ByteSize(self.value_size.try_into()?).display().si();
+        let total_size = ByteSize(self.total_size().try_into()?).display().si();
 
         info!(
             "{}: {} entries, key_size: {key_size}, value_size: {value_size}, total_size: {total_size}",
@@ -122,7 +122,7 @@ pub fn print<P: Preset>(
 
     info!(
         "Total size: {}",
-        ByteSize(total_size.try_into()?).to_string_as(true)
+        ByteSize(total_size.try_into()?).display().si()
     );
 
     Ok(())

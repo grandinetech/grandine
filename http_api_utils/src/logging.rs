@@ -108,8 +108,8 @@ pub fn log_latency_metrics(api_metrics: &ApiMetrics, response: &Response, latenc
         );
 
         warn!(
-            "Unable to observe HTTP API metrics: MatchedPath response extension is missing for: {}",
-            original_uri
+            "Unable to observe HTTP API metrics: \
+            MatchedPath response extension is missing for: {original_uri}"
         );
     }
 }

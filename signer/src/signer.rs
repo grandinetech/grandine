@@ -108,15 +108,14 @@ impl Signer {
             match remote_keys {
                 Some(keys) => {
                     info!(
-                        "loaded {} validator key(s) from Web3Signer at {}",
+                        "loaded {} validator key(s) from Web3Signer at {url}",
                         keys.len(),
-                        url,
                     );
                 }
                 None => {
                     warn!(
-                        "Web3Signer at {} did not return any validator keys. It will retry to fetch keys again in the next epoch.",
-                        url,
+                        "Web3Signer at {url} did not return any validator keys. \
+                        It will retry to fetch keys again in the next epoch.",
                     );
                 }
             }

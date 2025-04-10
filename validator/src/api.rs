@@ -913,7 +913,7 @@ mod tests {
             ApiToken::load(Path::new("nonexisting-token.txt"))
                 .expect_err("opening non-existing file should fail")
                 .to_string(),
-            "failed to open file `nonexisting-token.txt`"
+            "failed to open file `nonexisting-token.txt`: No such file or directory (os error 2)"
         )
     }
 
