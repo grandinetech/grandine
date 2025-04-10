@@ -1655,7 +1655,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 return Some(handle);
             }
-        };
+        }
 
         None
     }
@@ -1701,7 +1701,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     .await?
                     .map(PayloadIdEntry::Live)
             }
-        };
+        }
 
         let Some(payload_id) = payload_id else {
             error!(

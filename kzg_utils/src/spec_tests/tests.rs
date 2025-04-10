@@ -132,7 +132,7 @@ fn test_compute_kzg_proof(case: Case) {
                     "should compute kzg proof (backend {backend})"
                 )
             }
-        };
+        }
     }
 }
 

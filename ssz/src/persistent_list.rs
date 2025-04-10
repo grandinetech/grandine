@@ -92,7 +92,7 @@ impl<'list, T, N, B: BundleSize<T>> IntoIterator for &'list PersistentList<T, N,
                 stack.push(node.as_ref().as_ref());
             }
             None => stack = vec![],
-        };
+        }
 
         ExactSize::new(Leaves { stack }.flatten(), self.length)
     }
@@ -114,7 +114,7 @@ impl<'list, T: Clone, N, B: BundleSize<T>> IntoIterator for &'list mut Persisten
                 stack.push(node.make_mut().as_mut());
             }
             None => stack = vec![],
-        };
+        }
 
         ExactSize::new(LeavesMut { stack }.flatten(), self.length)
     }
@@ -671,7 +671,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                     right.make_mut().push(element, right_length);
                     if Self::pushing_increases_height(right_length) {
                         right_height += 1;
-                    };
+                    }
                     assert!(right_height <= left_height);
 
                     Self::Internal {

@@ -1,8 +1,3 @@
-#![expect(
-    clippy::allow_attributes,
-    reason = "allow_attributes lint trigger from some derive macros. \
-              See <https://github.com/rust-lang/rust-clippy/issues/13349>."
-)]
 use core::{
     fmt::{Formatter, Result as FmtResult},
     num::NonZeroUsize,
@@ -329,6 +324,7 @@ impl<P: Preset, I> AttestationItem<P, I> {
         self.data().slot
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn data(&self) -> AttestationData {
         self.item.data()

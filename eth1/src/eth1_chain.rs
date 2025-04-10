@@ -73,6 +73,7 @@ impl Eth1Chain {
         Ok(chain)
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn unfinalized_blocks(&self) -> &RwLock<Vec<Eth1Block>> {
         &self.unfinalized_blocks

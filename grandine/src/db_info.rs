@@ -16,7 +16,7 @@ pub fn print(
             let database = storage_config.sync_database(custom_path, DatabaseMode::ReadOnly)?;
             p2p::print_sync_database_info(&database)?;
         }
-    };
+    }
 
     Ok(())
 }

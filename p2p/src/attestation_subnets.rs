@@ -252,7 +252,7 @@ impl<P: Preset> AttestationSubnets<P> {
                             expiration: slot + 1,
                         };
                     }
-                };
+                }
             } else {
                 // Discover peers instantly after processing beacon committee subscriptions
                 match subnet_state {
@@ -267,7 +267,7 @@ impl<P: Preset> AttestationSubnets<P> {
                         };
                     }
                     _ => {}
-                };
+                }
             }
         }
 

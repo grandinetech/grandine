@@ -32,7 +32,7 @@ impl EntriesInfo {
         self.key_size + self.value_size
     }
 
-    fn track(&mut self, key: &[u8], length: usize) {
+    const fn track(&mut self, key: &[u8], length: usize) {
         self.key_size += key.len();
         self.value_size += length;
         self.count += 1;

@@ -344,7 +344,7 @@ fn next_tick_with_instant<I: InstantLike, S: SystemTimeLike>(
         }
 
         now_to_next_tick -= current_slot_to_now;
-    };
+    }
 
     let next_instant = now_instant
         .checked_add(now_to_next_tick)

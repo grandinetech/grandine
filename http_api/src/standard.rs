@@ -908,7 +908,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
 
     if difference > P::EpochsPerHistoricalVector::U64 {
         return Err(Error::EpochOutOfRangeForStateRandao);
-    };
+    }
 
     let randao = accessors::get_randao_mix(&state, epoch);
     let response = StateRandaoResponse { randao };
@@ -2401,9 +2401,8 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 
     let block_root;
     let mut state;
-    let is_optimistic;
 
-    if slot < head_slot {
+    let is_optimistic = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
         let block = controller
             .block_by_slot(slot)?
@@ -2413,11 +2412,11 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         state = controller
             .state_before_or_at_slot(block_root, slot)
             .ok_or(Error::StateNotFound)?;
-        is_optimistic = block.status.is_optimistic();
+        block.status.is_optimistic()
     } else {
         block_root = head.block_root;
         state = controller.state_by_chain_link(&head);
-        is_optimistic = status.is_optimistic();
+        status.is_optimistic()
     };
 
     if is_optimistic {
@@ -2430,7 +2429,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         })
         .await?
         .map_err(Error::UnableToProduceAttestation)?;
-    };
+    }
 
     let target = Checkpoint {
         epoch: requested_epoch,

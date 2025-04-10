@@ -514,7 +514,7 @@ fn try_main() -> Result<()> {
     if let Some(cache) = cache {
         if let Err(error) = cache.save() {
             warn!("Unable to save validator key cache: {error:?}");
-        };
+        }
     }
 
     let slasher_config = slashing_enabled.then_some(SlasherConfig {

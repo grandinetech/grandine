@@ -76,7 +76,6 @@ impl IntoResponse for Error {
     }
 }
 
-#[expect(clippy::module_name_repetitions)]
 pub async fn run_metrics_server(
     config: MetricsServerConfig,
     libp2p_registry: Option<Registry>,

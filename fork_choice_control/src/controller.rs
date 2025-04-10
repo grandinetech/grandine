@@ -565,6 +565,7 @@ where
         self.store_snapshot.load_full()
     }
 
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     pub(crate) fn storage(&self) -> &Storage<P> {
         &self.storage
     }

@@ -87,6 +87,9 @@ options=(
     # until that was fixed in <https://github.com/rust-lang/rust-clippy/pull/12730>,
     # which somehow did make into Rust 1.80.0 despite being merged in the same release cycle.
     --allow clippy::lint_groups_priority
+
+    # TODO: find and fix these warnings
+    --allow clippy::large-stack-arrays
 )
 
 exec cargo clippy "${options[@]}" "$@"

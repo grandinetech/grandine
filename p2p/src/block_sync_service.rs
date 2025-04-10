@@ -115,10 +115,8 @@ impl<P: Preset> BlockSyncService<P> {
     ) -> Result<Self> {
         let database;
         let back_sync;
-        let archiver_to_sync_tx;
-        let archiver_to_sync_rx;
 
-        if back_sync_enabled {
+        let (archiver_to_sync_tx, archiver_to_sync_rx) = if back_sync_enabled {
             if loaded_from_remote {
                 let anchor_checkpoint = controller.anchor_block().as_ref().into();
 
@@ -171,13 +169,11 @@ impl<P: Preset> BlockSyncService<P> {
             let (sync_tx, sync_rx) = futures::channel::mpsc::unbounded();
 
             database = Some(db);
-            archiver_to_sync_tx = Some(sync_tx);
-            archiver_to_sync_rx = Some(sync_rx);
+            (Some(sync_tx), Some(sync_rx))
         } else {
             database = None;
             back_sync = None;
-            archiver_to_sync_tx = None;
-            archiver_to_sync_rx = None;
+            (None, None)
         };
 
         let Channels {
