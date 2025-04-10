@@ -276,9 +276,7 @@ impl Default for Config {
 //                      tests that verify built-in configurations match YAML files in them.
 
 impl Config {
-    /// [Mainnet configuration](https://github.com/ethereum/consensus-specs/blob/4e2578dfe4097e2a6b6284ff6991089057d48776/configs/mainnet.yaml).
-    ///
-    /// Also available at <https://github.com/eth-clients/eth2-networks/blob/934c948e69205dcf2deb87e4ae6cc140c335f94d/shared/mainnet/config.yaml>.
+    /// [Mainnet configuration](https://github.com/eth-clients/mainnet/blob/978f1794eada6f85bee76e4d2d5959a5fb8e0cc5/metadata/config.yaml).
     #[must_use]
     pub fn mainnet() -> Self {
         Self {
@@ -293,6 +291,7 @@ impl Config {
             bellatrix_fork_epoch: 144_896,
             capella_fork_epoch: 194_048,
             deneb_fork_epoch: 269_568,
+            electra_fork_epoch: 364_032,
 
             // Deposit contract
             deposit_chain_id: 1,
