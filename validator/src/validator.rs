@@ -1290,6 +1290,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
     async fn publish_contributions_and_proofs(&self, slot_head: &SlotHead<P>) {
+        if !self.controller.is_forward_synced() {
+            return;
+        }
+
         if !slot_head.has_sync_committee() {
             return;
         }
