@@ -118,8 +118,8 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
     }
 
     fn spawn_verify_batch_tasks(&mut self, wait_group: &W) {
-        self.spawn_verify_attestation_batch_task(wait_group);
         self.spawn_verify_aggregate_batch_task(wait_group);
+        self.spawn_verify_attestation_batch_task(wait_group);
     }
 
     fn spawn_verify_aggregate_batch_task(&mut self, wait_group: &W) {
