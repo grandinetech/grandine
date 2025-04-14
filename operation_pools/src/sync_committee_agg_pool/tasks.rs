@@ -432,11 +432,12 @@ fn validate_external_contribution_and_proof<P: Preset>(
         SignatureKind::ContributionAndProof,
     )?;
 
+    let backend = verifier.backend();
     let participant_pubkeys = subcommittee_pubkeys
         .iter()
         .zip(contribution.aggregation_bits)
         .filter(|(_, bit)| *bit)
-        .map(|(pubkey, _)| pubkey.decompress());
+        .map(|(pubkey, _)| pubkey.decompress(backend));
 
     let signing_root =
         contribution

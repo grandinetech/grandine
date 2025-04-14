@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, SecretKeyBytes};
+use bls::{Backend, PublicKeyBytes, SecretKey, SecretKeyBytes};
 use eip_2335::Crypto;
 use log::info;
 use sha2::{Digest as _, Sha256};
@@ -33,15 +33,17 @@ pub struct ValidatorKeyCache {
     keys: BTreeMap<Uuid, (PublicKeyBytes, Arc<SecretKey>)>,
     passwords: BTreeMap<Uuid, Zeroizing<String>>,
     validator_directory: PathBuf,
+    backend: Backend,
 }
 
 impl ValidatorKeyCache {
     #[must_use]
-    pub const fn new(validator_directory: PathBuf) -> Self {
+    pub const fn new(validator_directory: PathBuf, backend: Backend) -> Self {
         Self {
             keys: BTreeMap::new(),
             passwords: BTreeMap::new(),
             validator_directory,
+            backend,
         }
     }
 
@@ -90,7 +92,10 @@ impl ValidatorKeyCache {
                 } = record;
 
                 let uuid = Uuid::from_u128(uuid);
-                let secret_key = Arc::new(secret_key.try_into()?);
+                let secret_key = Arc::new(SecretKey::try_from_with_backend(
+                    secret_key,
+                    self.backend.clone(),
+                )?);
 
                 Ok((uuid, (public_key, secret_key)))
             })

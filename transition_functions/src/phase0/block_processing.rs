@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
-use bls::traits::CachedPublicKey as _;
+use bls::Backend;
 use helper_functions::{
     accessors::{
         self, attestation_epoch, get_beacon_proposer_index, index_of_public_key,
@@ -69,12 +69,13 @@ pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
+    backend: Backend,
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
     unphased::process_block_header_for_gossip(state, &block.message)?;
 
-    SingleVerifier.verify_singular(
+    SingleVerifier::new(backend).verify_singular(
         block.message.signing_root(config, state),
         block.signature,
         accessors::public_key(state, block.message.proposer_index)?,
@@ -191,8 +192,12 @@ fn process_operations<P: Preset, V: Verifier>(
     // The conditional is not needed for correctness.
     // It only serves to avoid overhead when processing blocks with no deposits.
     if !body.deposits.is_empty() {
-        let combined_deposits =
-            unphased::validate_deposits(config, state, body.deposits.iter().copied())?;
+        let combined_deposits = unphased::validate_deposits(
+            config,
+            state,
+            body.deposits.iter().copied(),
+            verifier.backend(),
+        )?;
 
         apply_deposits(state, body.deposits.len(), combined_deposits, slot_report)?;
     }
@@ -285,6 +290,7 @@ pub fn process_deposit_data<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
     deposit_data: DepositData,
+    backend: Backend,
 ) -> Result<Option<ValidatorIndex>> {
     let DepositData {
         pubkey,
@@ -314,7 +320,10 @@ pub fn process_deposit_data<P: Preset>(
     let pubkey = pubkey.into();
 
     // > Fork-agnostic domain since deposits are valid across forks
-    if deposit_message.verify(config, signature, &pubkey).is_ok() {
+    if deposit_message
+        .verify(config, signature, &pubkey, backend)
+        .is_ok()
+    {
         let validator_index = state.validators.len_u64();
 
         let combined_deposit = CombinedDeposit::NewValidator {
@@ -501,7 +510,7 @@ mod spec_tests {
                 config,
                 state,
                 proposer_slashing,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -517,7 +526,7 @@ mod spec_tests {
                 config,
                 state,
                 &attester_slashing,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -550,7 +559,7 @@ mod spec_tests {
         process_deposit_data,
         |config, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
-            process_deposit_data(config, state, deposit.data)?;
+            process_deposit_data(config, state, deposit.data, Backend::default())?;
             Ok(())
         },
         "deposit",
@@ -561,7 +570,8 @@ mod spec_tests {
     processing_tests! {
         process_voluntary_exit,
         |config, state, voluntary_exit, _| {
-            unphased::process_voluntary_exit(config, state, voluntary_exit, SingleVerifier)
+            unphased::process_voluntary_exit(config, state, voluntary_exit,
+                SingleVerifier::new(Backend::default()))
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/phase0/operations/voluntary_exit/*/*",
@@ -649,7 +659,7 @@ mod spec_tests {
                     config,
                     state,
                     attestation,
-                    SingleVerifier,
+                    SingleVerifier::new(Backend::default()),
                 )?
             }
             BlsSetting::Ignored => unphased::validate_attestation_with_verifier(

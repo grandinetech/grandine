@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bls::{traits::SecretKey as _, CachedPublicKey, SecretKey, Signature, SignatureBytes};
+use bls::{Backend, CachedPublicKey, SecretKey, Signature, SignatureBytes};
 use derive_more::From;
 use ssz::{Ssz, SszHash};
 use types::{
@@ -77,8 +77,9 @@ pub trait SignForAllForks: SszHash {
         config: &Config,
         signature_bytes: SignatureBytes,
         cached_public_key: &CachedPublicKey,
+        backend: Backend,
     ) -> Result<()> {
-        SingleVerifier.verify_singular(
+        SingleVerifier::new(backend).verify_singular(
             self.signing_root(config),
             signature_bytes,
             cached_public_key,
@@ -112,8 +113,9 @@ pub trait SignForAllForksWithGenesis<P: Preset>: SszHash {
         beacon_state: &(impl BeaconState<P> + ?Sized),
         signature_bytes: SignatureBytes,
         cached_public_key: &CachedPublicKey,
+        backend: Backend,
     ) -> Result<()> {
-        SingleVerifier.verify_singular(
+        SingleVerifier::new(backend).verify_singular(
             self.signing_root(config, beacon_state),
             signature_bytes,
             cached_public_key,
@@ -149,8 +151,9 @@ pub trait SignForSingleFork<P: Preset>: SszHash {
         beacon_state: &(impl BeaconState<P> + ?Sized),
         signature_bytes: SignatureBytes,
         cached_public_key: &CachedPublicKey,
+        backend: Backend,
     ) -> Result<()> {
-        SingleVerifier.verify_singular(
+        SingleVerifier::new(backend).verify_singular(
             self.signing_root(config, beacon_state),
             signature_bytes,
             cached_public_key,
@@ -191,8 +194,9 @@ pub trait SignForSingleForkAtSlot<P: Preset>: SszHash {
         slot: Slot,
         signature_bytes: SignatureBytes,
         cached_public_key: &CachedPublicKey,
+        backend: Backend,
     ) -> Result<()> {
-        SingleVerifier.verify_singular(
+        SingleVerifier::new(backend).verify_singular(
             self.signing_root(config, beacon_state, slot),
             signature_bytes,
             cached_public_key,

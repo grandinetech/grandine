@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use arithmetic::U64Ext as _;
+use bls::Backend;
 use helper_functions::{
     accessors::{get_current_epoch, get_next_sync_committee, total_active_balance},
     misc::vec_of_default,
@@ -39,7 +40,11 @@ pub struct EpochReport {
     pub post_balances: Vec<Gwei>,
 }
 
-pub fn process_epoch(config: &Config, state: &mut AltairBeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    state: &mut AltairBeaconState<impl Preset>,
+    backend: Backend,
+) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -79,7 +84,7 @@ pub fn process_epoch(config: &Config, state: &mut AltairBeaconState<impl Preset>
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     process_participation_flag_updates(state);
-    process_sync_committee_updates(state)?;
+    process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -89,6 +94,7 @@ pub fn process_epoch(config: &Config, state: &mut AltairBeaconState<impl Preset>
 pub fn epoch_report<P: Preset>(
     config: &Config,
     state: &mut AltairBeaconState<P>,
+    backend: Backend,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = epoch_intermediates::statistics(state);
 
@@ -130,7 +136,7 @@ pub fn epoch_report<P: Preset>(
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     process_participation_flag_updates(state);
-    process_sync_committee_updates(state)?;
+    process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -269,11 +275,12 @@ pub fn process_participation_flag_updates<P: Preset>(state: &mut impl PostAltair
 
 pub fn process_sync_committee_updates<P: Preset>(
     state: &mut impl PostAltairBeaconState<P>,
+    backend: Backend,
 ) -> Result<()> {
     let next_epoch = get_current_epoch(state) + 1;
 
     if next_epoch.is_multiple_of(P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD) {
-        let committee = get_next_sync_committee(state)?;
+        let committee = get_next_sync_committee(state, backend)?;
         *state.current_sync_committee_mut() =
             core::mem::replace(state.next_sync_committee_mut(), committee);
     }
@@ -555,7 +562,9 @@ mod spec_tests {
     }
 
     fn run_sync_committee_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, process_sync_committee_updates);
+        run_case::<P>(case, |state| {
+            process_sync_committee_updates(state, Backend::default())
+        });
     }
 
     fn run_case<P: Preset>(

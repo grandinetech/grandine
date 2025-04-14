@@ -1,6 +1,7 @@
 use core::ops::{Add as _, Index as _, Rem as _};
 
 use anyhow::{ensure, Result};
+use bls::Backend;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
@@ -83,6 +84,7 @@ pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
+    backend: Backend,
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
@@ -90,7 +92,7 @@ pub fn process_block_for_gossip<P: Preset>(
 
     process_execution_payload_for_gossip(config, state, &block.message.body)?;
 
-    SingleVerifier.verify_singular(
+    SingleVerifier::new(backend).verify_singular(
         block.message.signing_root(config, state),
         block.signature,
         accessors::public_key(state, block.message.proposer_index)?,
@@ -289,8 +291,12 @@ pub fn process_operations<P: Preset, V: Verifier>(
     // The conditional is not needed for correctness.
     // It only serves to avoid overhead when processing blocks with no deposits.
     if !body.deposits().is_empty() {
-        let combined_deposits =
-            unphased::validate_deposits(config, state, body.deposits().iter().copied())?;
+        let combined_deposits = unphased::validate_deposits(
+            config,
+            state,
+            body.deposits().iter().copied(),
+            verifier.backend(),
+        )?;
 
         altair::apply_deposits(state, body.deposits().len(), combined_deposits, slot_report)?;
     }
@@ -336,12 +342,13 @@ pub fn validate_bls_to_execution_change<P: Preset>(
     config: &Config,
     state: &(impl PostCapellaBeaconState<P> + ?Sized),
     bls_to_execution_change: SignedBlsToExecutionChange,
+    backend: Backend,
 ) -> Result<()> {
     validate_bls_to_execution_change_with_verifier(
         config,
         state,
         bls_to_execution_change,
-        SingleVerifier,
+        SingleVerifier::new(backend),
     )
 }
 
@@ -602,7 +609,7 @@ mod spec_tests {
                 config,
                 state,
                 proposer_slashing,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -618,7 +625,7 @@ mod spec_tests {
                 config,
                 state,
                 &attester_slashing,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -649,7 +656,7 @@ mod spec_tests {
                 config,
                 state,
                 bls_to_execution_change,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
             )
         },
         "address_change",
@@ -671,7 +678,7 @@ mod spec_tests {
         process_deposit_data,
         |config, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
-            altair::process_deposit_data(config, state, deposit.data)?;
+            altair::process_deposit_data(config, state, deposit.data, Backend::default())?;
             Ok(())
         },
         "deposit",
@@ -686,7 +693,7 @@ mod spec_tests {
                 config,
                 state,
                 voluntary_exit,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
             )
         },
         "voluntary_exit",
@@ -701,7 +708,7 @@ mod spec_tests {
                 config,
                 state,
                 sync_aggregate,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -713,7 +720,7 @@ mod spec_tests {
     validation_tests! {
         validate_proposer_slashing,
         |config, state, proposer_slashing| {
-            unphased::validate_proposer_slashing(config, state, proposer_slashing)
+            unphased::validate_proposer_slashing(config, state, proposer_slashing, Backend::default())
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/capella/operations/proposer_slashing/*/*",
@@ -723,7 +730,7 @@ mod spec_tests {
     validation_tests! {
         validate_attester_slashing,
         |config, state, attester_slashing: AttesterSlashing<P>| {
-            unphased::validate_attester_slashing(config, state, &attester_slashing)
+            unphased::validate_attester_slashing(config, state, &attester_slashing, Backend::default())
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/capella/operations/attester_slashing/*/*",
@@ -733,7 +740,7 @@ mod spec_tests {
     validation_tests! {
         validate_voluntary_exit,
         |config, state, voluntary_exit| {
-            unphased::validate_voluntary_exit(config, state, voluntary_exit)
+            unphased::validate_voluntary_exit(config, state, voluntary_exit, Backend::default())
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/capella/operations/voluntary_exit/*/*",
@@ -743,7 +750,7 @@ mod spec_tests {
     validation_tests! {
         validate_bls_to_execution_change,
         |config, state, bls_to_execution_change| {
-            validate_bls_to_execution_change(config, state, bls_to_execution_change)
+            validate_bls_to_execution_change(config, state, bls_to_execution_change, Backend::default())
         },
         "address_change",
         "consensus-spec-tests/tests/mainnet/capella/operations/bls_to_execution_change/*/*",
@@ -860,7 +867,7 @@ mod spec_tests {
                     config,
                     state,
                     attestation,
-                    SingleVerifier,
+                    SingleVerifier::new(Backend::default()),
                 )?
             }
             BlsSetting::Ignored => unphased::validate_attestation_with_verifier(
@@ -879,8 +886,12 @@ mod spec_tests {
         state: &mut BeaconState<P>,
         deposit: Deposit,
     ) -> Result<()> {
-        let combined_deposits =
-            unphased::validate_deposits(config, state, core::iter::once(deposit))?;
+        let combined_deposits = unphased::validate_deposits(
+            config,
+            state,
+            core::iter::once(deposit),
+            Backend::default(),
+        )?;
 
         altair::apply_deposits(state, 1, combined_deposits, NullSlotReport)
     }

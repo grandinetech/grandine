@@ -90,7 +90,7 @@ impl<P: Preset> Storage<P> {
                 combined::untrusted_state_transition(self.config(), state.make_mut(), &block)?;
                 previous_block = Some(block);
             } else {
-                combined::process_slots(self.config(), state.make_mut(), slot)?;
+                combined::process_slots(self.config(), state.make_mut(), slot, self.backend)?;
             }
 
             batch.push(serialize(SlotByStateRoot(state.hash_tree_root()), slot)?);

@@ -1,6 +1,7 @@
 use core::{cell::LazyCell, ops::Mul as _};
 
 use anyhow::Result;
+use bls::Backend;
 use helper_functions::{
     accessors::{get_current_epoch, total_active_balance},
     misc::vec_of_default,
@@ -21,7 +22,11 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(config: &Config, state: &mut CapellaBeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    state: &mut CapellaBeaconState<impl Preset>,
+    backend: Backend,
+) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -61,7 +66,7 @@ pub fn process_epoch(config: &Config, state: &mut CapellaBeaconState<impl Preset
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -71,6 +76,7 @@ pub fn process_epoch(config: &Config, state: &mut CapellaBeaconState<impl Preset
 pub fn epoch_report<P: Preset>(
     config: &Config,
     state: &mut CapellaBeaconState<P>,
+    backend: Backend,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
@@ -112,7 +118,7 @@ pub fn epoch_report<P: Preset>(
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -449,7 +455,9 @@ mod spec_tests {
     }
 
     fn run_sync_committee_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, altair::process_sync_committee_updates);
+        run_case::<P>(case, |state| {
+            altair::process_sync_committee_updates(state, Backend::default())
+        });
     }
 
     fn run_case<P: Preset>(

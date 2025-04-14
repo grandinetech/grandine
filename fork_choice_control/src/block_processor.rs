@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use bls::Backend;
 use derive_more::Constructor;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
@@ -31,6 +32,7 @@ use types::{
 pub struct BlockProcessor<P: Preset> {
     chain_config: Arc<ChainConfig>,
     state_cache: Arc<StateCacheProcessor<P>>,
+    backend: Backend,
 }
 
 impl<P: Preset> BlockProcessor<P> {
@@ -167,10 +169,10 @@ impl<P: Preset> BlockProcessor<P> {
             // > Make a copy of the state to avoid mutability issues
             let state = self
                 .state_cache
-                .try_state_at_slot(store, parent.block_root, block_slot)?
+                .try_state_at_slot(store, parent.block_root, block_slot, self.backend)?
                 .unwrap_or_else(|| parent.state(store));
 
-            combined::process_block_for_gossip(&self.chain_config, &state, block)?;
+            combined::process_block_for_gossip(&self.chain_config, &state, block, self.backend)?;
 
             Ok(None)
         })

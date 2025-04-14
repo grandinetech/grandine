@@ -1,7 +1,7 @@
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::traits::CachedPublicKey as _;
+use bls::Backend;
 use helper_functions::{
     accessors::{
         self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
@@ -83,12 +83,13 @@ pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
+    backend: Backend,
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.message.slot);
 
     unphased::process_block_header_for_gossip(state, &block.message)?;
 
-    SingleVerifier.verify_singular(
+    SingleVerifier::new(backend).verify_singular(
         block.message.signing_root(config, state),
         block.signature,
         accessors::public_key(state, block.message.proposer_index)?,
@@ -208,8 +209,12 @@ fn process_operations<P: Preset, V: Verifier>(
     // The conditional is not needed for correctness.
     // It only serves to avoid overhead when processing blocks with no deposits.
     if !body.deposits.is_empty() {
-        let combined_deposits =
-            unphased::validate_deposits(config, state, body.deposits.iter().copied())?;
+        let combined_deposits = unphased::validate_deposits(
+            config,
+            state,
+            body.deposits.iter().copied(),
+            verifier.backend(),
+        )?;
 
         apply_deposits(state, body.deposits.len(), combined_deposits, slot_report)?;
     }
@@ -343,6 +348,7 @@ pub fn process_deposit_data<P: Preset>(
     config: &Config,
     state: &mut impl PostAltairBeaconState<P>,
     deposit_data: DepositData,
+    backend: Backend,
 ) -> Result<Option<ValidatorIndex>> {
     let DepositData {
         pubkey,
@@ -372,7 +378,10 @@ pub fn process_deposit_data<P: Preset>(
     let pubkey = pubkey.into();
 
     // > Fork-agnostic domain since deposits are valid across forks
-    if deposit_message.verify(config, signature, &pubkey).is_ok() {
+    if deposit_message
+        .verify(config, signature, &pubkey, backend)
+        .is_ok()
+    {
         let validator_index = state.validators().len_u64();
 
         let combined_deposit = CombinedDeposit::NewValidator {
@@ -557,13 +566,14 @@ pub fn verify_sync_aggregate_signature<P: Preset, V: Verifier>(
     // (see the doc comment for `Verifier::verify_aggregate_allowing_empty`).
     // This should not matter much in practice because empty sync aggregates are rare.
 
+    let backend = verifier.backend();
     let participant_pubkeys = state
         .current_sync_committee()
         .pubkeys
         .iter()
         .zip(sync_committee_bits)
         .filter(|(_, bit)| *bit)
-        .map(|(pubkey, _)| pubkey.decompress());
+        .map(|(pubkey, _)| pubkey.decompress(backend));
 
     let previous_slot = misc::previous_slot(state.slot());
 
@@ -673,7 +683,7 @@ mod spec_tests {
                 config,
                 state,
                 proposer_slashing,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -689,7 +699,7 @@ mod spec_tests {
                 config,
                 state,
                 &attester_slashing,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -727,7 +737,8 @@ mod spec_tests {
         process_deposit_data,
         |config, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
-            process_deposit_data(config, state, deposit.data)?;
+            process_deposit_data(config, state, deposit.data,
+                SingleVerifier::new(Backend::default()))?;
             Ok(())
         },
         "deposit",
@@ -742,7 +753,7 @@ mod spec_tests {
                 config,
                 state,
                 voluntary_exit,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
             )
         },
         "voluntary_exit",
@@ -757,7 +768,7 @@ mod spec_tests {
                 config,
                 state,
                 sync_aggregate,
-                SingleVerifier,
+                SingleVerifier::new(Backend::default()),
                 NullSlotReport,
             )
         },
@@ -847,7 +858,7 @@ mod spec_tests {
                     config,
                     state,
                     attestation,
-                    SingleVerifier,
+                    SingleVerifier::new(Backend::default()),
                 )?
             }
             BlsSetting::Ignored => unphased::validate_attestation_with_verifier(

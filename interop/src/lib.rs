@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 
 use anyhow::Result;
-use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
+use bls::{Backend, SecretKey, SecretKeyBytes};
 use deposit_tree::DepositTree;
 use genesis::Incremental;
 use helper_functions::{misc, signing::SignForAllForks};
@@ -39,13 +39,14 @@ pub fn quick_start_beacon_state<P: Preset>(
     config: &Config,
     genesis_time: UnixSeconds,
     validator_count: NonZeroU64,
+    backend: Backend,
 ) -> Result<(CombinedBeaconState<P>, DepositTree)> {
-    let mut incremental = Incremental::new(config);
+    let mut incremental = Incremental::new(config, backend);
 
     incremental.set_eth1_timestamp(QUICK_START_ETH1_BLOCK_TIMESTAMP);
 
     for index in 0..validator_count.get() {
-        let deposit_data = quick_start_deposit_data::<P>(config, &secret_key(index));
+        let deposit_data = quick_start_deposit_data::<P>(config, &secret_key(index, backend));
         incremental.add_deposit_data(deposit_data, index)?;
     }
 
@@ -62,7 +63,7 @@ pub fn quick_start_beacon_state<P: Preset>(
 
 /// <https://github.com/ethereum/eth2.0-pm/tree/b7c76e7a9d036ce73ca6aa0b7065db92f7728f41/interop/mocked_start#pubkeyprivkey-generation>
 #[must_use]
-pub fn secret_key(validator_index: ValidatorIndex) -> SecretKey {
+pub fn secret_key(validator_index: ValidatorIndex, backend: Backend) -> SecretKey {
     let index_hash = hashing::hash_256(validator_index.hash_tree_root());
     let curve_order = BigUint::from_bytes_be(CURVE_ORDER);
     let secret_key_uint = BigUint::from_bytes_le(index_hash.as_bytes()) % &curve_order;
@@ -70,8 +71,7 @@ pub fn secret_key(validator_index: ValidatorIndex) -> SecretKey {
     let mut padded = SecretKeyBytes::default();
     padded.as_mut()[size_of::<SecretKeyBytes>() - unpadded.len()..]
         .copy_from_slice(unpadded.as_slice());
-    padded
-        .try_into()
+    SecretKey::try_from_with_backend(padded, backend)
         .expect("the algorithm given in the standard should produce valid secret keys")
 }
 
@@ -101,7 +101,7 @@ pub fn quick_start_deposit_data<P: Preset>(config: &Config, secret_key: &SecretK
 
 #[cfg(test)]
 mod tests {
-    use bls::PublicKeyBytes;
+    use bls::{PublicKey, PublicKeyBytes};
 
     use super::*;
 
@@ -162,14 +162,12 @@ mod tests {
         ];
 
         for ((sk_bytes, pk_bytes), validator_index) in expected_keypairs.iter().copied().zip(0..) {
-            let expected_secret_key = SecretKeyBytes::from(sk_bytes)
-                .try_into()
+            let expected_secret_key = SecretKey::try_from_with_backend(SecretKeyBytes::from(sk_bytes), Backend::default()) 
                 .expect("every secret key given in the standard should be valid");
-            let expected_public_key = PublicKeyBytes::from(pk_bytes)
-                .try_into()
+            let expected_public_key = PublicKey::try_from_with_backend(PublicKeyBytes::from(pk_bytes), Backend::default())
                 .expect("every public key given in the standard should be valid");
 
-            let actual_secret_key = secret_key(validator_index);
+            let actual_secret_key = secret_key(validator_index, Backend::default());
             let actual_public_key = actual_secret_key.to_public_key();
 
             assert_eq!(actual_secret_key, expected_secret_key);

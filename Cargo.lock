@@ -1068,16 +1068,6 @@ dependencies = [
 name = "bls"
 version = "0.0.0"
 dependencies = [
- "bls-blst",
- "bls-core",
- "bls-zkcrypto",
-]
-
-[[package]]
-name = "bls-blst"
-version = "0.0.0"
-dependencies = [
- "bls-core",
  "blst",
  "derivative",
  "derive_more 1.0.0",
@@ -1091,47 +1081,7 @@ dependencies = [
  "serde_utils",
  "ssz",
  "static_assertions",
- "std_ext",
- "tap",
- "typenum",
- "zeroize",
-]
-
-[[package]]
-name = "bls-core"
-version = "0.0.0"
-dependencies = [
- "derivative",
- "hex",
- "once_cell",
- "serde",
- "ssz",
- "static_assertions",
  "thiserror 1.0.69",
- "typenum",
- "zeroize",
-]
-
-[[package]]
-name = "bls-zkcrypto"
-version = "0.0.0"
-dependencies = [
- "bls-core",
- "bls12_381 0.8.0 (git+https://github.com/zkcrypto/bls12_381.git)",
- "derivative",
- "derive_more 1.0.0",
- "ff",
- "fixed-hash",
- "hex",
- "impl-serde",
- "itertools 0.13.0",
- "once_cell",
- "rand 0.8.5",
- "serde",
- "serde_utils",
- "sha2 0.10.8",
- "ssz",
- "static_assertions",
  "typenum",
  "zeroize",
 ]
@@ -1141,19 +1091,6 @@ name = "bls12_381"
 version = "0.8.0"
 source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
- "ff",
- "group",
- "pairing",
- "rand_core 0.6.4",
- "subtle",
-]
-
-[[package]]
-name = "bls12_381"
-version = "0.8.0"
-source = "git+https://github.com/zkcrypto/bls12_381.git#9ea427c0eb1a7e2ac16902a322aea156c496ddb0"
-dependencies = [
- "digest 0.10.7",
  "ff",
  "group",
  "pairing",
@@ -2921,6 +2858,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arithmetic",
+ "bls",
  "bytesize",
  "clock",
  "crossbeam-utils",
@@ -2974,6 +2912,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arithmetic",
+ "bls",
  "clock",
  "crossbeam-skiplist",
  "derivative",
@@ -7141,7 +7080,7 @@ name = "rust-kzg-zkcrypto"
 version = "0.1.0"
 source = "git+https://github.com/grandinetech/rust-kzg.git#6ea2a2ad93ecac70d627edc91334ccb5f4ecd4fb"
 dependencies = [
- "bls12_381 0.8.0 (git+https://github.com/grandinetech/rust-kzg.git)",
+ "bls12_381",
  "byteorder",
  "ff",
  "hex",

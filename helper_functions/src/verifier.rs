@@ -2,14 +2,13 @@
 
 use anyhow::{ensure, Result};
 use bls::{
-    traits::{CachedPublicKey as _, PublicKey as _, Signature as _, SignatureBytes as _},
-    AggregatePublicKey, AggregateSignature, CachedPublicKey, PublicKey, Signature, SignatureBytes,
+    AggregatePublicKey, AggregateSignature, Backend, CachedPublicKey, PublicKey, Signature,
+    SignatureBytes,
 };
 use derive_more::Constructor;
 use enumset::{EnumSet, EnumSetType};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelBridge as _, ParallelIterator as _};
 use static_assertions::assert_not_impl_any;
-use tap::TryConv as _;
 use types::phase0::primitives::H256;
 
 use crate::error::{Error, SignatureKind};
@@ -67,6 +66,8 @@ pub trait Verifier {
     fn finish(&self) -> Result<()>;
 
     fn has_option(&self, option: VerifierOption) -> bool;
+
+    fn backend(&self) -> Backend;
 }
 
 impl<V: Verifier> Verifier for &mut V {
@@ -116,6 +117,11 @@ impl<V: Verifier> Verifier for &mut V {
     #[inline]
     fn has_option(&self, option: VerifierOption) -> bool {
         (**self).has_option(option)
+    }
+
+    #[inline]
+    fn backend(&self) -> Backend {
+        (**self).backend()
     }
 }
 
@@ -167,9 +173,16 @@ impl Verifier for NullVerifier {
     fn has_option(&self, _option: VerifierOption) -> bool {
         false
     }
+
+    #[inline]
+    fn backend(&self) -> Backend {
+        Default::default()
+    }
 }
 
-pub struct SingleVerifier;
+pub struct SingleVerifier {
+    backend: Backend,
+}
 
 impl Verifier for SingleVerifier {
     const IS_NULL: bool = false;
@@ -185,8 +198,8 @@ impl Verifier for SingleVerifier {
         cached_public_key: &CachedPublicKey,
         signature_kind: SignatureKind,
     ) -> Result<()> {
-        let public_key = *cached_public_key.decompress()?;
-        let triple = Triple::new(message, signature_bytes, public_key);
+        let public_key = *cached_public_key.decompress(self.backend)?;
+        let triple = Triple::new(message, signature_bytes, public_key, self.backend);
         self.extend(core::iter::once(triple), signature_kind)
     }
 
@@ -203,8 +216,7 @@ impl Verifier for SingleVerifier {
         // verifying signatures individually. Block processing now uses `Signature::multi_verify`,
         // which is even faster.
         ensure!(
-            signature_bytes
-                .try_conv::<AggregateSignature>()?
+            AggregateSignature::try_from_with_backend(signature_bytes, self.backend)?
                 .fast_aggregate_verify(message, public_keys.into_iter()),
             Error::SignatureInvalid(signature_kind),
         );
@@ -223,9 +235,10 @@ impl Verifier for SingleVerifier {
                 message,
                 signature_bytes,
                 public_key,
+                backend,
             } = triple;
 
-            let signature = Signature::try_from(signature_bytes)?;
+            let signature = Signature::try_from_with_backend(signature_bytes, backend)?;
 
             ensure!(
                 signature.verify(message, public_key),
@@ -245,12 +258,24 @@ impl Verifier for SingleVerifier {
     fn has_option(&self, _option: VerifierOption) -> bool {
         false
     }
+
+    #[inline]
+    fn backend(&self) -> Backend {
+        self.backend
+    }
+}
+
+impl SingleVerifier {
+    pub fn new(backend: Backend) -> Self {
+        Self { backend }
+    }
 }
 
 #[derive(Default)]
 pub struct MultiVerifier {
     triples: Vec<Triple>,
     options: EnumSet<VerifierOption>,
+    backend: Backend,
 }
 
 impl Verifier for MultiVerifier {
@@ -269,8 +294,8 @@ impl Verifier for MultiVerifier {
         cached_public_key: &CachedPublicKey,
         _signature_kind: SignatureKind,
     ) -> Result<()> {
-        let public_key = *cached_public_key.decompress()?;
-        let triple = Triple::new(message, signature_bytes, public_key);
+        let public_key = *cached_public_key.decompress(self.backend)?;
+        let triple = Triple::new(message, signature_bytes, public_key, self.backend);
         self.triples.push(triple);
         Ok(())
     }
@@ -310,7 +335,9 @@ impl Verifier for MultiVerifier {
         let signatures = self
             .triples
             .par_iter()
-            .map(|triple| triple.signature_bytes.try_into())
+            .map(|triple| {
+                Signature::try_from_with_backend(triple.signature_bytes, triple.backend.clone())
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let public_keys = self.triples.iter().map(|triple| &triple.public_key);
@@ -326,6 +353,11 @@ impl Verifier for MultiVerifier {
     #[inline]
     fn has_option(&self, option: VerifierOption) -> bool {
         self.options.contains(option)
+    }
+
+    #[inline]
+    fn backend(&self) -> Backend {
+        self.backend
     }
 }
 
@@ -347,11 +379,23 @@ impl MultiVerifier {
     }
 }
 
-#[derive(Default, Constructor)]
+#[derive(Constructor)]
 pub struct Triple {
     message: H256,
     signature_bytes: SignatureBytes,
     public_key: PublicKey,
+    backend: Backend,
+}
+
+impl Default for Triple {
+    fn default() -> Self {
+        Self {
+            message: Default::default(),
+            signature_bytes: Default::default(),
+            public_key: PublicKey::default(Default::default()),
+            backend: Default::default(),
+        }
+    }
 }
 
 // `Triple` was originally an alias for a tuple and thus implemented `Copy`.
@@ -394,13 +438,12 @@ impl Verifier for Triple {
     ) -> Result<()> {
         // TODO(Grandine Team): This may no longer be true as of Rayon 1.6.1. Benchmark again.
         // The `ParallelBridge::par_bridge` here outperforms "native" parallel iterators.
-        let public_key = public_keys
-            .into_iter()
-            .par_bridge()
-            .copied()
-            .reduce(AggregatePublicKey::default, AggregatePublicKey::aggregate);
+        let public_key = public_keys.into_iter().par_bridge().copied().reduce(
+            || AggregatePublicKey::default(self.backend.clone()),
+            AggregatePublicKey::aggregate,
+        );
 
-        *self = Self::new(message, signature_bytes, public_key);
+        *self = Self::new(message, signature_bytes, public_key, self.backend.clone());
 
         Ok(())
     }
@@ -423,6 +466,11 @@ impl Verifier for Triple {
     fn has_option(&self, _option: VerifierOption) -> bool {
         false
     }
+
+    #[inline]
+    fn backend(&self) -> Backend {
+        self.backend
+    }
 }
 
 // TODO(Grandine Team): The first 2 variants are no longer used at runtime because
@@ -438,9 +486,9 @@ pub enum VerifierOption {
 
 #[cfg(test)]
 mod tests {
-    use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
+    use bls::{SecretKey, SecretKeyBytes};
     use std_ext::CopyExt as _;
-    use tap::{Conv as _, TryConv as _};
+    use tap::Conv as _;
 
     use super::*;
 
@@ -451,7 +499,7 @@ mod tests {
 
     #[test]
     fn multi_verifier_finalize_succeeds_with_1_signature() -> Result<()> {
-        let secret_key = secret_key();
+        let secret_key = secret_key(Default::default());
         let public_key = secret_key.to_public_key().into();
         let message = H256::default();
         let signature = secret_key.sign(message).into();
@@ -461,11 +509,13 @@ mod tests {
         verifier.finish()
     }
 
-    fn secret_key() -> SecretKey {
-        b"????????????????????????????????"
-            .copy()
-            .conv::<SecretKeyBytes>()
-            .try_conv::<SecretKey>()
-            .expect("bytes encode a valid secret key")
+    fn secret_key(backend: Backend) -> SecretKey {
+        SecretKey::try_from_with_backend(
+            b"????????????????????????????????"
+                .copy()
+                .conv::<SecretKeyBytes>(),
+            backend,
+        )
+        .expect("bytes encode a valid secret key")
     }
 }

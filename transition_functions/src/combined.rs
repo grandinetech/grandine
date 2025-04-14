@@ -1,4 +1,5 @@
 use anyhow::{bail, ensure, Result};
+use bls::Backend;
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
@@ -116,7 +117,7 @@ pub fn custom_state_transition<P: Preset>(
 ) -> Result<()> {
     // > Process slots (including those with no blocks) since block
     if process_slots.should_process(state, block.message()) {
-        self::process_slots(config, state, block.message().slot())?;
+        self::process_slots(config, state, block.message().slot(), verifier.backend())?;
     }
 
     let process_slots = ProcessSlots::Never;
@@ -200,6 +201,7 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
     config: &Config,
     head_state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
+    backend: Backend,
 ) -> Result<()> {
     let phase = config.phase_at_slot::<P>(block.message().slot());
     let fork_version = config.version(phase);
@@ -214,7 +216,7 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
 
     let signing_root = misc::compute_signing_root(block.message(), domain);
 
-    SingleVerifier.verify_singular(
+    SingleVerifier::new(backend).verify_singular(
         signing_root,
         block.signature(),
         accessors::public_key(head_state, block.message().proposer_index())?,
@@ -264,6 +266,7 @@ pub fn process_slots<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
     slot: Slot,
+    backend: Backend,
 ) -> Result<()> {
     // This validation is not required to pass `consensus-spec-tests`.
     // `process_block_header` already prevents multiple blocks from being applied in the same slot
@@ -307,7 +310,9 @@ pub fn process_slots<P: Preset>(
                 }
 
                 if Toption::Some(last_slot_in_phase) == altair_fork_slot {
-                    *state = fork::upgrade_to_altair(config, phase0_state.as_ref().clone())?.into();
+                    *state =
+                        fork::upgrade_to_altair(config, phase0_state.as_ref().clone(), backend)?
+                            .into();
 
                     made_progress = true;
                 }
@@ -320,7 +325,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if altair_state.slot < last_slot_in_phase {
-                    altair::process_slots(config, altair_state, last_slot_in_phase)?;
+                    altair::process_slots(config, altair_state, last_slot_in_phase, backend)?;
 
                     made_progress = true;
                 }
@@ -340,7 +345,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if bellatrix_state.slot < last_slot_in_phase {
-                    bellatrix::process_slots(config, bellatrix_state, last_slot_in_phase)?;
+                    bellatrix::process_slots(config, bellatrix_state, last_slot_in_phase, backend)?;
 
                     made_progress = true;
                 }
@@ -360,7 +365,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if capella_state.slot < last_slot_in_phase {
-                    capella::process_slots(config, capella_state, last_slot_in_phase)?;
+                    capella::process_slots(config, capella_state, last_slot_in_phase, backend)?;
 
                     made_progress = true;
                 }
@@ -379,7 +384,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if deneb_state.slot < last_slot_in_phase {
-                    deneb::process_slots(config, deneb_state, last_slot_in_phase)?;
+                    deneb::process_slots(config, deneb_state, last_slot_in_phase, backend)?;
 
                     made_progress = true;
                 }
@@ -391,7 +396,7 @@ pub fn process_slots<P: Preset>(
                 }
             }
             BeaconState::Electra(electra_state) => {
-                electra::process_slots(config, electra_state, slot)?;
+                electra::process_slots(config, electra_state, slot, backend)?;
 
                 made_progress = true;
             }
@@ -436,30 +441,38 @@ pub fn process_justification_and_finalization(state: &mut BeaconState<impl Prese
     Ok(())
 }
 
-pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    state: &mut BeaconState<impl Preset>,
+    backend: Backend,
+) -> Result<()> {
     match state {
         BeaconState::Phase0(state) => phase0::process_epoch(config, state),
-        BeaconState::Altair(state) => altair::process_epoch(config, state),
-        BeaconState::Bellatrix(state) => bellatrix::process_epoch(config, state),
-        BeaconState::Capella(state) => capella::process_epoch(config, state),
-        BeaconState::Deneb(state) => deneb::process_epoch(config, state),
-        BeaconState::Electra(state) => electra::process_epoch(config, state),
+        BeaconState::Altair(state) => altair::process_epoch(config, state, backend),
+        BeaconState::Bellatrix(state) => bellatrix::process_epoch(config, state, backend),
+        BeaconState::Capella(state) => capella::process_epoch(config, state, backend),
+        BeaconState::Deneb(state) => deneb::process_epoch(config, state, backend),
+        BeaconState::Electra(state) => electra::process_epoch(config, state, backend),
     }
 }
 
-pub fn epoch_report(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<EpochReport> {
-    process_slots_for_epoch_report(config, state)?;
+pub fn epoch_report(
+    config: &Config,
+    state: &mut BeaconState<impl Preset>,
+    backend: Backend,
+) -> Result<EpochReport> {
+    process_slots_for_epoch_report(config, state, backend)?;
 
     let report = match state {
         BeaconState::Phase0(state) => phase0::epoch_report(config, state)?.into(),
-        BeaconState::Altair(state) => altair::epoch_report(config, state)?.into(),
-        BeaconState::Bellatrix(state) => bellatrix::epoch_report(config, state)?.into(),
-        BeaconState::Capella(state) => capella::epoch_report(config, state)?.into(),
-        BeaconState::Deneb(state) => deneb::epoch_report(config, state)?.into(),
-        BeaconState::Electra(state) => electra::epoch_report(config, state)?.into(),
+        BeaconState::Altair(state) => altair::epoch_report(config, state, backend)?.into(),
+        BeaconState::Bellatrix(state) => bellatrix::epoch_report(config, state, backend)?.into(),
+        BeaconState::Capella(state) => capella::epoch_report(config, state, backend)?.into(),
+        BeaconState::Deneb(state) => deneb::epoch_report(config, state, backend)?.into(),
+        BeaconState::Electra(state) => electra::epoch_report(config, state, backend)?.into(),
     };
 
-    post_process_slots_for_epoch_report(config, state)?;
+    post_process_slots_for_epoch_report(config, state, backend)?;
 
     Ok(report)
 }
@@ -467,12 +480,13 @@ pub fn epoch_report(config: &Config, state: &mut BeaconState<impl Preset>) -> Re
 fn process_slots_for_epoch_report<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
+    backend: Backend,
 ) -> Result<()> {
     let next_epoch = accessors::get_next_epoch(state);
     let last_slot = misc::compute_start_slot_at_epoch::<P>(next_epoch) - 1;
 
     if state.slot() < last_slot {
-        process_slots(config, state, last_slot)?;
+        process_slots(config, state, last_slot, backend)?;
     }
 
     unphased::process_slot(state);
@@ -485,6 +499,7 @@ fn process_slots_for_epoch_report<P: Preset>(
 fn post_process_slots_for_epoch_report<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
+    backend: Backend,
 ) -> Result<()> {
     let post_slot = state.slot() + 1;
 
@@ -502,7 +517,9 @@ fn post_process_slots_for_epoch_report<P: Preset>(
                 let altair_fork_slot = config.fork_slot::<P>(Phase::Altair);
 
                 if Toption::Some(post_slot) == altair_fork_slot {
-                    *state = fork::upgrade_to_altair(config, phase0_state.as_ref().clone())?.into();
+                    *state =
+                        fork::upgrade_to_altair(config, phase0_state.as_ref().clone(), backend)?
+                            .into();
                 }
             }
             BeaconState::Altair(altair_state) => {
@@ -610,25 +627,26 @@ pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
+    backend: Backend,
 ) -> Result<()> {
     match (state, block) {
         (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => {
-            phase0::process_block_for_gossip(config, state, block)
+            phase0::process_block_for_gossip(config, state, block, backend)
         }
         (BeaconState::Altair(state), SignedBeaconBlock::Altair(block)) => {
-            altair::process_block_for_gossip(config, state, block)
+            altair::process_block_for_gossip(config, state, block, backend)
         }
         (BeaconState::Bellatrix(state), SignedBeaconBlock::Bellatrix(block)) => {
-            bellatrix::process_block_for_gossip(config, state, block)
+            bellatrix::process_block_for_gossip(config, state, block, backend)
         }
         (BeaconState::Capella(state), SignedBeaconBlock::Capella(block)) => {
-            capella::process_block_for_gossip(config, state, block)
+            capella::process_block_for_gossip(config, state, block, backend)
         }
         (BeaconState::Deneb(state), SignedBeaconBlock::Deneb(block)) => {
-            deneb::process_block_for_gossip(config, state, block)
+            deneb::process_block_for_gossip(config, state, block, backend)
         }
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
-            electra::process_block_for_gossip(config, state, block)
+            electra::process_block_for_gossip(config, state, block, backend)
         }
         (state, _) => {
             // This match arm will silently match any new phases.
@@ -705,26 +723,33 @@ pub fn process_deposit_data(
     config: &Config,
     state: &mut BeaconState<impl Preset>,
     deposit_data: DepositData,
+    backend: Backend,
 ) -> Result<Option<ValidatorIndex>> {
     match state {
-        BeaconState::Phase0(state) => phase0::process_deposit_data(config, state, deposit_data),
-        BeaconState::Altair(state) => altair::process_deposit_data(config, state, deposit_data),
+        BeaconState::Phase0(state) => {
+            phase0::process_deposit_data(config, state, deposit_data, backend)
+        }
+        BeaconState::Altair(state) => {
+            altair::process_deposit_data(config, state, deposit_data, backend)
+        }
         BeaconState::Bellatrix(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Bellatrix does not modify `process_deposit_data`.
-            altair::process_deposit_data(config, state, deposit_data)
+            altair::process_deposit_data(config, state, deposit_data, backend)
         }
         BeaconState::Capella(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Capella does not modify `process_deposit_data`.
-            altair::process_deposit_data(config, state, deposit_data)
+            altair::process_deposit_data(config, state, deposit_data, backend)
         }
         BeaconState::Deneb(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Deneb does not modify `process_deposit_data`.
-            altair::process_deposit_data(config, state, deposit_data)
+            altair::process_deposit_data(config, state, deposit_data, backend)
         }
-        BeaconState::Electra(state) => electra::process_deposit_data(config, state, deposit_data),
+        BeaconState::Electra(state) => {
+            electra::process_deposit_data(config, state, deposit_data, backend)
+        }
     }
 }
 
@@ -873,7 +898,7 @@ mod spec_tests {
         let slots = case.yaml::<u64>("slots");
         let last_slot = state.slot() + slots;
 
-        process_slots(config, &mut state, last_slot)
+        process_slots(config, &mut state, last_slot, Backend::default())
             .expect("every slot processing test should perform processing successfully");
 
         assert_eq!(state, expected_post);
@@ -989,7 +1014,7 @@ mod spec_tests {
         blocks
             .into_iter()
             .try_for_each(|block| {
-                process_slots(config, state, block.message().slot())?;
+                process_slots(config, state, block.message().slot(), Backend::default())?;
 
                 let (message, _) = block.split();
 

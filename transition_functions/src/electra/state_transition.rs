@@ -1,7 +1,6 @@
 use core::ops::Not as _;
 
 use anyhow::{Error as AnyhowError, Result};
-use bls::traits::CachedPublicKey as _;
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors, electra,
@@ -38,9 +37,11 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
 ) -> Result<()> {
     let block = &signed_block.message;
 
+    let backend = verifier.backend();
+
     // > Process slots (including those with no blocks) since block
     if process_slots.should_process(state, block) {
-        slot_processing::process_slots(config, state, block.slot)?;
+        slot_processing::process_slots(config, state, block.slot, backend)?;
     }
 
     let verify_signatures = V::IS_NULL.not().then(|| {
@@ -121,6 +122,7 @@ pub fn verify_signatures<P: Preset>(
 
         // Attester slashings
 
+        let backend = verifier.backend();
         for attester_slashing in &block.message.body.attester_slashings {
             for attestation in [
                 &attester_slashing.attestation_1,
@@ -133,7 +135,7 @@ pub fn verify_signatures<P: Preset>(
                         .copied()
                         .map(|validator_index| {
                             accessors::public_key(state, validator_index)?
-                                .decompress()
+                                .decompress(backend)
                                 .map_err(AnyhowError::new)
                         }),
                     |public_keys| {

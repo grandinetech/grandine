@@ -1,4 +1,5 @@
 use anyhow::{ensure, Result};
+use bls::Backend;
 use helper_functions::misc;
 use ssz::Hc;
 use types::{
@@ -12,6 +13,7 @@ pub fn process_slots<P: Preset>(
     config: &Config,
     state: &mut Hc<BeaconState<P>>,
     slot: Slot,
+    backend: Backend,
 ) -> Result<()> {
     ensure!(
         state.slot < slot,
@@ -26,7 +28,7 @@ pub fn process_slots<P: Preset>(
 
         // > Process epoch on the start slot of the next epoch
         if misc::is_epoch_start::<P>(state.slot + 1) {
-            epoch_processing::process_epoch(config, state)?;
+            epoch_processing::process_epoch(config, state, backend)?;
         }
 
         state.slot += 1;

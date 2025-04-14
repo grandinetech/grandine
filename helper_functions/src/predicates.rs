@@ -6,7 +6,7 @@ use core::{
 use anyhow::{ensure, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{traits::CachedPublicKey as _, SignatureBytes};
+use bls::SignatureBytes;
 use itertools::Itertools as _;
 use ssz::SszHash as _;
 use tap::TryConv as _;
@@ -123,13 +123,15 @@ fn validate_indexed_attestation<P: Preset>(
         );
     }
 
+    let backend = verifier.backend();
+
     // > Verify aggregate signature
     itertools::process_results(
         indexed_attestation
             .attesting_indices()
             .map(|validator_index| {
                 accessors::public_key(state, validator_index)?
-                    .decompress()
+                    .decompress(backend)
                     .map_err(AnyhowError::new)
             }),
         |public_keys| {
@@ -586,10 +588,7 @@ mod spec_tests {
 
 #[cfg(test)]
 mod extra_tests {
-    use bls::{
-        traits::{SecretKey as _, Signature as _},
-        SecretKey, SecretKeyBytes,
-    };
+    use bls::{Backend, SecretKey, SecretKeyBytes};
     use std_ext::CopyExt as _;
     use tap::Conv as _;
     use types::{
@@ -839,7 +838,7 @@ mod extra_tests {
             &Config::mainnet(),
             &state,
             &attestation,
-            SingleVerifier,
+            SingleVerifier::new(Backend::default()),
         )
         .expect_err("validation should fail");
     }
@@ -857,7 +856,7 @@ mod extra_tests {
             &Config::mainnet(),
             &state,
             &attestation,
-            SingleVerifier,
+            SingleVerifier::new(Backend::default()),
         )
         .expect_err("validation should fail");
     }
@@ -884,7 +883,7 @@ mod extra_tests {
             &Config::mainnet(),
             &state,
             &attestation,
-            SingleVerifier,
+            SingleVerifier::new(Backend::default()),
         )
         .expect_err("validation should fail");
     }
@@ -893,15 +892,19 @@ mod extra_tests {
     fn validate_received_indexed_attestation_valid_signature() -> Result<()> {
         let config = Config::mainnet();
 
-        let secret_key_1 = b"????????????????????????????????"
-            .copy()
-            .conv::<SecretKeyBytes>()
-            .try_conv::<SecretKey>()?;
+        let secret_key_1 = SecretKey::try_from_with_backend(
+            b"????????????????????????????????"
+                .copy()
+                .conv::<SecretKeyBytes>(),
+            Backend::default(),
+        )?;
 
-        let secret_key_2 = b"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-            .copy()
-            .conv::<SecretKeyBytes>()
-            .try_conv::<SecretKey>()?;
+        let secret_key_2 = SecretKey::try_from_with_backend(
+            b"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                .copy()
+                .conv::<SecretKeyBytes>(),
+            Backend::default(),
+        )?;
 
         let state = Phase0BeaconState::<Mainnet> {
             validators: [
@@ -934,7 +937,12 @@ mod extra_tests {
             signature: aggregate_signature.into(),
         };
 
-        validate_received_indexed_attestation(&config, &state, &attestation, SingleVerifier)
+        validate_received_indexed_attestation(
+            &config,
+            &state,
+            &attestation,
+            SingleVerifier::new(Backend::default()),
+        )
     }
 
     fn inactive_validator() -> Validator {

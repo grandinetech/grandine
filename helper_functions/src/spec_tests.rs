@@ -83,8 +83,7 @@ fn aggregate(case: Case) {
     let actual_output = input
         .into_iter()
         .map(|bytes| {
-            bytes
-                .try_into()
+            Signature::try_from_with_backend(bytes, Backend::default())
                 .expect("every aggregate test case contains a valid signature")
         })
         .reduce(AggregateSignature::aggregate)
@@ -99,7 +98,7 @@ fn eth_aggregate_pubkeys(case: Case) {
 
     #[rustfmt::skip]
     let result = itertools::process_results(
-        input.into_iter().map(PublicKey::try_from),
+        input.into_iter().map(|i| PublicKey::try_from_with_backend(bytes, Backend::default())),
         |public_keys| AggregatePublicKey::aggregate_nonempty(public_keys),
     );
 
@@ -129,10 +128,10 @@ fn eth_fast_aggregate_verify(case: Case) {
 
     let result = pubkeys
         .into_iter()
-        .map(PublicKey::try_from)
+        .map(|i| PublicKey::try_from_with_backend(i, Backend::default()))
         .collect::<Result<Vec<_>, _>>()
         .map(|public_keys| {
-            SingleVerifier.verify_aggregate_allowing_empty(
+            SingleVerifier::new(Backend::default()).verify_aggregate_allowing_empty(
                 message,
                 signature,
                 public_keys.iter(),
@@ -165,10 +164,10 @@ fn fast_aggregate_verify(case: Case) {
     let run = || -> Result<_, Error> {
         let public_keys = pubkeys
             .into_iter()
-            .map(PublicKey::try_from)
+            .map(|i| PublicKey::try_from_with_backend(i, Backend::default()))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let signature = Signature::try_from(signature)?;
+        let signature = Signature::try_from_with_backend(signature, Backend::default())?;
 
         Ok(signature.fast_aggregate_verify(message, public_keys.iter()))
     };
@@ -193,7 +192,7 @@ fn sign(case: Case) {
         output,
     } = case.yaml("data");
 
-    let secret_key = SecretKey::try_from(privkey);
+    let secret_key = SecretKey::try_from_with_backend(privkey, Backend::default());
 
     if let Some(expected_output) = output {
         let actual_output = secret_key
@@ -218,8 +217,8 @@ fn verify(case: Case) {
     } = input;
 
     let run = || -> Result<_, Error> {
-        let public_key = PublicKey::try_from(pubkey)?;
-        let signature = Signature::try_from(signature)?;
+        let public_key = PublicKey::try_from_with_backend(pubkey, Backend::default())?;
+        let signature = Signature::try_from_with_backend(signature, Backend::default())?;
         Ok(signature.verify(message, public_key))
     };
 

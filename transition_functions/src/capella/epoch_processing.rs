@@ -1,5 +1,6 @@
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
+use bls::Backend;
 use helper_functions::{accessors::get_next_epoch, misc::vec_of_default};
 use ssz::SszHash as _;
 use types::{
@@ -18,7 +19,11 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    state: &mut BeaconState<impl Preset>,
+    backend: Backend,
+) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -61,14 +66,18 @@ pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> R
     process_historical_summaries_update(state)?;
 
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
     Ok(())
 }
 
-pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> Result<EpochReport> {
+pub fn epoch_report<P: Preset>(
+    config: &Config,
+    state: &mut BeaconState<P>,
+    backend: Backend,
+) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
     altair::process_justification_and_finalization(state, statistics);
@@ -109,7 +118,7 @@ pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> R
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -410,7 +419,9 @@ mod spec_tests {
     }
 
     fn run_sync_committee_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, altair::process_sync_committee_updates);
+        run_case::<P>(case, |state| {
+            altair::process_sync_committee_updates(state, Backend::default())
+        });
     }
 
     fn run_case<P: Preset>(

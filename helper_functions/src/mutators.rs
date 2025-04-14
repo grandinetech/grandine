@@ -1,10 +1,7 @@
 use core::cmp::Ordering;
 
 use anyhow::Result;
-use bls::{
-    traits::{CachedPublicKey as _, SignatureBytes as _},
-    SignatureBytes,
-};
+use bls::SignatureBytes;
 use types::{
     config::Config,
     electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},

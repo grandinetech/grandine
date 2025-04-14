@@ -480,7 +480,7 @@ where
         let head = store.head();
 
         self.state_cache()
-            .state_at_slot(&store, head.block_root, store.slot())
+            .state_at_slot(&store, head.block_root, store.slot(), self.storage().backend)
     }
 
     pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
@@ -488,7 +488,7 @@ where
         let head = store.head();
 
         self.state_cache()
-            .state_at_slot(&store, head.block_root, store.slot() + 1)
+            .state_at_slot(&store, head.block_root, store.slot() + 1, self.storage().backend)
     }
 
     // The `block_root` and `state` parameters are needed
@@ -502,7 +502,7 @@ where
 
         if let Some(state) = self
             .state_cache()
-            .try_state_at_slot(&store, block_root, slot)?
+            .try_state_at_slot(&store, block_root, slot, self.storage().backend)?
         {
             return Ok(state);
         }
@@ -510,7 +510,7 @@ where
         if let Some(state) = self.storage().state_post_block(block_root)? {
             return self
                 .state_cache()
-                .process_slots(&store, state, block_root, slot);
+                .process_slots(&store, state, block_root, slot, self.storage().backend);
         }
 
         bail!(Error::StateNotFound { block_root })
@@ -536,7 +536,7 @@ where
 
         let state = self
             .state_cache()
-            .state_at_slot(&store, head.block_root, requested_slot)
+            .state_at_slot(&store, head.block_root, requested_slot, self.storage().backend)
             .unwrap_or_else(|_| head.state(&store));
 
         Ok(WithStatus {
@@ -780,7 +780,7 @@ impl<P: Preset> Snapshot<'_, P> {
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
         self.state_cache
-            .try_state_at_slot(&self.store_snapshot, root, slot)
+            .try_state_at_slot(&self.store_snapshot, root, slot, self.storage.backend)
     }
 
     #[must_use]
@@ -868,9 +868,12 @@ impl<P: Preset> Snapshot<'_, P> {
         let store = &self.store_snapshot;
 
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
-            let state = self
-                .state_cache
-                .state_at_slot(store, chain_link.block_root, slot)?;
+            let state = self.state_cache.state_at_slot(
+                store,
+                chain_link.block_root,
+                slot,
+                self.storage.backend,
+            )?;
 
             return Ok(Some(WithStatus {
                 value: state,

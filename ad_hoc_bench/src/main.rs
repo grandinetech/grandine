@@ -357,6 +357,7 @@ fn run<P: Preset>(
         anchor_block,
         anchor_state,
         futures::sink::drain(),
+        Backend::default(),
     );
 
     controller.on_slot(last_slot);

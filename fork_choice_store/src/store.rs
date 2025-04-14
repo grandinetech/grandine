@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::NonZeroExt as _;
+use bls::Backend;
 use clock::Tick;
 use execution_engine::ExecutionEngine;
 use features::Feature;
@@ -210,6 +211,7 @@ pub struct Store<P: Preset> {
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
+    backend: Backend,
 }
 
 impl<P: Preset> Store<P> {
@@ -222,6 +224,7 @@ impl<P: Preset> Store<P> {
         anchor_state: Arc<BeaconState<P>>,
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
+        backend: Backend,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -284,6 +287,7 @@ impl<P: Preset> Store<P> {
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
+            backend,
         }
     }
 
@@ -1302,16 +1306,26 @@ impl<P: Preset> Store<P> {
             // > The `aggregate_and_proof.selection_proof` is a valid signature of the
             // > `aggregate.data.slot` by the validator with index
             // > `aggregate_and_proof.aggregator_index`.
-            if let Err(error) =
-                slot.verify(chain_config, &target_state, selection_proof, public_key)
-            {
+            if let Err(error) = slot.verify(
+                chain_config,
+                &target_state,
+                selection_proof,
+                public_key,
+                self.backend,
+            ) {
                 bail!(error.context(Error::InvalidSelectionProof {
                     aggregate_and_proof,
                 }));
             }
 
             // > The aggregator signature, `signed_aggregate_and_proof.signature`, is valid.
-            if let Err(error) = message.verify(chain_config, &target_state, signature, public_key) {
+            if let Err(error) = message.verify(
+                chain_config,
+                &target_state,
+                signature,
+                public_key,
+                self.backend,
+            ) {
                 bail!(error.context(Error::InvalidAggregateAndProofSignature {
                     aggregate_and_proof,
                 }));
@@ -1624,7 +1638,7 @@ impl<P: Preset> Store<P> {
                         &self.chain_config,
                         target_state,
                         &indexed_attestation,
-                        SingleVerifier,
+                        SingleVerifier::new(self.backend),
                     )?;
                 }
 
@@ -1641,7 +1655,7 @@ impl<P: Preset> Store<P> {
                         &self.chain_config,
                         target_state,
                         &indexed_attestation,
-                        SingleVerifier,
+                        SingleVerifier::new(self.backend),
                     )?;
                 }
 
@@ -1658,7 +1672,7 @@ impl<P: Preset> Store<P> {
                         &self.chain_config,
                         target_state,
                         &indexed_attestation,
-                        SingleVerifier,
+                        SingleVerifier::new(self.backend),
                     )?;
                 }
 
@@ -1681,6 +1695,7 @@ impl<P: Preset> Store<P> {
                         &self.chain_config,
                         self.justified_state(),
                         attester_slashing,
+                        self.backend,
                     )
                 } else {
                     unphased::validate_attester_slashing_with_verifier(
@@ -1697,6 +1712,7 @@ impl<P: Preset> Store<P> {
                         &self.chain_config,
                         self.justified_state(),
                         attester_slashing,
+                        self.backend,
                     )
                 } else {
                     unphased::validate_attester_slashing_with_verifier(
@@ -1781,7 +1797,7 @@ impl<P: Preset> Store<P> {
         };
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
-        SingleVerifier.verify_singular(
+        SingleVerifier::new(self.backend).verify_singular(
             blob_sidecar
                 .signed_block_header
                 .message
@@ -1898,13 +1914,19 @@ impl<P: Preset> Store<P> {
             },
             || {
                 self.state_cache
-                    .try_state_at_slot(self, block_header.parent_root, block_header.slot)
+                    .try_state_at_slot(
+                        self,
+                        block_header.parent_root,
+                        block_header.slot,
+                        self.backend,
+                    )
                     .transpose()
                     .unwrap_or_else(|| {
                         self.state_cache.state_at_slot(
                             self,
                             self.head().block_root,
                             block_header.slot,
+                            self.backend,
                         )
                     })
             },

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
+use bls::Backend;
 use deposit_tree::DepositTree;
 use helper_functions::{accessors, misc, mutators::increase_balance};
 use ssz::{PersistentList, PersistentVector, SszHash as _};
@@ -57,12 +58,13 @@ pub struct Incremental<'config, P: Preset> {
     config: &'config Config,
     beacon_state: BeaconState<P>,
     deposit_tree: DepositTree,
+    backend: Backend,
 }
 
 impl<'config, P: Preset> Incremental<'config, P> {
     /// <https://github.com/ethereum/consensus-specs/blob/2fa396f67df35df236b6aa6fe714a59ee1032dc8/specs/phase0/beacon-chain.md#genesis>
     #[must_use]
-    pub fn new(config: &'config Config) -> Self {
+    pub fn new(config: &'config Config, backend: Backend) -> Self {
         let slot = GENESIS_SLOT;
         let phase = config.phase_at_slot::<P>(slot);
         let version = config.version(phase);
@@ -138,6 +140,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
             config,
             beacon_state,
             deposit_tree: DepositTree::default(),
+            backend,
         }
     }
 
@@ -164,7 +167,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
         eth1_data.deposit_count = self.deposit_tree.deposit_count;
 
         if let Some(validator_index) =
-            combined::process_deposit_data(self.config, &mut self.beacon_state, data)?
+            combined::process_deposit_data(self.config, &mut self.beacon_state, data, self.backend)?
         {
             if let Some(state) = self.beacon_state.post_electra_mut() {
                 let pending_deposits = state.pending_deposits().clone();
@@ -235,7 +238,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
         // > [New in Altair] Fill in sync committees
         // > Note: A duplicate committee is assigned for the current and next committee at genesis
         if let Some(state) = beacon_state.post_altair_mut() {
-            let sync_committee = accessors::get_next_sync_committee(state)?;
+            let sync_committee = accessors::get_next_sync_committee(state, self.backend)?;
             *state.current_sync_committee_mut() = sync_committee.clone_arc();
             *state.next_sync_committee_mut() = sync_committee;
         }
@@ -352,6 +355,7 @@ fn validate_genesis_state<P: Preset>(config: &Config, state: &BeaconState<P>) ->
 
 #[cfg(test)]
 mod spec_tests {
+    use bls::Backend;
     use duplicate::duplicate_item;
     use serde::Deserialize;
     use spec_test_utils::Case;
@@ -430,7 +434,7 @@ mod spec_tests {
             meta.execution_payload_header,
         );
 
-        let mut incremental = Incremental::new(&config);
+        let mut incremental = Incremental::new(&config, Backend::default());
 
         incremental.set_eth1_timestamp(eth1_timestamp);
 
@@ -464,10 +468,10 @@ mod spec_tests {
 
 #[cfg(test)]
 mod extra_tests {
-    use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
+    use bls::{Backend, SecretKey, SecretKeyBytes};
     use helper_functions::signing::SignForAllForks;
     use std_ext::CopyExt as _;
-    use tap::{Conv as _, TryConv as _};
+    use tap::Conv as _;
     use types::{
         phase0::{containers::DepositMessage, primitives::H256},
         preset::Mainnet,
@@ -481,7 +485,7 @@ mod extra_tests {
         let half_deposit_data = half_deposit_data::<Mainnet>()?;
         let eth1_block_hash = ExecutionBlockHash::default();
 
-        let mut incremental = Incremental::<Mainnet>::new(&config);
+        let mut incremental = Incremental::<Mainnet>::new(&config, Backend::default());
 
         incremental.add_deposit_data(half_deposit_data, 0)?;
         incremental.add_deposit_data(half_deposit_data, 1)?;
@@ -498,10 +502,12 @@ mod extra_tests {
     }
 
     fn half_deposit_data<P: Preset>() -> Result<DepositData> {
-        let secret_key = b"????????????????????????????????"
-            .copy()
-            .conv::<SecretKeyBytes>()
-            .try_conv::<SecretKey>()?;
+        let secret_key = SecretKey::try_from_with_backend(
+            b"????????????????????????????????"
+                .copy()
+                .conv::<SecretKeyBytes>(),
+            Backend::default(),
+        )?;
 
         let pubkey = secret_key.to_public_key().into();
         let withdrawal_credentials = H256::default();

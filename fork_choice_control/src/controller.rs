@@ -17,6 +17,7 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
+use bls::Backend;
 use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
@@ -107,6 +108,7 @@ where
         storage: Arc<Storage<P>>,
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
         finished_back_sync: bool,
+        backend: Backend,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
 
@@ -117,6 +119,7 @@ where
             anchor_state,
             finished_initial_forward_sync,
             finished_back_sync,
+            backend,
         );
 
         store.apply_tick(tick)?;
@@ -126,7 +129,7 @@ where
         let thread_pool = ThreadPool::new()?;
         let (mutator_tx, mutator_rx) = std::sync::mpsc::channel();
 
-        let block_processor = Arc::new(BlockProcessor::new(chain_config, state_cache.clone_arc()));
+        let block_processor = Arc::new(BlockProcessor::new(chain_config, state_cache.clone_arc(), backend));
 
         let mut mutator = Mutator::new(
             store_snapshot.clone_arc(),
@@ -145,6 +148,7 @@ where
             subnet_tx,
             sync_tx,
             validator_tx,
+            backend,
         );
 
         mutator.process_unfinalized_blocks(unfinalized_blocks)?;

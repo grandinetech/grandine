@@ -1,6 +1,7 @@
 use core::ops::DerefMut as _;
 use std::sync::Arc;
 
+use bls::Backend;
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use database::Database;
@@ -96,6 +97,7 @@ where
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        backend: Backend,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let tick = Tick::block_proposal(&anchor_block);
 
@@ -104,6 +106,7 @@ where
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::Standard,
+            backend,
         ));
 
         let event_channels = Arc::new(EventChannels::default());
@@ -126,6 +129,7 @@ where
             storage,
             core::iter::empty(),
             true,
+            backend,
         )
         .expect("Controller::new should not fail in tests and benchmarks")
     }
@@ -138,6 +142,7 @@ impl<P: Preset> AdHocBenchController<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        backend: Backend,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         Self::new_internal(
             chain_config,
@@ -147,6 +152,7 @@ impl<P: Preset> AdHocBenchController<P> {
             NullExecutionEngine,
             None,
             p2p_tx,
+            backend,
         )
     }
 }
@@ -157,6 +163,7 @@ impl<P: Preset> BenchController<P> {
         chain_config: Arc<ChainConfig>,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        backend: Backend,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         Self::new_internal(
             chain_config,
@@ -166,6 +173,7 @@ impl<P: Preset> BenchController<P> {
             NullExecutionEngine,
             None,
             futures::sink::drain(),
+            backend,
         )
     }
 }
@@ -193,6 +201,7 @@ impl<P: Preset> TestController<P> {
         anchor_state: Arc<BeaconState<P>>,
         execution_engine: TestExecutionEngine<P>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        backend: Backend,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let store_config = StoreConfig::aggressive(&chain_config);
 
@@ -204,6 +213,7 @@ impl<P: Preset> TestController<P> {
             execution_engine,
             None,
             p2p_tx,
+            backend,
         )
     }
 

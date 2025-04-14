@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use bls::Backend;
 use genesis::AnchorCheckpointProvider;
 use log::info;
 use ssz::{SszHash as _, SszRead, SszWrite as _};
@@ -49,6 +50,7 @@ pub fn export_state_and_blocks<P: Preset>(
                         storage.config(),
                         temporary_state.make_mut(),
                         state_slot,
+                        storage.backend,
                     )?;
                 }
 
@@ -88,6 +90,7 @@ pub fn replay_blocks<P: Preset>(
     input_dir: &Path,
     from_slot: Slot,
     to_slot: Slot,
+    backend: Backend,
 ) -> Result<()> {
     let first_state_file_prefix = format!("beacon_state_slot_{from_slot:06}_root_");
     let mut state =
@@ -104,7 +107,7 @@ pub fn replay_blocks<P: Preset>(
     }
 
     if state.slot() < to_slot {
-        combined::process_slots(config, &mut state, to_slot)?;
+        combined::process_slots(config, &mut state, to_slot, backend)?;
     }
 
     let last_state_file_prefix = format!("beacon_state_slot_{to_slot:06}_root_");

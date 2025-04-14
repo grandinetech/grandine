@@ -3,6 +3,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{bail, ensure, Context as _, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
+use bls::Backend;
 use database::Database;
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
@@ -59,6 +60,7 @@ pub struct Storage<P> {
     pub(crate) archival_epoch_interval: NonZeroU64,
     storage_mode: StorageMode,
     phantom: PhantomData<P>,
+    pub(crate) backend: Backend,
 }
 
 impl<P: Preset> Storage<P> {
@@ -68,6 +70,7 @@ impl<P: Preset> Storage<P> {
         database: Database,
         archival_epoch_interval: NonZeroU64,
         storage_mode: StorageMode,
+        backend: Backend,
     ) -> Self {
         Self {
             config,
@@ -75,6 +78,7 @@ impl<P: Preset> Storage<P> {
             archival_epoch_interval,
             storage_mode,
             phantom: PhantomData,
+            backend,
         }
     }
 
@@ -586,7 +590,7 @@ impl<P: Preset> Storage<P> {
         }
 
         if state.slot() < slot {
-            combined::process_slots(&self.config, state.make_mut(), slot)?;
+            combined::process_slots(&self.config, state.make_mut(), slot, self.backend)?;
         }
 
         Ok(Some(state))

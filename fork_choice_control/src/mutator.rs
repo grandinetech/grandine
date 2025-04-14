@@ -26,6 +26,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
+use bls::Backend;
 use clock::{Tick, TickKind};
 use drain_filter_polyfill::VecExt as _;
 use eth2_libp2p::{GossipId, PeerId};
@@ -120,6 +121,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     subnet_tx: NS,
     sync_tx: SS,
     validator_tx: VS,
+    backend: Backend,
 }
 
 impl<P, E, W, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, TS, PS, LS, NS, SS, VS>
@@ -152,6 +154,7 @@ where
         subnet_tx: NS,
         sync_tx: SS,
         validator_tx: VS,
+        backend: Backend,
     ) -> Self {
         Self {
             store: store_snapshot.load_full(),
@@ -176,6 +179,7 @@ where
             subnet_tx,
             sync_tx,
             validator_tx,
+            backend,
         }
     }
 
@@ -2295,6 +2299,7 @@ where
             wait_group,
             checkpoint,
             metrics: self.metrics.clone(),
+            backend: self.backend,
         });
     }
 
@@ -2310,6 +2315,7 @@ where
             head_block_root: self.store.head().block_root,
             next_slot: self.store.slot() + 1,
             metrics: self.metrics.clone(),
+            backend: self.backend,
         })
     }
 

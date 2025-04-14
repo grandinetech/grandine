@@ -2,6 +2,7 @@ use core::{cell::LazyCell, ops::Mul as _};
 
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
+use bls::Backend;
 use helper_functions::{
     accessors::{
         self, get_activation_exit_churn_limit, get_current_epoch, get_next_epoch,
@@ -44,7 +45,11 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    state: &mut ElectraBeaconState<impl Preset>,
+    backend: Backend,
+) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -80,7 +85,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
     process_registry_updates(config, state, summaries.as_mut_slice())?;
     process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
-    process_pending_deposits(config, state)?;
+    process_pending_deposits(config, state, backend)?;
     process_pending_consolidations(state)?;
     process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
@@ -90,7 +95,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
     process_historical_summaries_update(state)?;
 
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -100,6 +105,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
 pub fn epoch_report<P: Preset>(
     config: &Config,
     state: &mut ElectraBeaconState<P>,
+    backend: Backend,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
@@ -141,7 +147,7 @@ pub fn epoch_report<P: Preset>(
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(state, backend)?;
 
     state.cache.advance_epoch();
 
@@ -224,6 +230,7 @@ fn process_registry_updates<P: Preset>(
 fn process_pending_deposits<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
+    backend: Backend,
 ) -> Result<()> {
     let next_epoch = get_current_epoch(state) + 1;
     let available_for_processing =
@@ -265,7 +272,7 @@ fn process_pending_deposits<P: Preset>(
 
         if is_validator_withdrawn {
             // > Deposited balance will never become active. Increase balance but do not consume churn
-            apply_pending_deposit(config, state, deposit)?;
+            apply_pending_deposit(config, state, deposit, backend)?;
         } else if is_validator_exited {
             // > Validator is exiting, postpone the deposit until after withdrawable epoch
             deposits_to_postpone.push(*deposit);
@@ -279,7 +286,7 @@ fn process_pending_deposits<P: Preset>(
 
             // > Consume churn and apply deposit.
             processed_amount += deposit.amount;
-            apply_pending_deposit(config, state, deposit)?;
+            apply_pending_deposit(config, state, deposit, backend)?;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.
@@ -308,6 +315,7 @@ fn apply_pending_deposit<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     deposit: &PendingDeposit,
+    backend: Backend,
 ) -> Result<()> {
     let PendingDeposit {
         pubkey,
@@ -318,7 +326,7 @@ fn apply_pending_deposit<P: Preset>(
 
     if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
         increase_balance(balance(state, validator_index)?, *amount);
-    } else if is_valid_deposit_signature(config, deposit) {
+    } else if is_valid_deposit_signature(config, deposit, backend) {
         block_processing::add_validator_to_registry::<P>(
             state,
             (*pubkey).into(),
@@ -330,7 +338,7 @@ fn apply_pending_deposit<P: Preset>(
     Ok(())
 }
 
-fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit) -> bool {
+fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit, backend: Backend) -> bool {
     let PendingDeposit {
         pubkey,
         withdrawal_credentials,
@@ -346,7 +354,7 @@ fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit) -> bool
     };
 
     deposit_message
-        .verify(config, signature, &pubkey.into())
+        .verify(config, signature, &pubkey.into(), backend)
         .is_ok()
 }
 
@@ -808,12 +816,14 @@ mod spec_tests {
     }
 
     fn run_sync_committee_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, altair::process_sync_committee_updates);
+        run_case::<P>(case, |state| {
+            altair::process_sync_committee_updates(state, Backend::default())
+        });
     }
 
     fn run_pending_deposits_case<P: Preset>(case: Case) {
         run_case::<P>(case, |state| {
-            process_pending_deposits(&P::default_config(), state)
+            process_pending_deposits(&P::default_config(), state, Backend::default())
         });
     }
 

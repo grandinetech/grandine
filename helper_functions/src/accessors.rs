@@ -8,10 +8,7 @@ use std::sync::Arc;
 use anyhow::{bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{
-    traits::{CachedPublicKey as _, PublicKey as _},
-    AggregatePublicKey, CachedPublicKey, PublicKeyBytes,
-};
+use bls::{AggregatePublicKey, Backend, CachedPublicKey, PublicKeyBytes};
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;
@@ -664,6 +661,7 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
 
 pub fn get_next_sync_committee<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
+    backend: Backend,
 ) -> Result<Arc<Hc<SyncCommittee<P>>>> {
     let indices = get_next_sync_committee_indices(state)?;
 
@@ -675,7 +673,9 @@ pub fn get_next_sync_committee<P: Preset>(
     }
 
     let aggregate_pubkey = itertools::process_results(
-        pubkeys.iter().map(CachedPublicKey::decompress),
+        pubkeys
+            .iter()
+            .map(|k| CachedPublicKey::decompress(k, backend)),
         |public_keys| AggregatePublicKey::aggregate_nonempty(public_keys.copied()),
     )??
     .into();

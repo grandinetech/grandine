@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use bls::{traits::CachedPublicKey as _, CachedPublicKey, SignatureBytes};
+use bls::{Backend, CachedPublicKey, SignatureBytes};
 use helper_functions::{
     accessors::{
         attestation_epoch, get_beacon_proposer_index, get_current_epoch, get_randao_mix,
@@ -204,8 +204,14 @@ pub fn validate_proposer_slashing<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     proposer_slashing: ProposerSlashing,
+    backend: Backend,
 ) -> Result<()> {
-    validate_proposer_slashing_with_verifier(config, state, proposer_slashing, SingleVerifier)
+    validate_proposer_slashing_with_verifier(
+        config,
+        state,
+        proposer_slashing,
+        SingleVerifier::new(backend),
+    )
 }
 
 pub fn validate_proposer_slashing_with_verifier<P: Preset>(
@@ -273,8 +279,14 @@ pub fn validate_attester_slashing<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     attester_slashing: &impl AttesterSlashing<P>,
+    backend: Backend,
 ) -> Result<Vec<ValidatorIndex>> {
-    validate_attester_slashing_with_verifier(config, state, attester_slashing, SingleVerifier)
+    validate_attester_slashing_with_verifier(
+        config,
+        state,
+        attester_slashing,
+        SingleVerifier::new(backend),
+    )
 }
 
 pub fn validate_attester_slashing_with_verifier<P: Preset>(
@@ -322,8 +334,9 @@ pub fn validate_attestation<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     attestation: &Attestation<P>,
+    backend: Backend,
 ) -> Result<()> {
-    validate_attestation_with_verifier(config, state, attestation, SingleVerifier)
+    validate_attestation_with_verifier(config, state, attestation, SingleVerifier::new(backend))
 }
 
 pub fn validate_attestation_with_verifier<P: Preset>(
@@ -390,6 +403,7 @@ pub fn validate_deposits<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     deposits: impl IntoIterator<Item = Deposit>,
+    backend: Backend,
 ) -> Result<Vec<CombinedDeposit>> {
     let deposits_by_pubkey = (0..)
         .zip(deposits)
@@ -414,7 +428,7 @@ pub fn validate_deposits<P: Preset>(
         .map(|(_, cached_public_key, deposits)| {
             let (_, first_deposit) = deposits[0];
 
-            let public_key = *cached_public_key.decompress()?;
+            let public_key = *cached_public_key.decompress(backend)?;
 
             // > Verify the deposit signature (proof of possession)
             // > which is not checked by the deposit contract
@@ -427,6 +441,7 @@ pub fn validate_deposits<P: Preset>(
                 signing_root,
                 first_deposit.data.signature,
                 public_key,
+                backend,
             ))
         })
         .collect::<Result<Vec<_>>>()
@@ -479,7 +494,7 @@ pub fn validate_deposits<P: Preset>(
 
                     // > Fork-agnostic domain since deposits are valid across forks
                     deposit_message
-                        .verify(config, deposit.data.signature, &cached_public_key)
+                        .verify(config, deposit.data.signature, &cached_public_key, backend)
                         .is_ok()
                 })
             };
@@ -563,8 +578,14 @@ pub fn validate_voluntary_exit<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
     signed_voluntary_exit: SignedVoluntaryExit,
+    backend: Backend,
 ) -> Result<()> {
-    validate_voluntary_exit_with_verifier(config, state, signed_voluntary_exit, SingleVerifier)
+    validate_voluntary_exit_with_verifier(
+        config,
+        state,
+        signed_voluntary_exit,
+        SingleVerifier::new(backend),
+    )
 }
 
 pub fn validate_voluntary_exit_with_verifier<P: Preset>(

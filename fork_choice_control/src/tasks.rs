@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
+use bls::Backend;
 use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
@@ -407,6 +408,7 @@ pub struct CheckpointStateTask<P: Preset, W> {
     pub wait_group: W,
     pub checkpoint: Checkpoint,
     pub metrics: Option<Arc<Metrics>>,
+    pub backend: Backend,
 }
 
 impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
@@ -418,6 +420,7 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
             wait_group,
             checkpoint,
             metrics,
+            backend,
         } = self;
 
         let _timer = metrics
@@ -427,13 +430,14 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        let checkpoint_state = match state_cache.try_state_at_slot(&store_snapshot, root, slot) {
-            Ok(state) => state,
-            Err(error) => {
-                warn!("failed to compute checkpoint state: {error:?}");
-                return;
-            }
-        };
+        let checkpoint_state =
+            match state_cache.try_state_at_slot(&store_snapshot, root, slot, backend) {
+                Ok(state) => state,
+                Err(error) => {
+                    warn!("failed to compute checkpoint state: {error:?}");
+                    return;
+                }
+            };
 
         MutatorMessage::CheckpointState {
             wait_group,
@@ -451,6 +455,7 @@ pub struct PreprocessStateTask<P: Preset, W> {
     pub head_block_root: H256,
     pub next_slot: Slot,
     pub metrics: Option<Arc<Metrics>>,
+    pub backend: Backend,
 }
 
 impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
@@ -462,13 +467,15 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
             head_block_root,
             next_slot,
             metrics,
+            backend,
         } = self;
 
         let _timer = metrics
             .as_ref()
             .map(|metrics| metrics.fc_preprocess_state_task_times.start_timer());
 
-        match state_cache.state_at_slot_quiet(&store_snapshot, head_block_root, next_slot) {
+        match state_cache.state_at_slot_quiet(&store_snapshot, head_block_root, next_slot, backend)
+        {
             Ok(state) => {
                 if let Err(error) = initialize_preprocessed_state_cache(&state) {
                     warn!("failed to initialize preprocessed state's cache values: {error:?}");

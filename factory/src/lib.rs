@@ -7,10 +7,7 @@ use core::ops::Range;
 use std::sync::Arc;
 
 use anyhow::{bail, ensure, Result};
-use bls::{
-    traits::{CachedPublicKey as _, SecretKey as _, Signature as _},
-    AggregateSignature,
-};
+use bls::{AggregateSignature, Backend};
 use deposit_tree::DepositTree;
 use helper_functions::{
     accessors, misc,
@@ -59,11 +56,15 @@ use types::{
 
 type BlockWithState<P> = (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>);
 
-pub fn min_genesis_state<P: Preset>(config: &Config) -> Result<(Arc<BeaconState<P>>, DepositTree)> {
+pub fn min_genesis_state<P: Preset>(
+    config: &Config,
+    backend: Backend,
+) -> Result<(Arc<BeaconState<P>>, DepositTree)> {
     let (genesis_state, deposit_tree) = interop::quick_start_beacon_state(
         config,
         config.min_genesis_time,
         config.min_genesis_active_validator_count,
+        backend,
     )?;
 
     Ok((Arc::new(genesis_state), deposit_tree))
@@ -74,8 +75,9 @@ pub fn empty_block<P: Preset>(
     pre_state: Arc<BeaconState<P>>,
     slot: Slot,
     graffiti: H256,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pre_state, slot, backend)?;
     let eth1_data = advanced_state.eth1_data();
     let attestations = core::iter::empty();
     let deposits = ContiguousList::default();
@@ -91,6 +93,7 @@ pub fn empty_block<P: Preset>(
         deposits,
         sync_aggregate,
         execution_payload,
+        backend,
     )
 }
 
@@ -99,12 +102,14 @@ pub fn block_justifying_previous_epoch<P: Preset>(
     pre_state: Arc<BeaconState<P>>,
     epoch: Epoch,
     graffiti: H256,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
     let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-    let advanced_state = advance_state(config, pre_state, block_slot)?;
+    let advanced_state = advance_state(config, pre_state, block_slot, backend)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::slots_in_epoch::<P>(epoch - 1);
-    let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
+    let attestations =
+        full_block_attestations(config, &advanced_state, attestation_slots, backend)?;
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
     let execution_payload = None;
@@ -118,6 +123,7 @@ pub fn block_justifying_previous_epoch<P: Preset>(
         deposits,
         sync_aggregate,
         execution_payload,
+        backend,
     )
 }
 
@@ -127,12 +133,14 @@ pub fn block_justifying_current_epoch<P: Preset>(
     epoch: Epoch,
     graffiti: H256,
     execution_payload: Option<ExecutionPayload<P>>,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
     let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch + 1) - 1;
-    let advanced_state = advance_state(config, pre_state, block_slot)?;
+    let advanced_state = advance_state(config, pre_state, block_slot, backend)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::compute_start_slot_at_epoch::<P>(epoch)..block_slot;
-    let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
+    let attestations =
+        full_block_attestations(config, &advanced_state, attestation_slots, backend)?;
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
 
@@ -145,6 +153,7 @@ pub fn block_justifying_current_epoch<P: Preset>(
         deposits,
         sync_aggregate,
         execution_payload,
+        backend,
     )
 }
 
@@ -153,8 +162,9 @@ pub fn block_with_deposits<P: Preset>(
     pre_state: Arc<BeaconState<P>>,
     slot: Slot,
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pre_state, slot, backend)?;
     let eth1_data = advanced_state.eth1_data();
     let graffiti = H256::zero();
     let attestations = core::iter::empty();
@@ -170,6 +180,7 @@ pub fn block_with_deposits<P: Preset>(
         deposits,
         sync_aggregate,
         execution_payload,
+        backend,
     )
 }
 
@@ -179,8 +190,9 @@ pub fn block_with_eth1_vote_and_deposits<P: Preset>(
     slot: Slot,
     eth1_vote: Eth1Data,
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pre_state, slot, backend)?;
     let graffiti = H256::zero();
     let attestations = core::iter::empty();
     let sync_aggregate = SyncAggregate::empty();
@@ -195,6 +207,7 @@ pub fn block_with_eth1_vote_and_deposits<P: Preset>(
         deposits,
         sync_aggregate,
         execution_payload,
+        backend,
     )
 }
 
@@ -204,8 +217,9 @@ pub fn block_with_payload<P: Preset>(
     slot: Slot,
     graffiti: H256,
     execution_payload: ExecutionPayload<P>,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pre_state, slot, backend)?;
     let eth1_data = advanced_state.eth1_data();
     let attestations = core::iter::empty();
     let deposits = ContiguousList::default();
@@ -221,6 +235,7 @@ pub fn block_with_payload<P: Preset>(
         deposits,
         sync_aggregate,
         execution_payload,
+        backend,
     )
 }
 
@@ -228,6 +243,7 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
     config: &Config,
     genesis_state: Arc<BeaconState<P>>,
     end_epoch: Epoch,
+    backend: Backend,
 ) -> Result<Vec<Arc<SignedBeaconBlock<P>>>> {
     let start_slot = GENESIS_SLOT + 1;
     let end_slot = misc::compute_start_slot_at_epoch::<P>(end_epoch);
@@ -237,12 +253,13 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
 
     // This has to be a loop because it moves out of `pre_state`.
     for slot in start_slot..=end_slot {
-        let advanced_state = advance_state(config, pre_state, slot)?;
+        let advanced_state = advance_state(config, pre_state, slot, backend)?;
         let eth1_data = advanced_state.eth1_data();
         let graffiti = H256::zero();
-        let attestations = full_block_attestations(config, &advanced_state, (slot - 1)..slot)?;
+        let attestations =
+            full_block_attestations(config, &advanced_state, (slot - 1)..slot, backend)?;
         let deposits = ContiguousList::default();
-        let sync_aggregate = full_sync_aggregate(config, &advanced_state);
+        let sync_aggregate = full_sync_aggregate(config, &advanced_state, backend);
         let execution_payload = None;
 
         let (block, post_state) = block(
@@ -254,6 +271,7 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
             deposits,
             sync_aggregate,
             execution_payload,
+            backend,
         )?;
 
         pre_state = post_state;
@@ -268,9 +286,10 @@ pub fn singular_attestation<P: Preset>(
     state: Arc<BeaconState<P>>,
     epoch: Epoch,
     validator_index: ValidatorIndex,
+    backend: Backend,
 ) -> Result<(Attestation<P>, SubnetId)> {
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-    let state_in_epoch = advance_state(config, state, start_slot)?;
+    let state_in_epoch = advance_state(config, state, start_slot, backend)?;
 
     for slot in misc::slots_in_epoch::<P>(epoch) {
         let committees = accessors::beacon_committees(&state_in_epoch, slot)?;
@@ -302,7 +321,7 @@ pub fn singular_attestation<P: Preset>(
                     target: Checkpoint { epoch, root },
                 };
 
-                let secret_key = interop::secret_key(validator_index);
+                let secret_key = interop::secret_key(validator_index, backend);
                 let signature = data.sign(config, &state_in_epoch, &secret_key).into();
 
                 let attestation = if pre_electra {
@@ -405,10 +424,11 @@ fn block<P: Preset>(
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
     sync_aggregate: SyncAggregate<P>,
     mut execution_payload: Option<ExecutionPayload<P>>,
+    backend: Backend,
 ) -> Result<BlockWithState<P>> {
     let slot = advanced_state.slot();
     let proposer_index = accessors::get_beacon_proposer_index(&advanced_state)?;
-    let secret_key = interop::secret_key(proposer_index);
+    let secret_key = interop::secret_key(proposer_index, backend);
     let parent_root = accessors::latest_block_root(&advanced_state);
 
     let randao_reveal = RandaoEpoch::from(accessors::get_current_epoch(&advanced_state))
@@ -567,6 +587,7 @@ fn full_block_attestations<P: Preset>(
     config: &Config,
     advanced_state: &BeaconState<P>,
     slots: Range<Slot>,
+    backend: Backend,
 ) -> Result<Vec<Attestation<P>>> {
     let mut attestations = vec![];
 
@@ -607,9 +628,11 @@ fn full_block_attestations<P: Preset>(
 
                 let signature = committee
                     .into_iter()
-                    .map(|validator_index| interop::secret_key(validator_index).sign(signing_root))
+                    .map(|validator_index| {
+                        interop::secret_key(validator_index, backend).sign(signing_root)
+                    })
                     .reduce(AggregateSignature::aggregate)
-                    .unwrap_or_default()
+                    .unwrap_or(AggregateSignature::default_with_backend(backend))
                     .into();
 
                 attestations.push(Attestation::from(Phase0Attestation {
@@ -656,9 +679,11 @@ fn full_block_attestations<P: Preset>(
 
             let signature = committees
                 .flatten()
-                .map(|validator_index| interop::secret_key(validator_index).sign(signing_root))
+                .map(|validator_index| {
+                    interop::secret_key(validator_index, backend).sign(signing_root)
+                })
                 .reduce(AggregateSignature::aggregate)
-                .unwrap_or_default()
+                .unwrap_or(AggregateSignature::default_with_backend(backend))
                 .into();
 
             attestations.push(Attestation::from(ElectraAttestation {
@@ -676,6 +701,7 @@ fn full_block_attestations<P: Preset>(
 fn full_sync_aggregate<P: Preset>(
     config: &Config,
     advanced_state: &BeaconState<P>,
+    backend: Backend,
 ) -> SyncAggregate<P> {
     let Some(advanced_state) = advanced_state.post_altair() else {
         return SyncAggregate::empty();
@@ -694,9 +720,9 @@ fn full_sync_aggregate<P: Preset>(
                  are taken from advanced_state.validators",
             )
         })
-        .map(|validator_index| interop::secret_key(validator_index).sign(signing_root))
+        .map(|validator_index| interop::secret_key(validator_index, backend).sign(signing_root))
         .reduce(AggregateSignature::aggregate)
-        .unwrap_or_default()
+        .unwrap_or(AggregateSignature::default_with_backend(backend))
         .into();
 
     SyncAggregate {
@@ -709,9 +735,10 @@ fn advance_state<P: Preset>(
     config: &Config,
     mut state: Arc<BeaconState<P>>,
     slot: Slot,
+    backend: Backend,
 ) -> Result<Arc<BeaconState<P>>> {
     if state.slot() < slot {
-        combined::process_slots(config, state.make_mut(), slot)?;
+        combined::process_slots(config, state.make_mut(), slot, backend)?;
     }
 
     Ok(state)

@@ -2,6 +2,7 @@ use core::time::Duration;
 use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 
 use anyhow::{bail, Result};
+use bls::Backend;
 use features::Feature;
 use log::warn;
 use state_cache::{StateCache, StateWithRewards};
@@ -76,12 +77,14 @@ impl<P: Preset> StateCacheProcessor<P> {
         store: &Store<P>,
         block_root: H256,
         slot: Slot,
+        backend: Backend,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         self.try_get_state_at_slot(
             store,
             block_root,
             slot,
             should_print_slot_processing_warning(store),
+            backend,
         )
     }
 
@@ -90,8 +93,9 @@ impl<P: Preset> StateCacheProcessor<P> {
         store: &Store<P>,
         block_root: H256,
         slot: Slot,
+        backend: Backend,
     ) -> Result<Arc<BeaconState<P>>> {
-        self.try_state_at_slot(store, block_root, slot)?
+        self.try_state_at_slot(store, block_root, slot, backend)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
     }
@@ -101,8 +105,9 @@ impl<P: Preset> StateCacheProcessor<P> {
         store: &Store<P>,
         block_root: H256,
         slot: Slot,
+        backend: Backend,
     ) -> Result<Arc<BeaconState<P>>> {
-        self.try_get_state_at_slot(store, block_root, slot, false)?
+        self.try_get_state_at_slot(store, block_root, slot, false, backend)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
     }
@@ -113,6 +118,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         state: Arc<BeaconState<P>>,
         block_root: H256,
         slot: Slot,
+        backend: Backend,
     ) -> Result<Arc<BeaconState<P>>> {
         let post_state = process_slots(
             store,
@@ -120,6 +126,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             should_print_slot_processing_warning(store),
+            backend,
         )?;
 
         if store.is_forward_synced() {
@@ -136,6 +143,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
         warn_on_slot_processing: bool,
+        backend: Backend,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         if !store.is_forward_synced() {
             return match self.before_or_at_slot(store, block_root, slot) {
@@ -145,6 +153,7 @@ impl<P: Preset> StateCacheProcessor<P> {
                     block_root,
                     slot,
                     warn_on_slot_processing,
+                    backend,
                 )?)),
                 None => Ok(None),
             };
@@ -159,7 +168,14 @@ impl<P: Preset> StateCacheProcessor<P> {
                     return Ok(None);
                 };
 
-                let state = process_slots(store, state, block_root, slot, warn_on_slot_processing)?;
+                let state = process_slots(
+                    store,
+                    state,
+                    block_root,
+                    slot,
+                    warn_on_slot_processing,
+                    backend,
+                )?;
 
                 Ok(Some((state, None)))
             })?
@@ -174,6 +190,7 @@ fn process_slots<P: Preset>(
     block_root: H256,
     slot: Slot,
     warn_on_slot_processing: bool,
+    backend: Backend,
 ) -> Result<Arc<BeaconState<P>>> {
     if state.slot() < slot {
         if warn_on_slot_processing && store.is_forward_synced() {
@@ -199,7 +216,7 @@ fn process_slots<P: Preset>(
             });
         }
 
-        combined::process_slots(store.chain_config(), state.make_mut(), slot)?;
+        combined::process_slots(store.chain_config(), state.make_mut(), slot, backend)?;
     }
 
     Ok(state)

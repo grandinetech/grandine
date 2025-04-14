@@ -2,10 +2,7 @@ use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{
-    traits::{CachedPublicKey as _, SignatureBytes as _},
-    SignatureBytes,
-};
+use bls::{Backend, SignatureBytes};
 use itertools::Itertools as _;
 use ssz::PersistentList;
 use std_ext::ArcExt as _;
@@ -43,6 +40,7 @@ use crate::{accessors, misc, mutators, phase0, predicates};
 pub fn upgrade_to_altair<P: Preset>(
     config: &Config,
     pre: Phase0BeaconState<P>,
+    backend: Backend,
 ) -> Result<AltairBeaconState<P>> {
     let epoch = accessors::get_current_epoch(&pre);
 
@@ -125,7 +123,7 @@ pub fn upgrade_to_altair<P: Preset>(
     // > Fill in sync committees
     // > Note: A duplicate committee is assigned for the current and next committee at the fork
     // >       boundary
-    let sync_committee = accessors::get_next_sync_committee(&post)?;
+    let sync_committee = accessors::get_next_sync_committee(&post, backend)?;
     post.current_sync_committee = sync_committee.clone_arc();
     post.next_sync_committee = sync_committee;
 
@@ -729,7 +727,7 @@ mod spec_tests {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
 
-        let actual_post = upgrade_to_altair::<P>(&P::default_config(), pre)
+        let actual_post = upgrade_to_altair::<P>(&P::default_config(), pre, Backend::default())
             .expect("upgrade from Phase 0 to Altair to should succeed");
 
         assert_eq!(actual_post, expected_post);

@@ -10,6 +10,7 @@ workspace = true
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 arithmetic = { workspace = true }
+bls = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }

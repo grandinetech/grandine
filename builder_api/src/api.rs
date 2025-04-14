@@ -3,7 +3,7 @@ use std::{sync::Arc, time::SystemTime};
 
 use anyhow::{bail, ensure, Result};
 use arc_swap::ArcSwap;
-use bls::PublicKeyBytes;
+use bls::{PublicKeyBytes, Backend};
 use helper_functions::{misc, signing::SignForAllForks};
 use http_api_utils::ETH_CONSENSUS_VERSION;
 use itertools::Itertools as _;
@@ -74,17 +74,19 @@ pub struct Api {
     metrics: Option<Arc<Metrics>>,
     supports_block_ssz: ArcSwap<Option<bool>>,
     supports_validators_ssz: ArcSwap<Option<bool>>,
+    backend: Backend,
 }
 
 impl Api {
     #[must_use]
-    pub fn new(config: BuilderConfig, client: Client, metrics: Option<Arc<Metrics>>) -> Self {
+    pub fn new(config: BuilderConfig, client: Client, metrics: Option<Arc<Metrics>>, backend: Backend) -> Self {
         Self {
             config,
             client,
             metrics,
             supports_block_ssz: ArcSwap::from_pointee(None),
             supports_validators_ssz: ArcSwap::from_pointee(None),
+            backend,
         }
     }
 
@@ -269,22 +271,22 @@ impl Api {
             SignedBuilderBid::Bellatrix(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, &public_key, self.backend)?
             }
             SignedBuilderBid::Capella(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, &public_key, self.backend)?
             }
             SignedBuilderBid::Deneb(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, &public_key, self.backend)?
             }
             SignedBuilderBid::Electra(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, &public_key, self.backend)?
             }
         }
 

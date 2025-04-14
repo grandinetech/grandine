@@ -1,7 +1,6 @@
 use core::ops::Not as _;
 
 use anyhow::{anyhow, Error as AnyhowError, Result};
-use bls::traits::CachedPublicKey as _;
 use helper_functions::{
     accessors,
     error::SignatureKind,
@@ -135,6 +134,7 @@ pub fn verify_signatures<P: Preset>(
 
     // Attester slashings
 
+    let backend = verifier.backend();
     for attester_slashing in &block.message.body.attester_slashings {
         for attestation in [
             &attester_slashing.attestation_1,
@@ -147,7 +147,7 @@ pub fn verify_signatures<P: Preset>(
                     .copied()
                     .map(|validator_index| {
                         accessors::public_key(state, validator_index)?
-                            .decompress()
+                            .decompress(backend)
                             .map_err(AnyhowError::new)
                     }),
                 |public_keys| {
