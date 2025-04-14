@@ -315,7 +315,7 @@ pub trait Eth1Storage {
             .is_some_and(|requests_start_index| requests_start_index <= finalized_deposit_index);
 
         let position = if deposit_requests_transition_period_finished {
-            Some(unfinalized_blocks.len())
+            Some(unfinalized_blocks.len().saturating_sub(1))
         } else {
             unfinalized_blocks.iter().position(|block| {
                 block
@@ -345,6 +345,10 @@ pub trait Eth1Storage {
 
         let mut new_finalized_blocks = unfinalized_blocks.split_off(block_position);
         core::mem::swap(&mut *unfinalized_blocks, &mut new_finalized_blocks);
+
+        if deposit_requests_transition_period_finished {
+            return;
+        }
 
         if let Some(last_block) = new_finalized_blocks.last() {
             let deposit_events = new_finalized_blocks
