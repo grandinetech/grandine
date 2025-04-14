@@ -18,6 +18,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+    - name: Maximize build space
+      if: runner.os == 'Linux'
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 2048
+        swap-size-mb: 1024
     - name: Disable autocrlf (Windows)
       if: runner.os == 'Windows'
       run: git config --global core.autocrlf false
@@ -39,11 +45,6 @@ jobs:
       with:
         submodules: true
         lfs: true
-    # There should be no need to install Rustup or a Rust toolchain explicitly.
-    # The `ubuntu-22.04` image already includes Rustup:
-    # <https://github.com/actions/runner-images/blob/ubuntu22/20240401.4/images/ubuntu/Ubuntu2204-Readme.md#rust-tools>
-    # Running `rustc` or Cargo should automatically install the toolchain specified in `rust-toolchain.toml`.
-    - uses: Swatinem/rust-cache@v2
     - name: Run cargo build
       run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }}
     - name: Check if code is formatted (Linux)
