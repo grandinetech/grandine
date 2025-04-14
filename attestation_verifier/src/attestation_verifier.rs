@@ -40,12 +40,16 @@ pub struct AttestationVerifier<P: Preset, W: Wait> {
     aggregates: Vec<AggregateWithOrigin<P>>,
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
-    active_task_count: usize,
-    max_active_tasks: usize,
+    active_aggregates_task_count: usize,
+    active_attestations_task_count: usize,
+    max_aggregates_active_tasks: usize,
+    max_attestations_active_tasks: usize,
     metrics: Option<Arc<Metrics>>,
     fc_to_verifier_rx: UnboundedReceiver<AttestationVerifierMessage<P, W>>,
-    task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
-    task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
+    aggregates_task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
+    aggregates_task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
+    attestations_task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
+    attestations_task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
 }
 
 impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
@@ -56,35 +60,57 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         metrics: Option<Arc<Metrics>>,
         fc_to_verifier_rx: UnboundedReceiver<AttestationVerifierMessage<P, W>>,
     ) -> Self {
-        let (task_to_verifier_tx, task_to_verifier_rx) = mpsc::unbounded();
+        let (aggregates_task_to_verifier_tx, aggregates_task_to_verifier_rx) = mpsc::unbounded();
+        let (attestations_task_to_verifier_tx, attestations_task_to_verifier_rx) =
+            mpsc::unbounded();
 
         Self {
             attestations: vec![],
             aggregates: vec![],
             controller,
             dedicated_executor,
-            active_task_count: 0,
+            active_aggregates_task_count: 0,
+            active_attestations_task_count: 0,
             // `blst` already parallelizes signature verification. For non parallelized BLS
             // libraries use `num_cpus::get()`
-            max_active_tasks: 1,
+            max_aggregates_active_tasks: 1,
+            max_attestations_active_tasks: 1,
             metrics,
             fc_to_verifier_rx,
-            task_to_verifier_rx,
-            task_to_verifier_tx,
+            aggregates_task_to_verifier_rx,
+            aggregates_task_to_verifier_tx,
+            attestations_task_to_verifier_rx,
+            attestations_task_to_verifier_tx,
         }
     }
 
     pub async fn run(mut self) -> Result<()> {
         loop {
             select! {
-                message = self.task_to_verifier_rx.select_next_some() => {
+                message = self.aggregates_task_to_verifier_rx.select_next_some() => {
                     match message {
                         TaskMessage::Finished(wait_group) => {
-                            self.active_task_count -= 1;
-                            self.spawn_verify_batch_tasks(&wait_group);
+                            self.active_aggregates_task_count -= 1;
+                            self.spawn_verify_aggregate_batch_task(&wait_group);
 
                             if let Some(metrics) = self.metrics.as_ref() {
-                                metrics.set_attestation_verifier_active_task_count(self.active_task_count);
+                                metrics.set_attestation_verifier_active_task_count(
+                                    self.active_aggregates_task_count + self.active_attestations_task_count,
+                                );
+                            }
+                        }
+                    }
+                }
+                message = self.attestations_task_to_verifier_rx.select_next_some() => {
+                    match message {
+                        TaskMessage::Finished(wait_group) => {
+                            self.active_attestations_task_count -= 1;
+                            self.spawn_verify_attestation_batch_task(&wait_group);
+
+                            if let Some(metrics) = self.metrics.as_ref() {
+                                metrics.set_attestation_verifier_active_task_count(
+                                    self.active_aggregates_task_count + self.active_attestations_task_count,
+                                );
                             }
                         }
                     }
@@ -101,14 +127,14 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                                 origin,
                             });
 
-                            self.spawn_verify_batch_tasks(&wait_group);
+                            self.spawn_verify_aggregate_batch_task(&wait_group);
                         }
                         AttestationVerifierMessage::Attestation {
                             wait_group,
                             attestation,
                         } => {
                             self.attestations.push(attestation);
-                            self.spawn_verify_batch_tasks(&wait_group);
+                            self.spawn_verify_attestation_batch_task(&wait_group);
                         }
                         AttestationVerifierMessage::Stop => break Ok(()),
                     }
@@ -117,20 +143,19 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         }
     }
 
-    fn spawn_verify_batch_tasks(&mut self, wait_group: &W) {
-        self.spawn_verify_aggregate_batch_task(wait_group);
-        self.spawn_verify_attestation_batch_task(wait_group);
-    }
-
     fn spawn_verify_aggregate_batch_task(&mut self, wait_group: &W) {
-        if self.aggregates.is_empty() || self.active_task_count >= self.max_active_tasks {
+        if self.active_aggregates_task_count >= self.max_aggregates_active_tasks
+            || self.aggregates.is_empty()
+        {
             return;
         }
 
-        self.active_task_count += 1;
+        self.active_aggregates_task_count += 1;
 
         if let Some(metrics) = self.metrics.as_ref() {
-            metrics.set_attestation_verifier_active_task_count(self.active_task_count);
+            metrics.set_attestation_verifier_active_task_count(
+                self.active_aggregates_task_count + self.active_attestations_task_count,
+            );
         }
 
         let split_at = self.aggregates.len().saturating_sub(MAX_BATCH_SIZE);
@@ -142,19 +167,23 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             self.controller.clone_arc(),
             &self.dedicated_executor,
             self.metrics.clone(),
-            self.task_to_verifier_tx.clone(),
+            self.aggregates_task_to_verifier_tx.clone(),
         );
     }
 
     fn spawn_verify_attestation_batch_task(&mut self, wait_group: &W) {
-        if self.attestations.is_empty() || self.active_task_count >= self.max_active_tasks {
+        if self.active_attestations_task_count >= self.max_attestations_active_tasks
+            || self.attestations.is_empty()
+        {
             return;
         }
 
-        self.active_task_count += 1;
+        self.active_attestations_task_count += 1;
 
         if let Some(metrics) = self.metrics.as_ref() {
-            metrics.set_attestation_verifier_active_task_count(self.active_task_count);
+            metrics.set_attestation_verifier_active_task_count(
+                self.active_aggregates_task_count + self.active_attestations_task_count,
+            );
         }
 
         let split_at = self.attestations.len().saturating_sub(MAX_BATCH_SIZE);
@@ -166,7 +195,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             self.controller.clone_arc(),
             &self.dedicated_executor,
             self.metrics.clone(),
-            self.task_to_verifier_tx.clone(),
+            self.attestations_task_to_verifier_tx.clone(),
         );
     }
 }
