@@ -12,7 +12,10 @@ use serde::Serialize;
 use strum::IntoStaticStr;
 use types::{
     combined::{SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    deneb::{
+        containers::{BlobIdentifier, BlobSidecar},
+        primitives::BlobIndex,
+    },
     phase0::primitives::ValidatorIndex,
     preset::Preset,
 };
@@ -141,4 +144,11 @@ impl StorageMode {
     pub const fn is_archive(self) -> bool {
         matches!(self, Self::Archive)
     }
+}
+
+pub enum BlockBlobAvailability {
+    Complete,
+    CompleteWithPending,
+    Missing(Vec<BlobIndex>),
+    Irrelevant,
 }

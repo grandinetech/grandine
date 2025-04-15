@@ -1125,7 +1125,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             && data_availability_policy.check()
             && !self.indices_of_missing_blobs(block).is_empty()
         {
-            return Ok(BlockAction::DelayUntilBlobs(block.clone_arc()));
+            return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
         }
 
         let attester_slashing_results = block
@@ -1804,7 +1804,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             Ok(state) => state,
             Err(error) => {
                 if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
-                    return Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar));
+                    // Delay blob validations until the state is available.
+                    // Alternatively, we could allow long slot processing distances for blob sidecar validations,
+                    // however, that introduces oportunity for DoS attacks with fake blob sidecars.
+                    return Ok(BlobSidecarAction::DelayUntilState(blob_sidecar, block_root));
                 }
 
                 bail!(error);
@@ -1914,34 +1917,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn validate_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
+        state: Option<Arc<BeaconState<P>>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
 
-        self.validate_blob_sidecar_with_state(
-            blob_sidecar,
-            block_seen,
-            origin,
-            || {
-                self.chain_link(block_header.parent_root)
-                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
-            },
-            || {
-                self.state_cache
-                    // TODO: this is a temporary measure to allow chain to progress during long periods without blocks.
-                    // Refactor blob processing so that blobs wait until required state is ready.
-                    .try_state_at_slot_for_block_sync(self, block_header.parent_root, block_header.slot)
-                    .transpose()
-                    .unwrap_or_else(|| {
-                        self.state_cache.state_at_slot(
-                            self,
-                            self.head().block_root,
-                            block_header.slot,
-                        )
-                    })
-            },
-        )
+        let parent_info = || {
+            self.chain_link(block_header.parent_root)
+                .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+        };
+
+        if let Some(state) = state {
+            self.validate_blob_sidecar_with_state(
+                blob_sidecar,
+                block_seen,
+                origin,
+                parent_info,
+                || Ok(state),
+            )
+        } else {
+            self.validate_blob_sidecar_with_state(
+                blob_sidecar,
+                block_seen,
+                origin,
+                parent_info,
+                || {
+                    self.state_cache
+                        .try_state_at_slot(self, block_header.parent_root, block_header.slot)
+                        .transpose()
+                        .unwrap_or_else(|| {
+                            self.state_cache.state_at_slot(
+                                self,
+                                self.head().block_root,
+                                block_header.slot,
+                            )
+                        })
+                },
+            )
+        }
     }
 
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)
@@ -3265,7 +3279,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         PayloadAction::DelayUntilBlock(latest_valid_hash)
     }
 
-    pub fn indices_of_missing_blobs(&self, block: &Arc<SignedBeaconBlock<P>>) -> Vec<BlobIndex> {
+    pub fn indices_of_missing_blobs(&self, block: &SignedBeaconBlock<P>) -> Vec<BlobIndex> {
         let block = block.message();
 
         let Some(body) = block.body().post_deneb() else {
