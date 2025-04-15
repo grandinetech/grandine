@@ -306,6 +306,7 @@ where
 }
 
 /// [`get_expected_withdrawals`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#new-get_expected_withdrawals)
+#[expect(clippy::too_many_lines)]
 pub fn get_expected_withdrawals<P: Preset>(
     state: &(impl PostElectraBeaconState<P> + ?Sized),
 ) -> Result<(Vec<Withdrawal>, usize)> {
@@ -317,7 +318,7 @@ pub fn get_expected_withdrawals<P: Preset>(
 
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut validator_index = state.next_withdrawal_validator_index();
-    let mut withdrawals = vec![];
+    let mut withdrawals: Vec<Withdrawal> = vec![];
     let mut processed_partial_withdrawals_count = 0;
 
     // > [New in Electra:EIP7251] Consume pending partial withdrawals
@@ -328,10 +329,19 @@ pub fn get_expected_withdrawals<P: Preset>(
             break;
         }
 
-        let validator_balance = state.balances().get(withdrawal.validator_index).copied()?;
         let validator = state.validators().get(withdrawal.validator_index)?;
         let has_sufficient_effective_balance =
             validator.effective_balance >= P::MIN_ACTIVATION_BALANCE;
+        let total_withdrawn = withdrawals
+            .iter()
+            .filter(|w| w.validator_index == withdrawal.validator_index)
+            .map(|w| w.amount)
+            .sum();
+        let validator_balance = state
+            .balances()
+            .get(withdrawal.validator_index)
+            .copied()?
+            .saturating_sub(total_withdrawn);
         let has_excess_balance = validator_balance > P::MIN_ACTIVATION_BALANCE;
 
         if validator.exit_epoch == FAR_FUTURE_EPOCH
