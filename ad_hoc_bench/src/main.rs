@@ -82,6 +82,10 @@ enum Blocks {
     Holesky,
     #[clap(name = "holesky-devnet")]
     HoleskyDevnet,
+    #[clap(name = "holesky-non-finality")]
+    HoleskyNonFinality,
+    #[clap(name = "holesky-non-finality-full")]
+    HoleskyNonFinalityFull,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -137,13 +141,16 @@ impl From<Blocks> for Chain {
             | Blocks::GoerliGenesis8192
             | Blocks::GoerliGenesis16384 => Self::Goerli,
             Blocks::Withdrawals2368 | Blocks::Withdrawals2496 => Self::Withdrawals,
-            Blocks::Holesky => Self::Holesky,
+            Blocks::Holesky | Blocks::HoleskyNonFinality | Blocks::HoleskyNonFinalityFull => {
+                Self::Holesky
+            }
             Blocks::HoleskyDevnet => Self::HoleskyDevnet,
         }
     }
 }
 
 impl From<Blocks> for BlockParameters {
+    #[expect(clippy::too_many_lines)]
     fn from(blocks: Blocks) -> Self {
         match blocks {
             Blocks::MainnetGenesis128 | Blocks::GoerliGenesis128 => Self {
@@ -237,6 +244,16 @@ impl From<Blocks> for BlockParameters {
                 first_slot: GENESIS_SLOT,
                 last_slot: 2584,
                 slot_width: 6,
+            },
+            Blocks::HoleskyNonFinality => Self {
+                first_slot: 3_710_944,
+                last_slot: 3_736_998,
+                slot_width: 8,
+            },
+            Blocks::HoleskyNonFinalityFull => Self {
+                first_slot: 3_710_944,
+                last_slot: 3_810_977,
+                slot_width: 8,
             },
         }
     }
