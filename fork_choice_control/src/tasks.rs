@@ -21,7 +21,10 @@ use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use types::{
-    combined::{AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        AttesterSlashing, BeaconState as CombinedBeaconState, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     nonstandard::{RelativeEpoch, ValidationOutcome},
@@ -325,6 +328,7 @@ pub struct BlobSidecarTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub blob_sidecar: Arc<BlobSidecar<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
     pub block_seen: bool,
     pub origin: BlobSidecarOrigin,
     pub submission_time: Instant,
@@ -338,6 +342,7 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
             mutator_tx,
             wait_group,
             blob_sidecar,
+            state,
             block_seen,
             origin,
             submission_time,
@@ -352,7 +357,7 @@ impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
         let index = blob_sidecar.index;
         let blob_identifier = BlobIdentifier { block_root, index };
 
-        let result = store_snapshot.validate_blob_sidecar(blob_sidecar, block_seen, &origin);
+        let result = store_snapshot.validate_blob_sidecar(blob_sidecar, state, block_seen, &origin);
 
         MutatorMessage::BlobSidecar {
             wait_group,

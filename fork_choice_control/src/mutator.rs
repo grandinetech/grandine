@@ -65,9 +65,9 @@ use crate::{
         SyncMessage, ValidatorMessage,
     },
     misc::{
-        Delayed, MutatorRejectionReason, PendingAggregateAndProof, PendingAttestation,
-        PendingBlobSidecar, PendingBlock, PendingChainLink, VerifyAggregateAndProofResult,
-        VerifyAttestationResult, WaitingForCheckpointState,
+        BlockBlobAvailability, Delayed, MutatorRejectionReason, PendingAggregateAndProof,
+        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink,
+        VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
@@ -99,6 +99,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     // problem it solves can occur in normal operation as well. The execution layer may finish
     // validating the payload before the fork choice store processes the block containing it.
     delayed_until_payload: HashMap<ExecutionBlockHash, Vec<(PayloadStatusV1, Slot)>>,
+    delayed_until_state: HashMap<(H256, Slot), Delayed<P>>,
     // The specification doesn't explicitly state it, but `Store.checkpoint_states` is effectively a
     // cache, as its contents can be recomputed at any time using data from other fields.
     //
@@ -166,6 +167,7 @@ where
             delayed_until_block: HashMap::new(),
             delayed_until_slot: BTreeMap::new(),
             delayed_until_payload: HashMap::new(),
+            delayed_until_state: HashMap::new(),
             waiting_for_checkpoint_states: HashMap::new(),
             storage,
             thread_pool,
@@ -524,7 +526,7 @@ where
                     Ok(ValidationOutcome::Ignore(publishable)),
                 );
             }
-            Ok(BlockAction::DelayUntilBlobs(block)) => {
+            Ok(BlockAction::DelayUntilBlobs(block, state)) => {
                 let block_root = block.message().hash_tree_root();
 
                 let pending_block = PendingBlock {
@@ -533,37 +535,64 @@ where
                     submission_time,
                 };
 
-                let missing_blob_indices =
-                    self.store.indices_of_missing_blobs(&pending_block.block);
+                let block_blob_availability = self.block_blob_availability(
+                    &pending_block.block,
+                    self.delayed_until_state
+                        .get(&(block_root, state.slot()))
+                        .iter()
+                        .flat_map(|delayed| delayed.blob_sidecars.iter())
+                        .map(|pending_blob_sidecar| pending_blob_sidecar.blob_sidecar.as_ref()),
+                );
 
-                if missing_blob_indices.is_empty() {
-                    self.retry_block(wait_group, pending_block);
-                } else {
-                    debug!("block delayed until blobs: {pending_block:?}");
-
-                    if let Some(gossip_id) = pending_block.origin.gossip_id() {
-                        self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                match block_blob_availability {
+                    BlockBlobAvailability::Complete => {
+                        self.retry_block(wait_group, pending_block);
                     }
+                    BlockBlobAvailability::CompleteWithPending => {
+                        self.delay_block_until_blobs(block_root, pending_block);
 
-                    let pending_block = reply_delayed_block_validation_result(
-                        pending_block,
-                        Ok(ValidationOutcome::Ignore(false)),
-                    );
+                        self.take_delayed_until_state(block_root, state.slot())
+                            .unwrap_or_default()
+                            .blob_sidecars
+                            .into_iter()
+                            .for_each(|pending_blob| {
+                                self.retry_blob_sidecar(
+                                    wait_group.clone(),
+                                    pending_blob,
+                                    Some(state.clone_arc()),
+                                );
+                            });
+                    }
+                    BlockBlobAvailability::Missing(missing_blob_indices) => {
+                        debug!("block delayed until blobs: {pending_block:?}");
 
-                    let blob_ids = missing_blob_indices
-                        .into_iter()
-                        .map(|index| BlobIdentifier { block_root, index })
-                        .collect_vec();
+                        if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                            self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                        }
 
-                    let peer_id = pending_block.origin.peer_id();
+                        let pending_block = reply_delayed_block_validation_result(
+                            pending_block,
+                            Ok(ValidationOutcome::Ignore(false)),
+                        );
 
-                    self.request_blobs_from_execution_engine(
-                        pending_block.block.clone_arc(),
-                        blob_ids,
-                        peer_id,
-                    );
+                        let blob_ids = missing_blob_indices
+                            .into_iter()
+                            .map(|index| BlobIdentifier { block_root, index })
+                            .collect_vec();
 
-                    self.delay_block_until_blobs(block_root, pending_block);
+                        let peer_id = pending_block.origin.peer_id();
+
+                        self.request_blobs_from_execution_engine(
+                            pending_block.block.clone_arc(),
+                            blob_ids,
+                            peer_id,
+                        );
+
+                        self.delay_block_until_blobs(block_root, pending_block);
+                    }
+                    BlockBlobAvailability::Irrelevant => {
+                        unreachable!("block without blobs should not be delayed until blobs")
+                    }
                 }
             }
             Ok(BlockAction::DelayUntilParent(block)) => {
@@ -1132,6 +1161,40 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
+            Ok(BlobSidecarAction::DelayUntilState(blob_sidecar, block_root)) => {
+                let slot = blob_sidecar.signed_block_header.message.slot;
+
+                let pending_blob_sidecar = PendingBlobSidecar {
+                    blob_sidecar,
+                    block_seen,
+                    origin,
+                    submission_time,
+                };
+
+                if let Some(state) =
+                    self.state_cache
+                        .existing_state_at_slot(&self.store, block_root, slot)
+                {
+                    self.retry_blob_sidecar(wait_group, pending_blob_sidecar, Some(state));
+                } else {
+                    debug!(
+                        "blob sidecar delayed until state at same slot is ready \
+                         (blob_sidecar: {:?}, block_root: {block_root:?}, slot: {slot})",
+                        pending_blob_sidecar.blob_sidecar,
+                    );
+
+                    let peer_id = pending_blob_sidecar.origin.peer_id();
+
+                    self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+
+                    let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
+                        pending_blob_sidecar,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
+                    self.delay_blob_sidecar_until_state(pending_blob_sidecar, block_root);
+                }
+            }
             Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar)) => {
                 let parent_root = blob_sidecar.signed_block_header.message.parent_root;
 
@@ -1143,7 +1206,7 @@ where
                 };
 
                 if self.store.contains_block(parent_root) {
-                    self.retry_blob_sidecar(wait_group, pending_blob_sidecar);
+                    self.retry_blob_sidecar(wait_group, pending_blob_sidecar, None);
                 } else {
                     debug!("blob sidecar delayed until block parent: {parent_root:?}");
 
@@ -1170,7 +1233,7 @@ where
                 };
 
                 if slot <= self.store.slot() {
-                    self.retry_blob_sidecar(wait_group, pending_blob_sidecar);
+                    self.retry_blob_sidecar(wait_group, pending_blob_sidecar, None);
                 } else {
                     debug!("blob sidecar delayed until slot: {slot}");
 
@@ -2024,6 +2087,24 @@ where
         }
     }
 
+    fn delay_blob_sidecar_until_state(
+        &mut self,
+        pending_blob_sidecar: PendingBlobSidecar<P>,
+        block_root: H256,
+    ) {
+        let slot = pending_blob_sidecar
+            .blob_sidecar
+            .signed_block_header
+            .message
+            .slot;
+
+        self.delayed_until_state
+            .entry((block_root, slot))
+            .or_default()
+            .blob_sidecars
+            .push(pending_blob_sidecar);
+    }
+
     fn delay_blob_sidecar_until_parent(&mut self, pending_blob_sidecar: PendingBlobSidecar<P>) {
         self.delayed_until_block
             .entry(
@@ -2071,6 +2152,10 @@ where
         .into_values()
     }
 
+    fn take_delayed_until_state(&mut self, block_root: H256, slot: Slot) -> Option<Delayed<P>> {
+        self.delayed_until_state.remove(&(block_root, slot))
+    }
+
     // `wait_group` is a reference not just to pass Clippy lints but for correctness as well.
     // The referenced value must not be dropped before the current message is handled.
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
@@ -2094,7 +2179,7 @@ where
         }
 
         for pending_blob_sidecar in blob_sidecars {
-            self.retry_blob_sidecar(wait_group.clone(), pending_blob_sidecar);
+            self.retry_blob_sidecar(wait_group.clone(), pending_blob_sidecar, None);
         }
     }
 
@@ -2164,7 +2249,12 @@ where
         });
     }
 
-    fn retry_blob_sidecar(&self, wait_group: W, pending_blob_sidecar: PendingBlobSidecar<P>) {
+    fn retry_blob_sidecar(
+        &self,
+        wait_group: W,
+        pending_blob_sidecar: PendingBlobSidecar<P>,
+        state: Option<Arc<BeaconState<P>>>,
+    ) {
         debug!("retrying delayed blob sidecar: {pending_blob_sidecar:?}");
 
         let PendingBlobSidecar {
@@ -2179,6 +2269,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             blob_sidecar,
+            state,
             block_seen,
             origin,
             submission_time,
@@ -2693,6 +2784,13 @@ where
             metrics.set_collection_length(
                 module_path!(),
                 &type_name,
+                "delayed_until_state",
+                self.delayed_until_state.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
                 "high_priority_tasks",
                 high_priority_tasks,
             );
@@ -2706,6 +2804,43 @@ where
 
             self.store.track_collection_metrics(metrics);
         }
+    }
+
+    fn block_blob_availability<'blob>(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        pending_blobs_for_block: impl Iterator<Item = &'blob BlobSidecar<P>>,
+    ) -> BlockBlobAvailability {
+        let Some(body) = block.message().body().post_deneb() else {
+            return BlockBlobAvailability::Irrelevant;
+        };
+
+        let missing_blob_indices = self.store.indices_of_missing_blobs(block);
+
+        if missing_blob_indices.is_empty() {
+            return BlockBlobAvailability::Complete;
+        }
+
+        let pending_missing_blobs = pending_blobs_for_block
+            .filter(|blob_sidecar| missing_blob_indices.contains(&blob_sidecar.index))
+            .collect_vec();
+
+        let all_blobs_downloaded = body
+            .blob_kzg_commitments()
+            .into_iter()
+            .zip(0..)
+            .filter(|(_, index)| missing_blob_indices.contains(index))
+            .all(|(block_commitment, index)| {
+                pending_missing_blobs.iter().any(|blob_sidecar| {
+                    blob_sidecar.index == index && blob_sidecar.kzg_commitment == *block_commitment
+                })
+            });
+
+        if all_blobs_downloaded {
+            return BlockBlobAvailability::CompleteWithPending;
+        }
+
+        BlockBlobAvailability::Missing(missing_blob_indices)
     }
 }
 
