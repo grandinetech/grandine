@@ -45,7 +45,6 @@ use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
-use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -301,7 +300,7 @@ where
 
         self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
 
-        for (index, result) in blocks.chain(core::iter::once(Ok(last_block))).enumerate() {
+        for result in blocks.chain(core::iter::once(Ok(last_block))) {
             let block = result?;
             let origin = BlockOrigin::Persisted;
             let submission_time = Instant::now();
@@ -327,10 +326,6 @@ where
                 submission_time,
                 rejected_block_root,
             )?;
-
-            if index % (P::SlotsPerEpoch::USIZE / 4) == 0 {
-                self.store.prune_state_cache(true);
-            }
         }
 
         self.finished_loading_from_storage = true;
@@ -1572,7 +1567,18 @@ where
         let unfinalized_states_in_memory = self.store.store_config().unfinalized_states_in_memory;
         let head_slot = self.store.head().slot();
 
-        if misc::is_epoch_start::<P>(block.message().slot()) {
+        let block_epoch = misc::compute_epoch_at_slot::<P>(block_slot);
+        let parent_epoch = self
+            .store
+            .chain_link(block.message().parent_root())
+            .map(|chain_link| misc::compute_epoch_at_slot::<P>(chain_link.slot()));
+
+        if parent_epoch
+            .map(|epoch| epoch < block_epoch)
+            .unwrap_or(true)
+        {
+            self.store.prune_state_cache(true);
+
             info!("unloading old beacon states (head slot: {head_slot})");
 
             let unloaded = self
