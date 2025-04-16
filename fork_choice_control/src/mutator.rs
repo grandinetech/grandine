@@ -65,7 +65,7 @@ use crate::{
     },
     misc::{
         BlockBlobAvailability, Delayed, MutatorRejectionReason, PendingAggregateAndProof,
-        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink,
+        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink, ReorgSource,
         VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
@@ -446,7 +446,7 @@ where
         }
 
         if let ApplyTickChanges::Reorganized { old_head, .. } = changes {
-            self.notify_about_reorganization(wait_group.clone(), &old_head);
+            self.notify_about_reorganization(wait_group.clone(), &old_head, ReorgSource::Tick);
             self.spawn_preprocess_head_state_for_next_slot_task();
         } else if self.store.tick().kind == TickKind::Attest {
             self.spawn_preprocess_head_state_for_next_slot_task();
@@ -769,7 +769,12 @@ where
                 self.update_store_snapshot();
 
                 if let Some(old_head) = old_head {
-                    self.notify_about_reorganization(wait_group.clone(), &old_head);
+                    self.notify_about_reorganization(
+                        wait_group.clone(),
+                        &old_head,
+                        ReorgSource::AggregateAndProof,
+                    );
+
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
@@ -936,7 +941,12 @@ where
                 self.update_store_snapshot();
 
                 if let Some(old_head) = old_head {
-                    self.notify_about_reorganization(wait_group.clone(), &old_head);
+                    self.notify_about_reorganization(
+                        wait_group.clone(),
+                        &old_head,
+                        ReorgSource::Attestation,
+                    );
+
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
@@ -1090,7 +1100,12 @@ where
         self.update_store_snapshot();
 
         if let Some(old_head) = old_head {
-            self.notify_about_reorganization(wait_group.clone(), &old_head);
+            self.notify_about_reorganization(
+                wait_group.clone(),
+                &old_head,
+                ReorgSource::BlockAttestation,
+            );
+
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
 
@@ -1112,7 +1127,12 @@ where
                 self.update_store_snapshot();
 
                 if let Some(old_head) = old_head {
-                    self.notify_about_reorganization(wait_group.clone(), &old_head);
+                    self.notify_about_reorganization(
+                        wait_group.clone(),
+                        &old_head,
+                        ReorgSource::AttesterSlashing,
+                    );
+
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
@@ -1445,19 +1465,22 @@ where
 
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
-        if (head_changed || head_was_optimistic) && head.is_valid() {
+        if !head_changed && head_was_optimistic && head.is_valid() {
             self.event_channels
                 .send_head_event(head, |head| self.calculate_dependent_roots(head));
 
-            if !head_changed {
-                // The call to `Store::notify_about_reorganization` below sends
-                // a `ValidatorMessage::Head` message if the head changed.
-                self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
-            }
+            // The call to `Store::notify_about_reorganization` below sends
+            // a `ValidatorMessage::Head` message if the head changed.
+            self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
         }
 
         if head_changed {
-            self.notify_about_reorganization(wait_group.clone(), old_head);
+            self.notify_about_reorganization(
+                wait_group.clone(),
+                old_head,
+                ReorgSource::PayloadResponse,
+            );
+
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
     }
@@ -1754,12 +1777,7 @@ where
 
                 self.send_to_p2p(P2pMessage::HeadState(state));
 
-                // Do not send API events about optimistic blocks.
-                // Vouch treats all head events as non-optimistic.
                 if new_head.is_valid() {
-                    self.event_channels
-                        .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
-
                     self.send_to_validator(ValidatorMessage::Head(
                         wait_group.clone(),
                         new_head.clone(),
@@ -1770,7 +1788,7 @@ where
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
             ApplyBlockChanges::Reorganized { old_head, .. } => {
-                self.notify_about_reorganization(wait_group.clone(), &old_head);
+                self.notify_about_reorganization(wait_group.clone(), &old_head, ReorgSource::Block);
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
             ApplyBlockChanges::AlternateChainExtended { .. } => {}
@@ -1861,7 +1879,12 @@ where
         );
     }
 
-    fn notify_about_reorganization(&self, wait_group: W, old_head: &ChainLink<P>) {
+    fn notify_about_reorganization(
+        &self,
+        wait_group: W,
+        old_head: &ChainLink<P>,
+        reorg_source: ReorgSource,
+    ) {
         let new_head = self.store.head().clone();
 
         self.event_channels
@@ -1872,7 +1895,7 @@ where
         }
 
         info!(
-            "chain reorganized (old head: {:?}, new head: {:?})",
+            "chain reorganized (old head: {:?}, new head: {:?}), cause: {reorg_source:?}",
             old_head.block_root, new_head.block_root,
         );
 
@@ -1885,6 +1908,14 @@ where
         self.send_to_p2p(P2pMessage::HeadState(state));
 
         if new_head.is_valid() {
+            // Do not send API events about optimistic blocks.
+            // Vouch treats all head events as non-optimistic.
+            // Head event is duplicated if block import causes a reorg.
+            if !matches!(reorg_source, ReorgSource::Block) {
+                self.event_channels
+                    .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
+            }
+
             self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
         }
 

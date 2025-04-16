@@ -152,3 +152,14 @@ pub enum BlockBlobAvailability {
     Missing(Vec<BlobIndex>),
     Irrelevant,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum ReorgSource {
+    AggregateAndProof,
+    Attestation,
+    AttesterSlashing,
+    Block,
+    BlockAttestation,
+    PayloadResponse,
+    Tick,
+}
