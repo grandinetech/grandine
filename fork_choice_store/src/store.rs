@@ -229,7 +229,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         storage: Arc<S>,
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
-        blacklisted_blocks: StdHashSet<H256>,
+        mut blacklisted_blocks: StdHashSet<H256>,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -261,6 +261,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let validator_count = anchor_state.validators().len_usize();
         let latest_messages = core::iter::repeat_n(None, validator_count).collect();
+
+        blacklisted_blocks.extend(chain_config.blacklisted_blocks.iter());
 
         Self {
             chain_config,
