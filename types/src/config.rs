@@ -18,7 +18,7 @@ use crate::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         primitives::{
             ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, NetworkId,
-            Slot, UnixSeconds, Version, H160, H32,
+            Slot, UnixSeconds, Version, H160, H256, H32,
         },
     },
     preset::{Preset, PresetName},
@@ -167,6 +167,9 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub samples_per_slot: u64,
 
+    #[serde(skip_serializing)]
+    pub blacklisted_blocks: Vec<H256>,
+
     // Later phases and other unknown variables
     //
     // Collect unknown variables in a map so we can log a warning about them.
@@ -265,6 +268,8 @@ impl Default for Config {
             // Custody
             custody_requirement: 4,
             samples_per_slot: 16,
+
+            blacklisted_blocks: vec![],
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
@@ -559,6 +564,10 @@ impl Config {
 
             // Transition
             terminal_total_difficulty: Difficulty::ZERO,
+
+            blacklisted_blocks: vec![H256(hex!(
+                "2db899881ed8546476d0b92c6aa9110bea9a4cd0dbeb5519eb0ea69575f1f359"
+            ))],
 
             ..Self::default()
         }
