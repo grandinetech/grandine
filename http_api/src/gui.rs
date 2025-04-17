@@ -2,7 +2,7 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Result;
-use bls::{traits::CachedPublicKey as _, PublicKeyBytes};
+use bls::PublicKeyBytes;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;

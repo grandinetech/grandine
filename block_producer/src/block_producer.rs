@@ -5,8 +5,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Error as AnyhowError, Result};
-use bls::{
-    traits::{CachedPublicKey as _, Signature as _},
+use bls::{SignatureTrait as _,
     AggregateSignature, PublicKeyBytes, SignatureBytes,
 };
 use builder_api::{combined::SignedBuilderBid, BuilderApi};

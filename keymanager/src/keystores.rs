@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, ensure, Result};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
+use bls::{SecretKeyTrait as _, PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use itertools::Itertools as _;

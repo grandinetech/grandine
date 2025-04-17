@@ -1,6 +1,6 @@
 use bls::{
     error::Error,
-    traits::{PublicKey as _, SecretKey as _, Signature as _},
+    SecretKeyTrait as _, SignatureTrait as _,
     AggregatePublicKey, AggregatePublicKeyBytes, AggregateSignature, AggregateSignatureBytes,
     PublicKey, PublicKeyBytes, SecretKey, SecretKeyBytes, Signature, SignatureBytes,
 };

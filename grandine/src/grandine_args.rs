@@ -13,7 +13,7 @@ use core::{
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{ensure, Result};
-use bls::PublicKeyBytes;
+use bls::{PublicKeyBytes, Backend};
 use builder_api::{
     BuilderApiFormat, BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
     DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, PREFERRED_EXECUTION_GAS_LIMIT,
@@ -397,6 +397,9 @@ struct BeaconNodeOptions {
 
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
+
+    #[clap(long)]
+    bls_backend: Backend,
 }
 
 #[expect(
@@ -940,6 +943,7 @@ impl GrandineArgs {
             detect_doppelgangers,
             in_memory,
             kzg_backend,
+            bls_backend
         } = beacon_node_options;
 
         // let SlasherOptions {
@@ -1322,6 +1326,7 @@ impl GrandineArgs {
             in_memory,
             validator_api_config,
             kzg_backend,
+            bls_backend,
         })
     }
 

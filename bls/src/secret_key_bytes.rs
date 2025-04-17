@@ -1,0 +1,47 @@
+// use super::secret_key::SecretKey;
+// pub const SIZE: usize = size_of::<SecretKey>();
+pub const SIZE: usize = 32;
+
+use derive_more::derive::{AsMut, AsRef, From};
+use hex::FromHex;
+use serde::Deserialize;
+use ssz::{SszRead, SszSize, SszWrite};
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[derive(Default, AsRef, AsMut, From, Zeroize, ZeroizeOnDrop, Deserialize)]
+#[as_ref(forward)]
+#[as_mut(forward)]
+#[serde(transparent)]
+pub struct SecretKeyBytes {
+    #[serde(with = "serde_utils::prefixed_hex_or_bytes_array")]
+    pub(crate) bytes: [u8; SIZE],
+}
+
+impl FromHex for SecretKeyBytes {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(digits: T) -> Result<Self, Self::Error> {
+        let bytes = FromHex::from_hex(digits)?;
+        Ok(Self { bytes })
+    }
+}
+
+impl SszSize for SecretKeyBytes {
+    const SIZE: ssz::Size = ssz::Size::Fixed { size: SIZE };
+}
+
+impl<C> SszRead<C> for SecretKeyBytes {
+    #[inline]
+    fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ssz::ReadError> {
+        let mut secret_key = Self::default();
+        secret_key.bytes.copy_from_slice(bytes);
+        Ok(secret_key)
+    }
+}
+
+impl SszWrite for SecretKeyBytes {
+    #[inline]
+    fn write_fixed(&self, bytes: &mut [u8]) {
+        bytes.copy_from_slice(&self.bytes);
+    }
+}

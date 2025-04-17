@@ -7,8 +7,7 @@ use core::ops::Range;
 use std::sync::Arc;
 
 use anyhow::{bail, ensure, Result};
-use bls::{
-    traits::{CachedPublicKey as _, SecretKey as _, Signature as _},
+use bls::{SecretKeyTrait as _, SignatureTrait as _,
     AggregateSignature,
 };
 use deposit_tree::DepositTree;

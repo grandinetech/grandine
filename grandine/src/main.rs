@@ -349,6 +349,8 @@ fn try_main() -> Result<()> {
         .try_into_config()
         .map_err(GrandineArgs::clap_error)?;
 
+    let _ = bls::set_backend(config.bls_backend);
+
     info!("starting beacon node");
     config.report();
 
@@ -393,6 +395,7 @@ fn try_main() -> Result<()> {
         in_memory,
         validator_api_config,
         kzg_backend,
+        bls_backend,
     } = config;
 
     features.into_iter().for_each(Feature::enable);

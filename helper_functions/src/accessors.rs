@@ -9,7 +9,6 @@ use anyhow::{bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::{
-    traits::{CachedPublicKey as _, PublicKey as _},
     AggregatePublicKey, CachedPublicKey, PublicKeyBytes,
 };
 use im::HashMap;

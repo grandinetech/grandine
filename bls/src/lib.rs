@@ -1,23 +1,29 @@
-pub use bls_core::*;
+pub mod consts;
+pub mod error;
 
-macro_rules! implement_backend {
-    ($backend:path) => {
-        pub use $backend::{
-            cached_public_key::CachedPublicKey, public_key::PublicKey,
-            public_key_bytes::PublicKeyBytes, secret_key::SecretKey,
-            secret_key_bytes::SecretKeyBytes, signature::Signature,
-            signature_bytes::SignatureBytes,
-        };
+pub use consts::*;
+pub use error::*;
 
-        pub type AggregatePublicKey = PublicKey;
-        pub type AggregatePublicKeyBytes = PublicKeyBytes;
-        pub type AggregateSignature = Signature;
-        pub type AggregateSignatureBytes = SignatureBytes;
-    };
-}
+mod backend;
+mod cached_public_key;
+mod public_key;
+mod public_key_bytes;
+mod secret_key;
+mod secret_key_bytes;
+mod signature;
+mod signature_bytes;
 
-#[cfg(feature = "blst")]
-implement_backend!(bls_blst);
+pub use backend::{Backend, set_backend};
 
-#[cfg(feature = "zkcrypto")]
-implement_backend!(bls_zkcrypto);
+pub use cached_public_key::CachedPublicKey;
+pub use public_key::{PublicKey, PublicKeyTrait};
+pub use public_key_bytes::PublicKeyBytes;
+pub use secret_key::{SecretKey, SecretKeyTrait};
+pub use secret_key_bytes::SecretKeyBytes;
+pub use signature::{Signature, SignatureTrait};
+pub use signature_bytes::SignatureBytes;
+
+pub type AggregatePublicKey = PublicKey;
+pub type AggregatePublicKeyBytes = PublicKeyBytes;
+pub type AggregateSignature = Signature;
+pub type AggregateSignatureBytes = SignatureBytes;

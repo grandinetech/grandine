@@ -16,7 +16,6 @@ use axum::{
 };
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{
-    traits::{CachedPublicKey as _, SignatureBytes as _},
     PublicKeyBytes, SignatureBytes,
 };
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;

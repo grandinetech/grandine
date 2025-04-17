@@ -1,16 +1,28 @@
 [package]
-name = 'bls'
+name = "bls"
 edition = { workspace = true }
-authors = ["Grandine <info@grandine.io>"]
-
-[lints]
-workspace = true
-
-[features]
-blst = ["dep:bls-blst"]
-zkcrypto = ["dep:bls-zkcrypto"]
 
 [dependencies]
-bls-core = { workspace = true }
-bls-blst = { workspace = true, optional = true }
-bls-zkcrypto = { workspace = true, optional = true }
+bls12_381 = { workspace = true, optional = true, features = ["default", "experimental"] }
+blst = { workspace = true, optional = true }
+derivative = { workspace = true }
+derive_more = { workspace = true }
+ff = { workspace = true, optional = true }
+fixed-hash = { workspace = true }
+hex = { workspace = true }
+impl-serde = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+sha2 = { workspace = true, optional = true }
+ssz = { workspace = true }
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
+typenum = { workspace = true }
+zeroize = { workspace = true }
+itertools = { workspace = true }
+rand = { workspace = true }
+
+[features]
+blst = ["dep:blst"]
+zkcrypto = ["dep:bls12_381", "dep:sha2", "dep:ff"]

@@ -1,6 +1,7 @@
 use core::{net::SocketAddr, time::Duration};
 use std::{path::PathBuf, sync::Arc};
 
+use bls::Backend;
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
 use features::Feature;
@@ -69,6 +70,7 @@ pub struct GrandineConfig {
     pub in_memory: bool,
     pub validator_api_config: Option<ValidatorApiConfig>,
     pub kzg_backend: KzgBackend,
+    pub bls_backend: Backend,
 }
 
 impl GrandineConfig {

@@ -6,7 +6,7 @@ use core::{
 use anyhow::{ensure, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{traits::CachedPublicKey as _, SignatureBytes};
+use bls::SignatureBytes;
 use itertools::Itertools as _;
 use ssz::SszHash as _;
 use tap::TryConv as _;
@@ -587,7 +587,7 @@ mod spec_tests {
 #[cfg(test)]
 mod extra_tests {
     use bls::{
-        traits::{SecretKey as _, Signature as _},
+        SecretKeyTrait as _,
         SecretKey, SecretKeyBytes,
     };
     use std_ext::CopyExt as _;

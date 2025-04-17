@@ -2,7 +2,7 @@
 
 use anyhow::{ensure, Result};
 use bls::{
-    traits::{CachedPublicKey as _, PublicKey as _, Signature as _, SignatureBytes as _},
+    SignatureTrait as _,
     AggregatePublicKey, AggregateSignature, CachedPublicKey, PublicKey, Signature, SignatureBytes,
 };
 use derive_more::Constructor;
@@ -438,7 +438,7 @@ pub enum VerifierOption {
 
 #[cfg(test)]
 mod tests {
-    use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
+    use bls::{SecretKeyTrait as _, SecretKey, SecretKeyBytes};
     use std_ext::CopyExt as _;
     use tap::{Conv as _, TryConv as _};
 
