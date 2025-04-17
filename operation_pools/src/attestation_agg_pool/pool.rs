@@ -313,6 +313,13 @@ impl<P: Preset> Pool<P> {
             .any(|(_, validator_index)| registered_indices.contains(validator_index))
     }
 
+    pub async fn is_registered_validator(&self, validator_index: ValidatorIndex) -> bool {
+        self.registered_validator_indices
+            .read()
+            .await
+            .contains(&validator_index)
+    }
+
     pub async fn set_best_proposable_attestations(
         &self,
         attestations: ContiguousList<Attestation<P>, P::MaxAttestations>,

@@ -284,13 +284,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
-                        let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
-                            || self.attestation_agg_pool.has_registered_validators_proposing_in_slots(slot..=slot).await;
-
-                        if !should_prepare_execution_payload {
-                            continue;
-                        }
-
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
@@ -301,6 +294,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     continue;
                                 }
                             };
+
+                            let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
+                                || self.attestation_agg_pool.is_registered_validator(proposer_index).await;
+
+                            if !should_prepare_execution_payload {
+                                continue;
+                            }
 
                             let block_build_context = self.block_producer.new_build_context(
                                 slot_head.beacon_state.clone_arc(),

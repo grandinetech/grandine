@@ -1,4 +1,3 @@
-use core::ops::RangeBounds;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -165,13 +164,8 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         }
     }
 
-    pub async fn has_registered_validators_proposing_in_slots(
-        &self,
-        range: impl RangeBounds<Slot> + Send,
-    ) -> bool {
-        self.pool
-            .has_registered_validators_proposing_in_slots(range)
-            .await
+    pub async fn is_registered_validator(&self, validator_index: ValidatorIndex) -> bool {
+        self.pool.is_registered_validator(validator_index).await
     }
 
     pub fn pack_proposable_attestations(&self) {
