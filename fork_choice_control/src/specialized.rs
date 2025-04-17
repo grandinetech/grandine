@@ -88,11 +88,13 @@ where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
 {
+    #[expect(clippy::too_many_arguments)]
     fn new_internal(
         chain_config: Arc<ChainConfig>,
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        database: Database,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
@@ -101,7 +103,7 @@ where
 
         let storage = Arc::new(Storage::new(
             chain_config.clone_arc(),
-            Database::in_memory(),
+            database,
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::Standard,
         ));
@@ -138,6 +140,7 @@ impl<P: Preset> AdHocBenchController<P> {
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        database: Database,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         Self::new_internal(
@@ -145,6 +148,7 @@ impl<P: Preset> AdHocBenchController<P> {
             store_config,
             anchor_block,
             anchor_state,
+            database,
             NullExecutionEngine,
             None,
             p2p_tx,
@@ -164,6 +168,7 @@ impl<P: Preset> BenchController<P> {
             StoreConfig::default(),
             anchor_block,
             anchor_state,
+            Database::in_memory(),
             NullExecutionEngine,
             None,
             futures::sink::drain(),
@@ -202,6 +207,7 @@ impl<P: Preset> TestController<P> {
             store_config,
             anchor_block,
             anchor_state,
+            Database::in_memory(),
             execution_engine,
             None,
             p2p_tx,
