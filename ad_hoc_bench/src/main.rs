@@ -3,7 +3,9 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use allocator as _;
 use anyhow::Result;
+use bytesize::ByteSize;
 use clap::{Parser, ValueEnum};
+use database::{Database, DatabaseMode};
 use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdrawal_devnet_4};
 use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
@@ -319,6 +321,7 @@ fn main() -> Result<()> {
 
 #[expect(clippy::cast_precision_loss)]
 #[expect(clippy::float_arithmetic)]
+#[expect(clippy::too_many_lines)]
 fn run<P: Preset>(
     chain_config: ChainConfig,
     options: Options,
@@ -368,11 +371,26 @@ fn run<P: Preset>(
 
     let anchor_state = beacon_state(first_slot, slot_width);
 
+    let database_dir = tempfile::Builder::new()
+        .prefix("ad_hoc_bench_db_")
+        .rand_bytes(10)
+        .tempdir()?;
+
+    log::info!("database dir: {}", database_dir.path().display());
+
+    let database = Database::persistent(
+        "ad_hoc_bench_db",
+        database_dir,
+        ByteSize::gib(512),
+        DatabaseMode::ReadWrite,
+    )?;
+
     let (controller, _mutator_handle) = AdHocBenchController::with_p2p_tx(
         chain_config,
         store_config,
         anchor_block,
         anchor_state,
+        database,
         futures::sink::drain(),
     );
 
@@ -468,5 +486,5 @@ fn print_jemalloc_stats() -> Result<()> {
 fn human_readable_size(result: jemalloc_ctl::Result<usize>) -> Result<String> {
     let size = result.map_err(anyhow::Error::msg)?;
     let size = size.try_into()?;
-    Ok(bytesize::ByteSize(size).to_string_as(true))
+    Ok(ByteSize(size).to_string_as(true))
 }

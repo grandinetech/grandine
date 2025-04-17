@@ -12,12 +12,14 @@ anyhow = { workspace = true }
 binary_utils = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
+database = { workspace = true }
 eth2_cache_utils = { workspace = true }
 fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
+tempfile = { workspace = true }
 types = { workspace = true }
 
 [target.'cfg(not(windows))'.dependencies]
