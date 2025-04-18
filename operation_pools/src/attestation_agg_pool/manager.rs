@@ -26,6 +26,7 @@ use types::{
 
 use crate::{
     attestation_agg_pool::{
+        conversion,
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask, InsertAttestationTask,
@@ -158,9 +159,12 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                     metrics: self.metrics.clone(),
                 });
             }
-            Err(error) => {
-                warn!("Failed to insert attestation to pool: {error:?}");
-            }
+            Err(error) => match error.downcast_ref::<conversion::Error<P>>() {
+                Some(conversion::Error::<P>::Irrelevant { .. }) => {}
+                _ => {
+                    warn!("Failed to convert attestation for pool: {error:?}");
+                }
+            },
         }
     }
 
