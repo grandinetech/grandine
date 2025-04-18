@@ -463,7 +463,7 @@ fn run<P: Preset>(
 
 #[cfg(not(target_os = "windows"))]
 fn print_jemalloc_stats() -> Result<()> {
-    jemalloc_ctl::epoch::advance().map_err(anyhow::Error::msg)?;
+    tikv_jemalloc_ctl::epoch::advance().map_err(anyhow::Error::msg)?;
 
     info!(
         "allocated: {}, \
@@ -472,18 +472,18 @@ fn print_jemalloc_stats() -> Result<()> {
          resident: {}, \
          mapped: {}, \
          retained: {}",
-        human_readable_size(jemalloc_ctl::stats::allocated::read())?,
-        human_readable_size(jemalloc_ctl::stats::active::read())?,
-        human_readable_size(jemalloc_ctl::stats::metadata::read())?,
-        human_readable_size(jemalloc_ctl::stats::resident::read())?,
-        human_readable_size(jemalloc_ctl::stats::mapped::read())?,
-        human_readable_size(jemalloc_ctl::stats::retained::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::allocated::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::active::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::metadata::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::resident::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::mapped::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::retained::read())?,
     );
 
     Ok(())
 }
 #[cfg(not(target_os = "windows"))]
-fn human_readable_size(result: jemalloc_ctl::Result<usize>) -> Result<bytesize::Display> {
+fn human_readable_size(result: tikv_jemalloc_ctl::Result<usize>) -> Result<bytesize::Display> {
     let size = result.map_err(anyhow::Error::msg)?;
     let size = size.try_into()?;
     Ok(ByteSize(size).display().si())

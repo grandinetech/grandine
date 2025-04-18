@@ -361,8 +361,6 @@ impl-serde = '0.4'
 integer-sqrt = '0.1'
 instant = '0.1'
 itertools = '0.14'
-jemalloc-ctl = '0.5'
-jemallocator = '0.5'
 jwt-simple = { version = '0.12', default-features = false, features = ['pure-rust'] }
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 lazy_static = '1'
@@ -440,6 +438,8 @@ test-case = '3'
 test-generator = '0.3'
 testing_logger = '0.1'
 thiserror = '1'
+tikv-jemalloc-ctl = { version = '0.6', features = ['stats'] }
+tikv-jemallocator = { version = '0.6', features = ['stats', 'background_threads_runtime_support'] }
 tiny-keccak = '2'
 tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
 tokio-io-timeout = '1'
