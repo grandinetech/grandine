@@ -162,7 +162,7 @@ impl DownloadManager {
             let deposit_events = deposit_event_map.values().flatten().collect();
 
             if let Err(error) = self.cache.add_deposits(deposit_events, to_block) {
-                warn!("{error:?}");
+                features::log!(DebugEth1, "{error:?}");
                 break;
             }
 
