@@ -23,4 +23,4 @@ tempfile = { workspace = true }
 types = { workspace = true }
 
 [target.'cfg(not(windows))'.dependencies]
-jemalloc-ctl = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true }
