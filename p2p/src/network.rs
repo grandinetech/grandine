@@ -15,13 +15,13 @@ use eth2_libp2p::{
         methods::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest, OldBlocksByRangeRequest,
         },
-        GoodbyeReason, InboundRequestId, RequestType, StatusMessage,
+        GoodbyeReason, Request, RequestId as IncomingRequestId, RequestType, StatusMessage,
     },
-    service::{api_types::AppRequestId, Network as Service},
+    service::Network as Service,
     types::{core_topics_to_subscribe, EnrForkId, ForkContext, GossipEncoding},
     Context, GossipId, GossipTopic, MessageAcceptance, MessageId, NetworkConfig, NetworkEvent,
-    NetworkGlobals, PeerAction, PeerId, PubsubMessage, ReportSource, Response, ShutdownReason,
-    Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
+    NetworkGlobals, PeerAction, PeerId, PeerRequestId, PubsubMessage, ReportSource, Response,
+    ShutdownReason, Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
 };
 use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage};
 use futures::{
@@ -849,7 +849,7 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn handle_network_event(&self, network_event: NetworkEvent<P>) {
+    fn handle_network_event(&self, network_event: NetworkEvent<RequestId, P>) {
         match network_event {
             NetworkEvent::PeerConnectedIncoming(peer_id) => {
                 debug!("peer {peer_id} connected incoming");
@@ -865,28 +865,24 @@ impl<P: Preset> Network<P> {
                 P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
                 self.update_peer_count();
             }
-            NetworkEvent::RPCFailed {
-                app_request_id,
-                peer_id,
-                error,
-            } => {
-                debug!("request_id: {app_request_id:?} to peer {peer_id} failed: {error}");
+            NetworkEvent::RPCFailed { peer_id, id, error } => {
+                debug!("request_id: {id:?} to peer {peer_id} failed: {error}");
                 P2pToSync::RequestFailed(peer_id).send(&self.channels.p2p_to_sync_tx);
             }
             NetworkEvent::RequestReceived {
                 peer_id,
-                inbound_request_id,
-                request_type,
+                id,
+                request,
             } => {
-                if let Err(error) = self.handle_request(peer_id, inbound_request_id, request_type) {
+                if let Err(error) = self.handle_request(peer_id, id, request) {
                     error!("error while handling request: {error}");
                 }
             }
             NetworkEvent::ResponseReceived {
                 peer_id,
-                app_request_id,
+                id,
                 response,
-            } => self.handle_response(peer_id, app_request_id, response),
+            } => self.handle_response(peer_id, id, response),
             NetworkEvent::PubsubMessage {
                 id,
                 source,
@@ -906,19 +902,21 @@ impl<P: Preset> Network<P> {
     fn handle_request(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
-        request_type: RequestType<P>,
+        peer_request_id: PeerRequestId,
+        request: Request<P>,
     ) -> Result<()> {
-        match request_type {
+        let request_id = request.id;
+
+        match request.r#type {
             RequestType::Status(remote) => {
-                self.handle_status_request(peer_id, inbound_request_id, remote);
+                self.handle_status_request(peer_id, peer_request_id, request_id, remote);
                 Ok(())
             }
             RequestType::BlocksByRange(request) => {
-                self.handle_blocks_by_range_request(peer_id, inbound_request_id, request)
+                self.handle_blocks_by_range_request(peer_id, peer_request_id, request_id, request)
             }
             RequestType::BlocksByRoot(request) => {
-                self.handle_blocks_by_root_request(peer_id, inbound_request_id, request);
+                self.handle_blocks_by_root_request(peer_id, peer_request_id, request_id, request);
                 Ok(())
             }
             RequestType::DataColumnsByRange(_) => {
@@ -950,10 +948,10 @@ impl<P: Preset> Network<P> {
                 Ok(())
             }
             RequestType::BlobsByRange(request) => {
-                self.handle_blobs_by_range_request(peer_id, inbound_request_id, request)
+                self.handle_blobs_by_range_request(peer_id, peer_request_id, request_id, request)
             }
             RequestType::BlobsByRoot(request) => {
-                self.handle_blobs_by_root_request(peer_id, inbound_request_id, request);
+                self.handle_blobs_by_root_request(peer_id, peer_request_id, request_id, request);
                 Ok(())
             }
             RequestType::Goodbye(goodbye_reason) => {
@@ -974,7 +972,8 @@ impl<P: Preset> Network<P> {
     fn handle_status_request(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
         remote: StatusMessage,
     ) {
         debug!("received Status request (peer_id: {peer_id}, remote: {remote:?})");
@@ -982,11 +981,16 @@ impl<P: Preset> Network<P> {
         let local = self.local_status();
 
         debug!(
-            "sending Status response (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+            "sending Status response (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
             local: {local:?})",
         );
 
-        self.respond(peer_id, inbound_request_id, Response::<P>::Status(local));
+        self.respond(
+            peer_id,
+            peer_request_id,
+            request_id,
+            Response::<P>::Status(local),
+        );
 
         self.check_status(&local, remote, peer_id);
     }
@@ -994,7 +998,8 @@ impl<P: Preset> Network<P> {
     fn handle_blocks_by_range_request(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
         request: OldBlocksByRangeRequest,
     ) -> Result<()> {
         debug!("received BeaconBlocksByRange request (peer_id: {peer_id}, request: {request:?})");
@@ -1026,14 +1031,15 @@ impl<P: Preset> Network<P> {
 
                     debug!(
                         "sending BeaconBlocksByRange response chunk \
-                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, root: {root:?})",
                         block.message().slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
                         peer_id,
-                        inbound_request_id,
+                        peer_request_id,
+                        request_id,
                         Box::new(Response::BlocksByRange(Some(block))),
                     )
                     .send(&network_to_service_tx);
@@ -1043,7 +1049,8 @@ impl<P: Preset> Network<P> {
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
-                    inbound_request_id,
+                    peer_request_id,
+                    request_id,
                     Box::new(Response::BlocksByRange(None)),
                 )
                 .send(&network_to_service_tx);
@@ -1058,7 +1065,8 @@ impl<P: Preset> Network<P> {
     fn handle_blobs_by_range_request(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
         request: BlobsByRangeRequest,
     ) -> Result<()> {
         debug!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
@@ -1086,14 +1094,15 @@ impl<P: Preset> Network<P> {
 
                     debug!(
                         "sending BlobSidecarsByRange response chunk \
-                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, id: {blob_identifier:?})",
                         blob_sidecar.slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
                         peer_id,
-                        inbound_request_id,
+                        peer_request_id,
+                        request_id,
                         Box::new(Response::BlobsByRange(Some(blob_sidecar))),
                     )
                     .send(&network_to_service_tx);
@@ -1103,7 +1112,8 @@ impl<P: Preset> Network<P> {
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
-                    inbound_request_id,
+                    peer_request_id,
+                    request_id,
                     Box::new(Response::BlobsByRange(None)),
                 )
                 .send(&network_to_service_tx);
@@ -1118,7 +1128,8 @@ impl<P: Preset> Network<P> {
     fn handle_blobs_by_root_request(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
         request: BlobsByRootRequest,
     ) {
         debug!("received BlobsByRootRequest request (peer_id: {peer_id}, request: {request:?})");
@@ -1143,14 +1154,15 @@ impl<P: Preset> Network<P> {
 
                     debug!(
                         "sending BlobSidecarsByRoot response chunk \
-                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, id: {blob_identifier:?})",
                         blob_sidecar.slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
                         peer_id,
-                        inbound_request_id,
+                        peer_request_id,
+                        request_id,
                         Box::new(Response::BlobsByRoot(Some(blob_sidecar))),
                     )
                     .send(&network_to_service_tx);
@@ -1160,7 +1172,8 @@ impl<P: Preset> Network<P> {
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
-                    inbound_request_id,
+                    peer_request_id,
+                    request_id,
                     Box::new(Response::BlobsByRoot(None)),
                 )
                 .send(&network_to_service_tx);
@@ -1173,7 +1186,8 @@ impl<P: Preset> Network<P> {
     fn handle_blocks_by_root_request(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
         request: BlocksByRootRequest,
     ) {
         let max_request_blocks = request.max_request_blocks(self.controller.chain_config());
@@ -1197,7 +1211,7 @@ impl<P: Preset> Network<P> {
                 for block in blocks.into_iter().map(WithStatus::value) {
                     debug!(
                         "sending BeaconBlocksByRoot response chunk \
-                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        (peer_request_id: {peer_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, root: {:?})",
                         block.message().slot(),
                         block.message().hash_tree_root(),
@@ -1205,7 +1219,8 @@ impl<P: Preset> Network<P> {
 
                     ServiceInboundMessage::SendResponse(
                         peer_id,
-                        inbound_request_id,
+                        peer_request_id,
+                        request_id,
                         Box::new(Response::BlocksByRoot(Some(block))),
                     )
                     .send(&network_to_service_tx);
@@ -1215,7 +1230,8 @@ impl<P: Preset> Network<P> {
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
-                    inbound_request_id,
+                    peer_request_id,
+                    request_id,
                     Box::new(Response::BlocksByRoot(None)),
                 )
                 .send(&network_to_service_tx);
@@ -1226,20 +1242,7 @@ impl<P: Preset> Network<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    fn handle_response(
-        &self,
-        peer_id: PeerId,
-        app_request_id: AppRequestId,
-        response: Response<P>,
-    ) {
-        let request_id = match app_request_id {
-            AppRequestId::Application(request_id) => request_id,
-            AppRequestId::Internal => {
-                warn!("ignoring response to an internal request: {response:?}");
-                return;
-            }
-        };
-
+    fn handle_response(&self, peer_id: PeerId, request_id: RequestId, response: Response<P>) {
         match response {
             Response::Status(remote) => {
                 debug!("received Status response (peer_id: {peer_id}, remote: {remote:?})");
@@ -1845,11 +1848,17 @@ impl<P: Preset> Network<P> {
     fn respond(
         &self,
         peer_id: PeerId,
-        inbound_request_id: InboundRequestId,
+        peer_request_id: PeerRequestId,
+        request_id: IncomingRequestId,
         response: Response<P>,
     ) {
-        ServiceInboundMessage::SendResponse(peer_id, inbound_request_id, Box::new(response))
-            .send(&self.network_to_service_tx);
+        ServiceInboundMessage::SendResponse(
+            peer_id,
+            peer_request_id,
+            request_id,
+            Box::new(response),
+        )
+        .send(&self.network_to_service_tx);
     }
 
     fn subnet_gossip_topic(&self, subnet: Subnet) -> Option<GossipTopic> {
@@ -1892,7 +1901,7 @@ fn fork_digest(fork_context: &ForkContext) -> ForkDigest {
 }
 
 fn run_network_service<P: Preset>(
-    mut service: Service<P>,
+    mut service: Service<RequestId, P>,
     mut network_to_service_rx: UnboundedReceiver<ServiceInboundMessage<P>>,
     service_to_network_tx: UnboundedSender<ServiceOutboundMessage<P>>,
 ) {
@@ -1939,12 +1948,12 @@ fn run_network_service<P: Preset>(
                             );
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
-                            if let Err(error) = service.send_request(peer_id, AppRequestId::Application(request_id), request) {
+                            if let Err(error) = service.send_request(peer_id, request_id, request) {
                                 debug!("Unable to send request to peer: {peer_id}: {error:?}");
                             }
                         }
-                        ServiceInboundMessage::SendResponse(peer_id, inbound_request_id, response) => {
-                            service.send_response(peer_id, inbound_request_id, *response);
+                        ServiceInboundMessage::SendResponse(peer_id, peer_request_id, request_id, response) => {
+                            service.send_response(peer_id, peer_request_id, request_id, *response);
                         }
                         ServiceInboundMessage::Subscribe(gossip_topic) => {
                             service.subscribe(gossip_topic);

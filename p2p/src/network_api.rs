@@ -1,6 +1,6 @@
 use eth2_libp2p::{
-    types::{EnrAttestationBitfield, PeerDirection, PeerState},
-    Enr, EnrExt as _, EnrSyncCommitteeBitfield, Multiaddr, PeerId, PeerInfo,
+    types::EnrAttestationBitfield, ConnectionDirection, Enr, EnrExt as _, EnrSyncCommitteeBitfield,
+    Multiaddr, PeerConnectionStatus, PeerId, PeerInfo,
 };
 use serde::{Deserialize, Serialize};
 use types::preset::Preset;
@@ -68,6 +68,45 @@ struct NodeMetadata {
     seq_number: u64,
     attnets: EnrAttestationBitfield,
     syncnets: Option<EnrSyncCommitteeBitfield>,
+}
+
+#[derive(PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PeerState {
+    Connected,
+    Connecting,
+    Disconnected,
+    Disconnecting,
+}
+
+impl PeerState {
+    // TODO(Grandine Team): This could be simplified if `PeerConnectionStatus` implemented `Copy`.
+    const fn try_from(status: &PeerConnectionStatus) -> Option<Self> {
+        match status {
+            PeerConnectionStatus::Connected { .. } => Some(Self::Connected),
+            PeerConnectionStatus::Dialing { .. } => Some(Self::Connecting),
+            PeerConnectionStatus::Disconnected { .. } => Some(Self::Disconnected),
+            PeerConnectionStatus::Disconnecting { .. } => Some(Self::Disconnecting),
+            _ => None,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PeerDirection {
+    Inbound,
+    Outbound,
+}
+
+// TODO(Grandine Team): This could be simplified if `ConnectionDirection` implemented `Copy`.
+impl From<&ConnectionDirection> for PeerDirection {
+    fn from(direction: &ConnectionDirection) -> Self {
+        match direction {
+            ConnectionDirection::Incoming => Self::Inbound,
+            ConnectionDirection::Outgoing => Self::Outbound,
+        }
+    }
 }
 
 impl<P: Preset> Network<P> {
