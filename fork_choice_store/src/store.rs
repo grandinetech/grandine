@@ -2153,6 +2153,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if !self.finished_initial_forward_sync && self.head().slot() >= self.slot() {
             self.finished_initial_forward_sync = true;
+            self.state_cache.set_log_lock_timeouts(true);
         }
 
         let changes = if self.reorganized(old_head_segment_id) {
