@@ -367,7 +367,6 @@ lazy_static = '1'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '44ab192899a898e2499ef20870629bb7a765f2a2' }
 libp2p = { version = '0.55', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
 libp2p-mplex = '0.43'
-local-ip-address = '0.6'
 log = '0.4'
 lru = '0.12'
 mediatype = '0.19'
@@ -491,7 +490,7 @@ features = { path = 'features' }
 fork_choice_control = { path = 'fork_choice_control' }
 fork_choice_store = { path = 'fork_choice_store' }
 genesis = { path = 'genesis' }
-gossipsub = { git = 'https://github.com/sigp/rust-libp2p.git', package = 'libp2p-gossipsub', rev = '7a36e4c', features = ['serde'] }
+gossipsub = { path = 'eth2_libp2p/gossipsub', features = ['serde'] }
 grandine_version = { path = 'grandine_version' }
 hashing = { path = 'hashing' }
 helper_functions = { path = 'helper_functions' }
