@@ -164,6 +164,10 @@ impl<P: Preset> StateCacheProcessor<P> {
         Ok(post_state)
     }
 
+    pub fn set_log_lock_timeouts(&self, log_lock_timeouts: bool) {
+        self.state_cache.set_log_lock_timeouts(log_lock_timeouts);
+    }
+
     fn try_get_state_at_slot<S: Storage<P>>(
         &self,
         store: &Store<P, S>,

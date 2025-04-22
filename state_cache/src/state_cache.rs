@@ -1,4 +1,7 @@
-use core::time::Duration;
+use core::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
@@ -32,6 +35,7 @@ enum CacheLockError {
 pub struct StateCache<P: Preset> {
     cache: Mutex<HashMap<H256, StateMapLock<P>>>,
     try_lock_timeout: Duration,
+    log_lock_timeouts: AtomicBool,
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +50,7 @@ impl<P: Preset> StateCache<P> {
         Self {
             cache: Mutex::new(HashMap::new()),
             try_lock_timeout,
+            log_lock_timeouts: AtomicBool::new(false),
         }
     }
 
@@ -229,6 +234,11 @@ impl<P: Preset> StateCache<P> {
         Ok(())
     }
 
+    pub fn set_log_lock_timeouts(&self, log_lock_timeouts: bool) {
+        self.log_lock_timeouts
+            .store(log_lock_timeouts, Ordering::SeqCst);
+    }
+
     fn all_state_map_locks(&self) -> Result<Vec<(H256, StateMapLock<P>)>> {
         self.try_lock_cache()?
             .iter()
@@ -255,7 +265,9 @@ impl<P: Preset> StateCache<P> {
         self.cache.try_lock_for(timeout).ok_or_else(|| {
             let error = CacheLockError::CacheLockTimeout { timeout };
 
-            warn!("{error:?}");
+            if self.log_lock_timeouts.load(Ordering::SeqCst) {
+                warn!("{error:?}");
+            }
 
             anyhow!(error)
         })
@@ -274,7 +286,9 @@ impl<P: Preset> StateCache<P> {
                 timeout,
             };
 
-            warn!("{error:?}");
+            if self.log_lock_timeouts.load(Ordering::SeqCst) {
+                warn!("{error:?}");
+            }
 
             anyhow!(error)
         })
