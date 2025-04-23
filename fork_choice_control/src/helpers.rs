@@ -239,6 +239,9 @@ impl<P: Preset> Context<P> {
         self.controller().on_tick(tick);
         self.controller().wait_for_tasks();
 
+        // Some artifacts, like blob sidecars, require current slot state for validation.
+        let _unused = self.controller().preprocessed_state_at_current_slot();
+
         if old_slot < new_slot {
             assert!(matches!(
                 self.next_p2p_message(),
