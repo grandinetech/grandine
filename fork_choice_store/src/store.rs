@@ -72,7 +72,6 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
-    StateCacheError,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -1744,7 +1743,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_seen: bool,
         origin: &BlobSidecarOrigin,
         parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
-        state_fn: impl FnOnce() -> Result<Arc<BeaconState<P>>>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
         let block_root = block_header.hash_tree_root();
@@ -1802,18 +1801,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
-        let state = match state_fn() {
-            Ok(state) => state,
-            Err(error) => {
-                if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
-                    // Delay blob validations until the state is available.
-                    // Alternatively, we could allow long slot processing distances for blob sidecar validations,
-                    // however, that introduces oportunity for DoS attacks with fake blob sidecars.
-                    return Ok(BlobSidecarAction::DelayUntilState(blob_sidecar, block_root));
-                }
-
-                bail!(error);
-            }
+        let Some(state) = state_fn() else {
+            // Delay blob validations until the state is available.
+            // Alternatively, we could allow slot processing to obtain states for blob sidecar validations,
+            // however, that introduces oportunity for DoS attacks with fake blob sidecars.
+            return Ok(BlobSidecarAction::DelayUntilState(blob_sidecar, block_root));
         };
 
         // [REJECT] The proposer signature of blob_sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
@@ -1936,7 +1928,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 block_seen,
                 origin,
                 parent_info,
-                || Ok(state),
+                || Some(state),
             )
         } else {
             self.validate_blob_sidecar_with_state(
@@ -1945,16 +1937,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 origin,
                 parent_info,
                 || {
-                    self.state_cache
-                        .try_state_at_slot(self, block_header.parent_root, block_header.slot)
-                        .transpose()
-                        .unwrap_or_else(|| {
-                            self.state_cache.state_at_slot(
-                                self,
-                                self.head().block_root,
-                                block_header.slot,
-                            )
-                        })
+                    self.state_cache.existing_state_at_slot(
+                        self,
+                        block_header.parent_root,
+                        block_header.slot,
+                    )
                 },
             )
         }

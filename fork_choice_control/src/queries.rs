@@ -578,7 +578,7 @@ where
         block_seen: bool,
         origin: &BlobSidecarOrigin,
         parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
-        state_fn: impl FnOnce() -> Result<Arc<BeaconState<P>>>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         self.store_snapshot().validate_blob_sidecar_with_state(
             blob_sidecar,

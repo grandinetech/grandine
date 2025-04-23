@@ -265,7 +265,7 @@ impl<P: Preset> Batch<P> {
                     true,
                     &BlobSidecarOrigin::BackSync,
                     || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
-                    || Ok(head_state.clone_arc()),
+                    || Some(head_state.clone_arc()),
                 )?;
 
                 if !action.accepted() {
