@@ -1901,7 +1901,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18e4fdb82bd54a12e42fb58a800dcae6b9e13982238ce2296dc3570b92148e1f"
 dependencies = [
  "data-encoding",
- "syn 2.0.100",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -4734,7 +4734,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -9322,7 +9322,7 @@ dependencies = [
 [[package]]
 name = "web3"
 version = "0.20.0"
-source = "git+https://github.com/grandinetech/rust-web3.git#9d791a0e8c490dd94ee982f3bffb609781d1ff14"
+source = "git+https://github.com/grandinetech/rust-web3.git#bb6d0dcbdd875d3d694a835d9a4ba391c68da207"
 dependencies = [
  "arrayvec",
  "base64 0.22.1",
@@ -9394,7 +9394,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
