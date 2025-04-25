@@ -1002,7 +1002,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
                     {
                         PartialBlockAction::Accept => {}
-                        PartialBlockAction::Ignore => return Ok((state, Some(BlockAction::Ignore(false)))),
+                        PartialBlockAction::Ignore => return Ok((state, Some(BlockAction::Ignore(false, block_root)))),
                     }
                 }
             }
@@ -1033,7 +1033,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // This is a slight deviation from `consensus-specs`, but it appears to be compatible with
         // both the fork choice rule and the Networking specification.
         if self.contains_block(block_root) {
-            return Some(BlockAction::Ignore(true));
+            return Some(BlockAction::Ignore(true, block_root));
         }
 
         // > Blocks cannot be in the future.
@@ -1046,7 +1046,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         //
         // This is redundant but may be faster than loading the parent block.
         if block.message().slot() <= self.finalized_slot() {
-            return Some(BlockAction::Ignore(false));
+            return Some(BlockAction::Ignore(false, block_root));
         }
 
         // > Parent block must be known
@@ -1058,7 +1058,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         //
         // Checking the slot is sufficient because orphans are pruned as soon as possible.
         if parent.slot() < self.finalized_slot() {
-            return Some(BlockAction::Ignore(false));
+            return Some(BlockAction::Ignore(false, block_root));
         }
 
         None
@@ -1769,7 +1769,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // No need to validate and import blob sidecars for blocks that are already in fork choice,
         // i.e. already have all the blobs validated
         if self.contains_block(block_root) {
-            return Ok(BlobSidecarAction::Ignore(false));
+            return Ok(BlobSidecarAction::Ignore(false, block_root));
         }
 
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
@@ -1805,7 +1805,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
         if !origin.is_from_back_sync() && block_header.slot <= self.finalized_slot() {
-            return Ok(BlobSidecarAction::Ignore(false));
+            return Ok(BlobSidecarAction::Ignore(false, block_root));
         }
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, blob_sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
@@ -1816,7 +1816,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             blob_sidecar.index,
         )) && !block_seen
         {
-            return Ok(BlobSidecarAction::Ignore(true));
+            return Ok(BlobSidecarAction::Ignore(true, block_root));
         }
 
         let Some(state) = state_fn() else {
@@ -2546,6 +2546,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // the Fork Choice specification). It is not sufficient because it does not prevent
                 // `ChainLink`s with unloaded states from becoming justified or finalized later.
                 if let Some(state) = chain_link.state.take() {
+                    log::info!(
+                        "unloading state {:?} at slot {}",
+                        chain_link.block_root,
+                        chain_link.slot()
+                    );
+
                     if misc::is_epoch_start::<P>(chain_link.slot()) {
                         to_persist.push(ChainLink {
                             state: Some(state),
@@ -2555,6 +2561,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             }
         }
+
+        log::info!("will persist {} unloaded states", to_persist.len());
 
         to_persist
     }
@@ -3327,6 +3335,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let block_root = block.hash_tree_root();
 
+        log::info!(
+            "block {block_root:?} blob count: {}",
+            body.blob_kzg_commitments().len()
+        );
+
         body.blob_kzg_commitments()
             .into_iter()
             .zip(0..)
@@ -3460,5 +3473,79 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             "current_slot_attestations",
             self.current_slot_attestations.len(),
         );
+    }
+
+    pub fn wipe(&mut self, step: usize) -> Result<()> {
+        let name = match step {
+            0 => {
+                log::info!("will wipe fork choice store clean");
+
+                return Ok(());
+            }
+            1 => {
+                self.state_cache.wipe()?;
+                "state cache"
+            }
+            2 => {
+                self.checkpoint_states = HashMap::new();
+                "checkpoint states"
+            }
+            3 => {
+                let segment_ids = self.unfinalized.keys().copied().collect_vec();
+
+                for segment_id in segment_ids {
+                    let segment = &mut self.unfinalized[&segment_id];
+
+                    for unfinalized_block in segment.blocks.iter_mut() {
+                        unfinalized_block.chain_link.state.take();
+                    }
+                }
+
+                "beacon states from unfinalized chains"
+            }
+            4 => {
+                self.finalized = Vector::new();
+                self.finalized_indices = HashMap::new();
+                "finalized chain"
+            }
+            5 => {
+                self.unfinalized = OrdMap::new();
+                self.unfinalized_locations = HashMap::new();
+                "unfinalized chain"
+            }
+            6 => {
+                self.equivocating_indices = HashSet::new();
+                "equivocating indices"
+            }
+            7 => {
+                self.justified_active_balances = Arc::new([]);
+                "justified active balances"
+            }
+            8 => {
+                self.latest_messages = Vector::new();
+                "latest messages"
+            }
+            9 => {
+                self.current_slot_attestations = Vector::new();
+                "current slot attestations"
+            }
+            10 => {
+                self.execution_payload_locations = HashMap::new();
+                "execution payload locations"
+            }
+            11 => {
+                self.aggregate_and_proof_supersets = Arc::new(AggregateAndProofSupersets::new());
+                "aggregate and proof supersets"
+            }
+            12 => {
+                self.rejected_block_roots = HashSet::new();
+                "rejected block roots"
+            }
+            _ => "",
+        };
+
+        log::info!("wiped {name}");
+
+        Ok(())
     }
 }

@@ -565,9 +565,7 @@ impl Config {
             // Transition
             terminal_total_difficulty: Difficulty::ZERO,
 
-            blacklisted_blocks: vec![H256(hex!(
-                "2db899881ed8546476d0b92c6aa9110bea9a4cd0dbeb5519eb0ea69575f1f359"
-            ))],
+            blacklisted_blocks: vec![],
 
             ..Self::default()
         }

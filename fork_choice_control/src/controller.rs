@@ -574,7 +574,7 @@ where
         self.store_snapshot.load()
     }
 
-    pub(crate) fn owned_store_snapshot(&self) -> Arc<Store<P, Storage<P>>> {
+    pub fn owned_store_snapshot(&self) -> Arc<Store<P, Storage<P>>> {
         self.store_snapshot.load_full()
     }
 

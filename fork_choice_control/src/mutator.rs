@@ -536,9 +536,21 @@ where
                     submission_time,
                 };
 
+                info!(
+                    "BlockAction::Accept (block root: {:?}, slot: {})",
+                    pending_chain_link
+                        .chain_link
+                        .block
+                        .message()
+                        .hash_tree_root(),
+                    pending_chain_link.chain_link.block.message().slot(),
+                );
+
                 self.accept_block(&wait_group, pending_chain_link)?;
             }
-            Ok(BlockAction::Ignore(publishable)) => {
+            Ok(BlockAction::Ignore(publishable, block_root)) => {
+                info!("BlockAction::Ignore (block root: {block_root:?})");
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -564,6 +576,12 @@ where
                         .iter()
                         .flat_map(|delayed| delayed.blob_sidecars.iter())
                         .map(|pending_blob_sidecar| pending_blob_sidecar.blob_sidecar.as_ref()),
+                );
+
+                info!(
+                    "BlockAction::DelayUntilBlobs (block root: {:?}, slot: {}, blob availability: {block_blob_availability:?})",
+                    pending_block.block.message().hash_tree_root(),
+                    pending_block.block.message().slot(),
                 );
 
                 match block_blob_availability {
@@ -620,6 +638,12 @@ where
             Ok(BlockAction::DelayUntilParent(block)) => {
                 let parent_root = block.message().parent_root();
 
+                info!(
+                    "BlockAction::DelayUntilParent (block root: {:?}, slot: {}, parent root: {parent_root:?})",
+                    block.message().hash_tree_root(),
+                    block.message().slot(),
+                );
+
                 let pending_block = PendingBlock {
                     block,
                     origin,
@@ -644,6 +668,11 @@ where
                 }
             }
             Ok(BlockAction::DelayUntilSlot(block)) => {
+                info!(
+                    "BlockAction::DelayUntilSlot (block root: {:?}, slot: {})",
+                    block.message().hash_tree_root(),
+                    block.message().slot(),
+                );
                 let slot = block.message().slot();
 
                 let pending_block = PendingBlock {
@@ -670,6 +699,12 @@ where
                 attester_slashing_results,
                 checkpoint,
             )) => {
+                info!(
+                    "BlockAction::WaitForJustifiedState (block root: {:?}, slot: {}, checkpoint: {checkpoint:?})",
+                    chain_link.block.message().hash_tree_root(),
+                    chain_link.block.message().slot(),
+                );
+
                 let pending_chain_link = PendingChainLink {
                     chain_link,
                     attester_slashing_results,
@@ -1152,6 +1187,13 @@ where
     ) {
         match result {
             Ok(BlobSidecarAction::Accept(blob_sidecar)) => {
+                info!(
+                    "BlobSidecarAction::Accept (block root: {:?}, slot: {}, index: {}",
+                    blob_sidecar.signed_block_header.message.hash_tree_root(),
+                    blob_sidecar.signed_block_header.message.slot,
+                    blob_sidecar.index,
+                );
+
                 if origin.is_from_el() {
                     self.send_to_p2p(P2pMessage::PublishBlobSidecar(blob_sidecar.clone_arc()));
                 }
@@ -1166,7 +1208,9 @@ where
 
                 self.accept_blob_sidecar(&wait_group, &blob_sidecar);
             }
-            Ok(BlobSidecarAction::Ignore(publishable)) => {
+            Ok(BlobSidecarAction::Ignore(publishable, block_root)) => {
+                info!("BlobSidecarAction::Ignore (block root: {block_root:?})");
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -1176,6 +1220,13 @@ where
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
             Ok(BlobSidecarAction::DelayUntilState(blob_sidecar, block_root)) => {
+                info!(
+                    "BlobSidecarAction::DelayUntilState (block root: {:?}, slot: {}, index: {}",
+                    blob_sidecar.signed_block_header.message.hash_tree_root(),
+                    blob_sidecar.signed_block_header.message.slot,
+                    blob_sidecar.index,
+                );
+
                 let slot = blob_sidecar.signed_block_header.message.slot;
 
                 let pending_blob_sidecar = PendingBlobSidecar {
@@ -1210,6 +1261,13 @@ where
                 }
             }
             Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar)) => {
+                info!(
+                    "BlobSidecarAction::DelayUntilParent (block root: {:?}, slot: {}, index: {}",
+                    blob_sidecar.signed_block_header.message.hash_tree_root(),
+                    blob_sidecar.signed_block_header.message.slot,
+                    blob_sidecar.index,
+                );
+
                 let parent_root = blob_sidecar.signed_block_header.message.parent_root;
 
                 let pending_blob_sidecar = PendingBlobSidecar {
@@ -1237,6 +1295,13 @@ where
                 }
             }
             Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar)) => {
+                info!(
+                    "BlobSidecarAction::DelayUntilSlot (block root: {:?}, slot: {}, index: {}",
+                    blob_sidecar.signed_block_header.message.hash_tree_root(),
+                    blob_sidecar.signed_block_header.message.slot,
+                    blob_sidecar.index,
+                );
+
                 let slot = blob_sidecar.signed_block_header.message.slot;
 
                 let pending_blob_sidecar = PendingBlobSidecar {
@@ -1588,11 +1653,21 @@ where
             .chain_link(block.message().parent_root())
             .map(|chain_link| misc::compute_epoch_at_slot::<P>(chain_link.slot()));
 
+        self.print_collection_metrics();
+
+        #[cfg(not(target_os = "windows"))]
+        print_jemalloc_stats()?;
+
         if parent_epoch
             .map(|epoch| epoch < block_epoch)
             .unwrap_or(true)
         {
             self.store.prune_state_cache(true);
+
+            self.print_collection_metrics();
+
+            #[cfg(not(target_os = "windows"))]
+            print_jemalloc_stats()?;
 
             info!("unloading old beacon states (head slot: {head_slot})");
 
@@ -1637,6 +1712,8 @@ where
             LogBlockProcessingTime,
             "block {block_root:?} processed in {processing_duration:?}",
         );
+
+        log::info!("block {block_root:?} processed in {processing_duration:?}");
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics
@@ -1790,6 +1867,8 @@ where
             "block {block_root:?} post-processed in {post_processing_duration:?}",
         );
 
+        log::info!("block {block_root:?} post-processed in {post_processing_duration:?}");
+
         if let Some(metrics) = self.metrics.as_ref() {
             metrics
                 .block_post_processing_times
@@ -1843,8 +1922,16 @@ where
 
         self.update_store_snapshot();
 
+        info!("checking for retrying pending block until blobs {block_root:?}");
+
         if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
+            info!("retrying pending block until blobs {block_root:?}");
             self.retry_block(wait_group.clone(), pending_block);
+        } else {
+            info!(
+                "delayed_until_blobs: {:?}",
+                self.delayed_until_blobs.keys().collect_vec()
+            );
         }
 
         self.event_channels
@@ -1995,6 +2082,8 @@ where
     }
 
     fn delay_block_until_blobs(&mut self, beacon_block_root: H256, pending_block: PendingBlock<P>) {
+        info!("delaying block until blobs {beacon_block_root:?}");
+
         self.delayed_until_blobs
             .insert(beacon_block_root, pending_block);
     }
@@ -2205,6 +2294,7 @@ where
     }
 
     fn take_delayed_until_blobs(&mut self, block_root: H256) -> Option<PendingBlock<P>> {
+        info!("taking delayed until blobs {block_root:?}");
         self.delayed_until_blobs.remove(&block_root)
     }
 
@@ -2356,17 +2446,20 @@ where
 
         let mut gossip_ids = vec![];
 
-        self.delayed_until_blobs.retain(|_, pending_block| {
-            if pending_block.block.message().slot() > finalized_slot {
-                return true;
-            }
+        self.delayed_until_blobs
+            .retain(|block_root, pending_block| {
+                if pending_block.block.message().slot() > finalized_slot {
+                    return true;
+                }
 
-            if let Some(gossip_id) = pending_block.origin.gossip_id() {
-                gossip_ids.push(gossip_id);
-            }
+                if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                    gossip_ids.push(gossip_id);
+                }
 
-            false
-        });
+                info!("pruning delayed until blobs {block_root:?}");
+
+                false
+            });
 
         gossip_ids
     }
@@ -2759,6 +2852,92 @@ where
         metrics.set_beacon_head_slot(head.slot());
     }
 
+    pub fn print_collection_metrics(&self) {
+        let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
+
+        match self.state_cache.len() {
+            Ok(len) => {
+                info!("collection_metrics state cache len: {len}");
+            }
+            Err(error) => {
+                error!("collection_metrics failed to get state cache len: {error}");
+            }
+        };
+
+        info!(
+            "collection_metrics delayed_until_blobs: {}",
+            self.delayed_until_blobs.len(),
+        );
+        info!(
+            "collection_metrics delayed_until_block: {}",
+            self.delayed_until_block.len(),
+        );
+        info!(
+            "collection_metrics delayed_until_block_blob_sidecars: {}",
+            self.delayed_until_block
+                .values()
+                .map(|delayed| delayed.blob_sidecars.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_block_blocks: {}",
+            self.delayed_until_block
+                .values()
+                .map(|delayed| delayed.blocks.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_block_attestations: {}",
+            self.delayed_until_block
+                .values()
+                .map(|delayed| delayed.attestations.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_block_aggregates: {}",
+            self.delayed_until_block
+                .values()
+                .map(|delayed| delayed.aggregates.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_slot: {}",
+            self.delayed_until_slot.len(),
+        );
+        info!(
+            "collection_metrics delayed_until_slot_blocks: {}",
+            self.delayed_until_slot
+                .values()
+                .map(|delayed| delayed.blocks.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_slot_attestations: {}",
+            self.delayed_until_slot
+                .values()
+                .map(|delayed| delayed.attestations.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_slot_aggregates: {}",
+            self.delayed_until_slot
+                .values()
+                .map(|delayed| delayed.aggregates.len())
+                .sum::<usize>(),
+        );
+        info!(
+            "collection_metrics delayed_until_payload: {}",
+            self.delayed_until_payload.len(),
+        );
+        info!(
+            "collection_metrics delayed_until_state: {}",
+            self.delayed_until_state.len(),
+        );
+
+        info!("collection_metrics high_priority_tasks: {high_priority_tasks}");
+        info!("collection_metrics low_priority_tasks: {low_priority_tasks}");
+    }
+
     #[expect(clippy::too_many_lines)]
     fn track_collection_metrics(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
@@ -3004,4 +3183,40 @@ fn reply_delayed_blob_sidecar_validation_result<P: Preset>(
             submission_time,
         }
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn print_jemalloc_stats() -> Result<()> {
+    tikv_jemalloc_ctl::epoch::advance().map_err(anyhow::Error::msg)?;
+
+    log_jemalloc_stats()?;
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn log_jemalloc_stats() -> Result<()> {
+    info!(
+        "allocated: {}, \
+         active: {}, \
+         metadata: {}, \
+         resident: {}, \
+         mapped: {}, \
+         retained: {}",
+        human_readable_size(tikv_jemalloc_ctl::stats::allocated::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::active::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::metadata::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::resident::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::mapped::read())?,
+        human_readable_size(tikv_jemalloc_ctl::stats::retained::read())?,
+    );
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn human_readable_size(result: tikv_jemalloc_ctl::Result<usize>) -> Result<bytesize::Display> {
+    let size = result.map_err(anyhow::Error::msg)?;
+    let size = size.try_into()?;
+    Ok(bytesize::ByteSize(size).display().si())
 }

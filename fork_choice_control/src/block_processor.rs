@@ -225,7 +225,7 @@ impl<P: Preset> BlockProcessor<P> {
                         )? {
                             PartialBlockAction::Accept => {}
                             PartialBlockAction::Ignore => {
-                                return Ok((state, Some(BlockAction::Ignore(false))))
+                                return Ok((state, Some(BlockAction::Ignore(false, block_root))))
                             }
                         }
                     }

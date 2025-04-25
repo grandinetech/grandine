@@ -86,6 +86,10 @@ impl<P: Preset> StateCacheProcessor<P> {
             .get_or_process_with(block_root, slot, options, f)
     }
 
+    pub fn len(&self) -> Result<usize> {
+        self.state_cache.len()
+    }
+
     pub fn prune(
         &self,
         last_pruned_slot: Slot,
@@ -228,6 +232,10 @@ impl<P: Preset> StateCacheProcessor<P> {
             .map(|(state, _)| state)
             .pipe(Ok)
     }
+
+    pub fn wipe(&self) -> Result<()> {
+        self.state_cache.wipe()
+    }
 }
 
 fn process_slots<P: Preset, S: Storage<P>>(
@@ -255,11 +263,12 @@ fn process_slots<P: Preset, S: Storage<P>>(
         });
     }
 
-    currently_processing.fetch_add(1, Ordering::SeqCst);
+    let warn_on_slot_processing = true;
 
     // Log state cache misses after chain is forward synced - mostly to catch cases when
     // some other than preprocessed next slot state is needed.
     // With exception of chain reorgs, this is the symptom that state cache is not used optimally.
+    // if warn_on_slot_processing && store.is_forward_synced() {
     if warn_on_slot_processing {
         // `Backtrace::force_capture` can be costly and a warning may be excessive,
         // but this is controlled by a `Feature` that should be disabled by default.
@@ -276,13 +285,22 @@ fn process_slots<P: Preset, S: Storage<P>>(
         }
     }
 
+    currently_processing.fetch_add(1, Ordering::SeqCst);
+
+    let processing_count = currently_processing.load(Ordering::SeqCst);
+
+    // if processing_count > 1 {
+    //     warn!("currenltly processing slots for {processing_count} states in state cache");
+    // }
+
+    info!("currently processing slots for {processing_count} states in state cache");
+
     let started_at = std::time::Instant::now();
-    let process_slots_result =
-        combined::process_slots(store.chain_config(), state.make_mut(), slot);
+    let result = combined::process_slots(store.chain_config(), state.make_mut(), slot);
 
     currently_processing.fetch_sub(1, Ordering::SeqCst);
 
-    process_slots_result?;
+    result?;
 
     if warn_on_slot_processing {
         info!(

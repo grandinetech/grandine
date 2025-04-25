@@ -166,7 +166,7 @@ impl<P: Preset, W> Run for BlockVerifyForGossipTask<P, W> {
             .validate_block_for_gossip(&store_snapshot, &block)
             .map(|block_action| match block_action {
                 Some(BlockAction::Accept(_, _)) | None => ValidationOutcome::Accept,
-                Some(BlockAction::Ignore(publishable)) => ValidationOutcome::Ignore(publishable),
+                Some(BlockAction::Ignore(publishable, _)) => ValidationOutcome::Ignore(publishable),
                 Some(_) => ValidationOutcome::Ignore(false),
             });
 

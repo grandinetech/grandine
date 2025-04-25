@@ -150,7 +150,7 @@ impl StorageMode {
         matches!(self, Self::Archive)
     }
 }
-
+#[derive(Debug)]
 pub enum BlockBlobAvailability {
     Complete,
     CompleteWithPending,

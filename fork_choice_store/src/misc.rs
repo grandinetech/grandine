@@ -545,7 +545,7 @@ impl BlobSidecarOrigin {
 
 pub enum BlockAction<P: Preset> {
     Accept(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>),
-    Ignore(Publishable),
+    Ignore(Publishable, H256),
     DelayUntilBlobs(Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>),
     DelayUntilParent(Arc<SignedBeaconBlock<P>>),
     DelayUntilSlot(Arc<SignedBeaconBlock<P>>),
@@ -601,7 +601,7 @@ impl<P: Preset, I> AttestationAction<P, I> {
 #[derive(Debug)]
 pub enum BlobSidecarAction<P: Preset> {
     Accept(Arc<BlobSidecar<P>>),
-    Ignore(Publishable),
+    Ignore(Publishable, H256),
     DelayUntilState(Arc<BlobSidecar<P>>, H256),
     DelayUntilParent(Arc<BlobSidecar<P>>),
     DelayUntilSlot(Arc<BlobSidecar<P>>),

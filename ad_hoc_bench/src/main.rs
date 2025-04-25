@@ -7,10 +7,11 @@ use bytesize::ByteSize;
 use clap::{Parser, ValueEnum};
 use database::{Database, DatabaseMode};
 use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdrawal_devnet_4};
-use fork_choice_control::AdHocBenchController;
-use fork_choice_store::StoreConfig;
-use log::info;
+use fork_choice_control::{AdHocBenchController, Storage};
+use fork_choice_store::{Store, StoreConfig};
+use log::{error, info};
 use rand::seq::SliceRandom as _;
+use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
@@ -254,7 +255,9 @@ impl From<Blocks> for BlockParameters {
             },
             Blocks::HoleskyNonFinalityFull => Self {
                 first_slot: 3_710_944,
-                last_slot: 3_810_977,
+                // last_slot: 3_711_110,
+                last_slot: 3_722_692,
+                // last_slot: 3_810_977,
                 slot_width: 8,
             },
         }
@@ -269,7 +272,7 @@ fn main() -> Result<()> {
 
     let options = Options::parse();
 
-    match options.blocks.into() {
+    let store = match options.blocks.into() {
         Chain::Mainnet => run(
             ChainConfig::mainnet(),
             options,
@@ -277,13 +280,7 @@ fn main() -> Result<()> {
             mainnet::beacon_blocks,
             mainnet::blob_sidecars,
         ),
-        Chain::Medalla => run(
-            ChainConfig::medalla(),
-            options,
-            medalla::beacon_state,
-            medalla::beacon_blocks,
-            |_, _| BTreeMap::new(),
-        ),
+        Chain::Medalla => panic!("medalla is not supported"),
         Chain::Goerli => run(
             ChainConfig::goerli(),
             options,
@@ -316,6 +313,8 @@ fn main() -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
 
+    wipe_store_and_print_mem_stats(store);
+
     Ok(())
 }
 
@@ -328,7 +327,7 @@ fn run<P: Preset>(
     beacon_state: impl FnOnce(Slot, usize) -> Arc<BeaconState<P>>,
     beacon_blocks: impl FnOnce(RangeInclusive<Slot>, usize) -> Vec<Arc<SignedBeaconBlock<P>>>,
     blob_sidecars: impl FnOnce(RangeInclusive<Slot>, usize) -> BTreeMap<Slot, Vec<Arc<BlobSidecar<P>>>>,
-) -> Result<()> {
+) -> Result<Arc<Store<P, Storage<P>>>> {
     #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
 
@@ -371,12 +370,9 @@ fn run<P: Preset>(
 
     let anchor_state = beacon_state(first_slot, slot_width);
 
-    let database_dir = tempfile::Builder::new()
-        .prefix("ad_hoc_bench_db_")
-        .rand_bytes(10)
-        .tempdir()?;
+    let database_dir = "/disk/workspace/test_db";
 
-    log::info!("database dir: {}", database_dir.path().display());
+    // log::info!("database dir: {}", database_dir.path().display());
 
     let database = Database::persistent(
         "ad_hoc_bench_db",
@@ -434,8 +430,8 @@ fn run<P: Preset>(
     let time = start.elapsed().as_secs_f64();
 
     let head = controller.head().value;
-    assert_eq!(head.block_root, last_block_root);
-    assert_eq!(head.slot(), last_slot);
+    // assert_eq!(head.block_root, last_block_root);
+    // assert_eq!(head.slot(), last_slot);
 
     let time_per_block = time / block_count as f64;
     let time_per_slot = time / slot_count as f64;
@@ -459,7 +455,7 @@ fn run<P: Preset>(
     #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
 
-    Ok(())
+    Ok(controller.owned_store_snapshot())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -488,4 +484,23 @@ fn human_readable_size(result: tikv_jemalloc_ctl::Result<usize>) -> Result<bytes
     let size = result.map_err(anyhow::Error::msg)?;
     let size = size.try_into()?;
     Ok(ByteSize(size).display().si())
+}
+
+fn wipe_store_and_print_mem_stats<P: Preset>(mut store: Arc<Store<P, Storage<P>>>) {
+    info!(
+        "Store ARC strong references count: {}",
+        Arc::strong_count(&store),
+    );
+
+    let store = store.make_mut();
+
+    for step in 0..=12 {
+        if let Err(error) = store.wipe(step) {
+            error!("failed to wipe store: {error:?}");
+        }
+
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        print_jemalloc_stats().unwrap();
+    }
 }

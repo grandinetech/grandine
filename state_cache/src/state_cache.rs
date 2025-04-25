@@ -200,17 +200,26 @@ impl<P: Preset> StateCache<P> {
     }
 
     pub fn len(&self) -> Result<usize> {
+        let mut state_info = vec![];
+
         let lengths = self
             .all_state_map_locks()?
             .into_iter()
             .map(|(block_root, state_map_lock)| {
-                self.try_lock_map(&state_map_lock, block_root)?
-                    .len()
-                    .pipe(Ok)
+                let map = self.try_lock_map(&state_map_lock, block_root)?;
+
+                state_info.push((block_root, map.keys().copied().collect::<Vec<_>>()));
+
+                map.len().pipe(Ok)
             })
             .collect::<Result<Vec<_>>>()?;
 
-        lengths.into_iter().sum::<usize>().pipe(Ok)
+        let total_len = lengths.into_iter().sum::<usize>();
+
+        info!("state_cache total size: {total_len}");
+        info!("state_cache stored states (block roots and slots): {state_info:?}");
+
+        total_len.pipe(Ok)
     }
 
     pub fn prune(
@@ -253,6 +262,12 @@ impl<P: Preset> StateCache<P> {
     pub fn set_log_lock_timeouts(&self, log_lock_timeouts: bool) {
         self.log_lock_timeouts
             .store(log_lock_timeouts, Ordering::SeqCst);
+    }
+
+    pub fn wipe(&self) -> Result<()> {
+        self.try_lock_cache()?.clear();
+
+        Ok(())
     }
 
     fn all_state_map_locks(&self) -> Result<Vec<(H256, StateMapLock<P>)>> {

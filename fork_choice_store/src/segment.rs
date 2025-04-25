@@ -17,7 +17,7 @@ use crate::misc::{ChainLink, UnfinalizedBlock};
 #[derive(Clone, Debug)]
 pub struct Segment<P: Preset> {
     // This is never empty. A segment always contains at least one block.
-    blocks: Vector<UnfinalizedBlock<P>>,
+    pub blocks: Vector<UnfinalizedBlock<P>>,
     // A nonzero value in `Segment.first_position` indicates that the segment has been partially
     // finalized and the finalized blocks have been removed from it. The number of finalized blocks
     // is equal to `Segment.first_position`.
