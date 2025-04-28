@@ -22,10 +22,11 @@ use bls::{
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, Eth1Api};
-use eth2_libp2p::PeerId;
+use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{ForkChoiceContext, ForkTip, Wait};
+use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::{
-    channel::mpsc::UnboundedSender,
+    channel::{mpsc::UnboundedSender, oneshot::Receiver as OneshotReceiver},
     stream::{FuturesOrdered, FuturesUnordered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
@@ -2971,48 +2972,65 @@ async fn get_pool_attestations<P: Preset, W: Wait>(
         .collect()
 }
 
-async fn submit_attestation_to_pool<P: Preset, W: Wait>(
-    controller: ApiController<P, W>,
-    index: usize,
+async fn wait_for_validation<P: Preset>(
     attestation: Arc<Attestation<P>>,
-    target_state: Option<Arc<BeaconState<P>>>,
+    index: usize,
+    subnet_id: SubnetId,
+    receiver: OneshotReceiver<Result<ValidationOutcome>>,
 ) -> Result<(Arc<Attestation<P>>, SubnetId, ValidationOutcome), IndexedError> {
     let run = async {
-        let AttestationData {
-            slot,
-            beacon_block_root,
-            target,
-            ..
-        } = attestation.data();
-
-        ensure!(
-            controller.block_by_root(beacon_block_root)?.is_some(),
-            Error::MatchingAttestationHeadBlockNotFound,
-        );
-
-        let target_state = target_state.ok_or(Error::TargetStateNotFound)?;
-
-        let relative_epoch = accessors::relative_epoch(&target_state, target.epoch)
-            .map_err(|_| Error::TargetStateNotFound)?;
-
-        let committees_per_slot =
-            accessors::get_committee_count_per_slot(&target_state, relative_epoch);
-
-        let committee_index = misc::committee_index(&attestation);
-
-        let subnet_id =
-            misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)?;
-
-        let (sender, receiver) = futures::channel::oneshot::channel();
-
-        controller.on_api_singular_attestation(attestation.clone_arc(), subnet_id, sender);
-
         let validation_outcome = receiver.await??;
-
         Ok((attestation, subnet_id, validation_outcome))
     };
 
     run.await.map_err(|error| IndexedError { index, error })
+}
+
+#[expect(clippy::type_complexity)]
+fn build_attestation_item<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    index: usize,
+    attestation: Arc<Attestation<P>>,
+    target_state: Option<Arc<BeaconState<P>>>,
+) -> Result<(
+    AttestationItem<P, GossipId>,
+    usize,
+    SubnetId,
+    OneshotReceiver<Result<ValidationOutcome>>,
+)> {
+    let AttestationData {
+        slot,
+        beacon_block_root,
+        target,
+        ..
+    } = attestation.data();
+
+    ensure!(
+        controller.block_by_root(beacon_block_root)?.is_some(),
+        Error::MatchingAttestationHeadBlockNotFound,
+    );
+
+    let target_state = target_state.ok_or(Error::TargetStateNotFound)?;
+
+    let relative_epoch = accessors::relative_epoch(&target_state, target.epoch)
+        .map_err(|_| Error::TargetStateNotFound)?;
+
+    let committees_per_slot =
+        accessors::get_committee_count_per_slot(&target_state, relative_epoch);
+
+    let committee_index = misc::committee_index(&attestation);
+
+    let subnet_id =
+        misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)?;
+
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    Ok((
+        AttestationItem::unverified(attestation, AttestationOrigin::Api(subnet_id, sender)),
+        index,
+        subnet_id,
+        receiver,
+    ))
 }
 
 async fn submit_attestations_to_pool<P: Preset, W: Wait>(
@@ -3030,7 +3048,7 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
         .map(|(target, attestations)| (target, attestations.collect_vec()))
         .unzip();
 
-    let (successes, failures): (Vec<_>, Vec<_>) = targets
+    let (prevalidated, mut failures): (Vec<_>, Vec<_>) = targets
         .into_iter()
         .map(|target| {
             if controller.head_block_root().value == target.root {
@@ -3057,14 +3075,30 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
             let controller = controller.clone_arc();
 
             attestations.into_iter().map(move |(index, attestation)| {
-                submit_attestation_to_pool(
-                    controller.clone_arc(),
-                    index,
-                    attestation,
-                    target_state.clone(),
-                )
+                build_attestation_item(&controller, index, attestation, target_state.clone())
+                    .map_err(|error| IndexedError { index, error })
             })
         })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .partition_result();
+
+    let (attestation_items, receivers): (Vec<_>, Vec<_>) = prevalidated
+        .into_iter()
+        .map(|(attestation_item, index, subnet_id, receiver)| {
+            let attestation = attestation_item.item.clone_arc();
+
+            (
+                attestation_item,
+                wait_for_validation(attestation, index, subnet_id, receiver),
+            )
+        })
+        .unzip();
+
+    controller.on_api_singular_attestation_batch(attestation_items);
+
+    let (successes, mut validation_failures): (Vec<_>, Vec<_>) = receivers
+        .into_iter()
         .collect::<FuturesOrdered<_>>()
         .collect::<Vec<_>>()
         .await
@@ -3081,6 +3115,9 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
             ApiToP2p::PublishSingularAttestation(attestation, subnet_id).send(&api_to_p2p_tx);
         }
     }
+
+    // extend prevalidation failures with received failed validations
+    failures.append(&mut validation_failures);
 
     if !failures.is_empty() {
         return Err(Error::InvalidAttestations(failures));

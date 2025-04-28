@@ -45,6 +45,10 @@ pub enum AttestationVerifierMessage<P: Preset, W> {
         wait_group: W,
         attestation: AttestationItem<P, GossipId>,
     },
+    AttestationBatch {
+        wait_group: W,
+        attestations: Vec<AttestationItem<P, GossipId>>,
+    },
     Stop,
 }
 

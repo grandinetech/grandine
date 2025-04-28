@@ -315,6 +315,17 @@ where
         .send(&self.attestation_verifier_tx);
     }
 
+    pub fn on_api_singular_attestation_batch(
+        &self,
+        attestations: Vec<AttestationItem<P, GossipId>>,
+    ) {
+        AttestationVerifierMessage::AttestationBatch {
+            wait_group: self.owned_wait_group(),
+            attestations,
+        }
+        .send(&self.attestation_verifier_tx);
+    }
+
     pub fn on_gossip_aggregate_and_proof(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,

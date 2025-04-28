@@ -37,6 +37,7 @@ const MAX_BATCH_SIZE: usize = 64;
 
 pub struct AttestationVerifier<P: Preset, W: Wait> {
     attestations: Vec<AttestationItem<P, GossipId>>,
+    batch_attestations: Vec<AttestationItem<P, GossipId>>,
     aggregates: Vec<AggregateWithOrigin<P>>,
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
@@ -66,6 +67,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
 
         Self {
             attestations: vec![],
+            batch_attestations: vec![],
             aggregates: vec![],
             controller,
             dedicated_executor,
@@ -136,6 +138,19 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                             self.attestations.push(attestation);
                             self.spawn_verify_attestation_batch_task(&wait_group);
                         }
+                        AttestationVerifierMessage::AttestationBatch {
+                            wait_group,
+                            mut attestations,
+                        } => {
+                            debug!(
+                                "received attestation batch with {} attestations, existing batch attestations: {}",
+                                attestations.len(),
+                                self.batch_attestations.len()
+                            );
+
+                            self.batch_attestations.append(&mut attestations);
+                            self.spawn_verify_attestation_batch_task(&wait_group);
+                        }
                         AttestationVerifierMessage::Stop => break Ok(()),
                     }
                 }
@@ -186,8 +201,19 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             );
         }
 
-        let split_at = self.attestations.len().saturating_sub(MAX_BATCH_SIZE);
-        let attestations = self.attestations.split_off(split_at);
+        debug!(
+            "spawn verify attestation batch task: attestation_len: {}, batch_attestation_len: {}",
+            self.attestations.len(),
+            self.batch_attestations.len()
+        );
+
+        let mut attestations = vec![];
+        core::mem::swap(&mut self.batch_attestations, &mut attestations);
+
+        if attestations.is_empty() {
+            let split_at = self.attestations.len().saturating_sub(MAX_BATCH_SIZE);
+            attestations = self.attestations.split_off(split_at);
+        }
 
         VerifyAttestationBatchTask::spawn(
             wait_group.clone(),
