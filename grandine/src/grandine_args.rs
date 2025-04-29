@@ -1221,11 +1221,18 @@ impl GrandineArgs {
             Error::UnfinalizedStatesInMemoryTooLow { minimum },
         );
 
-        let features = features
+        let mut features = features
             .into_iter()
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
-            .collect();
+            .collect_vec();
+
+        features.push(Feature::DebugAttestationPacker);
+        features.push(Feature::DebugBlockProducer);
+        features.push(Feature::DebugEth1);
+        features.push(Feature::LogBlockProcessingTime);
+        features.push(Feature::LogHttpRequests);
+        features.push(Feature::WarnOnStateCacheSlotProcessing);
 
         let auth_options = AuthOptions {
             secrets_path: jwt_secret,
