@@ -281,7 +281,7 @@ pub trait Eth1Storage {
         );
 
         let deposit_data = deposit_events.map(|event| &event.data).collect_vec();
-        let deposit_indices = eth1_deposit_index..eth1_data.deposit_count;
+        let deposit_indices = eth1_deposit_index..eth1_deposit_index + expected_number_of_deposits;
         let proof_indices = eth1_deposit_index..eth1_deposit_index + expected_number_of_deposits;
 
         features::log!(DebugEth1, "deposit indices: {deposit_indices:?}");
