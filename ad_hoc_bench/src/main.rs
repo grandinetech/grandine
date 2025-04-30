@@ -383,6 +383,7 @@ fn run<P: Preset>(
         database_dir,
         ByteSize::gib(512),
         DatabaseMode::ReadWrite,
+        None,
     )?;
 
     let (controller, _mutator_handle) = AdHocBenchController::with_p2p_tx(

@@ -1185,6 +1185,7 @@ mod tests {
             TempDir::new()?,
             ByteSize::mib(10),
             DatabaseMode::ReadWrite,
+            None,
         )?;
 
         let block_1 = block_with_slot(1);
@@ -1253,6 +1254,7 @@ mod tests {
             TempDir::new()?,
             ByteSize::mib(10),
             DatabaseMode::ReadWrite,
+            None,
         )?;
 
         let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
@@ -1317,6 +1319,7 @@ mod tests {
             TempDir::new()?,
             ByteSize::mib(10),
             DatabaseMode::ReadWrite,
+            None,
         )?;
 
         let storage = Storage::<Mainnet>::new(

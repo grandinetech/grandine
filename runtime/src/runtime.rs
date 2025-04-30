@@ -9,7 +9,7 @@ use bytesize::ByteSize;
 use clock::Tick;
 use dashmap::DashMap;
 use data_dumper::DataDumper;
-use database::{Database, DatabaseMode};
+use database::{Database, DatabaseMode, RestartMessage};
 use dedicated_executor::DedicatedExecutor;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1::{Eth1Chain, Eth1Config};
@@ -93,6 +93,8 @@ pub async fn run_after_genesis<P: Preset>(
     blacklisted_blocks: HashSet<H256>,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
+    restart_tx: UnboundedSender<RestartMessage>,
+    restart_rx: UnboundedReceiver<RestartMessage>,
 ) -> Result<()> {
     let RuntimeConfig {
         back_sync_enabled,
@@ -196,7 +198,11 @@ pub async fn run_after_genesis<P: Preset>(
     let storage_database = if in_memory {
         Database::in_memory()
     } else {
-        storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadWrite)?
+        storage_config.beacon_fork_choice_database(
+            None,
+            DatabaseMode::ReadWrite,
+            Some(restart_tx),
+        )?
     };
 
     let storage = Arc::new(Storage::new(
@@ -422,6 +428,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .join(format!("slasher_attestation_votes_{fork_version:?}_db")),
                         db_size,
                         DatabaseMode::ReadWrite,
+                        None,
                     )?,
                     attestations_db: Database::persistent(
                         "SLASHER_INDEXED_ATTESTATIONS",
@@ -432,6 +439,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .join(format!("slasher_indexed_attestations_{fork_version:?}_db")),
                         db_size,
                         DatabaseMode::ReadWrite,
+                        None,
                     )?,
                     min_targets_db: Database::persistent(
                         "SLASHER_MIN_TARGETS",
@@ -442,6 +450,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .join(format!("slasher_min_targets_{fork_version:?}_db")),
                         db_size,
                         DatabaseMode::ReadWrite,
+                        None,
                     )?,
                     max_targets_db: Database::persistent(
                         "SLASHER_MAX_TARGETS",
@@ -452,6 +461,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .join(format!("slasher_max_targets_{fork_version:?}_db")),
                         db_size,
                         DatabaseMode::ReadWrite,
+                        None,
                     )?,
                     blocks_db: Database::persistent(
                         "SLASHER_BLOCKS",
@@ -462,6 +472,7 @@ pub async fn run_after_genesis<P: Preset>(
                             .join(format!("slasher_blocks_{fork_version:?}_db")),
                         db_size,
                         DatabaseMode::ReadWrite,
+                        None,
                     )?,
                 }
             };
@@ -712,7 +723,7 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(run_liveness_tracker) => result,
         result = spawn_fallible(run_validator_api) => result,
         result = spawn_fallible(subnet_service.run()) => result,
-        result = wait_for_signal() => result,
+        result = wait_for_signal_or_restart(restart_rx) => result,
     }?;
 
     if stop_clock_tx.send(()).is_err() {
@@ -740,6 +751,23 @@ async fn run_clock<P: Preset>(
             _ = &mut stop_clock_rx => {
                 break;
             }
+        }
+    }
+
+    Ok(())
+}
+
+async fn wait_for_signal_or_restart(error_rx: UnboundedReceiver<RestartMessage>) -> Result<()> {
+    select! {
+        result = wait_for_restart(error_rx) => result,
+        result = wait_for_signal() => result,
+    }
+}
+
+async fn wait_for_restart(mut rx: UnboundedReceiver<RestartMessage>) -> Result<()> {
+    if let Some(message) = rx.next().await {
+        match message {
+            RestartMessage::StorageMapFull(error) => return Err(error.into()),
         }
     }
 

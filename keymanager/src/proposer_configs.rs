@@ -50,6 +50,7 @@ impl ProposerConfigs {
             validator_directory,
             DB_MAX_SIZE,
             DatabaseMode::ReadWrite,
+            None,
         )?;
 
         Ok(Self {
