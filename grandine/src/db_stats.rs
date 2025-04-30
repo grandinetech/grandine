@@ -57,7 +57,7 @@ pub fn print<P: Preset>(
     custom_path: Option<PathBuf>,
 ) -> Result<()> {
     let storage_database =
-        storage_config.beacon_fork_choice_database(custom_path, DatabaseMode::ReadOnly)?;
+        storage_config.beacon_fork_choice_database(custom_path, DatabaseMode::ReadOnly, None)?;
 
     let mut total_size = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");

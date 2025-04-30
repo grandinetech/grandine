@@ -7,10 +7,11 @@ use std::{
 
 use anyhow::Result;
 use bytesize::ByteSize;
+use futures::channel::mpsc::UnboundedSender;
 use im::OrdMap;
 use itertools::Either;
 use libmdbx::{DatabaseFlags, Environment, Geometry, ObjectLength, Stat, WriteFlags};
-use log::info;
+use log::{debug, error};
 use snap::raw::{Decoder, Encoder};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -19,6 +20,19 @@ use unwrap_none::UnwrapNone as _;
 
 const GROWTH_STEP: ByteSize = ByteSize::mib(256);
 const MAX_NAMED_DATABASES: usize = 10;
+
+#[derive(Debug)]
+pub enum RestartMessage {
+    StorageMapFull(libmdbx::Error),
+}
+
+impl RestartMessage {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if let Err(message) = tx.unbounded_send(self) {
+            debug!("send to restart service failed because the receiver was dropped: {message:?}");
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum DatabaseMode {
@@ -63,6 +77,7 @@ impl Database {
         directory: impl AsRef<Path>,
         max_size: ByteSize,
         mode: DatabaseMode,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
     ) -> Result<Self> {
         // If a database with the legacy name exists, keep using it.
         // Otherwise, create a new database with the specified name.
@@ -89,14 +104,14 @@ impl Database {
         let existing_db = transaction.open_db(Some(legacy_name));
 
         let database_name = if existing_db.is_err() {
-            info!("database: {legacy_name} with name {name}");
+            debug!("database: {legacy_name} with name {name}");
             if !mode.is_read_only() {
                 transaction.create_db(Some(name), DatabaseFlags::default())?;
             }
 
             name
         } else {
-            info!("legacy database: {legacy_name}");
+            debug!("legacy database: {legacy_name}");
             legacy_name
         }
         .to_owned();
@@ -106,6 +121,7 @@ impl Database {
         Ok(Self(DatabaseKind::Persistent {
             database_name,
             environment,
+            restart_tx,
         }))
     }
 
@@ -121,6 +137,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -150,6 +167,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -201,6 +219,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -222,6 +241,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -244,6 +264,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -262,6 +283,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -298,6 +320,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -343,6 +366,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -390,6 +414,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx,
             } => {
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -397,10 +422,16 @@ impl Database {
                 for (key, value) in pairs {
                     let key = key.as_ref();
                     let compressed = compress(value.as_ref())?;
-                    transaction.put(database.dbi(), key, compressed, WriteFlags::default())?;
+                    transaction
+                        .put(database.dbi(), key, compressed, WriteFlags::default())
+                        .map_err(|error| {
+                            handle_write_error(database_name, error, restart_tx.as_ref())
+                        })?;
                 }
 
-                transaction.commit()?;
+                transaction.commit().map_err(|error| {
+                    handle_write_error(database_name, error, restart_tx.as_ref())
+                })?;
             }
             DatabaseKind::InMemory { map } => {
                 let mut map = map.lock().expect("in-memory database mutex is poisoned");
@@ -429,6 +460,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -461,6 +493,7 @@ impl Database {
             DatabaseKind::Persistent {
                 database_name,
                 environment,
+                restart_tx: _,
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
@@ -489,6 +522,7 @@ enum DatabaseKind {
         //                      database (`None`), but that would probably force users to resync.
         database_name: String,
         environment: Environment,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
     },
     InMemory {
         // Various methods of `OrdMap` and `Database` clone the elements of this map,
@@ -529,6 +563,22 @@ fn decompress(data: &[u8]) -> Result<Vec<u8>> {
 fn decompress_pair<K>((key, compressed_value): (K, Cow<[u8]>)) -> Result<(K, Vec<u8>)> {
     let value = decompress(&compressed_value)?;
     Ok((key, value))
+}
+
+fn handle_write_error(
+    database_name: &str,
+    error: libmdbx::Error,
+    restart_tx: Option<&UnboundedSender<RestartMessage>>,
+) -> libmdbx::Error {
+    if error == libmdbx::Error::MapFull {
+        error!("error while writing to {database_name} database: {error}");
+
+        if let Some(restart_tx) = restart_tx {
+            RestartMessage::StorageMapFull(error).send(restart_tx);
+        }
+    }
+
+    error
 }
 
 #[cfg(test)]
@@ -795,6 +845,7 @@ mod tests {
             TempDir::new()?,
             ByteSize::mib(1),
             DatabaseMode::ReadWrite,
+            None,
         )?;
 
         populate_database(&database)?;

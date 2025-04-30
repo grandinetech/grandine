@@ -227,10 +227,12 @@ impl Context {
             .then(futures::channel::mpsc::unbounded)
             .unzip();
 
+        let (restart_tx, restart_rx) = futures::channel::mpsc::unbounded();
+
         let eth1_database = if in_memory {
             Database::in_memory()
         } else {
-            storage_config.eth1_database()?
+            storage_config.eth1_database(restart_tx.clone())?
         };
 
         let eth1_chain = Eth1Chain::new(
@@ -311,6 +313,8 @@ impl Context {
             blacklisted_blocks,
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
+            restart_tx,
+            restart_rx,
         )
         .await
     }
@@ -687,7 +691,7 @@ fn handle_command<P: Preset>(
             output_dir,
         } => {
             let storage_database =
-                storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadOnly)?;
+                storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadOnly, None)?;
 
             let storage = Storage::new(
                 chain_config,
