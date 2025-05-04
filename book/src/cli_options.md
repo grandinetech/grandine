@@ -70,7 +70,7 @@ The list of command line options:
       --jwt-id <JWT_ID>
           Optional CL unique identifier to send to EL in the JWT token claim [default: None]
       --jwt-secret <JWT_SECRET>
-          Path to a file containing the hex-encoded 256 bit secret key to be used for verifying/generating JWT tokens
+          Path to a file containing the hex-encoded 256-bit secret key to be used for verifying/generating JWT tokens
       --jwt-version <JWT_VERSION>
           Optional CL node type/version to send to EL in the JWT token claim [default: None]
       --back-sync
