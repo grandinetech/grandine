@@ -3210,20 +3210,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.update_head_segment_id();
     }
 
-    pub fn invalidate_execution_block_and_descendant_payloads(
-        &mut self,
-        block_hash: ExecutionBlockHash,
-    ) -> PayloadAction {
-        if self.set_block_payload_status(block_hash, PayloadStatus::Invalid) {
-            self.set_block_descendant_payload_statuses(block_hash, PayloadStatus::Invalid);
-            self.update_head_segment_id();
-
-            return PayloadAction::Accept;
-        }
-
-        PayloadAction::DelayUntilBlock(block_hash)
-    }
-
     pub fn update_chain_payload_statuses(
         &mut self,
         latest_valid_hash: ExecutionBlockHash,

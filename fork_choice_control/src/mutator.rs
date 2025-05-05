@@ -1369,7 +1369,7 @@ where
     fn handle_notified_new_payload(
         &mut self,
         wait_group: &W,
-        beacon_block_root: Option<H256>,
+        beacon_block_root: H256,
         execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {
@@ -1403,21 +1403,8 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            if let Some(block_root) = beacon_block_root {
-                self.store_mut()
-                    .invalidate_block_and_descendant_payloads(block_root);
-            } else {
-                // The call to `Store::update_chain_payload_statuses` above will set the payload
-                // statuses of the block and its descendants to `PayloadStatus::Invalid`,
-                // but only if `latest_valid_hash` is present.
-                if latest_valid_hash.is_none()
-                    || latest_valid_hash == Some(ExecutionBlockHash::zero())
-                {
-                    payload_action = self
-                        .store_mut()
-                        .invalidate_execution_block_and_descendant_payloads(execution_block_hash);
-                }
-            }
+            self.store_mut()
+                .invalidate_block_and_descendant_payloads(beacon_block_root);
         } else {
             return;
         }
@@ -1653,12 +1640,7 @@ where
         if let Some(hash) = block.execution_block_hash() {
             if let Some(payload_statuses) = self.delayed_until_payload.remove(&hash) {
                 for (payload_status, _) in payload_statuses {
-                    self.handle_notified_new_payload(
-                        wait_group,
-                        Some(block_root),
-                        hash,
-                        payload_status,
-                    );
+                    self.handle_notified_new_payload(wait_group, block_root, hash, payload_status);
                 }
             }
         }

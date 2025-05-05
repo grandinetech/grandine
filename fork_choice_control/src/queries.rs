@@ -572,6 +572,16 @@ where
         self.store_snapshot().min_checked_data_availability_epoch()
     }
 
+    #[must_use]
+    pub fn unfinalized_chain_link_by_execution_block_hash(
+        &self,
+        block_hash: ExecutionBlockHash,
+    ) -> Option<ChainLink<P>> {
+        self.store_snapshot()
+            .unfinalized_chain_link_by_execution_block_hash(block_hash)
+            .cloned()
+    }
+
     pub fn validate_blob_sidecar_with_state(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
