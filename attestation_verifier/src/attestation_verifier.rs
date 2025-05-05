@@ -43,14 +43,18 @@ pub struct AttestationVerifier<P: Preset, W: Wait> {
     dedicated_executor: Arc<DedicatedExecutor>,
     active_aggregates_task_count: usize,
     active_attestations_task_count: usize,
+    active_batch_attestations_task_count: usize,
     max_aggregates_active_tasks: usize,
     max_attestations_active_tasks: usize,
+    max_batch_attestations_active_tasks: usize,
     metrics: Option<Arc<Metrics>>,
     fc_to_verifier_rx: UnboundedReceiver<AttestationVerifierMessage<P, W>>,
     aggregates_task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
     aggregates_task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
     attestations_task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
     attestations_task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
+    batch_attestations_task_to_verifier_rx: UnboundedReceiver<TaskMessage<W>>,
+    batch_attestations_task_to_verifier_tx: UnboundedSender<TaskMessage<W>>,
 }
 
 impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
@@ -64,6 +68,8 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         let (aggregates_task_to_verifier_tx, aggregates_task_to_verifier_rx) = mpsc::unbounded();
         let (attestations_task_to_verifier_tx, attestations_task_to_verifier_rx) =
             mpsc::unbounded();
+        let (batch_attestations_task_to_verifier_tx, batch_attestations_task_to_verifier_rx) =
+            mpsc::unbounded();
 
         Self {
             attestations: vec![],
@@ -73,16 +79,20 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             dedicated_executor,
             active_aggregates_task_count: 0,
             active_attestations_task_count: 0,
+            active_batch_attestations_task_count: 0,
             // `blst` already parallelizes signature verification. For non parallelized BLS
             // libraries use `num_cpus::get()`
             max_aggregates_active_tasks: 1,
             max_attestations_active_tasks: 1,
+            max_batch_attestations_active_tasks: 1,
             metrics,
             fc_to_verifier_rx,
             aggregates_task_to_verifier_rx,
             aggregates_task_to_verifier_tx,
             attestations_task_to_verifier_rx,
             attestations_task_to_verifier_tx,
+            batch_attestations_task_to_verifier_rx,
+            batch_attestations_task_to_verifier_tx,
         }
     }
 
@@ -94,12 +104,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                         TaskMessage::Finished(wait_group) => {
                             self.active_aggregates_task_count -= 1;
                             self.spawn_verify_aggregate_batch_task(&wait_group);
-
-                            if let Some(metrics) = self.metrics.as_ref() {
-                                metrics.set_attestation_verifier_active_task_count(
-                                    self.active_aggregates_task_count + self.active_attestations_task_count,
-                                );
-                            }
+                            self.track_active_task_count();
                         }
                     }
                 }
@@ -108,12 +113,16 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                         TaskMessage::Finished(wait_group) => {
                             self.active_attestations_task_count -= 1;
                             self.spawn_verify_attestation_batch_task(&wait_group);
-
-                            if let Some(metrics) = self.metrics.as_ref() {
-                                metrics.set_attestation_verifier_active_task_count(
-                                    self.active_aggregates_task_count + self.active_attestations_task_count,
-                                );
-                            }
+                            self.track_active_task_count();
+                        }
+                    }
+                }
+                message = self.batch_attestations_task_to_verifier_rx.select_next_some() => {
+                    match message {
+                        TaskMessage::Finished(wait_group) => {
+                            self.active_batch_attestations_task_count -= 1;
+                            self.spawn_verify_batch_attestation_task(&wait_group);
+                            self.track_active_task_count();
                         }
                     }
                 }
@@ -149,7 +158,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                             );
 
                             self.batch_attestations.append(&mut attestations);
-                            self.spawn_verify_attestation_batch_task(&wait_group);
+                            self.spawn_verify_batch_attestation_task(&wait_group);
                         }
                         AttestationVerifierMessage::Stop => break Ok(()),
                     }
@@ -166,12 +175,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         }
 
         self.active_aggregates_task_count += 1;
-
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.set_attestation_verifier_active_task_count(
-                self.active_aggregates_task_count + self.active_attestations_task_count,
-            );
-        }
+        self.track_active_task_count();
 
         let split_at = self.aggregates.len().saturating_sub(MAX_BATCH_SIZE);
         let aggregates = self.aggregates.split_off(split_at);
@@ -194,26 +198,15 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         }
 
         self.active_attestations_task_count += 1;
-
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.set_attestation_verifier_active_task_count(
-                self.active_aggregates_task_count + self.active_attestations_task_count,
-            );
-        }
+        self.track_active_task_count();
 
         debug!(
-            "spawn verify attestation batch task: attestation_len: {}, batch_attestation_len: {}",
+            "spawn verify attestation batch task: attestation_len: {}",
             self.attestations.len(),
-            self.batch_attestations.len()
         );
 
-        let mut attestations = vec![];
-        core::mem::swap(&mut self.batch_attestations, &mut attestations);
-
-        if attestations.is_empty() {
-            let split_at = self.attestations.len().saturating_sub(MAX_BATCH_SIZE);
-            attestations = self.attestations.split_off(split_at);
-        }
+        let split_at = self.attestations.len().saturating_sub(MAX_BATCH_SIZE);
+        let attestations = self.attestations.split_off(split_at);
 
         VerifyAttestationBatchTask::spawn(
             wait_group.clone(),
@@ -223,6 +216,44 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             self.metrics.clone(),
             self.attestations_task_to_verifier_tx.clone(),
         );
+    }
+
+    fn spawn_verify_batch_attestation_task(&mut self, wait_group: &W) {
+        if self.active_batch_attestations_task_count >= self.max_batch_attestations_active_tasks
+            || self.batch_attestations.is_empty()
+        {
+            return;
+        }
+
+        self.active_batch_attestations_task_count += 1;
+        self.track_active_task_count();
+
+        debug!(
+            "spawn verify batch attestation task: batch_attestation_len: {}",
+            self.batch_attestations.len()
+        );
+
+        let mut attestations = vec![];
+        core::mem::swap(&mut self.batch_attestations, &mut attestations);
+
+        VerifyAttestationBatchTask::spawn(
+            wait_group.clone(),
+            attestations,
+            self.controller.clone_arc(),
+            &self.dedicated_executor,
+            self.metrics.clone(),
+            self.batch_attestations_task_to_verifier_tx.clone(),
+        );
+    }
+
+    fn track_active_task_count(&self) {
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.set_attestation_verifier_active_task_count(
+                self.active_aggregates_task_count
+                    + self.active_attestations_task_count
+                    + self.active_batch_attestations_task_count,
+            );
+        }
     }
 }
 
