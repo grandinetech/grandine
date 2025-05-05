@@ -4,6 +4,7 @@ use anyhow::Result;
 use clock::Tick;
 use derivative::Derivative;
 use eth2_libp2p::GossipId;
+use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink,
@@ -16,7 +17,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    phase0::primitives::ValidatorIndex,
+    phase0::primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
     preset::Preset,
 };
 
@@ -27,6 +28,7 @@ pub struct Delayed<P: Preset> {
     // using sets makes logic for handling delayed objects more complicated and seems to worsen
     // performance in benchmarks.
     pub blocks: Vec<PendingBlock<P>>,
+    pub payload_statuses: Vec<PendingPayloadStatus>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
@@ -37,12 +39,14 @@ impl<P: Preset> Delayed<P> {
     pub fn is_empty(&self) -> bool {
         let Self {
             blocks,
+            payload_statuses,
             aggregates,
             attestations,
             blob_sidecars,
         } = self;
 
         blocks.is_empty()
+            && payload_statuses.is_empty()
             && aggregates.is_empty()
             && attestations.is_empty()
             && blob_sidecars.is_empty()
@@ -96,6 +100,8 @@ pub struct PendingAggregateAndProof<P: Preset> {
 }
 
 pub type PendingAttestation<P> = AttestationItem<P, GossipId>;
+
+pub type PendingPayloadStatus = (H256, ExecutionBlockHash, PayloadStatusV1, Slot);
 
 #[derive(Debug)]
 pub struct PendingBlobSidecar<P: Preset> {

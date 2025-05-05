@@ -1373,6 +1373,16 @@ where
         execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {
+        if !self.store.contains_block(beacon_block_root) {
+            self.delay_payload_status_until_block(
+                beacon_block_root,
+                execution_block_hash,
+                payload_status,
+            );
+
+            return;
+        }
+
         let old_head = self.store.head().clone();
         let head_was_optimistic = old_head.is_optimistic();
         let latest_valid_hash = payload_status.latest_valid_hash;
@@ -2041,6 +2051,30 @@ where
         }
     }
 
+    fn delay_payload_status_until_block(
+        &mut self,
+        beacon_block_root: H256,
+        execution_block_hash: ExecutionBlockHash,
+        payload_status: PayloadStatusV1,
+    ) {
+        debug!(
+            "payload status handling delayed until block \
+             (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
+             beacon_block_root: {beacon_block_root:?})",
+        );
+
+        self.delayed_until_block
+            .entry(beacon_block_root)
+            .or_default()
+            .payload_statuses
+            .push((
+                beacon_block_root,
+                execution_block_hash,
+                payload_status,
+                self.store.head().slot(),
+            ));
+    }
+
     fn delay_block_until_slot(&mut self, pending_block: PendingBlock<P>) {
         // Requested blocks can also be delayed until a slot if the slot isn't updated on time.
         // Blocks produced by the application itself should never be delayed.
@@ -2180,6 +2214,7 @@ where
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
         let Delayed {
             blocks,
+            payload_statuses,
             aggregates,
             attestations,
             blob_sidecars,
@@ -2187,6 +2222,15 @@ where
 
         for pending_block in blocks {
             self.retry_block(wait_group.clone(), pending_block);
+        }
+
+        for (beacon_block_root, execution_block_hash, payload_status, _) in payload_statuses {
+            self.retry_payload_status(
+                wait_group.clone(),
+                beacon_block_root,
+                execution_block_hash,
+                payload_status,
+            );
         }
 
         for pending_aggregate_and_proof in aggregates {
@@ -2222,6 +2266,28 @@ where
             submission_time,
             metrics: self.metrics.clone(),
         });
+    }
+
+    fn retry_payload_status(
+        &self,
+        wait_group: W,
+        beacon_block_root: H256,
+        execution_block_hash: ExecutionBlockHash,
+        payload_status: PayloadStatusV1,
+    ) {
+        debug!(
+            "retrying delayed payload status handling \
+             (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
+             beacon_block_root: {beacon_block_root:?})",
+        );
+
+        MutatorMessage::NotifiedNewPayload {
+            wait_group,
+            beacon_block_root,
+            execution_block_hash,
+            payload_status,
+        }
+        .send(&self.mutator_tx);
     }
 
     fn retry_attestation(&self, wait_group: W, attestation: PendingAttestation<P>) {
@@ -2332,6 +2398,7 @@ where
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
+                payload_statuses,
                 aggregates,
                 attestations,
                 blob_sidecars,
@@ -2345,6 +2412,8 @@ where
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
+
+            payload_statuses.retain(|(_, _, _, slot)| *slot > finalized_slot);
 
             gossip_ids.extend(
                 aggregates
