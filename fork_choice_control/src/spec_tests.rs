@@ -158,6 +158,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
     };
 
     let mut context = Context::<P>::new(config.clone_arc(), anchor_block, anchor_state, false);
+    let mut last_payload_status: Option<PayloadStatusWithBlockHash> = None;
 
     for step in steps {
         match step {
@@ -206,6 +207,20 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     context.on_blob_sidecar(blob_sidecar);
                 }
 
+                let beacon_block_root = block.message().hash_tree_root();
+
+                if let Some(PayloadStatusWithBlockHash {
+                    block_hash,
+                    payload_status,
+                }) = last_payload_status.take()
+                {
+                    context.on_notified_new_payload(
+                        beacon_block_root,
+                        block_hash,
+                        payload_status.into(),
+                    );
+                }
+
                 if !valid && expected_blob_count > 0 {
                     context.on_block_with_missing_blobs(&block, expected_blob_count);
                 } else if valid {
@@ -232,11 +247,8 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
 
                 context.on_merge_block(block_hash, timed_pow_block);
             }
-            Step::PayloadStatus(PayloadStatusWithBlockHash {
-                block_hash,
-                payload_status,
-            }) => {
-                context.on_notified_new_payload(None, block_hash, payload_status.into());
+            Step::PayloadStatus(payload_status_with_block_hash) => {
+                last_payload_status = Some(payload_status_with_block_hash);
             }
             Step::AttesterSlashing {
                 attester_slashing: file_name,

@@ -273,7 +273,7 @@ where
 
     pub fn on_notified_new_payload(
         &self,
-        beacon_block_root: Option<H256>,
+        beacon_block_root: H256,
         execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {

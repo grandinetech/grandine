@@ -1369,10 +1369,20 @@ where
     fn handle_notified_new_payload(
         &mut self,
         wait_group: &W,
-        beacon_block_root: Option<H256>,
+        beacon_block_root: H256,
         execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {
+        if !self.store.contains_block(beacon_block_root) {
+            self.delay_payload_status_until_block(
+                beacon_block_root,
+                execution_block_hash,
+                payload_status,
+            );
+
+            return;
+        }
+
         let old_head = self.store.head().clone();
         let head_was_optimistic = old_head.is_optimistic();
         let latest_valid_hash = payload_status.latest_valid_hash;
@@ -1403,21 +1413,8 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            if let Some(block_root) = beacon_block_root {
-                self.store_mut()
-                    .invalidate_block_and_descendant_payloads(block_root);
-            } else {
-                // The call to `Store::update_chain_payload_statuses` above will set the payload
-                // statuses of the block and its descendants to `PayloadStatus::Invalid`,
-                // but only if `latest_valid_hash` is present.
-                if latest_valid_hash.is_none()
-                    || latest_valid_hash == Some(ExecutionBlockHash::zero())
-                {
-                    payload_action = self
-                        .store_mut()
-                        .invalidate_execution_block_and_descendant_payloads(execution_block_hash);
-                }
-            }
+            self.store_mut()
+                .invalidate_block_and_descendant_payloads(beacon_block_root);
         } else {
             return;
         }
@@ -1653,13 +1650,29 @@ where
         if let Some(hash) = block.execution_block_hash() {
             if let Some(payload_statuses) = self.delayed_until_payload.remove(&hash) {
                 for (payload_status, _) in payload_statuses {
-                    self.handle_notified_new_payload(
-                        wait_group,
-                        Some(block_root),
-                        hash,
-                        payload_status,
-                    );
+                    self.handle_notified_new_payload(wait_group, block_root, hash, payload_status);
                 }
+            }
+        }
+
+        if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
+            let delayed_payload_statuses = delayed.payload_statuses.drain(..).collect_vec();
+
+            for (beacon_block_root, execution_block_hash, payload_status, _) in
+                delayed_payload_statuses
+            {
+                debug!(
+                    "retrying delayed payload status handling \
+                     (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
+                     beacon_block_root: {beacon_block_root:?})",
+                );
+
+                self.handle_notified_new_payload(
+                    wait_group,
+                    beacon_block_root,
+                    execution_block_hash,
+                    payload_status,
+                );
             }
         }
 
@@ -2059,6 +2072,30 @@ where
         }
     }
 
+    fn delay_payload_status_until_block(
+        &mut self,
+        beacon_block_root: H256,
+        execution_block_hash: ExecutionBlockHash,
+        payload_status: PayloadStatusV1,
+    ) {
+        debug!(
+            "payload status handling delayed until block \
+             (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
+             beacon_block_root: {beacon_block_root:?})",
+        );
+
+        self.delayed_until_block
+            .entry(beacon_block_root)
+            .or_default()
+            .payload_statuses
+            .push((
+                beacon_block_root,
+                execution_block_hash,
+                payload_status,
+                self.store.head().slot(),
+            ));
+    }
+
     fn delay_block_until_slot(&mut self, pending_block: PendingBlock<P>) {
         // Requested blocks can also be delayed until a slot if the slot isn't updated on time.
         // Blocks produced by the application itself should never be delayed.
@@ -2198,6 +2235,8 @@ where
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
         let Delayed {
             blocks,
+            // Payload status updates are retried in `accept_block` method a bit earlier than the other delayed items
+            payload_statuses: _,
             aggregates,
             attestations,
             blob_sidecars,
@@ -2350,6 +2389,7 @@ where
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
+                payload_statuses,
                 aggregates,
                 attestations,
                 blob_sidecars,
@@ -2363,6 +2403,8 @@ where
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
+
+            payload_statuses.retain(|(_, _, _, slot)| *slot > finalized_slot);
 
             gossip_ids.extend(
                 aggregates
