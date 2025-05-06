@@ -1655,6 +1655,27 @@ where
             }
         }
 
+        if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
+            let delayed_payload_statuses = delayed.payload_statuses.drain(..).collect_vec();
+
+            for (beacon_block_root, execution_block_hash, payload_status, _) in
+                delayed_payload_statuses
+            {
+                debug!(
+                    "retrying delayed payload status handling \
+                     (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
+                     beacon_block_root: {beacon_block_root:?})",
+                );
+
+                self.handle_notified_new_payload(
+                    wait_group,
+                    beacon_block_root,
+                    execution_block_hash,
+                    payload_status,
+                );
+            }
+        }
+
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if is_valid {
@@ -2214,7 +2235,8 @@ where
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
         let Delayed {
             blocks,
-            payload_statuses,
+            // Payload status updates are retried in `accept_block` method a bit earlier than the other delayed items
+            payload_statuses: _,
             aggregates,
             attestations,
             blob_sidecars,
@@ -2222,15 +2244,6 @@ where
 
         for pending_block in blocks {
             self.retry_block(wait_group.clone(), pending_block);
-        }
-
-        for (beacon_block_root, execution_block_hash, payload_status, _) in payload_statuses {
-            self.retry_payload_status(
-                wait_group.clone(),
-                beacon_block_root,
-                execution_block_hash,
-                payload_status,
-            );
         }
 
         for pending_aggregate_and_proof in aggregates {
@@ -2266,28 +2279,6 @@ where
             submission_time,
             metrics: self.metrics.clone(),
         });
-    }
-
-    fn retry_payload_status(
-        &self,
-        wait_group: W,
-        beacon_block_root: H256,
-        execution_block_hash: ExecutionBlockHash,
-        payload_status: PayloadStatusV1,
-    ) {
-        debug!(
-            "retrying delayed payload status handling \
-             (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
-             beacon_block_root: {beacon_block_root:?})",
-        );
-
-        MutatorMessage::NotifiedNewPayload {
-            wait_group,
-            beacon_block_root,
-            execution_block_hash,
-            payload_status,
-        }
-        .send(&self.mutator_tx);
     }
 
     fn retry_attestation(&self, wait_group: W, attestation: PendingAttestation<P>) {
