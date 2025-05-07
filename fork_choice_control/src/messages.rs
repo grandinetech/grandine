@@ -76,7 +76,7 @@ pub enum MutatorMessage<P: Preset, W> {
         result: Result<BlockAction<P>>,
         origin: BlockOrigin,
         submission_time: Instant,
-        rejected_block_root: Option<H256>,
+        block_root: H256,
     },
     AggregateAndProof {
         wait_group: W,

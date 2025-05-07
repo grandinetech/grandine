@@ -17,7 +17,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    phase0::primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
+    phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
 
@@ -28,7 +28,8 @@ pub struct Delayed<P: Preset> {
     // using sets makes logic for handling delayed objects more complicated and seems to worsen
     // performance in benchmarks.
     pub blocks: Vec<PendingBlock<P>>,
-    pub payload_statuses: Vec<PendingPayloadStatus>,
+    // There can only be one payload status per block
+    pub payload_status: Option<(PayloadStatusV1, Slot)>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
@@ -39,14 +40,14 @@ impl<P: Preset> Delayed<P> {
     pub fn is_empty(&self) -> bool {
         let Self {
             blocks,
-            payload_statuses,
+            payload_status,
             aggregates,
             attestations,
             blob_sidecars,
         } = self;
 
         blocks.is_empty()
-            && payload_statuses.is_empty()
+            && payload_status.is_none()
             && aggregates.is_empty()
             && attestations.is_empty()
             && blob_sidecars.is_empty()
@@ -100,8 +101,6 @@ pub struct PendingAggregateAndProof<P: Preset> {
 }
 
 pub type PendingAttestation<P> = AttestationItem<P, GossipId>;
-
-pub type PendingPayloadStatus = (H256, ExecutionBlockHash, PayloadStatusV1, Slot);
 
 #[derive(Debug)]
 pub struct PendingBlobSidecar<P: Preset> {

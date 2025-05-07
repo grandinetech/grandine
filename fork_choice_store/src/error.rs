@@ -79,6 +79,8 @@ pub enum Error<P: Preset> {
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
+    #[error("block has invalid execution payload")]
+    InvalidExecutionPayload,
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,

@@ -24,7 +24,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error as AnyhowError, Result};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
 use drain_filter_polyfill::VecExt as _;
@@ -33,8 +33,8 @@ use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
-    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, PayloadAction,
-    StateCacheProcessor, Store, ValidAttestation,
+    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink, Error,
+    PayloadAction, StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -200,14 +200,8 @@ where
                     result,
                     origin,
                     submission_time,
-                    rejected_block_root,
-                } => self.handle_block(
-                    wait_group,
-                    result,
-                    origin,
-                    submission_time,
-                    rejected_block_root,
-                )?,
+                    block_root,
+                } => self.handle_block(wait_group, result, origin, submission_time, block_root)?,
                 MutatorMessage::AggregateAndProof { wait_group, result } => {
                     self.handle_aggregate_and_proof(&wait_group, result)?
                 }
@@ -317,14 +311,14 @@ where
                 NullVerifier,
             );
 
-            let rejected_block_root = result.is_err().then(|| block.message().hash_tree_root());
+            let block_root = block.message().hash_tree_root();
 
             self.handle_block(
                 wait_group.clone(),
                 result,
                 origin,
                 submission_time,
-                rejected_block_root,
+                block_root,
             )?;
         }
 
@@ -496,10 +490,45 @@ where
         result: Result<BlockAction<P>>,
         origin: BlockOrigin,
         submission_time: Instant,
-        rejected_block_root: Option<H256>,
+        block_root: H256,
     ) -> Result<()> {
         match result {
             Ok(BlockAction::Accept(chain_link, attester_slashing_results)) => {
+                let block_root = chain_link.block_root;
+                let parent_root = chain_link.block.message().parent_root();
+
+                if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
+                    if let Some((payload_status, _)) = delayed.payload_status.take() {
+                        debug!(
+                            "applying delayed payload status \
+                            (payload_status: {payload_status:?}, beacon_block_root: {block_root:?})",
+                        );
+
+                        if let Some(valid_hash) = payload_status.latest_valid_hash {
+                            if let Some(parent) = self.store.chain_link(parent_root) {
+                                let parent_execution_block_hash =
+                                    parent.block.execution_block_hash();
+
+                                self.store_mut().update_chain_payload_statuses(
+                                    valid_hash,
+                                    parent_execution_block_hash,
+                                );
+
+                                self.update_store_snapshot();
+                            }
+                        }
+
+                        if payload_status.status.is_invalid() {
+                            self.reject_block(
+                                Error::<P>::InvalidExecutionPayload.into(),
+                                block_root,
+                                origin,
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+
                 let pending_chain_link = PendingChainLink {
                     chain_link,
                     attester_slashing_results,
@@ -522,8 +551,6 @@ where
                 );
             }
             Ok(BlockAction::DelayUntilBlobs(block, state)) => {
-                let block_root = block.message().hash_tree_root();
-
                 let pending_block = PendingBlock {
                     block,
                     origin,
@@ -674,41 +701,7 @@ where
                     }
                 }
             }
-            Err(error) => {
-                warn!("block rejected (error: {error}, origin: {origin:?})");
-
-                let sender = match origin {
-                    BlockOrigin::Gossip(gossip_id) => {
-                        self.send_to_p2p(P2pMessage::Reject(
-                            Some(gossip_id),
-                            MutatorRejectionReason::InvalidBlock,
-                        ));
-
-                        None
-                    }
-                    BlockOrigin::Api(sender) => sender,
-                    BlockOrigin::Requested(peer_id) => {
-                        if let Some(peer_id) = peer_id {
-                            // During block sync (and especially during non-finality events)
-                            // it's important to drop peers that send invalid blocks
-                            self.send_to_p2p(P2pMessage::PenalizePeer(
-                                peer_id,
-                                MutatorRejectionReason::InvalidBlock,
-                            ));
-                        }
-
-                        None
-                    }
-                    BlockOrigin::Own | BlockOrigin::Persisted => None,
-                };
-
-                if let Some(block_root) = rejected_block_root {
-                    self.store_mut().register_rejected_block(block_root);
-                    self.update_store_snapshot();
-                }
-
-                reply_block_validation_result_to_http_api(sender, Err(error));
-            }
+            Err(error) => self.reject_block(error, block_root, origin),
         }
 
         Ok(())
@@ -1374,11 +1367,7 @@ where
         payload_status: PayloadStatusV1,
     ) {
         if !self.store.contains_block(beacon_block_root) {
-            self.delay_payload_status_until_block(
-                beacon_block_root,
-                execution_block_hash,
-                payload_status,
-            );
+            self.delay_payload_status_until_block(beacon_block_root, payload_status);
 
             return;
         }
@@ -1655,27 +1644,6 @@ where
             }
         }
 
-        if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
-            let delayed_payload_statuses = delayed.payload_statuses.drain(..).collect_vec();
-
-            for (beacon_block_root, execution_block_hash, payload_status, _) in
-                delayed_payload_statuses
-            {
-                debug!(
-                    "retrying delayed payload status handling \
-                     (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
-                     beacon_block_root: {beacon_block_root:?})",
-                );
-
-                self.handle_notified_new_payload(
-                    wait_group,
-                    beacon_block_root,
-                    execution_block_hash,
-                    payload_status,
-                );
-            }
-        }
-
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if is_valid {
@@ -1821,6 +1789,40 @@ where
         }
 
         Ok(())
+    }
+
+    fn reject_block(&mut self, error: AnyhowError, block_root: H256, origin: BlockOrigin) {
+        warn!("block rejected (error: {error}, block root: {block_root:?}, origin: {origin:?})");
+
+        let sender = match origin {
+            BlockOrigin::Gossip(gossip_id) => {
+                self.send_to_p2p(P2pMessage::Reject(
+                    Some(gossip_id),
+                    MutatorRejectionReason::InvalidBlock,
+                ));
+
+                None
+            }
+            BlockOrigin::Api(sender) => sender,
+            BlockOrigin::Requested(peer_id) => {
+                if let Some(peer_id) = peer_id {
+                    // During block sync (and especially during non-finality events)
+                    // it's important to drop peers that send invalid blocks
+                    self.send_to_p2p(P2pMessage::PenalizePeer(
+                        peer_id,
+                        MutatorRejectionReason::InvalidBlock,
+                    ));
+                }
+
+                None
+            }
+            BlockOrigin::Own | BlockOrigin::Persisted => None,
+        };
+
+        self.store_mut().register_rejected_block(block_root);
+        self.update_store_snapshot();
+
+        reply_block_validation_result_to_http_api(sender, Err(error));
     }
 
     fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: &Arc<BlobSidecar<P>>) {
@@ -2075,25 +2077,19 @@ where
     fn delay_payload_status_until_block(
         &mut self,
         beacon_block_root: H256,
-        execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     ) {
         debug!(
             "payload status handling delayed until block \
-             (payload_status: {payload_status:?}, execution_block_hash: ExecutionBlockHash, \
-             beacon_block_root: {beacon_block_root:?})",
+             (payload_status: {payload_status:?}, beacon_block_root: {beacon_block_root:?})",
         );
+
+        let pending_payload_status = (payload_status, self.store.head().slot());
 
         self.delayed_until_block
             .entry(beacon_block_root)
             .or_default()
-            .payload_statuses
-            .push((
-                beacon_block_root,
-                execution_block_hash,
-                payload_status,
-                self.store.head().slot(),
-            ));
+            .payload_status = Some(pending_payload_status);
     }
 
     fn delay_block_until_slot(&mut self, pending_block: PendingBlock<P>) {
@@ -2235,8 +2231,9 @@ where
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
         let Delayed {
             blocks,
-            // Payload status updates are retried in `accept_block` method a bit earlier than the other delayed items
-            payload_statuses: _,
+            // Delayed payload status update is applied before accepting block,
+            // so a bit earlier than the other delayed items.
+            payload_status: _,
             aggregates,
             attestations,
             blob_sidecars,
@@ -2389,7 +2386,7 @@ where
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
-                payload_statuses,
+                payload_status,
                 aggregates,
                 attestations,
                 blob_sidecars,
@@ -2404,7 +2401,11 @@ where
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
 
-            payload_statuses.retain(|(_, _, _, slot)| *slot > finalized_slot);
+            if let Some((_, slot)) = payload_status {
+                if *slot <= finalized_slot {
+                    payload_status.take();
+                }
+            }
 
             gossip_ids.extend(
                 aggregates
