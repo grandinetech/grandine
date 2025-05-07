@@ -130,14 +130,15 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             ),
         };
 
-        let rejected_block_root = result.is_err().then(|| block.message().hash_tree_root());
+        // TODO: reduce number of block root computations across the app
+        let block_root = block.message().hash_tree_root();
 
         MutatorMessage::Block {
             wait_group,
             result,
             origin,
             submission_time,
-            rejected_block_root,
+            block_root,
         }
         .send(&mutator_tx);
     }
