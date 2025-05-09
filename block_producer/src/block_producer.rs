@@ -12,7 +12,6 @@ use bls::{
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
-use eth1::Eth1Chain;
 use eth1_api::{ApiController, Eth1ExecutionEngine};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
@@ -79,22 +78,19 @@ use types::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
             Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
-            BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody, Deposit,
-            Eth1Data, ProposerSlashing, SignedVoluntaryExit,
+            BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
+            ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, DepositIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot,
-            Uint256, ValidatorIndex, H256,
+            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
+            ValidatorIndex, H256,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{BeaconState as _, PostBellatrixBeaconState},
 };
 
-use crate::{
-    eth1_storage::Eth1Storage as _,
-    misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock},
-};
+use crate::misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock};
 
 const DEFAULT_BUILDER_BOOST_FACTOR: NonZeroU64 = nonzero!(100_u64);
 const PAYLOAD_CACHE_SIZE: usize = 20;
@@ -120,7 +116,6 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         builder_api: Option<Arc<BuilderApi>>,
         controller: ApiController<P, W>,
         dedicated_executor: Arc<DedicatedExecutor>,
-        eth1_chain: Eth1Chain,
         execution_engine: Arc<Eth1ExecutionEngine<P>>,
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
@@ -138,7 +133,6 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             builder_api,
             controller,
             dedicated_executor,
-            eth1_chain,
             execution_engine,
             attestation_agg_pool,
             bls_to_execution_change_pool,
@@ -282,16 +276,6 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
 
                 validator.exit_epoch == FAR_FUTURE_EPOCH
             })
-    }
-
-    pub fn finalize_deposits(
-        &self,
-        finalized_deposit_index: DepositIndex,
-        deposit_requests_start_index: Option<DepositIndex>,
-    ) {
-        self.producer_context
-            .eth1_chain
-            .finalize_deposits(finalized_deposit_index, deposit_requests_start_index)
     }
 
     pub async fn get_attester_slashings(&self) -> Vec<AttesterSlashing<P>> {
@@ -571,10 +555,6 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 "voluntary_exits",
                 self.producer_context.voluntary_exits.lock().await.len(),
             );
-
-            self.producer_context
-                .eth1_chain
-                .track_collection_metrics(metrics);
         }
     }
 }
@@ -585,7 +565,6 @@ struct ProducerContext<P: Preset, W: Wait> {
     builder_api: Option<Arc<BuilderApi>>,
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
-    eth1_chain: Eth1Chain,
     execution_engine: Arc<Eth1ExecutionEngine<P>>,
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
@@ -738,8 +717,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         randao_reveal: SignatureBytes,
     ) -> Result<BeaconBlock<P>> {
-        let eth1_data = self.prepare_eth1_data()?;
-        let deposits = self.prepare_deposits(eth1_data)?;
+        let eth1_data = self.beacon_state.eth1_data();
+        let deposits = ContiguousList::default();
 
         // TODO(Grandine Team): Preparing slashings and voluntary exits independently may result
         //                      in an invalid block because a validator can only exit or be
@@ -1146,17 +1125,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
     }
 
-    fn prepare_eth1_data(&self) -> Result<Eth1Data> {
-        self.producer_context
-            .eth1_chain
-            .eth1_vote(
-                &self.producer_context.chain_config,
-                self.producer_context.metrics.as_ref(),
-                &self.beacon_state,
-            )
-            .context("failed to prepare eth1 data")
-    }
-
     async fn prepare_proposer_slashings(
         &self,
     ) -> ContiguousList<ProposerSlashing, P::MaxProposerSlashings> {
@@ -1295,20 +1263,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .attestation_agg_pool
             .best_proposable_attestations(self.beacon_state.clone_arc())
             .await
-    }
-
-    fn prepare_deposits(
-        &self,
-        eth1_data: Eth1Data,
-    ) -> Result<ContiguousList<Deposit, P::MaxDeposits>> {
-        self.producer_context
-            .eth1_chain
-            .pending_deposits(
-                &self.beacon_state,
-                eth1_data,
-                self.producer_context.metrics.as_ref(),
-            )
-            .context("failed to prepare deposits")
     }
 
     async fn prepare_voluntary_exits(

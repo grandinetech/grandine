@@ -10,7 +10,7 @@ use database::Database;
 use dedicated_executor::DedicatedExecutor;
 use deposit_tree::DepositTree;
 use enum_iterator::Sequence as _;
-use eth1::{Eth1Chain, Eth1Config};
+use eth1::Eth1Config;
 use eth1_api::{Eth1Api, Eth1ExecutionEngine, ExecutionService};
 #[cfg(feature = "eth2-cache")]
 use eth2_cache_utils::mainnet;
@@ -117,17 +117,6 @@ impl<P: Preset> Context<P> {
         });
 
         let client = Client::new();
-
-        let eth1_chain = Eth1Chain::new(
-            chain_config.clone_arc(),
-            eth1_config.clone_arc(),
-            client.clone(),
-            Database::in_memory(),
-            None,
-            None,
-        )?;
-
-        eth1_chain.spawn_unfinalized_blocks_tracker_task()?;
 
         let eth1_api = Arc::new(Eth1Api::new(
             chain_config.clone_arc(),
@@ -284,7 +273,6 @@ impl<P: Preset> Context<P> {
             None,
             controller.clone_arc(),
             dedicated_executor,
-            eth1_chain,
             execution_engine,
             attestation_agg_pool.clone_arc(),
             bls_to_execution_change_pool.clone_arc(),

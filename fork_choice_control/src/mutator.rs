@@ -1880,13 +1880,6 @@ where
             metrics.set_beacon_previous_justified_epoch(previous_justified_checkpoint.epoch);
         }
 
-        let finalized_state = self.store.last_finalized().state(&self.store);
-
-        self.send_to_validator(ValidatorMessage::FinalizedEth1Data(
-            finalized_state.eth1_deposit_index(),
-            finalized_state.deposit_requests_start_index(),
-        ));
-
         self.event_channels.send_finalized_checkpoint_event(
             head.block_root,
             finalized_checkpoint,

@@ -9,13 +9,10 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-arithmetic = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 cached = { workspace = true }
 dedicated_executor = { workspace = true }
-deposit_tree = { workspace = true }
-eth1 = { workspace = true }
 eth1_api = { workspace = true }
 execution_engine = { workspace = true }
 factory = { workspace = true }
@@ -34,7 +31,6 @@ serde_utils = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 transition_functions = { workspace = true }
 try_from_iterator = { workspace = true }
@@ -44,4 +40,3 @@ types = { workspace = true }
 
 [dev-dependencies]
 factory = { workspace = true }
-interop = { workspace = true }

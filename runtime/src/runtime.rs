@@ -12,7 +12,7 @@ use data_dumper::DataDumper;
 use database::{Database, DatabaseMode, RestartMessage};
 use dedicated_executor::DedicatedExecutor;
 use doppelganger_protection::DoppelgangerProtection;
-use eth1::{Eth1Chain, Eth1Config};
+use eth1::Eth1Config;
 use eth1_api::{
     Eth1Api, Eth1ApiToMetrics, Eth1ConnectionData, Eth1ExecutionEngine, Eth1Metrics,
     ExecutionBlobFetcher, ExecutionService, RealController,
@@ -82,7 +82,6 @@ pub async fn run_after_genesis<P: Preset>(
     network_config: NetworkConfig,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     state_load_strategy: StateLoadStrategy<P>,
-    eth1_chain: Eth1Chain,
     eth1_config: Arc<Eth1Config>,
     storage_config: StorageConfig,
     builder_config: Option<BuilderConfig>,
@@ -559,7 +558,6 @@ pub async fn run_after_genesis<P: Preset>(
         builder_api.clone(),
         controller.clone_arc(),
         dedicated_executor_normal_priority.clone_arc(),
-        eth1_chain,
         execution_engine,
         attestation_agg_pool.clone_arc(),
         bls_to_execution_change_pool.clone_arc(),

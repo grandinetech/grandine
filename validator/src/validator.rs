@@ -263,9 +263,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             panic!("error while handling tick: {error:?}");
                         }
                     }
-                    ValidatorMessage::FinalizedEth1Data(finalized_eth1_data, deposit_requests_start_index) => {
-                        self.block_producer.finalize_deposits(finalized_eth1_data, deposit_requests_start_index);
-                    },
                     ValidatorMessage::Head(wait_group, head) => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             let state = self.controller.state_by_chain_link(&head);
