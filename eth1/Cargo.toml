@@ -25,5 +25,4 @@ std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
-tynm = { workspace = true }
 types = { workspace = true }

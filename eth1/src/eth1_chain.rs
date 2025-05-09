@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Error as AnyhowError, Result};
 use database::Database;
@@ -39,7 +39,6 @@ pub struct Eth1Config {
 
 pub struct Eth1Chain {
     cache: Arc<Eth1Cache>,
-    unfinalized_blocks: Arc<RwLock<Vec<Eth1Block>>>,
 }
 
 impl Eth1Chain {
@@ -55,10 +54,7 @@ impl Eth1Chain {
             .map(Arc::new)
             .context("failed to create Eth1 cache database environment")?;
 
-        let chain = Self {
-            cache,
-            unfinalized_blocks: Arc::new(RwLock::new(vec![])),
-        };
+        let chain = Self { cache };
 
         if !eth1_config.eth1_rpc_urls.is_empty() {
             chain.spawn_download_task(
@@ -71,12 +67,6 @@ impl Eth1Chain {
         }
 
         Ok(chain)
-    }
-
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
-    #[must_use]
-    pub fn unfinalized_blocks(&self) -> &RwLock<Vec<Eth1Block>> {
-        &self.unfinalized_blocks
     }
 
     pub fn add_deposits(
@@ -124,22 +114,6 @@ impl Eth1Chain {
         });
     }
 
-    pub fn spawn_unfinalized_blocks_tracker_task(&self) -> Result<()> {
-        let unfinalized_blocks = self.unfinalized_blocks.clone_arc();
-        let cache = self.cache.clone_arc();
-        let deposit_tree = self.load_deposit_tree()?;
-
-        tokio::spawn(async move {
-            if let Err(error) =
-                run_unfinalized_blocks_tracker(unfinalized_blocks, cache, deposit_tree).await
-            {
-                panic!("failed to update unfinalized Eth1 block list: {error}");
-            }
-        });
-
-        Ok(())
-    }
-
     pub fn stream_blocks(&self) -> Result<impl Stream<Item = Result<Eth1Block>>> {
         let cache = self.cache.clone_arc();
         let deposit_tree = self.load_deposit_tree()?;
@@ -168,18 +142,6 @@ impl Eth1Chain {
             });
 
         Ok(blocks)
-    }
-
-    pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
-        metrics.set_collection_length(
-            module_path!(),
-            &tynm::type_name::<Self>(),
-            "unfinalized_blocks",
-            self.unfinalized_blocks
-                .read()
-                .expect("unfinalized blocks lock is poisoned")
-                .len(),
-        );
     }
 }
 
@@ -245,38 +207,5 @@ fn handle_error(error: &AnyhowError) {
         // TODO(Grandine Team): This is supposed to be temporary.
         // _ => return Err(error),
         _ => error!("error while downloading and storing blocks: {error:?}"),
-    }
-}
-
-async fn run_unfinalized_blocks_tracker(
-    unfinalized_blocks: Arc<RwLock<Vec<Eth1Block>>>,
-    cache: Arc<Eth1Cache>,
-    deposit_tree: DepositTree,
-) -> Result<()> {
-    let mut last_added_block_number = deposit_tree.last_added_block_number;
-
-    loop {
-        let blocks = cache.get_blocks_from(last_added_block_number + 1, STREAM_BATCH_SIZE)?;
-
-        features::log!(
-            DebugEth1,
-            "Add Eth1 blocks from cache to unfinalized blocks: {}: ({:?} - {:?})",
-            blocks.len(),
-            blocks.first(),
-            blocks.last(),
-        );
-
-        for block in blocks {
-            last_added_block_number = block.number;
-
-            features::log!(DebugEth1, "read Eth1 block from cache: {}", block.number);
-
-            unfinalized_blocks
-                .write()
-                .expect("unfinalized blocks lock is poisoned")
-                .push(block);
-        }
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

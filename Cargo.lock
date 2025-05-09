@@ -995,13 +995,10 @@ name = "block_producer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arithmetic",
  "bls",
  "builder_api",
  "cached",
  "dedicated_executor",
- "deposit_tree",
- "eth1",
  "eth1_api",
  "execution_engine",
  "factory",
@@ -1009,7 +1006,6 @@ dependencies = [
  "fork_choice_control",
  "futures",
  "helper_functions",
- "interop",
  "itertools 0.14.0",
  "keymanager",
  "log",
@@ -1021,7 +1017,6 @@ dependencies = [
  "ssz",
  "std_ext",
  "tap",
- "thiserror 1.0.69",
  "tokio",
  "transition_functions",
  "try_from_iterator",
@@ -2592,7 +2587,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
- "tynm",
  "types",
 ]
 

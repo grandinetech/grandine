@@ -11,12 +11,13 @@ use allocator as _;
 use anyhow::{bail, ensure, Context as _, Result};
 use builder_api::BuilderConfig;
 use clap::{Error as ClapError, Parser as _};
-use database::{Database, DatabaseMode};
+use database::{Database, DatabaseMode, RestartMessage};
 use eth1::{Eth1Chain, Eth1Config};
-use eth1_api::Auth;
+use eth1_api::{Auth, Eth1ApiToMetrics};
 use features::Feature;
 use fork_choice_control::{StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
+use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
 use http_api::HttpApiConfig;
@@ -192,8 +193,6 @@ impl Context {
             blacklisted_blocks,
         } = self;
 
-        let StorageConfig { in_memory, .. } = storage_config;
-
         // Load keys early so we can validate `eth1_rpc_urls`.
         signer.load_keys_from_web3signer().await;
 
@@ -229,35 +228,17 @@ impl Context {
 
         let (restart_tx, restart_rx) = futures::channel::mpsc::unbounded();
 
-        let eth1_database = if in_memory {
-            Database::in_memory()
-        } else {
-            storage_config.eth1_database(restart_tx.clone())?
-        };
-
-        let eth1_chain = Eth1Chain::new(
-            chain_config.clone_arc(),
-            eth1_config.clone_arc(),
-            signer_snapshot.client().clone(),
-            eth1_database,
-            eth1_api_to_metrics_tx.clone(),
-            metrics_config.metrics.clone(),
-        )?;
-
-        eth1_chain.spawn_unfinalized_blocks_tracker_task()?;
-
         let anchor_checkpoint_provider = genesis_checkpoint_provider::<P>(
             &chain_config,
+            &eth1_config,
+            &storage_config,
             genesis_state_file,
             predefined_network,
             signer_snapshot.client(),
-            storage_config
-                .directories
-                .store_directory
-                .clone()
-                .unwrap_or_default(),
             genesis_state_download_url,
-            &eth1_chain,
+            &metrics_config,
+            eth1_api_to_metrics_tx.as_ref(),
+            &restart_tx,
         )
         .await?;
 
@@ -302,7 +283,6 @@ impl Context {
             network_config,
             anchor_checkpoint_provider,
             state_load_strategy,
-            eth1_chain,
             eth1_config,
             storage_config,
             builder_config,
@@ -789,20 +769,30 @@ fn handle_command<P: Preset>(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn genesis_checkpoint_provider<P: Preset>(
-    chain_config: &ChainConfig,
+    chain_config: &Arc<ChainConfig>,
+    eth1_config: &Arc<Eth1Config>,
+    storage_config: &StorageConfig,
     genesis_state_file: Option<PathBuf>,
     predefined_network: Option<PredefinedNetwork>,
     client: &Client,
-    store_directory: PathBuf,
     genesis_state_download_url: Option<RedactingUrl>,
-    eth1_chain: &Eth1Chain,
+    metrics_config: &MetricsConfig,
+    eth1_api_to_metrics_tx: Option<&UnboundedSender<Eth1ApiToMetrics>>,
+    restart_tx: &UnboundedSender<RestartMessage>,
 ) -> Result<AnchorCheckpointProvider<P>> {
     if let Some(file_path) = genesis_state_file {
         let bytes = fs_err::read(file_path)?;
-        let genesis_state = Arc::from_ssz(chain_config, bytes)?;
+        let genesis_state = Arc::from_ssz(chain_config.as_ref(), bytes)?;
         return Ok(AnchorCheckpointProvider::custom_from_genesis(genesis_state));
     }
+
+    let store_directory = storage_config
+        .directories
+        .store_directory
+        .clone()
+        .unwrap_or_default();
 
     if let Some(predefined_network) = predefined_network {
         return predefined_network
@@ -814,11 +804,33 @@ async fn genesis_checkpoint_provider<P: Preset>(
             .await;
     }
 
+    // Code that waits for genesis by tracking deposits starts here
+    // (may be removed in the future)
+
+    let eth1_database = if storage_config.in_memory {
+        Database::in_memory()
+    } else {
+        storage_config.eth1_database(restart_tx.clone())?
+    };
+
+    let eth1_chain = Eth1Chain::new(
+        chain_config.clone_arc(),
+        eth1_config.clone_arc(),
+        client.clone(),
+        eth1_database,
+        eth1_api_to_metrics_tx.cloned(),
+        metrics_config.metrics.clone(),
+    )?;
+
     let eth1_block_stream = pin!(eth1_chain.stream_blocks()?);
 
-    let genesis_state =
-        eth1::wait_for_genesis(chain_config, store_directory, eth1_block_stream, eth1_chain)
-            .await?;
+    let genesis_state = eth1::wait_for_genesis(
+        chain_config,
+        store_directory,
+        eth1_block_stream,
+        &eth1_chain,
+    )
+    .await?;
 
     Ok(AnchorCheckpointProvider::custom_from_genesis(Arc::new(
         genesis_state,
