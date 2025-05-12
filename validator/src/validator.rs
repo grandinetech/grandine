@@ -1262,11 +1262,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let own_messages = self.own_sync_committee_messages(&slot_head).await?;
 
         for (subcommittee_index, messages) in &own_messages {
-            info!(
-                "validators [{}] participating in sync subcommittee {subcommittee_index} in slot {}",
-                messages.iter().map(|m| m.validator_index).format(", "),
-                slot_head.slot(),
-            );
+            if !messages.is_empty() {
+                info!(
+                    "validators [{}] participating in sync subcommittee {subcommittee_index} in slot {}",
+                    messages.iter().map(|m| m.validator_index).format(", "),
+                    slot_head.slot(),
+                );
+            }
         }
 
         for (sync_subnet_id, messages) in own_messages {
@@ -1321,6 +1323,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 return;
             }
         };
+
+        if contributions.is_empty() {
+            return;
+        }
 
         info!(
             "validators [{}] aggregating in sync committee in slot {}",
