@@ -222,7 +222,6 @@ impl<P: Preset> StateCache<P> {
     }
 
     pub fn len(&self) -> Result<usize> {
-        panic!("no state cache len please");
         let mut state_info = vec![];
 
         let lengths = self
@@ -282,7 +281,8 @@ impl<P: Preset> StateCache<P> {
 
         self.try_lock_cache()?.retain(|block_root, state_map_lock| {
             info!("StateCache::prune try_lock_map 2 {block_root:?}");
-            let r = self.try_lock_map(state_map_lock, *block_root)
+            let r = self
+                .try_lock_map(state_map_lock, *block_root)
                 .ok()
                 .is_some_and(|state_map| !state_map.is_empty());
 

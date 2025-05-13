@@ -3072,7 +3072,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return state.clone_arc();
         }
 
-        log::info!("load beacon state {block_root:?} at slot {slot}\n{}", std::backtrace::Backtrace::force_capture());
+        log::info!(
+            "load beacon state {block_root:?} at slot {slot}\n{}",
+            std::backtrace::Backtrace::force_capture()
+        );
 
         let load_result = self
             .state_cache

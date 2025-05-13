@@ -256,8 +256,8 @@ impl From<Blocks> for BlockParameters {
             Blocks::HoleskyNonFinalityFull => Self {
                 first_slot: 3_710_944,
                 // last_slot: 3_711_110,
-                last_slot: 3_722_692,
-                // last_slot: 3_810_977,
+                // last_slot: 3_722_692,
+                last_slot: 3_810_977,
                 slot_width: 8,
             },
         }
@@ -370,9 +370,12 @@ fn run<P: Preset>(
 
     let anchor_state = beacon_state(first_slot, slot_width);
 
-    let database_dir = "/disk/workspace/test_db";
+    let database_dir = tempfile::Builder::new()
+        .prefix("ad_hoc_bench_db_")
+        .rand_bytes(10)
+        .tempdir()?;
 
-    // log::info!("database dir: {}", database_dir.path().display());
+    log::info!("database dir: {}", database_dir.path().display());
 
     let database = Database::persistent(
         "ad_hoc_bench_db",
@@ -430,8 +433,8 @@ fn run<P: Preset>(
     let time = start.elapsed().as_secs_f64();
 
     let head = controller.head().value;
-    // assert_eq!(head.block_root, last_block_root);
-    // assert_eq!(head.slot(), last_slot);
+    assert_eq!(head.block_root, last_block_root);
+    assert_eq!(head.slot(), last_slot);
 
     let time_per_block = time / block_count as f64;
     let time_per_slot = time / slot_count as f64;
