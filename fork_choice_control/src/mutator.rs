@@ -2855,14 +2855,14 @@ where
     pub fn print_collection_metrics(&self) {
         let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
 
-        match self.state_cache.len() {
-            Ok(len) => {
-                info!("collection_metrics state cache len: {len}");
-            }
-            Err(error) => {
-                error!("collection_metrics failed to get state cache len: {error}");
-            }
-        };
+        // match self.state_cache.len() {
+        //     Ok(len) => {
+        //         info!("collection_metrics state cache len: {len}");
+        //     }
+        //     Err(error) => {
+        //         error!("collection_metrics failed to get state cache len: {error}");
+        //     }
+        // };
 
         info!(
             "collection_metrics delayed_until_blobs: {}",

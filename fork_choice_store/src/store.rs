@@ -3072,6 +3072,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return state.clone_arc();
         }
 
+        log::info!("load beacon state {block_root:?} at slot {slot}\n{}", std::backtrace::Backtrace::force_capture());
+
         let load_result = self
             .state_cache
             .get_or_insert_with(block_root, slot, true, || {
@@ -3085,6 +3087,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 let loaded_state = stored_state_opt
                     .unwrap_or_else(|| self.load_beacon_state_by_state_transition(block_root));
+
+                log::info!("loaded beacon state {block_root:?} at slot {slot}");
 
                 Ok((loaded_state, None))
             });
