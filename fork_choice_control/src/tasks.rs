@@ -250,6 +250,7 @@ pub struct BlockAttestationsTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
+    pub block_root: H256,
     pub block: Arc<SignedBeaconBlock<P>>,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -260,6 +261,7 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             store_snapshot,
             mutator_tx,
             wait_group,
+            block_root,
             block,
             metrics,
         } = self;
@@ -275,7 +277,10 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             .combined_attestations()
             .map(|attestation| {
                 store_snapshot.validate_attestation(
-                    AttestationItem::verified(Arc::new(attestation), AttestationOrigin::Block),
+                    AttestationItem::verified(
+                        Arc::new(attestation),
+                        AttestationOrigin::Block(block_root),
+                    ),
                     true,
                 )
             })

@@ -72,6 +72,7 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
+    AttestationOrigin,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -1359,6 +1360,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         })
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn validate_attestation<I>(
         &self,
         attestation: AttestationItem<P, I>,
@@ -1433,10 +1435,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             state.clone_arc()
         } else {
-            let Some(state) = self.state_before_or_at_slot(
-                target.root,
-                misc::compute_start_slot_at_epoch::<P>(target.epoch),
-            ) else {
+            let mut target_state = self
+                .state_cache
+                .before_or_at_slot_in_cache_only(target.root, slot);
+
+            if let AttestationOrigin::Block(block_root) = attestation.origin {
+                if target_state.is_none() {
+                    // During state transition, all block attestations are validated against block state.
+                    // Same logic applies here.
+                    target_state = self
+                        .chain_link(block_root)
+                        .map(|chain_link| chain_link.state(self));
+                }
+            }
+
+            let Some(state) = target_state.or_else(|| {
+                self.state_before_or_at_slot(
+                    target.root,
+                    misc::compute_start_slot_at_epoch::<P>(target.epoch),
+                )
+            }) else {
                 return Ok(AttestationAction::DelayUntilBlock(attestation, target.root));
             };
 

@@ -39,12 +39,20 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Option<Arc<BeaconState<P>>> {
+        self.before_or_at_slot_in_cache_only(block_root, slot)
+            .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
+    }
+
+    pub fn before_or_at_slot_in_cache_only(
+        &self,
+        block_root: H256,
+        slot: Slot,
+    ) -> Option<Arc<BeaconState<P>>> {
         self.state_cache
             .before_or_at_slot(block_root, slot)
             .ok()
             .flatten()
             .map(|(state, _)| state)
-            .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
     }
 
     pub fn existing_state_at_slot<S: Storage<P>>(
