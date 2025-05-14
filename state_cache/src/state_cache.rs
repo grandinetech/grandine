@@ -213,11 +213,21 @@ impl<P: Preset> StateCache<P> {
         lengths.into_iter().sum::<usize>().pipe(Ok)
     }
 
-    pub fn prune(&self, last_pruned_slot: Slot, preserved_states: &HashSet<H256>) -> Result<()> {
+    pub fn prune(
+        &self,
+        last_pruned_slot: Slot,
+        preserved_older_states: &HashSet<H256>,
+        pruned_newer_states: &HashSet<H256>,
+    ) -> Result<()> {
         for (block_root, state_map_lock) in self.all_state_map_locks()? {
             let mut state_map = self.try_lock_map(&state_map_lock, block_root)?;
 
-            if preserved_states.contains(&block_root) {
+            if preserved_older_states.contains(&block_root) {
+                continue;
+            }
+
+            if pruned_newer_states.contains(&block_root) {
+                state_map.clear();
                 continue;
             }
 
@@ -380,7 +390,7 @@ mod tests {
     fn test_state_cache_prune() -> Result<()> {
         let cache = new_test_cache()?;
 
-        cache.prune(2, &[].into())?;
+        cache.prune(2, &[].into(), &[].into())?;
 
         assert_eq!(cache.before_or_at_slot(ROOT_1, 1)?, None);
         assert_eq!(cache.before_or_at_slot(ROOT_2, 2)?, None);
@@ -399,7 +409,7 @@ mod tests {
         cache.insert(ROOT_1, (state_at_slot(2), None))?;
         cache.insert(ROOT_2, (state_at_slot(2), None))?;
 
-        cache.prune(2, &[ROOT_1].into())?;
+        cache.prune(2, &[ROOT_1].into(), &[].into())?;
 
         assert_eq!(
             cache.before_or_at_slot(ROOT_1, 1)?,
