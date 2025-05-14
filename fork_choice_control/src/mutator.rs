@@ -1081,8 +1081,7 @@ where
                     None
                 }
                 Err(error) => {
-                    let origin = AttestationOrigin::<GossipId>::Block;
-                    warn!("attestation rejected (error: {error}, origin: {origin:?})");
+                    warn!("block attestation rejected (error: {error})");
                     None
                 }
             })
@@ -1689,7 +1688,7 @@ where
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Accept));
         }
 
-        self.maybe_spawn_block_attestations_task(wait_group, &block);
+        self.maybe_spawn_block_attestations_task(wait_group, block_root, &block);
 
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
@@ -2141,7 +2140,7 @@ where
             // because at least one slot must have passed since they were published.
             assert!(!matches!(
                 pending_attestation.origin,
-                AttestationOrigin::Own(_) | AttestationOrigin::Block,
+                AttestationOrigin::Own(_) | AttestationOrigin::Block(_),
             ));
 
             self.delayed_until_slot
@@ -2505,6 +2504,7 @@ where
     fn maybe_spawn_block_attestations_task(
         &self,
         wait_group: &W,
+        block_root: H256,
         block: &Arc<SignedBeaconBlock<P>>,
     ) {
         // `BlockAttestationsTask`s have a surprisingly large amount of overhead.
@@ -2517,6 +2517,7 @@ where
             store_snapshot: self.owned_store(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: wait_group.clone(),
+            block_root,
             block: block.clone_arc(),
             metrics: self.metrics.clone(),
         });

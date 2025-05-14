@@ -357,7 +357,7 @@ pub enum AttestationOrigin<I> {
         SubnetId,
         #[serde(skip)] OneshotSender<Result<ValidationOutcome>>,
     ),
-    Block,
+    Block(H256),
     // Some test cases in `consensus-spec-tests` contain data that cannot occur in normal operation.
     // `fork_choice` test cases contain bare aggregate attestations.
     // Normally they can only occur inside blocks or alongside aggregate selection proofs.
@@ -370,7 +370,7 @@ impl<I> AttestationOrigin<I> {
         match self {
             Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(_, sender) => (None, Some(sender)),
-            Self::Own(_) | Self::Block | Self::Test => (None, None),
+            Self::Own(_) | Self::Block(_) | Self::Test => (None, None),
         }
     }
 
@@ -380,7 +380,7 @@ impl<I> AttestationOrigin<I> {
             Self::Gossip(subnet_id, _) | Self::Own(subnet_id) | Self::Api(subnet_id, _) => {
                 Some(subnet_id)
             }
-            Self::Block | Self::Test => None,
+            Self::Block(_) | Self::Test => None,
         }
     }
 
@@ -402,14 +402,14 @@ impl<I> AttestationOrigin<I> {
 
     #[must_use]
     pub const fn is_from_block(&self) -> bool {
-        matches!(self, Self::Block)
+        matches!(self, Self::Block(_))
     }
 
     #[must_use]
     pub const fn validate_as_gossip(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) | Self::Test => true,
-            Self::Block => false,
+            Self::Block(_) => false,
         }
     }
 
@@ -417,7 +417,7 @@ impl<I> AttestationOrigin<I> {
     pub const fn must_be_singular(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) => true,
-            Self::Block | Self::Test => false,
+            Self::Block(_) | Self::Test => false,
         }
     }
 
@@ -430,7 +430,7 @@ impl<I> AttestationOrigin<I> {
     pub fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Api(_, _) | Self::Test => true,
-            Self::Block => false,
+            Self::Block(_) => false,
             Self::Own(_) => !Feature::TrustOwnAttestationSignatures.is_enabled(),
         }
     }
@@ -439,7 +439,7 @@ impl<I> AttestationOrigin<I> {
     pub const fn send_to_validator(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Api(_, _) => true,
-            Self::Own(_) | Self::Block | Self::Test => false,
+            Self::Own(_) | Self::Block(_) | Self::Test => false,
         }
     }
 
@@ -450,7 +450,7 @@ impl<I> AttestationOrigin<I> {
             Self::Gossip(_, _) => "Gossip",
             Self::Own(_) => "Own",
             Self::Api(_, _) => "Api",
-            Self::Block => "Block",
+            Self::Block(_) => "Block",
             Self::Test => "Test",
         }
     }

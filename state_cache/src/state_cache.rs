@@ -220,7 +220,13 @@ impl<P: Preset> StateCache<P> {
         pruned_newer_states: &HashSet<H256>,
     ) -> Result<()> {
         for (block_root, state_map_lock) in self.all_state_map_locks()? {
-            let mut state_map = self.try_lock_map(&state_map_lock, block_root)?;
+            let mut state_map = match self.try_lock_map(&state_map_lock, block_root) {
+                Ok(state_map) => state_map,
+                Err(error) => {
+                    warn!("failed to prune beacon state cache: {error:?}");
+                    continue;
+                }
+            };
 
             if preserved_older_states.contains(&block_root) {
                 continue;
