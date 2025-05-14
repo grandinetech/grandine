@@ -331,6 +331,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
                 .bytes()
                 .await?;
 
+            fs_err::create_dir_all(&store_directory)?;
             fs_err::tokio::write(genesis_state_path, &bytes).await?;
 
             bytes
