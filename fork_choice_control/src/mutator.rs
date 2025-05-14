@@ -1598,7 +1598,8 @@ where
             let storage = self.storage.clone_arc();
             let wait_group = wait_group.clone();
 
-            Builder::new()
+            if !unloaded.is_empty() {
+                Builder::new()
                 .name("store-unloader".to_owned())
                 .spawn(move || {
                     debug!("persisting unloaded old beacon states…");
@@ -1621,6 +1622,7 @@ where
 
                     drop(wait_group);
                 })?;
+            }
         }
 
         let processing_duration = insertion_time.duration_since(submission_time);

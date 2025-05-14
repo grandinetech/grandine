@@ -2502,10 +2502,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut to_persist = vec![];
 
         for segment_id in segment_ids {
+            let segment = &self.unfinalized[&segment_id];
+            let segment_last_slot = segment
+                .last_non_invalid_block()
+                .map(UnfinalizedBlock::slot)
+                .unwrap_or_else(|| segment.last_block().slot());
+            let far_ahead_non_canonical_segment =
+                segment_last_slot >= head_slot + P::SlotsPerEpoch::U64;
+
             for unfinalized_block in &mut self.unfinalized[&segment_id] {
                 let chain_link = &mut unfinalized_block.chain_link;
 
-                if head_slot.saturating_sub(chain_link.slot()) < unfinalized_states_in_memory {
+                if far_ahead_non_canonical_segment {
+                    // Keep only one epoch of states in memory for far ahead (relative to head) non-canonical chains
+                    if chain_link.slot() + P::SlotsPerEpoch::U64 > segment_last_slot {
+                        break;
+                    }
+                } else if chain_link.slot() + unfinalized_states_in_memory > head_slot {
                     break;
                 }
 
@@ -2610,7 +2623,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .saturating_sub(retain_slots)
             .max(self.finalized_slot());
 
-        let fork_tip_block_roots = if preserve_unfinalized_fork_tips {
+        let preserved_older_states = if preserve_unfinalized_fork_tips {
             self.unfinalized_fork_tips()
                 .map(|chain_link| chain_link.block_root)
                 .collect()
@@ -2618,7 +2631,39 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             [].into()
         };
 
-        if let Err(error) = self.state_cache.prune(prune_slot, &fork_tip_block_roots) {
+        let head_slot = self.head().slot();
+        let mut pruned_newer_states = StdHashSet::new();
+        let slots_to_retain = P::SlotsPerEpoch::U64;
+
+        let far_ahead_non_canonical_segments = self
+            .unfinalized
+            .values()
+            .map(|segment| {
+                (
+                    segment,
+                    segment
+                        .last_non_invalid_block()
+                        .map(UnfinalizedBlock::slot)
+                        .unwrap_or_else(|| segment.last_block().slot()),
+                )
+            })
+            .filter(|(_, last_slot)| *last_slot >= head_slot + slots_to_retain);
+
+        for (segment, last_slot) in far_ahead_non_canonical_segments {
+            for unfinalized_block in segment {
+                let chain_link = &unfinalized_block.chain_link;
+
+                if chain_link.slot() + slots_to_retain < last_slot {
+                    pruned_newer_states.insert(chain_link.block_root);
+                }
+            }
+        }
+
+        let prune_result =
+            self.state_cache
+                .prune(prune_slot, &preserved_older_states, &pruned_newer_states);
+
+        if let Err(error) = prune_result {
             error!("failed to prune beacon state cache: {error:?}");
         }
     }

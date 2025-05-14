@@ -73,8 +73,17 @@ impl<P: Preset> StateCacheProcessor<P> {
             .get_or_process_with(block_root, slot, options, f)
     }
 
-    pub fn prune(&self, last_pruned_slot: Slot, preserved_states: &HashSet<H256>) -> Result<()> {
-        self.state_cache.prune(last_pruned_slot, preserved_states)
+    pub fn prune(
+        &self,
+        last_pruned_slot: Slot,
+        preserved_older_states: &HashSet<H256>,
+        pruned_newer_states: &HashSet<H256>,
+    ) -> Result<()> {
+        self.state_cache.prune(
+            last_pruned_slot,
+            preserved_older_states,
+            pruned_newer_states,
+        )
     }
 
     pub fn try_state_at_slot<S: Storage<P>>(
