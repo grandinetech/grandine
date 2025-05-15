@@ -8,7 +8,6 @@ use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
 use logging::info_with_peers;
 use p2p::NetworkConfig;
-use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
 use ssz::Uint256;
 use types::{
@@ -21,6 +20,7 @@ use validator::ValidatorApiConfig;
 
 use crate::{
     commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
+    MetricsConfig, StorageConfig,
 };
 
 #[expect(

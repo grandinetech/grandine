@@ -47,6 +47,14 @@ impl<N: ArrayLength<u8>> Debug for ByteVector<N> {
     }
 }
 
+impl<N: ArrayLength<u8>> From<&[u8]> for ByteVector<N> {
+    fn from(value: &[u8]) -> Self {
+        let bytes: &GenericArray<u8, N> = value.into();
+        let bytes: ContiguousVector<u8, N> = bytes.clone().into();
+        Self { bytes }
+    }
+}
+
 impl<'de, N: ArrayLength<u8>> Deserialize<'de> for ByteVector<N> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         serde_utils::prefixed_hex_or_bytes_generic_array::deserialize(deserializer)
