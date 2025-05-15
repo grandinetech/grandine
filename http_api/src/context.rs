@@ -241,14 +241,19 @@ impl<P: Preset> Context<P> {
             fc_to_attestation_verifier_rx,
         );
 
-        let attestation_agg_pool =
-            AttestationAggPool::new(controller.clone_arc(), dedicated_executor.clone_arc(), None);
+        let attestation_agg_pool = AttestationAggPool::new(
+            controller.clone_arc(),
+            dedicated_executor.clone_arc(),
+            None,
+            None,
+        );
 
         let sync_committee_agg_pool = SyncCommitteeAggPool::new(
             dedicated_executor.clone_arc(),
             controller.clone_arc(),
             Some(pool_to_liveness_tx),
             pool_to_p2p_tx.clone(),
+            None,
             None,
         );
 
@@ -306,6 +311,7 @@ impl<P: Preset> Context<P> {
             signer,
             slashing_protector,
             sync_committee_agg_pool.clone_arc(),
+            None,
             None,
             validator_channels,
         );

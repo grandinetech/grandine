@@ -49,6 +49,7 @@ transition_functions = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
+validator_statistics = { workspace = true }
 
 [dev-dependencies]
 test-case = { workspace = true }

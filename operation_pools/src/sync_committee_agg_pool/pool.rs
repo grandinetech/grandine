@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use bls::traits::Signature as _;
-use helper_functions::accessors;
+use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use log::debug;
 use prometheus_metrics::Metrics;
@@ -18,6 +18,7 @@ use types::{
     preset::Preset,
     traits::BeaconState as _,
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::sync_committee_agg_pool::types::{
     Aggregate, AggregateMap, ContributionData, SyncCommitteeMessageMap, SyncCommitteeMessageSet,
@@ -27,15 +28,17 @@ pub struct Pool<P: Preset> {
     aggregates: RwLock<AggregateMap<P>>,
     aggregator_contributions: RwLock<HashSet<(ValidatorIndex, Slot, SubcommitteeIndex)>>,
     sync_committee_messages: RwLock<SyncCommitteeMessageMap>,
+    validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
 
 impl<P: Preset> Pool<P> {
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(validator_statistics: Option<Arc<ValidatorStatistics>>) -> Self {
         Self {
             aggregates: RwLock::new(AggregateMap::new()),
             aggregator_contributions: RwLock::new(HashSet::new()),
             sync_committee_messages: RwLock::new(SyncCommitteeMessageMap::new()),
+            validator_statistics,
         }
     }
 
@@ -162,11 +165,18 @@ impl<P: Preset> Pool<P> {
         contribution_data: ContributionData,
         messages: impl IntoIterator<Item = SyncCommitteeMessage> + Send,
     ) {
+        let epoch = misc::compute_epoch_at_slot::<P>(contribution_data.slot);
         let pool_messages = self.sync_committee_messages(contribution_data).await;
         let mut pool_messages = pool_messages.write().await;
 
         for message in messages {
             pool_messages.insert(message);
+
+            if let Some(validator_statistics) = self.validator_statistics.as_ref() {
+                validator_statistics
+                    .track_sync_committee_vote(epoch, message.into())
+                    .await;
+            }
         }
     }
 

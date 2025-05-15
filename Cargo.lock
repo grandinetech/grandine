@@ -3924,6 +3924,7 @@ dependencies = [
  "types",
  "unwrap_none",
  "validator",
+ "validator_statistics",
 ]
 
 [[package]]
@@ -5931,6 +5932,7 @@ dependencies = [
  "tynm",
  "typenum",
  "types",
+ "validator_statistics",
 ]
 
 [[package]]
@@ -6013,6 +6015,7 @@ dependencies = [
  "tynm",
  "typenum",
  "types",
+ "validator_statistics",
 ]
 
 [[package]]
@@ -7140,6 +7143,7 @@ dependencies = [
  "tokio",
  "types",
  "validator",
+ "validator_statistics",
 ]
 
 [[package]]
@@ -9117,6 +9121,7 @@ dependencies = [
  "tynm",
  "typenum",
  "types",
+ "validator_statistics",
  "zeroize",
 ]
 
@@ -9137,6 +9142,26 @@ dependencies = [
  "typenum",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "validator_statistics"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bls",
+ "eth1_api",
+ "fork_choice_control",
+ "helper_functions",
+ "log",
+ "num-traits",
+ "prometheus_metrics",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "tynm",
+ "typenum",
+ "types",
 ]
 
 [[package]]

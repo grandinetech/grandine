@@ -2,7 +2,7 @@
 
 use core::error::Error as StdError;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
     time::SystemTime,
 };
@@ -72,11 +72,12 @@ use types::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
         },
-        primitives::{Epoch, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, Slot, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::{
     messages::{ApiToValidator, InternalMessage},
@@ -139,7 +140,6 @@ pub struct Validator<P: Preset, W: Wait> {
     own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions<P>,
     published_own_sync_committee_messages_for: Option<SlotHead<P>>,
     own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
-    validator_votes: HashMap<Epoch, Vec<ValidatorVote>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
     event_channels: Arc<EventChannels>,
@@ -153,6 +153,7 @@ pub struct Validator<P: Preset, W: Wait> {
         BTreeMap<Epoch, BTreeMap<PublicKeyBytes, (ValidatorRegistrationV1, Signature)>>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     metrics: Option<Arc<Metrics>>,
+    validator_statistics: Option<Arc<ValidatorStatistics>>,
     internal_tx: UnboundedSender<InternalMessage>,
     internal_rx: UnboundedReceiver<InternalMessage>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
@@ -175,6 +176,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         metrics: Option<Arc<Metrics>>,
+        validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P, W>,
     ) -> Self {
         let Channels {
@@ -213,7 +215,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions::default(),
             published_own_sync_committee_messages_for: None,
             own_aggregators: BTreeMap::new(),
-            validator_votes: HashMap::new(),
             builder_api,
             doppelganger_protection,
             event_channels,
@@ -226,6 +227,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             subnet_service_tx,
             registered_validators: BTreeMap::new(),
             metrics,
+            validator_statistics,
             internal_rx,
             internal_tx,
             validator_to_liveness_tx,
@@ -273,7 +275,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
-                            .insert_attestation(wait_group, &attestation);
+                            .insert_attestation(wait_group, &attestation, None);
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -543,11 +545,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ValidatorToLiveness::Epoch(current_epoch).send(validator_to_liveness_tx);
             }
 
-            self.process_validator_votes(current_epoch)?;
             self.discard_old_registered_validators(current_epoch);
             self.block_producer.discard_old_data(current_epoch).await;
             self.own_sync_committee_subscriptions
                 .discard_old_subscriptions(current_epoch);
+
+            if let Some(validator_statistics) = self.validator_statistics.as_ref() {
+                let validator_statistics = validator_statistics.clone_arc();
+                let controller = self.controller.clone_arc();
+
+                tokio::spawn(async move {
+                    if controller.is_forward_synced() {
+                        validator_statistics
+                            .report_validator_performance(&controller, current_epoch)
+                            .await;
+                    }
+
+                    validator_statistics.prune(current_epoch).await;
+                });
+            }
         }
 
         if self.last_registration_epoch.is_none() {
@@ -1047,8 +1063,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
                 .send(&self.p2p_tx);
 
-            self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), &attestation);
+            self.attestation_agg_pool.insert_attestation(
+                wait_group.clone(),
+                &attestation,
+                Some(*validator_index),
+            );
         }
 
         prometheus_metrics::stop_and_record(timer);
@@ -1223,7 +1242,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let aggregate_and_proof = Arc::new(aggregate_and_proof);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), &attestation);
+                .insert_attestation(wait_group.clone(), &attestation, None);
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
         }
@@ -1760,26 +1779,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn discard_previous_slot_attestations(&mut self) {
-        if let Some(own_attestations) = self.own_singular_attestations.take() {
-            for own_attestation in own_attestations {
-                let AttestationData {
-                    beacon_block_root,
-                    slot,
-                    ..
-                } = own_attestation.attestation.data();
-
-                let vote = ValidatorVote {
-                    validator_index: own_attestation.validator_index,
-                    beacon_block_root,
-                    slot,
-                };
-
-                self.validator_votes
-                    .entry(misc::compute_epoch_at_slot::<P>(slot))
-                    .or_default()
-                    .push(vote);
-            }
-        }
+        self.own_singular_attestations.take();
     }
 
     fn discard_old_registered_validators(&mut self, current_epoch: Epoch) {
@@ -1788,137 +1788,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         {
             self.registered_validators = self.registered_validators.split_off(&epoch_boundary);
         }
-    }
-
-    #[expect(clippy::too_many_lines)]
-    fn process_validator_votes(&mut self, current_epoch: Epoch) -> Result<()> {
-        let Some(epoch_to_check) = misc::previous_epoch(current_epoch).checked_sub(1) else {
-            return Ok(());
-        };
-
-        // Take beacon blocks from `epoch_to_check` and the epoch before it in case the first
-        // slot(s) of `epoch_to_check` are empty.
-        let start_slot = Self::start_of_epoch(misc::previous_epoch(epoch_to_check));
-        let end_slot = Self::start_of_epoch(misc::previous_epoch(current_epoch));
-
-        // We assume that stored blocks from epoch before previous do reflect canonical chain
-        let canonical_blocks_with_roots = self.controller.blocks_by_range(start_slot..end_slot)?;
-
-        let root_to_block_map = canonical_blocks_with_roots
-            .iter()
-            .map(|block_with_root| (block_with_root.root, block_with_root))
-            .collect::<HashMap<_, _>>();
-
-        let slot_to_block_map = canonical_blocks_with_roots
-            .iter()
-            .map(|block_with_root| (block_with_root.block.message().slot(), block_with_root))
-            .collect::<HashMap<_, _>>();
-
-        let Some(validator_votes) = self.validator_votes.remove(&epoch_to_check) else {
-            debug!("no own validators voted in epoch {epoch_to_check}");
-            return Ok(());
-        };
-
-        let mut vote_summaries: BTreeMap<VoteSummary, BTreeSet<ValidatorIndex>> = BTreeMap::new();
-
-        for vote in &validator_votes {
-            let voter_index = vote.validator_index;
-            let voted_root = vote.beacon_block_root;
-            let voted_slot = vote.slot;
-
-            let canonical_block_at_slot_or_closest = (start_slot..=voted_slot)
-                .rev()
-                .find_map(|s| slot_to_block_map.get(&s));
-
-            let summary = match canonical_block_at_slot_or_closest {
-                Some(canonical_block) if canonical_block.root == voted_root => VoteSummary::Correct,
-                Some(canonical_block) => {
-                    let mut ancestors =
-                        core::iter::successors(Some(canonical_block), |block_with_root| {
-                            root_to_block_map.get(&block_with_root.block.message().parent_root())
-                        });
-
-                    let canonical_ancestor =
-                        ancestors.find(|block_with_root| block_with_root.root == voted_root);
-                    let canonical_root = canonical_block.root;
-
-                    if let Some(&ancestor_with_root) = canonical_ancestor {
-                        let ancestor_slot = ancestor_with_root.block.message().slot();
-                        let slot_diff = voted_slot - ancestor_slot;
-
-                        VoteSummary::Outdated {
-                            voted_root,
-                            voted_slot,
-                            canonical_root,
-                            slot_diff,
-                        }
-                    } else {
-                        VoteSummary::NonCanonical {
-                            voted_root,
-                            voted_slot,
-                            canonical_root,
-                        }
-                    }
-                }
-                None => VoteSummary::MissingBlock {
-                    voted_root,
-                    voted_slot,
-                },
-            };
-
-            vote_summaries
-                .entry(summary)
-                .or_default()
-                .insert(voter_index);
-        }
-
-        for (summary, validator_indices) in vote_summaries {
-            match summary {
-                VoteSummary::Correct => {
-                    let total_correct = validator_indices.len();
-                    let total = validator_votes.len();
-
-                    debug!(
-                        "{total_correct} of {total} validators \
-                         voted correctly in epoch {epoch_to_check}",
-                    );
-                }
-                VoteSummary::MissingBlock {
-                    voted_slot,
-                    voted_root,
-                } => {
-                    warn!(
-                        "cannot find beacon block that validators {validator_indices:?} voted for \
-                         at slot {voted_slot} (voted for block {voted_root:?})",
-                    );
-                }
-                VoteSummary::NonCanonical {
-                    voted_slot,
-                    voted_root,
-                    canonical_root,
-                } => {
-                    warn!(
-                        "validators {validator_indices:?} voted for \
-                         non-canonical block {voted_root:?} at slot {voted_slot} \
-                         (expected to vote for block {canonical_root:?})",
-                    );
-                }
-                VoteSummary::Outdated {
-                    voted_slot,
-                    voted_root,
-                    canonical_root,
-                    slot_diff,
-                } => {
-                    warn!(
-                        "validators {validator_indices:?} voted for \
-                         outdated head {voted_root:?} (by {slot_diff} slots) at slot {voted_slot} \
-                         (expected to vote for block {canonical_root:?})",
-                    );
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn spawn_slashing_protection_pruning(&self, current_epoch: Epoch) {
@@ -2058,10 +1927,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
     }
 
-    const fn start_of_epoch(epoch: Epoch) -> Slot {
-        misc::compute_start_slot_at_epoch::<P>(epoch)
-    }
-
     fn refresh_signer_keys(&self) {
         let signer = self.signer.clone_arc();
         let head_state = self.controller.head_state().value;
@@ -2185,42 +2050,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .unwrap_or(0),
             );
 
-            metrics.set_collection_length(
-                module_path!(),
-                &type_name,
-                "validator_votes",
-                self.validator_votes.values().map(Vec::len).sum(),
-            );
-
             self.block_producer.track_collection_metrics().await;
         }
+
+        if let Some(validator_statistics) = self.validator_statistics.as_ref() {
+            validator_statistics.track_collection_metrics().await;
+        }
     }
-}
-
-struct ValidatorVote {
-    validator_index: ValidatorIndex,
-    beacon_block_root: H256,
-    slot: Slot,
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum VoteSummary {
-    Correct,
-    MissingBlock {
-        voted_slot: Slot,
-        voted_root: H256,
-    },
-    NonCanonical {
-        voted_slot: Slot,
-        voted_root: H256,
-        canonical_root: H256,
-    },
-    Outdated {
-        voted_slot: Slot,
-        voted_root: H256,
-        canonical_root: H256,
-        slot_diff: u64,
-    },
 }
 
 // Use `BTreeMap` to make grouping deterministic for snapshot testing.

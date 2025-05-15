@@ -107,6 +107,7 @@ struct Context {
     slashing_protection_history_limit: u64,
     validator_enabled: bool,
     blacklisted_blocks: HashSet<H256>,
+    report_validator_performance: bool,
 }
 
 impl Context {
@@ -191,6 +192,7 @@ impl Context {
             slashing_protection_history_limit,
             validator_enabled,
             blacklisted_blocks,
+            report_validator_performance,
         } = self;
 
         // Load keys early so we can validate `eth1_rpc_urls`.
@@ -291,6 +293,7 @@ impl Context {
             http_api_config,
             metrics_config,
             blacklisted_blocks,
+            report_validator_performance,
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
             restart_tx,
@@ -383,6 +386,7 @@ fn try_main() -> Result<()> {
         validator_api_config,
         kzg_backend,
         blacklisted_blocks,
+        report_validator_performance,
     } = config;
 
     features.into_iter().for_each(Feature::enable);
@@ -536,6 +540,7 @@ fn try_main() -> Result<()> {
         slashing_protection_history_limit,
         validator_enabled,
         blacklisted_blocks,
+        report_validator_performance,
     };
 
     match context.chain_config.preset_base {

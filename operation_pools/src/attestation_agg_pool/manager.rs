@@ -23,6 +23,7 @@ use types::{
     },
     preset::Preset,
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::{
     attestation_agg_pool::{
@@ -44,6 +45,7 @@ pub struct Manager<P: Preset, W: Wait> {
     dedicated_executor: Arc<DedicatedExecutor>,
     metrics: Option<Arc<Metrics>>,
     pool: Arc<Pool<P>>,
+    validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
 
 impl<P: Preset, W: Wait> Manager<P, W> {
@@ -52,6 +54,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         controller: ApiController<P, W>,
         dedicated_executor: Arc<DedicatedExecutor>,
         metrics: Option<Arc<Metrics>>,
+        validator_statistics: Option<Arc<ValidatorStatistics>>,
     ) -> Arc<Self> {
         let chain_config = controller.chain_config().clone_arc();
 
@@ -60,6 +63,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             dedicated_executor,
             metrics,
             pool: Arc::new(Pool::new(chain_config)),
+            validator_statistics,
         })
     }
 
@@ -149,14 +153,25 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
-    pub fn insert_attestation(&self, wait_group: W, attestation: &CombinedAttestation<P>) {
+    pub fn insert_attestation(
+        &self,
+        wait_group: W,
+        attestation: &CombinedAttestation<P>,
+        mut attester_index: Option<ValidatorIndex>,
+    ) {
+        if let CombinedAttestation::Single(single_attestation) = attestation {
+            attester_index = Some(single_attestation.attester_index);
+        }
+
         match convert_attestation_for_pool(&self.controller, (*attestation).clone()) {
             Ok(attestation) => {
                 self.spawn_detached(InsertAttestationTask {
                     wait_group,
                     pool: self.pool.clone_arc(),
                     attestation: Arc::new(attestation),
+                    attester_index,
                     metrics: self.metrics.clone(),
+                    validator_statistics: self.validator_statistics.clone(),
                 });
             }
             Err(error) => match error.downcast_ref::<conversion::Error<P>>() {
@@ -200,6 +215,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             controller: self.controller.clone_arc(),
             pubkeys,
             prepared_proposer_indices,
+            validator_statistics: self.validator_statistics.clone(),
         });
     }
 

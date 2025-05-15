@@ -55,6 +55,7 @@ use types::{
 use validator::{
     run_validator_api, Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig,
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::misc::{MetricsConfig, StorageConfig};
 
@@ -90,6 +91,7 @@ pub async fn run_after_genesis<P: Preset>(
     http_api_config: HttpApiConfig,
     metrics_config: MetricsConfig,
     blacklisted_blocks: HashSet<H256>,
+    report_validator_performance: bool,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
     restart_tx: UnboundedSender<RestartMessage>,
@@ -377,12 +379,16 @@ pub async fn run_after_genesis<P: Preset>(
 
     let data_dumper = Arc::new(DataDumper::new(&controller.chain_config().config_name)?);
 
+    let validator_statistics =
+        report_validator_performance.then(|| Arc::new(ValidatorStatistics::new(metrics.clone())));
+
     let mut block_sync_service = BlockSyncService::new(
         chain_config.clone_arc(),
         block_sync_database,
         anchor_checkpoint_provider.clone(),
         controller.clone_arc(),
         metrics.clone(),
+        validator_statistics.clone(),
         block_sync_service_channels,
         back_sync_enabled,
         loaded_from_remote,
@@ -528,6 +534,7 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         dedicated_executor_normal_priority.clone_arc(),
         metrics.clone(),
+        validator_statistics.clone(),
     );
 
     let sync_committee_agg_pool = SyncCommitteeAggPool::new(
@@ -536,6 +543,7 @@ pub async fn run_after_genesis<P: Preset>(
         pool_to_liveness_tx,
         pool_to_p2p_tx.clone(),
         metrics.clone(),
+        validator_statistics.clone(),
     );
 
     let (bls_to_execution_change_pool, bls_to_execution_change_pool_service) =
@@ -590,6 +598,7 @@ pub async fn run_after_genesis<P: Preset>(
         slashing_protector,
         sync_committee_agg_pool.clone_arc(),
         metrics.clone(),
+        validator_statistics,
         validator_channels,
     );
 
