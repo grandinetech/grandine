@@ -1,0 +1,24 @@
+[package]
+name = 'csharp_grandine'
+edition = { workspace = true }
+
+[lib]
+path = 'src/lib.rs'
+
+[lints.rust]
+non_upper_case_globals = 'allow'
+non_camel_case_types = 'allow'
+
+[build-dependencies]
+bindgen = { workspace = true }
+csbindgen = { workspace = true }
+toml = { workspace = true }
+c_grandine = { workspace = true, default-features = false }
+
+[features]
+default = ['blst']
+arkworks = ['c_grandine/arkworks']
+blst = ['c_grandine/blst']
+constantine = ['c_grandine/constantine']
+mcl = ['c_grandine/mcl']
+zkcrypto = ['c_grandine/zkcrypto']

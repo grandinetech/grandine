@@ -53,7 +53,7 @@ const SUPPORTED_REQUEST_TYPES: &[&str; 3] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum RequestType {
+pub enum RequestType {
     Deposits,
     Withdrawals,
     Consolidations,
@@ -69,6 +69,16 @@ impl RequestType {
         }
     }
 
+    #[must_use]
+    pub const fn request_type_byte(self) -> u8 {
+        match self {
+            Self::Deposits => 0x00,
+            Self::Withdrawals => 0x01,
+            Self::Consolidations => 0x02,
+        }
+    }
+
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Deposits => "deposit",
@@ -78,8 +88,21 @@ impl RequestType {
     }
 }
 
+impl TryFrom<u8> for RequestType {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Self::Deposits),
+            0x01 => Ok(Self::Withdrawals),
+            0x02 => Ok(Self::Consolidations),
+            v => Err(v),
+        }
+    }
+}
+
 /// [`ExecutionPayloadV1`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#executionpayloadv1)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV1<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
@@ -180,7 +203,7 @@ impl<P: Preset> From<ExecutionPayloadV1<P>> for BellatrixExecutionPayload<P> {
 }
 
 /// [`ExecutionPayloadV2`](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#executionpayloadv2)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV2<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
@@ -290,7 +313,7 @@ impl<P: Preset> From<ExecutionPayloadV2<P>> for CapellaExecutionPayload<P> {
 }
 
 /// [`ExecutionPayloadV3`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#executionpayloadv3)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV3<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
@@ -411,8 +434,8 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
-/// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/cancun.md#blobsbundlev1)
-#[derive(Deserialize, Serialize)]
+/// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobsBundleV1<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
@@ -421,7 +444,7 @@ pub struct BlobsBundleV1<P: Preset> {
 }
 
 /// [`BlobsBundleV2`](https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#blobsbundlev2)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobsBundleV2<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
@@ -488,7 +511,7 @@ impl<P: Preset> From<EngineGetPayloadV1Response<P>> for WithBlobsAndMev<Executio
 ///
 /// [`engine_getPayloadV2` response]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#response-2
 /// [`execution_payload`]:            #structfield.execution_payload
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV2Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV2<P>,
@@ -513,7 +536,7 @@ impl<P: Preset> From<EngineGetPayloadV2Response<P>> for WithBlobsAndMev<Executio
 ///
 /// [`engine_getPayloadV3` response]: https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#response-2
 /// [`execution_payload`]:            #structfield.execution_payload
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV3Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
@@ -551,7 +574,7 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV4Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
@@ -591,7 +614,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV5Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
@@ -790,7 +813,8 @@ impl From<PayloadStatus> for PayloadStatusV1 {
     }
 }
 
-#[cfg_attr(test, derive(Clone, Default, Debug, Eq, PartialEq))]
+#[cfg_attr(test, derive(Default, Debug, Eq, PartialEq))]
+#[derive(Clone)]
 pub struct RawExecutionRequests<P: Preset>(
     ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
     ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
@@ -984,14 +1008,14 @@ impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "")]
 pub struct BlobAndProofV1<P: Preset> {
     pub blob: Blob<P>,
     pub proof: KzgProof,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobAndProofV2<P: Preset> {
     pub blob: Blob<P>,

@@ -1,0 +1,45 @@
+[package]
+name = 'c_grandine'
+edition = { workspace = true }
+
+[lib]
+name = 'grandine'
+crate-type = ['staticlib', 'cdylib']
+
+[dependencies]
+allocator = { workspace = true }
+anyhow = { workspace = true }
+bls = { workspace = true }
+clap = { workspace = true }
+eth1_api = { workspace = true, features = ['embed'] }
+ethereum-types = { workspace = true }
+execution_engine = { workspace = true }
+generic-array = { workspace = true }
+hex = { workspace = true }
+kzg_utils = { workspace = true }
+runtime = { workspace = true, features = [
+    'network-mainnet',
+    'network-sepolia',
+    'network-hoodi',
+    'embed'
+] }
+tracing = { workspace = true }
+primitive-types = { workspace = true }
+ssz = { workspace = true }
+typenum = { workspace = true }
+try_from_iterator = { workspace = true }
+types = { workspace = true }
+web3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+cbindgen = { workspace = true }
+
+[features]
+default = ['blst']
+arkworks = ['kzg_utils/arkworks']
+blst = ['bls/blst', 'kzg_utils/blst']
+constantine = ['kzg_utils/constantine']
+mcl = ['kzg_utils/mcl']
+zkcrypto = ['bls/zkcrypto', 'kzg_utils/zkcrypto']

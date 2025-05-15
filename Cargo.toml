@@ -6,6 +6,8 @@ members = [
     'attestation_verifier',
     'benches',
     'binary_utils',
+    'bindings/c',
+    'bindings/csharp',
     'block_producer',
     'bls',
     'bls/bls-blst',
@@ -296,6 +298,7 @@ axum = { version = '0.8' }
 axum-extra = { version = '0.12', features = ['typed-header', 'query'] }
 base64 = '0.22'
 bincode = '1'
+bindgen = '0.72'
 bit_field = '0.10'
 bitvec = '1'
 bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
@@ -308,6 +311,7 @@ byteorder = '1'
 bytes = '1'
 bytesize = { version = '2', features = ['serde'] }
 cached = '0.56'
+cbindgen = '0.29'
 chrono = '0.4'
 clap = { version = '4', features = ['derive'] }
 const-hex = '1.14'
@@ -316,6 +320,7 @@ constant_time_eq = '0.4'
 criterion = '0.7'
 crossbeam-skiplist = '0.1'
 crossbeam-utils = '0.8'
+csbindgen = '1.9'
 ctr = { version = '0.9', features = ['zeroize'] }
 darling = '0.21'
 dashmap = '6.1'
@@ -457,6 +462,7 @@ tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal'
 tokio-io-timeout = '1'
 tokio-stream = { version = '0.1', features = ['sync'] }
 tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
+toml = '0.5'
 tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
@@ -489,7 +495,9 @@ bls-blst = { path = 'bls/bls-blst' }
 bls-core = { path = 'bls/bls-core' }
 bls-zkcrypto = { path = 'bls/bls-zkcrypto' }
 builder_api = { path = 'builder_api' }
+c_grandine = { path = 'bindings/c', default-features = false }
 clock = { path = 'clock' }
+csharp_grandine = { path = 'bindings/csharp' }
 data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
 debug_info = { path = 'debug_info' }

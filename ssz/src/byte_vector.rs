@@ -47,6 +47,23 @@ impl<N: ArrayLength<u8>> Debug for ByteVector<N> {
     }
 }
 
+impl<N: ArrayLength<u8>> TryFrom<&[u8]> for ByteVector<N> {
+    type Error = ReadError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let expected = N::USIZE;
+        let actual = value.len();
+
+        if expected != actual {
+            return Err(ReadError::VectorSizeMismatch { expected, actual });
+        }
+
+        let bytes: &GenericArray<u8, N> = value.into();
+        let bytes: ContiguousVector<u8, N> = bytes.clone().into();
+        Ok(Self { bytes })
+    }
+}
+
 impl<'de, N: ArrayLength<u8>> Deserialize<'de> for ByteVector<N> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         serde_utils::prefixed_hex_or_bytes_generic_array::deserialize(deserializer)
