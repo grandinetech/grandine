@@ -42,12 +42,6 @@ use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
 use reqwest::header::HeaderValue;
-use runtime::{
-    MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
-    DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
-    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS,
-    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
-};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use signer::Web3SignerConfig;
@@ -75,9 +69,14 @@ use crate::{
         self, CONFIG_FILE, DEPOSIT_CONTRACT_BLOCK_FILE, GENESIS_STATE_FILE, PLAIN_BOOTNODES_FILE,
     },
     consts::GRANDINE_DONATION_ADDRESS,
+    default_network_config,
     grandine_config::GrandineConfig,
     predefined_network::PredefinedNetwork,
     validators::Validators,
+    MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
+    DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
+    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
 };
 
 /// Grandine Team <info@grandine.io>
@@ -594,7 +593,7 @@ impl NetworkConfigOptions {
         let mut network_config = network
             .predefined_network()
             .map(PredefinedNetwork::network_config)
-            .unwrap_or_else(runtime::default_network_config);
+            .unwrap_or_else(default_network_config);
 
         network_config.disable_peer_scoring = disable_peer_scoring;
         network_config.disable_quic_support = disable_quic;
