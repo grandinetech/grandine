@@ -8,8 +8,9 @@ use fork_choice_control::{
     SlotByStateRoot, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
 use logging::{info_with_peers, warn_with_peers};
-use runtime::StorageConfig;
 use types::preset::Preset;
+
+use crate::StorageConfig;
 
 #[derive(Default, Debug)]
 struct EntriesInfo {

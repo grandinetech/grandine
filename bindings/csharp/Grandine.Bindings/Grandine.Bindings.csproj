@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Grandine</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>Grandine</Authors>
+    <Copyright>Grandine, MB (Lithuania)</Copyright>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PackageId>Grandine.Bindings</PackageId>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <IncludeSymbols>true</IncludeSymbols>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/grandinetech/grandine</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\**" Pack="true">
+      <PackagePath>runtimes\%(RecursiveDir)native\%(Filename)%(Extension)</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" Version="8.4.0" />
+    <PackageReference Include="Nethermind.Numerics.Int256" Version="1.3.6" />
+    <PackageReference Include="Nethermind.ReferenceAssemblies" Version="1.33.1" />
+  </ItemGroup>
+
+  <Target Name="Generate csharp bindings" BeforeTargets="Compile">
+    <Exec Command="cargo build" />
+  </Target>
+</Project>

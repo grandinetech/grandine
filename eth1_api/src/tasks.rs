@@ -34,56 +34,63 @@ pub fn spawn_exchange_capabilities_and_versions_task(
 }
 
 async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
-    let params = vec![serde_json::to_value(CAPABILITIES)?];
-    let method = "engine_exchangeCapabilities";
+    #[cfg(feature = "embed")]
+    return Ok(());
 
-    for endpoint in eth1_api.endpoints.endpoints_for_request(None) {
-        let _timer = eth1_api.metrics.as_ref().map(|metrics| {
-            prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
-        });
+    #[cfg(not(feature = "embed"))]
+    {
+        let params = vec![serde_json::to_value(CAPABILITIES)?];
+        let method = "engine_exchangeCapabilities";
 
-        let api = eth1_api.build_api_for_request(endpoint);
+        for endpoint in eth1_api.endpoints.endpoints_for_request(None) {
+            let _timer = eth1_api.metrics.as_ref().map(|metrics| {
+                prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
+            });
 
-        let response: Result<HashSet<String>, Error> =
-            CallFuture::new(api.transport().execute_with_headers(
-                method,
-                params.clone(),
-                eth1_api.auth.headers()?,
-                Some(ENGINE_EXCHANGE_CAPABILITIES_TIMEOUT),
-            ))
-            .await;
+            let api = eth1_api.build_api_for_request(endpoint);
 
-        match response {
-            Ok(capabilities) => {
-                let supports_client_version = capabilities.contains(ENGINE_GET_CLIENT_VERSION_V1);
+            let response: Result<HashSet<String>, Error> =
+                CallFuture::new(api.transport().execute_with_headers(
+                    method,
+                    params.clone(),
+                    eth1_api.auth.headers()?,
+                    Some(ENGINE_EXCHANGE_CAPABILITIES_TIMEOUT),
+                ))
+                .await;
 
-                eth1_api.on_ok_response(endpoint);
-                endpoint.set_capabilities(capabilities);
+            match response {
+                Ok(capabilities) => {
+                    let supports_client_version =
+                        capabilities.contains(ENGINE_GET_CLIENT_VERSION_V1);
 
-                info_with_peers!("updated capabilities for eth1 endpoint: {}", endpoint.url());
+                    eth1_api.on_ok_response(endpoint);
+                    endpoint.set_capabilities(capabilities);
 
-                if supports_client_version {
-                    exchange_client_versions(eth1_api, &api, endpoint).await?;
-                } else {
-                    debug_with_peers!(
-                        "cannot get client version: {} does not support \
+                    info_with_peers!("updated capabilities for eth1 endpoint: {}", endpoint.url());
+
+                    if supports_client_version {
+                        exchange_client_versions(eth1_api, &api, endpoint).await?;
+                    } else {
+                        debug_with_peers!(
+                            "cannot get client version: {} does not support \
                         {ENGINE_GET_CLIENT_VERSION_V1}",
+                            endpoint.url(),
+                        );
+                    }
+                }
+                Err(error) => {
+                    eth1_api.on_error_response(endpoint);
+
+                    warn_with_peers!(
+                        "unable to update capabilities for eth1 endpoint: {} {error:?}",
                         endpoint.url(),
                     );
                 }
             }
-            Err(error) => {
-                eth1_api.on_error_response(endpoint);
-
-                warn_with_peers!(
-                    "unable to update capabilities for eth1 endpoint: {} {error:?}",
-                    endpoint.url(),
-                );
-            }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 async fn exchange_client_versions(
@@ -91,33 +98,39 @@ async fn exchange_client_versions(
     api: &Eth<Http>,
     endpoint: &Endpoint,
 ) -> Result<()> {
-    let response = CallFuture::new(api.transport().execute_with_headers(
-        ENGINE_GET_CLIENT_VERSION_V1,
-        vec![serde_json::to_value(ClientVersionV1::own())?],
-        eth1_api.auth.headers()?,
-        Some(ENGINE_GET_CLIENT_VERSION_V1_TIMEOUT),
-    ))
-    .await;
+    #[cfg(feature = "embed")]
+    return Ok(());
 
-    match response {
-        Ok(client_versions) => {
-            eth1_api.on_ok_response(endpoint);
-            endpoint.set_client_versions(client_versions);
+    #[cfg(not(feature = "embed"))]
+    {
+        let response = CallFuture::new(api.transport().execute_with_headers(
+            ENGINE_GET_CLIENT_VERSION_V1,
+            vec![serde_json::to_value(ClientVersionV1::own())?],
+            eth1_api.auth.headers()?,
+            Some(ENGINE_GET_CLIENT_VERSION_V1_TIMEOUT),
+        ))
+        .await;
 
-            info_with_peers!(
-                "updated client version for eth1 endpoint: {}",
-                endpoint.url()
-            );
+        match response {
+            Ok(client_versions) => {
+                eth1_api.on_ok_response(endpoint);
+                endpoint.set_client_versions(client_versions);
+
+                info_with_peers!(
+                    "updated client version for eth1 endpoint: {}",
+                    endpoint.url()
+                );
+            }
+            Err(error) => {
+                eth1_api.on_error_response(endpoint);
+
+                warn_with_peers!(
+                    "unable to update client version for eth1 endpoint: {} {error:?}",
+                    endpoint.url(),
+                );
+            }
         }
-        Err(error) => {
-            eth1_api.on_error_response(endpoint);
 
-            warn_with_peers!(
-                "unable to update client version for eth1 endpoint: {} {error:?}",
-                endpoint.url(),
-            );
-        }
+        Ok(())
     }
-
-    Ok(())
 }
