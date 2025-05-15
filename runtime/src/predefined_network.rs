@@ -18,6 +18,8 @@ use types::{
     traits::BeaconState as _,
 };
 
+use crate::default_network_config;
+
 #[cfg(any(feature = "network-mainnet", test))]
 use ::{hex_literal::hex, types::phase0::primitives::H256};
 
@@ -254,7 +256,7 @@ impl PredefinedNetwork {
 
     #[must_use]
     pub fn network_config(self) -> NetworkConfig {
-        let mut config = runtime::default_network_config();
+        let mut config = default_network_config();
         config.boot_nodes_enr = self.bootnodes();
         config
     }

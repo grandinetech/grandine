@@ -1,0 +1,100 @@
+name: Build & publish C# bindings
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'The reference (branch/tag/commit) to checkout'
+        required: false
+      version_suffix:
+        description: 'Suffix of version'
+        required: false
+
+jobs:
+  build:
+    name: Build for target ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            rid: linux-x64
+            
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            rid: linux-arm64
+            
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            rid: win-x64
+            
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            rid: osx-x64
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            rid: osx-arm64
+    steps:
+      - name: Disable autocrlf (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+        
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        if: matrix.rid == 'linux-arm64'
+          
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: true
+          
+      - name: Build library
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: "-p c_grandine --locked --profile=compact"
+          
+      - name: Upload dynamic libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: |
+            target/${{ matrix.target }}/compact/libc_grandine.so
+            target/${{ matrix.target }}/compact/libc_grandine.dylib
+            target/${{ matrix.target }}/compact/c_grandine.dll
+          if-no-files-found: error
+  publish:
+    name: Publish
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.x'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: bindings/csharp/Grandine.Bindings/runtimes
+
+      - name: Restore packages
+        working-directory: bindings/csharp/Grandine.Bindings
+        run: dotnet restore
+
+      - name: Package with dotnet pack
+        working-directory: bindings/csharp/Grandine.Bindings
+        run: dotnet pack -c release --no-restore -o nupkgs --version-suffix ${{ inputs.version_suffix }}
+
+      - name: Publish package
+        working-directory: bindings/csharp/Grandine.Bindings
+        run: dotnet nuget push ./nupkgs/*.nupkg -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json
