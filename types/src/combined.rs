@@ -1391,7 +1391,7 @@ impl<P: Preset> ExecutionPayloadHeader<P> {
 //                      entirely. Is this module the right place for it? See:
 //                      - <https://github.com/ethereum/consensus-specs/releases/tag/v1.4.0-alpha.0>
 //                      - <https://github.com/ethereum/consensus-specs/pull/3359>
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub enum ExecutionPayloadParams<P: Preset> {
     Deneb {
         versioned_hashes: Vec<VersionedHash>,

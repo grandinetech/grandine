@@ -12,6 +12,9 @@ pub use crate::{
     tasks::spawn_exchange_capabilities_and_versions_task,
 };
 
+#[cfg(feature = "embed")]
+pub use eth1_api::{set_adapter, EmbedAdapter, RawForkChoiceUpdatedResponse};
+
 mod auth;
 mod deposit_event;
 mod endpoints;

@@ -1,0 +1,315 @@
+name: Create release
+
+on:
+  push:
+    branches:
+      - develop
+    tags:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'The reference (branch/tag/commit) to build'
+        required: false
+      nethermind_version:
+        description: 'The nethermind version, used to pack grandine with'
+        required: false
+
+jobs:
+  version:
+    name: Get version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: false
+
+      - name: Get short commit hash
+        id: git-vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      
+      - name: Get latest nethermind release tag
+        uses: actions/github-script@v8
+        if: ${{ inputs.nethermind_version == '' }}
+        id: nethermind-tag
+        with:
+          result-encoding: string
+          script: |
+            const release = await github.rest.repos.getLatestRelease({ owner: 'NethermindEth', repo: 'nethermind' });
+            return release.data.tag_name;
+    outputs:
+      commit: ${{ steps.git-vars.outputs.sha_short }}
+      version: ${{ (github.event_name == 'push' && github.event.ref != 'refs/heads/develop' && github.ref_name) || steps.git-vars.outputs.sha_short }}
+      nethermind: ${{ inputs.nethermind_version || steps.nethermind-tag.outputs.result }}
+
+  build:
+    name: Build binary for target ${{ matrix.target }}
+    needs: [version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            rid: linux-x64
+            
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            rid: linux-arm64
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            rid: win-x64
+            
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            rid: osx-x64
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            rid: osx-arm64
+    env:
+      GRANDINE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Disable autocrlf (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+        
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        if: runner.os == 'Linux'
+
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            ca-certificates \
+            libssl-dev \
+            clang \
+            cmake \
+            unzip \
+            protobuf-compiler \
+            libz-dev
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: true
+
+      - name: Install cross
+        if: runner.os == 'Linux'
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build binary & lib
+        run: make ${{ matrix.target }}
+
+      - name: Rename binary (MacOS / Linux)
+        if: runner.os != 'Windows'
+        run: mv target/${{ matrix.target }}/compact/grandine ./grandine-${{ env.GRANDINE_VERSION }}-${{ matrix.rid }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: mv target/${{ matrix.target }}/compact/grandine.exe ./grandine-${{ env.GRANDINE_VERSION }}-${{ matrix.rid }}.exe
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: grandine-${{ env.GRANDINE_VERSION }}-${{ matrix.rid }}
+          path: |
+            ./grandine-${{ env.GRANDINE_VERSION }}-${{ matrix.rid }}
+            ./grandine-${{ env.GRANDINE_VERSION }}-${{ matrix.rid }}.exe
+          if-no-files-found: error
+
+      - name: Upload lib
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib-${{ matrix.rid }}
+          path: |
+            ./target/${{ matrix.target }}/compact/libgrandine.so
+            ./target/${{ matrix.target }}/compact/libgrandine.dylib
+            ./target/${{ matrix.target }}/compact/grandine.dll
+          if-no-files-found: error
+
+  build_csharp_bindings:
+    name: Build C# bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: true
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.x'
+
+      - name: Build nethermind plugin
+        run: make nethermind-plugin
+
+      - name: Upload C# bindings dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: |
+            bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+          if-no-files-found: error
+
+  build_docker:
+    name: Build docker images
+    runs-on: ubuntu-latest
+    needs: [version, build, build_csharp_bindings]
+    env:
+      GRANDINE_VERSION: ${{ needs.version.outputs.version }}
+      GRANDINE_COMMIT: ${{ needs.version.outputs.commit }}
+      NETHERMIND_VERSION: ${{ needs.version.outputs.nethermind }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: false
+
+      - name: Download binary artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: grandine-*
+          path: artifacts
+
+      - name: Download library artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: lib-*
+          path: artifacts
+
+      - name: Download csharp bindings
+        uses: actions/download-artifact@v5
+        with:
+          name: plugin
+          path: artifacts
+
+      - name: Move artifacts
+        run: |
+          mkdir -p ./target/x86_64-unknown-linux-gnu/compact/
+          mv ./artifacts/grandine-${{ env.GRANDINE_VERSION }}-linux-x64/grandine-${{ env.GRANDINE_VERSION }}-linux-x64 ./target/x86_64-unknown-linux-gnu/compact/grandine
+          mv ./artifacts/lib-linux-x64/libgrandine.so ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so
+          
+          mkdir -p ./target/aarch64-unknown-linux-gnu/compact
+          mv ./artifacts/grandine-${{ env.GRANDINE_VERSION }}-linux-arm64/grandine-${{ env.GRANDINE_VERSION }}-linux-arm64 ./target/aarch64-unknown-linux-gnu/compact/grandine
+          mv ./artifacts/lib-linux-arm64/libgrandine.so ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so
+          
+          mkdir -p ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
+          mv ./artifacts/Grandine.NethermindPlugin.dll ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push docker images
+        env:
+          DOCKER_LABEL: ${{ github.event_name == 'push' && github.event.ref != 'refs/heads/develop' && 'stable' || 'unstable' }}
+          DOCKER_SUFFIX: ${{ github.event_name == 'workflow_dispatch' && env.GRANDINE_COMMIT || '' }}
+        run: |
+          make docker \
+            DOCKER_LABEL=${{ env.DOCKER_LABEL }} \
+            DOCKER_SUFFIX=${{ env.DOCKER_SUFFIX }} \
+            GRANDINE_VERSION=${{ env.GRANDINE_VERSION }} \
+            NETHERMIND_VERSION=${{ env.NETHERMIND_VERSION }}
+
+  pack_nethermind:
+    name: Pack nethermind release with embedded grandine
+    runs-on: ubuntu-latest
+    needs: [version, build_csharp_bindings, build]
+    strategy:
+      matrix:
+        include:
+          - rid: 'linux-x64'
+            target: 'x86_64-unknown-linux-gnu'
+          - rid: 'linux-arm64'
+            target: 'aarch64-unknown-linux-gnu'
+          - rid: 'osx-x64'
+            alias: 'macos-x64'
+            target: 'x86_64-apple-darwin'
+          - rid: 'osx-arm64'
+            alias: 'macos-arm64'
+            target: 'aarch64-apple-darwin'
+          - rid: 'win-x64'
+            alias: 'windows-x64'
+            target: 'x86_64-pc-windows-msvc'
+    env:
+      GRANDINE_VERSION: ${{ needs.version.outputs.version }}
+      NETHERMIND_VERSION: ${{ needs.version.outputs.nethermind }}
+    steps:    
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: false
+
+      - name: Download compiled library
+        uses: actions/download-artifact@v4
+        with:
+          name: lib-${{ matrix.rid }}
+          path: ./target/${{ matrix.target }}/compact/
+      
+      - name: Download plugin
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin
+          path: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
+
+      - name: Pack nethermind with bundled grandine
+        run: |
+          make ./build/grandine-${{ env.GRANDINE_VERSION }}-nethermind-${{ env.NETHERMIND_VERSION }}-${{ matrix.alias || matrix.rid }} \
+            GRANDINE_VERSION=${{ env.GRANDINE_VERSION }} \
+            NETHERMIND_VERSION=${{ env.NETHERMIND_VERSION }}
+
+      - name: Upload nethermind
+        uses: actions/upload-artifact@v4
+        with:
+          name: grandine-${{ env.GRANDINE_VERSION }}-nethermind-${{ env.NETHERMIND_VERSION }}-${{ matrix.alias || matrix.rid }}
+          path: ./build/grandine-${{ env.GRANDINE_VERSION }}-nethermind-${{ env.NETHERMIND_VERSION }}-${{ matrix.alias || matrix.rid }}
+          if-no-files-found: error
+
+  publish:
+    name: Draft release
+    if: github.event_name == 'push' && github.event.ref != 'refs/heads/develop'
+    needs: [build, pack_nethermind]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: grandine-*
+          path: build
+
+        # this step can't be done in pack_nethermind, as then we would have zip inside zip in artifacts
+      - name: Archive grandine-nethermind versions
+        shell: bash
+        working-directory: ./build
+        run: |
+          for entry in grandine-*-nethermind-*; do
+            [ -e "$entry" ] || continue  # skip if no matches
+            zip_name="${entry}.zip"
+            echo "Creating archive: $zip_name"
+            zip -r "$zip_name" "$entry"
+            echo "Removing original dir: $entry"
+            rm -rf $entry
+          done
+          
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/**
+          draft: true
+          tag_name: ${{ env.GRANDINE_VERSION }}
+          preserve_order: true
+          fail_on_unmatched_files: true
