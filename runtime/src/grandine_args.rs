@@ -43,12 +43,6 @@ use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
 use reqwest::header::HeaderValue;
-use runtime::{
-    MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
-    DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
-    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS,
-    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
-};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use signer::Web3SignerConfig;
@@ -77,14 +71,19 @@ use crate::{
         self, CONFIG_FILE, DEPOSIT_CONTRACT_BLOCK_FILE, GENESIS_STATE_FILE, PLAIN_BOOTNODES_FILE,
     },
     consts::GRANDINE_DONATION_ADDRESS,
+    default_network_config,
     grandine_config::GrandineConfig,
     predefined_network::PredefinedNetwork,
     validators::Validators,
+    MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
+    DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
+    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
 };
 
 /// Grandine Team <info@grandine.io>
 /// High performance Ethereum consensus layer client
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[clap(display_name = APPLICATION_NAME, verbatim_doc_comment, version = APPLICATION_VERSION)]
 pub struct GrandineArgs {
     #[clap(flatten)]
@@ -129,7 +128,7 @@ pub struct GrandineArgs {
     command: Option<GrandineCommand>,
 }
 
-#[derive(Args)]
+#[derive(Debug, Args)]
 struct ChainOptions {
     /// Name of the Eth2 network to connect to
     #[clap(long, value_enum, default_value_t = Network::default())]
@@ -200,7 +199,7 @@ struct ChainOptions {
     genesis_state_download_url: Option<RedactingUrl>,
 }
 
-#[derive(Args)]
+#[derive(Debug, Args)]
 struct HttpApiOptions {
     /// Run Grandine without HTTP API server.
     #[clap(long, default_value_t = false)]
@@ -267,7 +266,7 @@ impl HttpApiOptions {
     clippy::struct_excessive_bools,
     reason = "False positive. The `bool`s are independent."
 )]
-#[derive(Args)]
+#[derive(Debug, Args)]
 struct BeaconNodeOptions {
     #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
     max_empty_slots: u64,
@@ -455,7 +454,7 @@ struct BeaconNodeOptions {
     clippy::struct_excessive_bools,
     reason = "False positive. The `bool`s are independent."
 )]
-#[derive(Args)]
+#[derive(Debug, Args)]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
     #[clap(long, default_value_t = Ipv4Addr::UNSPECIFIED)]
@@ -631,7 +630,7 @@ impl NetworkConfigOptions {
         let mut network_config = network
             .predefined_network()
             .map(PredefinedNetwork::network_config)
-            .unwrap_or_else(runtime::default_network_config);
+            .unwrap_or_else(default_network_config);
 
         network_config.disable_peer_scoring = disable_peer_scoring;
         network_config.disable_quic_support = disable_quic;
@@ -764,7 +763,7 @@ impl NetworkConfigOptions {
     }
 }
 
-#[derive(Derivative, Args)]
+#[derive(Debug, Derivative, Args)]
 #[derivative(Default)]
 struct SlasherOptions {
     /// Enable slasher
@@ -782,7 +781,7 @@ struct SlasherOptions {
     clippy::struct_excessive_bools,
     reason = "False positive. The `bool`s are independent."
 )]
-#[derive(Args)]
+#[derive(Debug, Args)]
 struct ValidatorOptions {
     /// Path to a directory containing EIP-2335 keystore files
     #[clap(long, requires("keystore_password_file"))]
@@ -877,7 +876,7 @@ struct ValidatorOptions {
     no_custody_groups_backfill: bool,
 }
 
-#[derive(Args)]
+#[derive(Debug, Args)]
 struct ValidatorApiOptions {
     /// Enable validator API
     #[clap(long)]
@@ -932,7 +931,7 @@ impl From<ValidatorApiOptions> for ValidatorApiConfig {
     }
 }
 
-#[derive(Clone, Copy, Sequence, ValueEnum)]
+#[derive(Debug, Clone, Copy, Sequence, ValueEnum)]
 enum Network {
     #[cfg(any(feature = "network-mainnet", test))]
     Mainnet,
@@ -1472,11 +1471,13 @@ impl GrandineArgs {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
 
+    #[must_use]
     pub fn data_dir(&self) -> Option<PathBuf> {
         (!self.beacon_node_options.in_memory)
             .then(|| directories::data_directory(self.beacon_node_options.data_dir.as_ref()))
     }
 
+    #[must_use]
     pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
         self.beacon_node_options.telemetry_config()
     }
