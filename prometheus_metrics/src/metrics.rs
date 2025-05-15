@@ -109,6 +109,7 @@ pub struct Metrics {
     // Pools
     att_pool_pack_iterations: Gauge,
     pub att_pool_insert_attestation_task_times: Histogram,
+    pub att_pool_attestation_tracking_times: Histogram,
 
     pub sync_pool_add_own_contribution_times: Histogram,
     pub sync_pool_aggregate_own_messages_times: Histogram,
@@ -471,6 +472,11 @@ impl Metrics {
                 "Attestation agg pool insert attestation task times",
             ))?,
 
+            att_pool_attestation_tracking_times: Histogram::with_opts(histogram_opts!(
+                "ATT_POOL_ATTESTATION_TRACKING_TIMES",
+                "Attestation agg pool track attestation times",
+            ))?,
+
             sync_pool_add_own_contribution_times: Histogram::with_opts(histogram_opts!(
                 "SYNC_POOL_ADD_OWN_CONTRIBUTION_TIMES",
                 "Sync committee contribution agg pool add own contribution task times",
@@ -824,6 +830,7 @@ impl Metrics {
         default_registry.register(Box::new(
             self.att_pool_insert_attestation_task_times.clone(),
         ))?;
+        default_registry.register(Box::new(self.att_pool_attestation_tracking_times.clone()))?;
         default_registry.register(Box::new(self.sync_pool_add_own_contribution_times.clone()))?;
         default_registry.register(Box::new(
             self.sync_pool_aggregate_own_messages_times.clone(),

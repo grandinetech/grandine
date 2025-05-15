@@ -1,6 +1,6 @@
 use core::time::Duration;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
     time::Instant,
 };
@@ -23,6 +23,7 @@ use types::{
     preset::Preset,
     traits::BeaconState as _,
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::{
     attestation_agg_pool::{
@@ -183,7 +184,9 @@ pub struct InsertAttestationTask<P: Preset, W> {
     pub wait_group: W,
     pub pool: Arc<Pool<P>>,
     pub attestation: Arc<Attestation<P>>,
+    pub attester_index: Option<ValidatorIndex>,
     pub metrics: Option<Arc<Metrics>>,
+    pub validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
 
 impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
@@ -194,7 +197,9 @@ impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
             wait_group,
             pool,
             attestation,
+            attester_index,
             metrics,
+            validator_statistics,
         } = self;
 
         let Attestation {
@@ -205,8 +210,22 @@ impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
 
         let is_singular = aggregation_bits.count_ones() == 1;
 
-        if is_singular && !pool.aggregate_in_committee(data.index, data.slot).await {
-            return Ok(());
+        if is_singular {
+            if let Some(validator_index) = attester_index {
+                let _timer = metrics
+                    .as_ref()
+                    .map(|metrics| metrics.att_pool_attestation_tracking_times.start_timer());
+
+                if let Some(validator_statistics) = validator_statistics.as_ref() {
+                    validator_statistics
+                        .track_attestation_vote::<P>(data, validator_index)
+                        .await;
+                }
+            }
+
+            if !pool.aggregate_in_committee(data.index, data.slot).await {
+                return Ok(());
+            }
         }
 
         let _timer = metrics
@@ -272,6 +291,7 @@ pub struct SetRegisteredValidatorsTask<P: Preset, W: Wait> {
     pub controller: ApiController<P, W>,
     pub pubkeys: Vec<PublicKeyBytes>,
     pub prepared_proposer_indices: Vec<ValidatorIndex>,
+    pub validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
@@ -283,6 +303,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
             controller,
             pubkeys,
             prepared_proposer_indices,
+            validator_statistics,
         } = self;
 
         let beacon_state = match controller.preprocessed_state_at_current_slot() {
@@ -299,11 +320,18 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
             }
         };
 
-        let validator_indices = pubkeys
+        let mut validator_indices = pubkeys
             .into_iter()
             .filter_map(|pubkey| accessors::index_of_public_key(&beacon_state, pubkey))
-            .chain(prepared_proposer_indices)
-            .collect();
+            .collect::<HashSet<_>>();
+
+        if let Some(validator_statistics) = validator_statistics.as_ref() {
+            validator_statistics
+                .set_registered_validator_indices(validator_indices.clone())
+                .await;
+        }
+
+        validator_indices.extend(prepared_proposer_indices);
 
         pool.set_registered_validator_indices(validator_indices)
             .await;

@@ -54,6 +54,7 @@ typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
 validator = { workspace = true }
+validator_statistics = { workspace = true }
 
 [dev-dependencies]
 attestation_verifier = { workspace = true }

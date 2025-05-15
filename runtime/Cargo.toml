@@ -50,3 +50,4 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 types = { workspace = true }
 validator = { workspace = true }
+validator_statistics = { workspace = true }

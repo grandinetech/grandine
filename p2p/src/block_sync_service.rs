@@ -33,6 +33,7 @@ use types::{
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::{
     back_sync::{
@@ -74,6 +75,7 @@ pub struct BlockSyncService<P: Preset> {
     controller: RealController<P>,
     sync_manager: SyncManager,
     metrics: Option<Arc<Metrics>>,
+    validator_statistics: Option<Arc<ValidatorStatistics>>,
     next_request_id: usize,
     slot: Slot,
     is_back_synced: bool,
@@ -105,6 +107,7 @@ impl<P: Preset> BlockSyncService<P> {
         anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
         controller: RealController<P>,
         metrics: Option<Arc<Metrics>>,
+        validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P>,
         back_sync_enabled: bool,
         loaded_from_remote: bool,
@@ -199,6 +202,7 @@ impl<P: Preset> BlockSyncService<P> {
             controller,
             sync_manager: SyncManager::new(target_peers),
             metrics,
+            validator_statistics,
             next_request_id: 0,
             slot,
             is_back_synced,
@@ -839,6 +843,11 @@ impl<P: Preset> BlockSyncService<P> {
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready()?;
+            }
+
+            if let Some(validator_statistics) = self.validator_statistics.as_ref() {
+                validator_statistics
+                    .set_tracking_start(misc::compute_epoch_at_slot::<P>(self.controller.slot()));
             }
         }
 

@@ -1,0 +1,23 @@
+[package]
+name = 'validator_statistics'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bls = { workspace = true }
+eth1_api = { workspace = true }
+fork_choice_control = { workspace = true }
+helper_functions = { workspace = true }
+log = { workspace = true }
+num-traits = { workspace = true }
+prometheus_metrics = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tynm = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }

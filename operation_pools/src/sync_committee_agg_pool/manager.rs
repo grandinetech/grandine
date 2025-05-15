@@ -17,6 +17,7 @@ use types::{
     phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
     preset::Preset,
 };
+use validator_statistics::ValidatorStatistics;
 
 use crate::{
     messages::{PoolToLivenessMessage, PoolToP2pMessage},
@@ -69,11 +70,12 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         pool_to_liveness_tx: Option<UnboundedSender<PoolToLivenessMessage>>,
         pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
         metrics: Option<Arc<Metrics>>,
+        validator_statistics: Option<Arc<ValidatorStatistics>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             dedicated_executor,
             controller,
-            pool: Arc::new(Pool::new()),
+            pool: Arc::new(Pool::new(validator_statistics)),
             pool_to_liveness_tx,
             pool_to_p2p_tx,
             metrics,

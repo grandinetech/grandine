@@ -72,6 +72,7 @@ pub struct GrandineConfig {
     pub validator_api_config: Option<ValidatorApiConfig>,
     pub kzg_backend: KzgBackend,
     pub blacklisted_blocks: HashSet<H256>,
+    pub report_validator_performance: bool,
 }
 
 impl GrandineConfig {

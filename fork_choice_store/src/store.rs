@@ -1822,7 +1822,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let Some(state) = state_fn() else {
             // Delay blob validations until the state is available.
             // Alternatively, we could allow slot processing to obtain states for blob sidecar validations,
-            // however, that introduces oportunity for DoS attacks with fake blob sidecars.
+            // however, that introduces opportunity for DoS attacks with fake blob sidecars.
             return Ok(BlobSidecarAction::DelayUntilState(blob_sidecar, block_root));
         };
 

@@ -9,7 +9,7 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{
     accessors, misc, predicates,
-    slot_report::{Assignment, Delta, RealSlotReport, SyncAggregateRewards},
+    slot_report::{Delta, SyncAggregateRewards},
 };
 use itertools::{chain, izip, Itertools as _};
 use serde::{Deserialize, Serialize};
@@ -30,28 +30,23 @@ use transition_functions::{
 };
 use typenum::Unsigned as _;
 use types::{
-    altair::containers::SyncAggregate,
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::BeaconState,
     config::Config,
-    nonstandard::{
-        AttestationEpoch, AttestationOutcome, GweiVec, RelativeEpoch, SlotVec, UsizeVec, WithStatus,
-    },
+    nonstandard::{GweiVec, RelativeEpoch, SlotVec, WithStatus},
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::Validator,
-        primitives::{CommitteeIndex, Epoch, Gwei, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use unwrap_none::UnwrapNone as _;
 use validator::ApiToValidator;
-
-// `AttestationPerformance::for_previous_epoch` has to process slot reports in chronological order.
-//
-// We previously stored slot reports in `HashMap`s. The nondeterministic iteration order revealed
-// some bugs in the code we were using to construct test data when we implemented snapshot tests.
-type SlotReports = BTreeMap<Slot, RealSlotReport>;
+use validator_statistics::{
+    AttestationAssignment, AttestationPerformance, SlotReports, SyncCommitteeAssignment,
+    SyncCommitteePerformance,
+};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -246,84 +241,6 @@ enum ValidatorEpochReport {
     },
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
-struct AttestationAssignment {
-    slot: Slot,
-    committee_index: CommitteeIndex,
-}
-
-#[derive(Clone, Copy, Default, Debug, Serialize)]
-struct AttestationPerformance {
-    source: Option<H256>,
-    target: Option<AttestationOutcome>,
-    head: Option<AttestationOutcome>,
-    inclusion_delay: Option<NonZeroU64>,
-}
-
-impl AttestationPerformance {
-    fn for_previous_epoch(
-        validator_index: ValidatorIndex,
-        previous_epoch_slot_reports: &SlotReports,
-        current_epoch_slot_reports: &SlotReports,
-    ) -> Self {
-        let mut performance = Self::default();
-
-        for slot_report in previous_epoch_slot_reports.values() {
-            performance.accumulate(slot_report, (validator_index, AttestationEpoch::Current));
-        }
-
-        for slot_report in current_epoch_slot_reports.values() {
-            performance.accumulate(slot_report, (validator_index, AttestationEpoch::Previous));
-        }
-
-        performance
-    }
-
-    fn accumulate(&mut self, slot_report: &RealSlotReport, assignment: Assignment) {
-        let new_target = slot_report.targets.get(&assignment).copied();
-        let new_head = slot_report.heads.get(&assignment).copied();
-
-        if !self.matching_source() {
-            self.source = slot_report.sources.get(&assignment).copied();
-        }
-
-        if AttestationOutcome::should_replace(self.target, new_target) {
-            self.target = new_target;
-        }
-
-        if AttestationOutcome::should_replace(self.head, new_head) {
-            self.head = new_head;
-        }
-
-        if self.inclusion_delay.is_none() {
-            self.inclusion_delay = slot_report.inclusion_delays.get(&assignment).copied();
-        }
-    }
-
-    const fn matching_source(self) -> bool {
-        self.source.is_some()
-    }
-
-    const fn matching_target(self) -> bool {
-        matches!(self.target, Some(AttestationOutcome::Match { .. }))
-    }
-
-    const fn matching_head(self) -> bool {
-        matches!(self.head, Some(AttestationOutcome::Match { .. }))
-    }
-}
-
-#[derive(Default, Debug, Serialize)]
-struct SyncCommitteeAssignment {
-    positions: UsizeVec,
-}
-
-#[derive(Debug, Serialize)]
-struct SyncCommitteePerformance {
-    positions: BTreeMap<usize, bool>,
-    beacon_block_root: H256,
-}
-
 #[derive(Default, Debug, Serialize)]
 struct IndividualSlotDeltas {
     slashing_penalty: Option<Gwei>,
@@ -446,7 +363,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         }
 
         previous_epoch_sync_committee_assignments =
-            current_epoch_sync_committee_assignments(&state);
+            validator_statistics::current_epoch_sync_committee_assignments(&state);
         previous_epoch_sync_aggregates_with_roots = HashMap::with_capacity(P::SlotsPerEpoch::USIZE);
         previous_epoch_slot_reports = SlotReports::new();
 
@@ -468,7 +385,9 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
 
             previous_epoch_slot_reports.insert(slot, slot_report);
 
-            if let Some(pair) = sync_aggregate_with_root(&block_with_root.block) {
+            if let Some(pair) =
+                validator_statistics::sync_aggregate_with_root(&block_with_root.block)
+            {
                 previous_epoch_sync_aggregates_with_roots.insert(slot, pair);
             }
         }
@@ -487,7 +406,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         let previous_epoch_attestation_assignments =
             previous_epoch_attestation_assignments(&state)?;
         let current_epoch_sync_committee_assignments =
-            current_epoch_sync_committee_assignments(&state);
+            validator_statistics::current_epoch_sync_committee_assignments(&state);
 
         let mut current_epoch_slot_reports = SlotReports::new();
         let mut current_epoch_sync_aggregates_with_roots =
@@ -509,7 +428,9 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
 
             current_epoch_slot_reports.insert(slot, slot_report);
 
-            if let Some(pair) = sync_aggregate_with_root(&block_with_root.block) {
+            if let Some(pair) =
+                validator_statistics::sync_aggregate_with_root(&block_with_root.block)
+            {
                 current_epoch_sync_aggregates_with_roots.insert(slot, pair);
             }
         }
@@ -646,10 +567,11 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     let previous_epoch_sync_committee_assignment =
                         previous_epoch_sync_committee_assignments.remove(&validator_index);
 
-                    let previous_epoch_sync_committee_performance = sync_committee_performance(
-                        previous_epoch_sync_committee_assignment.as_ref(),
-                        &previous_epoch_sync_aggregates_with_roots,
-                    );
+                    let previous_epoch_sync_committee_performance =
+                        validator_statistics::sync_committee_performance(
+                            previous_epoch_sync_committee_assignment.as_ref(),
+                            &previous_epoch_sync_aggregates_with_roots,
+                        );
 
                     let previous_epoch_slot_deltas = slot_deltas(
                         validator_index,
@@ -850,10 +772,11 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     let previous_epoch_sync_committee_assignment =
                         previous_epoch_sync_committee_assignments.remove(&validator_index);
 
-                    let previous_epoch_sync_committee_performance = sync_committee_performance(
-                        previous_epoch_sync_committee_assignment.as_ref(),
-                        &previous_epoch_sync_aggregates_with_roots,
-                    );
+                    let previous_epoch_sync_committee_performance =
+                        validator_statistics::sync_committee_performance(
+                            previous_epoch_sync_committee_assignment.as_ref(),
+                            &previous_epoch_sync_aggregates_with_roots,
+                        );
 
                     let previous_epoch_slot_deltas = slot_deltas(
                         validator_index,
@@ -1016,70 +939,6 @@ fn previous_epoch_attestation_assignments<P: Preset>(
     }
 
     Ok(attestation_assignments)
-}
-
-// A function that does the same for the previous epoch may be impossible.
-// The Altair Honest Validator specification states:
-// > *Note*: The data required to compute a given committee is not cached in the `BeaconState` after
-// > committees are calculated at the period boundaries.
-fn current_epoch_sync_committee_assignments<P: Preset>(
-    state: &BeaconState<P>,
-) -> HashMap<ValidatorIndex, SyncCommitteeAssignment> {
-    let Some(state) = state.post_altair() else {
-        return HashMap::new();
-    };
-
-    let mut sync_committee_assignments =
-        HashMap::<_, SyncCommitteeAssignment>::with_capacity(P::SyncCommitteeSize::USIZE);
-
-    for (position, pubkey) in state.current_sync_committee().pubkeys.iter().enumerate() {
-        let validator_index = accessors::index_of_public_key(state, pubkey.to_bytes())
-            .expect("public keys in state.current_sync_committee are taken from state.validators");
-
-        sync_committee_assignments
-            .entry(validator_index)
-            .or_default()
-            .positions
-            .push(position);
-    }
-
-    sync_committee_assignments
-}
-
-fn sync_aggregate_with_root<P: Preset>(
-    block: &SignedBeaconBlock<P>,
-) -> Option<(SyncAggregate<P>, H256)> {
-    let sync_aggregate = block.message().body().post_altair()?.sync_aggregate();
-    let parent_root = block.message().parent_root();
-    Some((sync_aggregate, parent_root))
-}
-
-fn sync_committee_performance(
-    assignment: Option<&SyncCommitteeAssignment>,
-    sync_aggregates_with_roots: &HashMap<Slot, (SyncAggregate<impl Preset>, H256)>,
-) -> BTreeMap<Slot, SyncCommitteePerformance> {
-    assignment
-        .iter()
-        .flat_map(|assignment| {
-            sync_aggregates_with_roots.iter().map(
-                move |(slot, (sync_aggregate, beacon_block_root))| {
-                    let positions = assignment
-                        .positions
-                        .iter()
-                        .copied()
-                        .map(|position| (position, sync_aggregate.sync_committee_bits[position]))
-                        .collect();
-
-                    let performance = SyncCommitteePerformance {
-                        positions,
-                        beacon_block_root: *beacon_block_root,
-                    };
-
-                    (*slot, performance)
-                },
-            )
-        })
-        .collect()
 }
 
 fn slot_deltas(

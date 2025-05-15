@@ -43,6 +43,7 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
         .filter_module("storage", LevelFilter::Info)
         .filter_module("validator", LevelFilter::Info)
         .filter_module("validator_key_cache", LevelFilter::Info)
+        .filter_module("validator_statistics", LevelFilter::Info)
         .filter_module("web3", LevelFilter::Info)
         .filter_module(module_path!(), LevelFilter::Info)
         .filter_module(module_path, LevelFilter::Info)
