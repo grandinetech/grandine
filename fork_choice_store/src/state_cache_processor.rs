@@ -1,9 +1,12 @@
-use core::time::Duration;
+use core::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
 use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 
 use anyhow::{bail, Result};
 use features::Feature;
-use log::warn;
+use log::{info, warn};
 use state_cache::{QueryOptions, StateCache, StateWithRewards};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -23,6 +26,7 @@ const ALLOWED_EMPTY_SLOTS_MULTIPLIER_FOR_BLOCK_SYNC: u64 = 100;
 
 pub struct StateCacheProcessor<P: Preset> {
     state_cache: StateCache<P>,
+    currently_processing: AtomicUsize,
 }
 
 impl<P: Preset> StateCacheProcessor<P> {
@@ -30,6 +34,7 @@ impl<P: Preset> StateCacheProcessor<P> {
     pub fn new(state_cache_lock_timeout: Duration) -> Self {
         Self {
             state_cache: StateCache::new(state_cache_lock_timeout),
+            currently_processing: AtomicUsize::new(0),
         }
     }
 
@@ -105,7 +110,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER,
-            should_print_slot_processing_warning(store),
+            should_print_slot_processing_warning(),
         )
     }
 
@@ -125,7 +130,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER_FOR_BLOCK_SYNC,
-            should_print_slot_processing_warning(store),
+            should_print_slot_processing_warning(),
         )
     }
 
@@ -170,7 +175,8 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER,
-            should_print_slot_processing_warning(store),
+            should_print_slot_processing_warning(),
+            &self.currently_processing,
         )?;
 
         if store.is_forward_synced() {
@@ -214,6 +220,7 @@ impl<P: Preset> StateCacheProcessor<P> {
                     slot,
                     allowed_empty_slots_multiplier,
                     warn_on_slot_processing,
+                    &self.currently_processing,
                 )?;
 
                 Ok(Some((state, None)))
@@ -230,6 +237,7 @@ fn process_slots<P: Preset, S: Storage<P>>(
     slot: Slot,
     allowed_empty_slots_multiplier: u64,
     warn_on_slot_processing: bool,
+    currently_processing: &AtomicUsize,
 ) -> Result<Arc<BeaconState<P>>> {
     let from_slot = state.slot();
 
@@ -247,10 +255,12 @@ fn process_slots<P: Preset, S: Storage<P>>(
         });
     }
 
+    currently_processing.fetch_add(1, Ordering::SeqCst);
+
     // Log state cache misses after chain is forward synced - mostly to catch cases when
     // some other than preprocessed next slot state is needed.
     // With exception of chain reorgs, this is the symptom that state cache is not used optimally.
-    if warn_on_slot_processing && store.is_forward_synced() {
+    if warn_on_slot_processing {
         // `Backtrace::force_capture` can be costly and a warning may be excessive,
         // but this is controlled by a `Feature` that should be disabled by default.
         warn!(
@@ -258,15 +268,35 @@ fn process_slots<P: Preset, S: Storage<P>>(
              (block root: {block_root:?}, from slot {from_slot} to {slot})\n{}",
             Backtrace::force_capture(),
         );
+
+        let processing_count = currently_processing.load(Ordering::SeqCst);
+
+        if processing_count > 1 {
+            warn!("currently processing slots for {processing_count} states in state cache");
+        }
     }
 
-    combined::process_slots(store.chain_config(), state.make_mut(), slot)?;
+    let started_at = std::time::Instant::now();
+    let process_slots_result =
+        combined::process_slots(store.chain_config(), state.make_mut(), slot);
+
+    currently_processing.fetch_sub(1, Ordering::SeqCst);
+
+    process_slots_result?;
+
+    if warn_on_slot_processing {
+        info!(
+            "processed slots for beacon state not found in state cache in {} ms \
+            (block root: {block_root:?}, from slot {from_slot} to {slot})",
+            started_at.elapsed().as_millis(),
+        );
+    }
 
     Ok(state)
 }
 
-fn should_print_slot_processing_warning<P: Preset, S: Storage<P>>(store: &Store<P, S>) -> bool {
-    Feature::WarnOnStateCacheSlotProcessing.is_enabled() && store.is_forward_synced()
+fn should_print_slot_processing_warning() -> bool {
+    Feature::WarnOnStateCacheSlotProcessing.is_enabled()
 }
 
 fn store_state_before_or_at_slot<P: Preset, S: Storage<P>>(

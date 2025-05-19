@@ -846,7 +846,14 @@ where
                     metrics.register_mutator_aggregate_and_proof(&["rejected"]);
                 }
 
-                warn!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
+                if matches!(
+                    error.downcast_ref::<Error<P>>(),
+                    Some(Error::AggregatorNotInCommittee { .. }),
+                ) {
+                    debug!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
+                } else {
+                    warn!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
+                }
 
                 let (gossip_id, sender) = origin.split();
 
