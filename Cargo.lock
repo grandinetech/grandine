@@ -6003,6 +6003,7 @@ dependencies = [
  "database",
  "dedicated_executor",
  "derive_more 1.0.0",
+ "eip_7594",
  "enum-iterator",
  "eth1_api",
  "eth2_libp2p",
