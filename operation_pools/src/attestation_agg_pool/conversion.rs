@@ -1,12 +1,15 @@
+use std::sync::Arc;
+
 use anyhow::{bail, Error as AnyhowError, Result};
 use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
+use log::debug;
 use ssz::ReadError;
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
-    combined::Attestation,
+    combined::{Attestation, BeaconState},
     electra::containers::{Attestation as ElectraAttestation, SingleAttestation},
     phase0::containers::{Attestation as Phase0Attestation, AttestationData},
     preset::Preset,
@@ -58,7 +61,7 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
         }
         Attestation::Single(attestation) => {
             let slot = attestation.data.slot;
-            let state = controller.head_state().value;
+            let state = current_state(controller);
             let committee = accessors::beacon_committee(&state, slot, attestation.committee_index)?;
 
             attestation.try_into_phase0_attestation(committee)?
@@ -90,8 +93,7 @@ pub fn try_convert_to_single_attestation<P: Preset>(
         .next()
         .unwrap_or_default();
 
-    let state = controller.head_state().value;
-
+    let state = current_state(controller);
     let committee = accessors::beacon_committee(&state, data.slot, committee_index)?;
 
     let attester_index = aggregation_bits
@@ -106,4 +108,22 @@ pub fn try_convert_to_single_attestation<P: Preset>(
         data: *data,
         signature: *signature,
     })
+}
+
+fn current_state<P: Preset, W: Wait>(controller: &ApiController<P, W>) -> Arc<BeaconState<P>> {
+    if !controller.is_forward_synced() {
+        return controller.head_state().value;
+    }
+
+    match controller.preprocessed_state_at_current_slot() {
+        Ok(state) => state,
+        Err(error) => {
+            debug!(
+                "failed to get state at current slot for attestation conversion: {error}. \
+                 Using head state instead",
+            );
+
+            controller.head_state().value
+        }
+    }
 }
