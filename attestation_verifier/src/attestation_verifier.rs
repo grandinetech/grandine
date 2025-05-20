@@ -5,7 +5,8 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use fork_choice_control::{
-    AttestationVerifierMessage, VerifyAggregateAndProofResult, VerifyAttestationResult, Wait,
+    AttestationVerifierMessage, Snapshot, VerifyAggregateAndProofResult, VerifyAttestationResult,
+    Wait,
 };
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
@@ -279,6 +280,24 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
             .detach();
     }
 
+    fn current_state(&self, snapshot: &Snapshot<P>) -> Arc<BeaconState<P>> {
+        if !self.controller.is_forward_synced() {
+            return snapshot.head_state();
+        }
+
+        match self.controller.preprocessed_state_at_current_slot() {
+            Ok(state) => state,
+            Err(error) => {
+                debug!(
+                    "failed to get state at current slot for aggregate and proof batch signature verification: {error}. \
+                     Using head state instead",
+                );
+
+                snapshot.head_state()
+            }
+        }
+    }
+
     fn process_aggregate_batch(
         &self,
         aggregates_with_origins: Vec<AggregateWithOrigin<P>>,
@@ -307,7 +326,11 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
 
         self.send_results_to_fork_choice(other);
 
-        match self.verify_aggregate_batch_signatures(&accepted, &snapshot.head_state(), metrics) {
+        match self.verify_aggregate_batch_signatures(
+            &accepted,
+            &self.current_state(&snapshot),
+            metrics,
+        ) {
             Ok(()) => {
                 self.send_results_to_fork_choice(accepted);
             }
@@ -441,6 +464,24 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
             .detach();
     }
 
+    fn current_state(&self, snapshot: &Snapshot<P>) -> Arc<BeaconState<P>> {
+        if !self.controller.is_forward_synced() {
+            return snapshot.head_state();
+        }
+
+        match self.controller.preprocessed_state_at_current_slot() {
+            Ok(state) => state,
+            Err(error) => {
+                debug!(
+                    "failed to get state at current slot for attestation batch signature verification: {error}. \
+                     Using head state instead",
+                );
+
+                snapshot.head_state()
+            }
+        }
+    }
+
     fn process_attestation_batch(&self, attestations: Vec<AttestationItem<P, GossipId>>) {
         let snapshot = self.controller.snapshot();
 
@@ -462,7 +503,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
         //     metrics.set_attestation_verifier_attestation_batch_signature_len(accepted_attestations_wo.len());
         // }
 
-        match self.verify_attestation_batch_signatures(&accepted, &snapshot.head_state()) {
+        match self.verify_attestation_batch_signatures(&accepted, &self.current_state(&snapshot)) {
             Ok(()) => {
                 let accepted = accepted
                     .into_iter()
