@@ -412,7 +412,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if electra_state.slot < last_slot_in_phase {
-                    electra::process_slots(config, electra_state, slot)?;
+                    electra::process_slots(config, electra_state, last_slot_in_phase)?;
 
                     made_progress = true;
                 }
@@ -424,6 +424,8 @@ pub fn process_slots<P: Preset>(
                 }
             }
             BeaconState::Fulu(fulu_state) => {
+                // When adding a new phase, please make sure that last processed slot here
+                // is not farther ahead than the last slot in the phase
                 fulu::process_slots(config, fulu_state, slot)?;
 
                 made_progress = true;
