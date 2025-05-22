@@ -1,4 +1,4 @@
-use core::{fmt::Display, future::Future, num::NonZeroU64, ops::Div as _};
+use core::{fmt::Display, future::Future, ops::Div as _};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -27,7 +27,6 @@ use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
 use log::{error, info, warn};
-use nonzero_ext::nonzero;
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PoolAdditionOutcome, PoolRejectionReason,
     SyncCommitteeAggPool,
@@ -92,7 +91,6 @@ use types::{
 
 use crate::misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock};
 
-const DEFAULT_BUILDER_BOOST_FACTOR: NonZeroU64 = nonzero!(100_u64);
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
@@ -583,7 +581,7 @@ struct ProducerContext<P: Preset, W: Wait> {
 pub struct BlockBuildOptions {
     pub graffiti: H256,
     pub skip_randao_verification: bool,
-    pub builder_boost_factor: Option<u64>,
+    pub builder_boost_factor: Uint256,
 }
 
 #[derive(Clone)]
@@ -658,14 +656,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 Some((blinded_block, blinded_block_rewards, builder_mev)),
             ) => {
                 if let Some(local_mev) = beacon_block.mev {
-                    let builder_boost_factor = Uint256::from_u64(
-                        self.options
-                            .builder_boost_factor
-                            .unwrap_or(DEFAULT_BUILDER_BOOST_FACTOR.get()),
-                    );
+                    let builder_boost_factor = self.options.builder_boost_factor;
 
                     let boosted_builder_mev = builder_mev
-                        .div(DEFAULT_BUILDER_BOOST_FACTOR)
+                        .div(Uint256::from_u64(100))
                         .saturating_mul(builder_boost_factor);
 
                     if local_mev >= boosted_builder_mev {

@@ -1009,7 +1009,6 @@ dependencies = [
  "itertools 0.14.0",
  "keymanager",
  "log",
- "nonzero_ext",
  "operation_pools",
  "prometheus_metrics",
  "serde",

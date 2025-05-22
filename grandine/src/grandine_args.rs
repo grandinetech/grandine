@@ -53,6 +53,7 @@ use serde_json::Value;
 use signer::Web3SignerConfig;
 use slasher::SlasherConfig;
 use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
+use ssz::Uint256;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
@@ -752,6 +753,10 @@ struct ValidatorOptions {
     #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
     builder_max_skipped_slots_per_epoch: u64,
 
+    /// Percentage multiplier to apply to the builder's payload value when choosing between a builder payload header and payload from the paired execution node
+    #[clap(long, default_value_t = ValidatorConfig::default().default_builder_boost_factor)]
+    default_builder_boost_factor: Uint256,
+
     /// Default execution gas limit for all validators
     #[clap(long, default_value_t = PREFERRED_EXECUTION_GAS_LIMIT)]
     default_gas_limit: Gas,
@@ -970,6 +975,7 @@ impl GrandineArgs {
             builder_disable_checks,
             builder_max_skipped_slots,
             builder_max_skipped_slots_per_epoch,
+            default_builder_boost_factor,
             default_gas_limit,
             use_validator_key_cache,
             web3signer_public_keys,
@@ -1301,6 +1307,7 @@ impl GrandineArgs {
             graffiti,
             max_empty_slots,
             suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
+            default_builder_boost_factor,
             default_gas_limit,
             network_config: network_config_options.into_config(
                 network,
@@ -1514,6 +1521,7 @@ fn headers_to_allow_origin(allowed_origins: Vec<HeaderValue>) -> Option<AllowOri
 mod tests {
     use core::net::{Ipv4Addr, SocketAddr};
 
+    use ssz::Uint256;
     use tempfile::NamedTempFile;
 
     use crate::commands::InterchangeCommand;
@@ -1556,6 +1564,43 @@ mod tests {
     fn back_sync_disabled_by_default() {
         let config = config_from_args([]);
         assert!(!config.back_sync_enabled);
+    }
+
+    #[test]
+    fn default_builder_boost_factor() {
+        let config = config_from_args([]);
+        assert_eq!(config.default_builder_boost_factor, Uint256::from_u64(100));
+    }
+
+    #[test]
+    fn zero_default_builder_boost_factor() {
+        let config = config_from_args(["--default-builder-boost-factor", "0"]);
+        assert_eq!(config.default_builder_boost_factor, Uint256::ZERO);
+    }
+
+    #[test]
+    fn custom_default_builder_boost_factor() {
+        let config = config_from_args(["--default-builder-boost-factor", "200"]);
+        assert_eq!(config.default_builder_boost_factor, Uint256::from_u64(200));
+    }
+
+    #[test]
+    fn max_default_builder_boost_facot() {
+        let config = config_from_args([
+            "--default-builder-boost-factor",
+            format!("{}", u64::MAX).as_str(),
+        ]);
+
+        assert_eq!(
+            config.default_builder_boost_factor,
+            Uint256::from_u64(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn invalid_default_builder_boost_factor() {
+        try_config_from_args(["--default-builder-boost-factor", "-100"])
+            .expect_err("negative --default-builder-boost-factor is invalid");
     }
 
     #[test]

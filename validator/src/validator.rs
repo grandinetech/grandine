@@ -776,6 +776,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             proposer_index,
             BlockBuildOptions {
                 graffiti,
+                builder_boost_factor: self.validator_config.default_builder_boost_factor,
                 ..BlockBuildOptions::default()
             },
         );

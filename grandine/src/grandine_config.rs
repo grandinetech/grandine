@@ -11,6 +11,7 @@ use log::info;
 use p2p::NetworkConfig;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
+use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
@@ -44,6 +45,7 @@ pub struct GrandineConfig {
     pub graffiti: Vec<H256>,
     pub max_empty_slots: u64,
     pub suggested_fee_recipient: ExecutionAddress,
+    pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Gas,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
@@ -83,6 +85,7 @@ impl GrandineConfig {
             data_dir,
             graffiti,
             suggested_fee_recipient,
+            default_builder_boost_factor,
             network_config,
             storage_config,
             slashing_enabled,
@@ -153,7 +156,8 @@ impl GrandineConfig {
 
         if let Some(builder_config) = builder_config {
             info!(
-                "using external block builder (API URL: {}, format: {})",
+                "using external block builder (API URL: {}, format: {}, \
+                default_builder_boost_factor: {default_builder_boost_factor})",
                 builder_config.builder_api_url, builder_config.builder_api_format,
             );
         }
