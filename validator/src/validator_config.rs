@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use derivative::Derivative;
+use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
     phase0::primitives::{ExecutionAddress, H256},
@@ -13,6 +14,8 @@ pub struct ValidatorConfig {
     #[derivative(Default(value = "32"))]
     pub max_empty_slots: u64,
     pub suggested_fee_recipient: ExecutionAddress,
+    #[derivative(Default(value = "Uint256::from_u64(100)"))]
+    pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Gas,
     pub keystore_storage_password_file: Option<PathBuf>,
 }

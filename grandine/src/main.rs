@@ -356,6 +356,7 @@ fn try_main() -> Result<()> {
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
+        default_builder_boost_factor,
         default_gas_limit,
         network_config,
         storage_config,
@@ -415,6 +416,7 @@ fn try_main() -> Result<()> {
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
+        default_builder_boost_factor,
         default_gas_limit,
         keystore_storage_password_file,
     });

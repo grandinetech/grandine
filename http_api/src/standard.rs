@@ -2275,6 +2275,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
+    State(validator_config): State<Arc<ValidatorConfig>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV3>,
     headers: HeaderMap,
@@ -2302,6 +2303,10 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
     let graffiti = graffiti.unwrap_or_default();
     let public_key = accessors::public_key(&beacon_state, proposer_index)?;
+
+    let builder_boost_factor = builder_boost_factor
+        .map(Uint256::from_u64)
+        .unwrap_or(validator_config.default_builder_boost_factor);
 
     let block_build_context = block_producer.new_build_context(
         beacon_state.clone_arc(),
