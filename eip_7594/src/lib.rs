@@ -1,9 +1,8 @@
 use num_traits::One as _;
 use sha2::{Digest as _, Sha256};
 use ssz::Uint256;
-use typenum::Unsigned as _;
 use types::{
-    eip7594::{CustodyIndex, NumberOfColumns, NUMBER_OF_CUSTODY_GROUPS},
+    eip7594::{CustodyIndex, NUMBER_OF_CUSTODY_GROUPS},
     phase0::primitives::NodeId,
 };
 
@@ -36,21 +35,13 @@ pub fn get_custody_groups(node_id: NodeId, custody_group_count: u64) -> Vec<Cust
 
         if current_id == Uint256::MAX {
             current_id = Uint256::ZERO;
-        }
-
-        current_id = current_id + Uint256::one();
-    }
-
-    let columns_per_custody_group = NumberOfColumns::U64 / NUMBER_OF_CUSTODY_GROUPS;
-    let mut result = Vec::new();
-    for i in 0..columns_per_custody_group {
-        for &custody_group in &custody_groups {
-            result.push(NUMBER_OF_CUSTODY_GROUPS * i + custody_group);
+        } else {
+            current_id = current_id + Uint256::one();
         }
     }
 
-    result.sort_unstable();
-    result
+    custody_groups.sort_unstable();
+    custody_groups
 }
 
 #[cfg(test)]
