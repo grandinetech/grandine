@@ -132,11 +132,7 @@ mod tests {
         };
     }
 
-    tests_for_type! {
-        DataColumnIdentifier,
-        "consensus-spec-tests/tests/mainnet/fulu/ssz_static/DataColumnIdentifier/*/*",
-        "consensus-spec-tests/tests/minimal/fulu/ssz_static/DataColumnIdentifier/*/*",
-    }
+    // TODO(peerdas-fulu): add `DataColumnsByRootIdentifier` type test
 
     tests_for_type! {
         DataColumnSidecar<_>,

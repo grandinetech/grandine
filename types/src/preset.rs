@@ -352,6 +352,8 @@ impl Preset for Minimal {
         type MaxAttestationsElectra;
         type MaxAttesterSlashingsElectra;
         type MaxConsolidationRequestsPerPayload;
+        type MaxDepositRequestsPerPayload;
+        type MaxWithdrawalRequestsPerPayload;
         type PendingDepositsLimit;
     }
 
@@ -374,8 +376,6 @@ impl Preset for Minimal {
     type KzgCommitmentInclusionProofDepth = U10;
 
     // Electra
-    type MaxDepositRequestsPerPayload = U4;
-    type MaxWithdrawalRequestsPerPayload = U2;
     type PendingConsolidationsLimit = U64;
     type PendingPartialWithdrawalsLimit = U64;
 
