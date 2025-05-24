@@ -40,6 +40,14 @@ pub struct DataColumnIdentifier {
     pub index: ColumnIndex,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct DataColumnsByRootIdentifier {
+    pub block_root: H256,
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    pub columns: ContiguousList<ColumnIndex, NumberOfColumns>,
+}
+
 #[derive(Clone, Default, PartialEq, Eq, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct DataColumnSidecar<P: Preset> {
@@ -132,7 +140,11 @@ mod tests {
         };
     }
 
-    // TODO(peerdas-fulu): add `DataColumnsByRootIdentifier` type test
+    tests_for_type! {
+        DataColumnsByRootIdentifier,
+        "consensus-spec-tests/tests/mainnet/fulu/ssz_static/DataColumnsByRootIdentifier/*/*",
+        "consensus-spec-tests/tests/minimal/fulu/ssz_static/DataColumnsByRootIdentifier/*/*",
+    }
 
     tests_for_type! {
         DataColumnSidecar<_>,

@@ -19,6 +19,7 @@ IGNORED_GLOBS = %w[
   tests/*/eip6110/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/eip7732/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/eip7441/*/*/*/*/*.{ssz_snappy,yaml}
+  tests/*/eip7805/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/fulu/*/*/*/*/*.{ssz_snappy,yaml}
   tests/diagnostics_obj.json{,.lock}
 ].map! { |glob| File.join(SUBMODULE, glob) }
