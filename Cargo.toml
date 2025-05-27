@@ -569,10 +569,12 @@ inherits = 'release'
 # This makes file names and line numbers unavailable in backtraces.
 # Some stack frames disappear, but the ones that remain should still have identifiers.
 debug = 'none'
-# 105 MiB -> 90 MiB
-lto = true
+# We have a problem with `rayon` overflowing stack if compiled with lto.
+# This issue was also reported elsewhere:
+# https://users.rust-lang.org/t/lto-causes-stack-overflow/48256
+lto = false
 # 90 MiB -> 86 MiB
-codegen-units = 1
+# codegen-units = 1
 # 86 MiB -> 88 MiB
 # Optimizing for size previously caused a significant decrease in performance (and might still do).
 # It actually makes the executable bigger now.
