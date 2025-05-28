@@ -270,7 +270,7 @@ impl Default for Config {
             max_request_blob_sidecars_electra: 1152,
             blob_sidecar_subnet_count_electra: nonzero!(9_u64),
             max_request_blob_sidecars_fulu: 1536,
-            blob_schedule: Vec::new(),
+            blob_schedule: vec![],
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -334,12 +334,6 @@ impl Config {
             deposit_contract_address: H160(hex!("00000000219ab540356cBB839Cbe05303d7705Fa")),
             deposit_network_id: 1,
 
-            // Networking
-            blob_schedule: vec![
-                BlobScheduleEntry::new(269_568, 6),
-                BlobScheduleEntry::new(364_032, 9),
-            ],
-
             // Transition
             terminal_total_difficulty: Difficulty::from_u128(58_750_000_000_000_000_000_000),
 
@@ -388,10 +382,6 @@ impl Config {
 
             // Networking
             min_epochs_for_block_requests: 272,
-            blob_schedule: vec![
-                BlobScheduleEntry::new(0xFFFF_FFFF_FFFF_FFFF, 6),
-                BlobScheduleEntry::new(0xFFFF_FFFF_FFFF_FFFF, 9),
-            ],
 
             ..Self::default()
         }
@@ -922,23 +912,30 @@ impl Config {
         usize::try_from(self.number_of_columns).expect("should be able to parse number_of_columns")
     }
 
-    pub fn get_max_blobs_per_block(&self, epoch: Epoch) -> Result<usize, Error> {
-        if self.blob_schedule.is_empty() {
-            return Err(Error::BlobScheduleUndefined);
-        }
-
+    #[must_use]
+    pub fn get_max_blobs_per_block_post_fulu(&self, epoch: Epoch) -> usize {
         // There is no need to sort everytime the function called, `blob_schedule` has been sorted by
         // `epoch` in descending order.
         self.blob_schedule
             .iter()
             .find_map(|entry| (epoch >= entry.epoch).then_some(entry.max_blobs_per_block))
-            .or_else(|| {
-                self.blob_schedule
-                    .iter()
-                    .map(|entry| entry.max_blobs_per_block)
-                    .min()
-            })
-            .ok_or(Error::BlobScheduleUndefined)
+            .unwrap_or(self.max_blobs_per_block_electra)
+    }
+
+    #[must_use]
+    pub fn max_blobs_per_block(&self, epoch: Epoch) -> u64 {
+        let phase = self.phase_at_epoch(epoch);
+        let max_blobs = match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                self.max_blobs_per_block
+            }
+            Phase::Electra => self.max_blobs_per_block_electra,
+            Phase::Fulu => self.get_max_blobs_per_block_post_fulu(epoch),
+        };
+
+        max_blobs
+            .try_into()
+            .expect("number of max blobs in block should fit in u64")
     }
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
