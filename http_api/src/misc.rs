@@ -214,7 +214,7 @@ pub enum SingleApiAttestation<P: Preset> {
 impl<P: Preset> SszSize for SingleApiAttestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0Attestation::<P>::SIZE,
         SingleAttestation::SIZE,
     ]);
@@ -226,7 +226,7 @@ impl<P: Preset> SszRead<Phase> for SingleApiAttestation<P> {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
             }
-            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(api_attestation)

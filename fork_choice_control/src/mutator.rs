@@ -71,8 +71,8 @@ use crate::{
     misc::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
-        PendingChainLink, PendingDataColumnSidecar, ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult,
-        VerifyAttestationResult, WaitingForCheckpointState,
+        PendingChainLink, PendingDataColumnSidecar, ProcessingTimings, ReorgSource,
+        VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
