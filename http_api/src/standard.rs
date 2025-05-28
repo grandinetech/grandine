@@ -656,17 +656,46 @@ pub async fn state_validator<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validator_balances`
-pub async fn state_validator_balances<P: Preset, W: Wait>(
+pub async fn get_state_validator_balances<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ValidatorIdQuery>,
 ) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
+    state_validator_balances(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &query.id,
+    )
+}
+
+/// `POST /eth/v1/beacon/states/{state_id}/validator_balances`
+pub async fn post_state_validator_balances<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    EthJson(validator_ids): EthJson<Vec<ValidatorId>>,
+) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
+    state_validator_balances(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &validator_ids,
+    )
+}
+
+fn state_validator_balances<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+    state_id: StateId,
+    validator_ids: &[ValidatorId],
+) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
     let WithStatus {
         value: state,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
 
     let balances = izip!(
         0..,
@@ -674,8 +703,8 @@ pub async fn state_validator_balances<P: Preset, W: Wait>(
         state.balances().into_iter().copied(),
     )
     .filter(|(index, validator, _)| {
-        query.id.is_empty()
-            || query.id.iter().any(|validator_id| match validator_id {
+        validator_ids.is_empty()
+            || validator_ids.iter().any(|validator_id| match validator_id {
                 ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
                 ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
             })
