@@ -167,7 +167,8 @@ fn process_execution_payload_for_gossip<P: Preset>(
     );
 
     // > [Modified in Fulu:EIP7594] Verify commitments are under limit
-    let maximum = config.get_max_blobs_per_block(get_current_epoch(state))?;
+    // > [Modified in Fulu:EIP7892] BPO blob schedule
+    let maximum = config.get_max_blobs_per_block_post_fulu(get_current_epoch(state));
     let in_block = body.blob_kzg_commitments.len();
 
     ensure!(

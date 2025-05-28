@@ -1821,8 +1821,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
         let max_blobs_per_block = self
             .chain_config()
-            .phase_at_slot::<P>(block_header.slot)
-            .max_blobs_per_block(Self::epoch_at_slot(block_header.slot), &self.chain_config)?;
+            .max_blobs_per_block(Self::epoch_at_slot(block_header.slot));
 
         ensure!(
             blob_sidecar.index < max_blobs_per_block,
