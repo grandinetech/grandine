@@ -72,7 +72,7 @@ impl<N: Send + Sync + 'static> AggregateAndProofSets<N> {
 #[derive(Default)]
 pub struct MultiPhaseAggregateAndProofSets<P: Preset> {
     phase0_supersets: AggregateAndProofSets<P::MaxValidatorsPerCommittee>,
-    electra_supersets: AggregateAndProofSets<P::MaxAggregatorsPerSlot>,
+    electra_supersets: AggregateAndProofSets<P::MaxAttestersPerSlot>,
 }
 
 impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {

@@ -11,14 +11,16 @@ use types::{
     altair::containers::SignedBeaconBlock as AltairSignedBeaconBlock,
     bellatrix::containers::SignedBeaconBlock as BellatrixSignedBeaconBlock,
     capella::containers::SignedBeaconBlock as CapellaSignedBeaconBlock,
-    combined::{BeaconBlock, SignedBeaconBlock},
+    combined::{Attestation, BeaconBlock, SignedBeaconBlock},
     deneb::{
         containers::SignedBeaconBlock as DenebSignedBeaconBlock,
         primitives::{Blob, KzgProof},
     },
-    electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
+    electra::containers::{SignedBeaconBlock as ElectraSignedBeaconBlock, SingleAttestation},
     nonstandard::{Phase, WithBlobsAndMev},
-    phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
+    phase0::containers::{
+        Attestation as Phase0Attestation, SignedBeaconBlock as Phase0SignedBeaconBlock,
+    },
     preset::Preset,
 };
 
@@ -179,6 +181,44 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                     blobs: blobs.unwrap_or_default(),
                 }),
             },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(bound = "", untagged)]
+pub enum SingleApiAttestation<P: Preset> {
+    Phase0(Phase0Attestation<P>),
+    Electra(SingleAttestation),
+}
+
+impl<P: Preset> SszSize for SingleApiAttestation<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
+        Phase0Attestation::<P>::SIZE,
+        SingleAttestation::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszRead<Phase> for SingleApiAttestation<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        let api_attestation = match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
+            }
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+        };
+
+        Ok(api_attestation)
+    }
+}
+
+impl<P: Preset> From<SingleApiAttestation<P>> for Attestation<P> {
+    fn from(single_api_attestation: SingleApiAttestation<P>) -> Self {
+        match single_api_attestation {
+            SingleApiAttestation::Phase0(attestation) => Self::Phase0(attestation),
+            SingleApiAttestation::Electra(attestation) => Self::Single(attestation),
         }
     }
 }

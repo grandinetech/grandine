@@ -18,9 +18,7 @@ use types::{
     deneb::{containers::BlobSidecar, primitives::BlobIndex},
     electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
     phase0::{
-        consts::{
-            ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TARGET_AGGREGATORS_PER_COMMITTEE,
-        },
+        consts::{TargetAggregatorsPerCommittee, ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH},
         containers::{AttestationData, Validator},
         primitives::{CommitteeIndex, Epoch, Slot, H256},
     },
@@ -161,7 +159,7 @@ pub fn is_aggregator<P: Preset>(
     let modulo = committee
         .len()
         .try_conv::<u64>()?
-        .div(TARGET_AGGREGATORS_PER_COMMITTEE)
+        .div(TargetAggregatorsPerCommittee::U64)
         .try_into()
         .unwrap_or(NonZeroU64::MIN);
 

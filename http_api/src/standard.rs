@@ -73,7 +73,7 @@ use types::{
         WEI_IN_GWEI,
     },
     phase0::{
-        consts::GENESIS_SLOT,
+        consts::{TargetAggregatorsPerCommittee, GENESIS_SLOT},
         containers::{
             AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint, Fork,
             ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
@@ -93,7 +93,7 @@ use crate::{
     error::{Error, IndexedError},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
-    misc::{APIBlock, BroadcastValidation, SignedAPIBlock, SyncedStatus},
+    misc::{APIBlock, BroadcastValidation, SignedAPIBlock, SingleApiAttestation, SyncedStatus},
     response::{EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
@@ -1602,16 +1602,25 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attestations): EthJson<Vec<Arc<Attestation<P>>>>,
 ) -> Result<(), Error> {
-    submit_attestations_to_pool(controller, api_to_p2p_tx, attestations).await
+    submit_attestations_to_pool(controller, api_to_p2p_tx, attestations.into_iter()).await
 }
 
 /// `POST /eth/v2/beacon/pool/attestations`
 pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJson(attestations): EthJson<Vec<Arc<Attestation<P>>>>,
+    EthJsonOrSsz(attestations): EthJsonOrSsz<
+        ContiguousList<SingleApiAttestation<P>, P::MaxAttestersPerSlot>,
+    >,
 ) -> Result<(), Error> {
-    submit_attestations_to_pool(controller, api_to_p2p_tx, attestations).await
+    submit_attestations_to_pool(
+        controller,
+        api_to_p2p_tx,
+        attestations
+            .into_iter()
+            .map(|attestation| Arc::new(attestation.into())),
+    )
+    .await
 }
 
 /// `POST /eth/v1/beacon/pool/sync_committees`
@@ -2151,7 +2160,8 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
     EthQuery(query): EthQuery<AggregateAttestationV2Query>,
-) -> Result<EthResponse<Attestation<P>>, Error> {
+    headers: HeaderMap,
+) -> Result<EthResponse<Attestation<P>, (), JsonOrSsz>, Error> {
     let AggregateAttestationV2Query {
         attestation_data_root,
         committee_index,
@@ -2185,7 +2195,7 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
         convert_to_electra_attestation(attestation).map(Attestation::Electra)?
     };
 
-    Ok(EthResponse::json(attestation).version(phase))
+    Ok(EthResponse::json_or_ssz(attestation, &headers)?.version(phase))
 }
 
 /// `GET /eth/v1/validator/blinded_blocks/{slot}`
@@ -2401,7 +2411,8 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     State(metrics): State<Option<Arc<Metrics>>>,
     State(validator_config): State<Arc<ValidatorConfig>>,
     EthQuery(query): EthQuery<AttestationDataQuery>,
-) -> Result<EthResponse<AttestationData>, Error> {
+    headers: HeaderMap,
+) -> Result<EthResponse<AttestationData, (), JsonOrSsz>, Error> {
     let _timer = metrics.map(|metrics| metrics.validator_api_attestation_data_times.start_timer());
 
     let AttestationDataQuery {
@@ -2479,7 +2490,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         target,
     };
 
-    Ok(EthResponse::json(attestation_data))
+    EthResponse::json_or_ssz(attestation_data, &headers)
 }
 
 /// `POST /eth/v1/validator/beacon_committee_subscriptions`
@@ -2574,7 +2585,9 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJson(aggregate_and_proofs): EthJson<Vec<Arc<SignedAggregateAndProof<P>>>>,
+    EthJsonOrSsz(aggregate_and_proofs): EthJsonOrSsz<
+        ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>,
+    >,
 ) -> Result<(), Error> {
     let (successes, failures): (Vec<_>, Vec<_>) = aggregate_and_proofs
         .into_iter()
@@ -3070,10 +3083,9 @@ fn build_attestation_item<P: Preset, W: Wait>(
 async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
-    attestations: Vec<Arc<Attestation<P>>>,
+    attestations: impl Iterator<Item = Arc<Attestation<P>>>,
 ) -> Result<(), Error> {
     let grouped_by_target = attestations
-        .into_iter()
         .enumerate()
         .chunk_by(|(_, attestation)| attestation.data().target);
 

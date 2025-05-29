@@ -33,7 +33,7 @@ pub struct AggregateAndProof<P: Preset> {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct Attestation<P: Preset> {
-    pub aggregation_bits: BitList<P::MaxAggregatorsPerSlot>,
+    pub aggregation_bits: BitList<P::MaxAttestersPerSlot>,
     pub data: AttestationData,
     pub signature: AggregateSignatureBytes,
     pub committee_bits: BitVector<P::MaxCommitteesPerSlot>,
@@ -141,7 +141,7 @@ pub struct ExecutionRequests<P: Preset> {
 #[serde(deny_unknown_fields)]
 pub struct IndexedAttestation<P: Preset> {
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub attesting_indices: ContiguousList<ValidatorIndex, P::MaxAggregatorsPerSlot>,
+    pub attesting_indices: ContiguousList<ValidatorIndex, P::MaxAttestersPerSlot>,
     pub data: AttestationData,
     pub signature: AggregateSignatureBytes,
 }

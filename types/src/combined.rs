@@ -1407,6 +1407,19 @@ impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
     ]);
 }
 
+impl<P: Preset> SszRead<Phase> for SignedAggregateAndProof<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        let signed_aggregate_and_proof = match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
+            }
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+        };
+
+        Ok(signed_aggregate_and_proof)
+    }
+}
+
 impl<P: Preset> SszWrite for SignedAggregateAndProof<P> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         match self {
@@ -1470,7 +1483,7 @@ impl<P: Preset> SignedAggregateAndProof<P> {
 #[serde(bound = "", untagged)]
 pub enum AttestingIndices<P: Preset> {
     Phase0(ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>),
-    Electra(ContiguousList<ValidatorIndex, P::MaxAggregatorsPerSlot>),
+    Electra(ContiguousList<ValidatorIndex, P::MaxAttestersPerSlot>),
 }
 
 impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {

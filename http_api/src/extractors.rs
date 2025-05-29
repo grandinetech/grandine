@@ -367,25 +367,30 @@ where
     type Rejection = Error;
 
     async fn from_request(mut request: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
-        let run = async {
-            let TypedHeader(content_type) =
-                request.extract_parts::<TypedHeader<ContentType>>().await?;
+        let TypedHeader(content_type) = request
+            .extract_parts::<TypedHeader<ContentType>>()
+            .await
+            .map_err(Error::ContentTypeHeaderInvalid)?;
 
-            if content_type == ContentType::octet_stream() {
-                let phase = http_api_utils::extract_phase_from_headers(request.headers())
-                    .map_err(Error::InvalidRequestConsensusHeader)?;
+        if content_type == ContentType::octet_stream() {
+            let phase = http_api_utils::extract_phase_from_headers(request.headers())
+                .map_err(Error::InvalidRequestConsensusHeader)?;
 
-                let bytes = Bytes::from_request(request, state).await?;
-                let block = T::from_ssz(&phase, bytes)?;
+            let bytes = Bytes::from_request(request, state)
+                .await
+                .map_err(Error::InvalidBytesBody)?;
 
-                return Ok(Self(block));
-            }
+            let data = T::from_ssz(&phase, bytes).map_err(Error::InvalidSszBody)?;
 
-            let Json(block) = request.extract().await?;
+            return Ok(Self(data));
+        }
 
-            Ok(Self(block))
-        };
+        if content_type == ContentType::json() {
+            let Json(data) = request.extract().await.map_err(Error::InvalidJsonBody)?;
 
-        run.await.map_err(Error::InvalidBlock)
+            return Ok(Self(data));
+        }
+
+        Err(Error::ContentTypeNotSupported)
     }
 }
