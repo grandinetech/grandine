@@ -2,7 +2,7 @@ use core::num::{NonZeroU64, NonZeroUsize};
 
 use hex_literal::hex;
 use nonzero_ext::nonzero;
-use typenum::{U32, U4, U64};
+use typenum::{U16, U32, U4, U64};
 
 use crate::phase0::primitives::{DomainType, Epoch, Slot, H32};
 
@@ -21,8 +21,8 @@ pub const FAR_FUTURE_EPOCH: Epoch = Epoch::MAX;
 pub const GENESIS_EPOCH: Epoch = 0;
 pub const GENESIS_SLOT: Slot = 0;
 pub const INTERVALS_PER_SLOT: NonZeroUsize = nonzero!(3_usize);
-pub const TARGET_AGGREGATORS_PER_COMMITTEE: NonZeroU64 = nonzero!(16_u64);
 
 pub type AttestationSubnetCount = U64;
 pub type DepositContractTreeDepth = U32;
 pub type JustificationBitsLength = U4;
+pub type TargetAggregatorsPerCommittee = U16;

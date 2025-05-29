@@ -172,7 +172,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Sync;
 
     // Derived type-level variables
-    type MaxAggregatorsPerSlot: MerkleElements<ValidatorIndex>
+    type MaxAttestersPerSlot: MerkleElements<ValidatorIndex>
         + MerkleBits
         + NonZero
         + Eq
@@ -292,7 +292,7 @@ impl Preset for Mainnet {
     type PendingPartialWithdrawalsLimit = U134217728;
 
     // Derived type-level variables
-    type MaxAggregatorsPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
+    type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
 
     // Meta
     const NAME: PresetName = PresetName::Mainnet;
@@ -380,7 +380,7 @@ impl Preset for Minimal {
     type PendingPartialWithdrawalsLimit = U64;
 
     // Derived type-level variables
-    type MaxAggregatorsPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
+    type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
 
     // Meta
     const NAME: PresetName = PresetName::Minimal;
@@ -456,7 +456,7 @@ impl Preset for Medalla {
         type PendingPartialWithdrawalsLimit;
 
         // Derived type-level variables
-        type MaxAggregatorsPerSlot;
+        type MaxAttestersPerSlot;
     }
 
     // Phase 0

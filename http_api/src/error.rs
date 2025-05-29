@@ -3,23 +3,25 @@ use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
 use axum::{
-    extract::rejection::JsonRejection,
+    extract::rejection::{BytesRejection, JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use axum_extra::extract::QueryRejection;
+use axum_extra::{extract::QueryRejection, typed_header::TypedHeaderRejection};
 use bls::{traits::SignatureBytes as _, SignatureBytes};
 use futures::channel::oneshot::Canceled;
 use http_api_utils::{ApiError, PhaseHeaderError};
 use serde::{Serialize, Serializer};
-use ssz::H256;
+use ssz::{ReadError, H256};
 use thiserror::Error;
 use tokio::task::JoinError;
 use types::{deneb::primitives::BlobIndex, phase0::primitives::Slot};
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Accept header media type not supported")]
+    AcceptedMediaNotSupported,
     #[error("attestation cannot be found")]
     AttestationNotFound,
     #[error("block {block_root} not validated")]
@@ -28,6 +30,10 @@ pub enum Error {
     BlockNotFound,
     #[error(transparent)]
     Canceled(#[from] Canceled),
+    #[error("Content-Type header invalid")]
+    ContentTypeHeaderInvalid(#[source] TypedHeaderRejection),
+    #[error("Content-Type header media type not supported")]
+    ContentTypeNotSupported,
     #[error(transparent)]
     InvalidRequestConsensusHeader(#[from] PhaseHeaderError),
     #[error(
@@ -71,6 +77,10 @@ pub enum Error {
     InvalidBlockId(#[source] AnyhowError),
     #[error("invalid block")]
     InvalidBlock(#[source] AnyhowError),
+    #[error("invalid bytes body")]
+    InvalidBytesBody(#[source] BytesRejection),
+    #[error("invalid ssz bytes")]
+    InvalidSszBody(#[source] ReadError),
     #[error("invalid contribution and proofs")]
     InvalidContributionAndProofs(Vec<IndexedError>),
     #[error("invalid epoch")]
@@ -178,8 +188,10 @@ impl IntoResponse for Error {
 impl Error {
     fn status_code(&self) -> StatusCode {
         match self {
+            Self::AcceptedMediaNotSupported => StatusCode::NOT_ACCEPTABLE,
             Self::InvalidJsonBody(json_rejection)
             | Self::InvalidValidatorIndices(json_rejection) => json_rejection.status(),
+            Self::InvalidBytesBody(rejection) => rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
             | Self::MatchingAttestationHeadBlockNotFound
@@ -188,6 +200,7 @@ impl Error {
             | Self::TargetStateNotFound
             | Self::ValidatorNotFound => StatusCode::NOT_FOUND,
             Self::CommitteesAtSlotMismatch { .. }
+            | Self::ContentTypeHeaderInvalid(_)
             | Self::CurrentSlotHasNoSyncCommittee
             | Self::EpochBeforePrevious { .. }
             | Self::EpochNotInSyncCommitteePeriod
@@ -208,6 +221,7 @@ impl Error {
             | Self::InvalidSignedVoluntaryExit(_)
             | Self::InvalidStateId(_)
             | Self::InvalidSignedBlsToExecutionChanges(_)
+            | Self::InvalidSszBody(_)
             | Self::InvalidSyncCommitteeMessages(_)
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
@@ -232,6 +246,7 @@ impl Error {
             | Self::HeadFarBehind { .. }
             | Self::HeadIsOptimistic
             | Self::NodeIsSyncing => StatusCode::SERVICE_UNAVAILABLE,
+            Self::ContentTypeNotSupported => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         }
     }
 

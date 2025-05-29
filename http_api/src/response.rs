@@ -6,7 +6,7 @@ use axum::{
 };
 use http_api_utils::ETH_CONSENSUS_VERSION;
 use mediatype::{MediaType, MediaTypeList};
-use mime::APPLICATION_OCTET_STREAM;
+use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use serde::Serialize;
 use ssz::SszWrite;
 use tap::Pipe as _;
@@ -230,12 +230,27 @@ impl<T> EthResponse<T, (), JsonOrSsz> {
     // `axum` recommends using `axum::TypedHeader` instead of extracting all headers,
     // but the `headers` crate does not provide a type for the `Accept` header.
     // See <https://github.com/hyperium/headers/issues/53>.
-    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self> {
+    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self, Error> {
         if let Some(accept_header) = request_headers.get(ACCEPT) {
-            if let Some(accept) = accept_content_type(accept_header.to_str()?)? {
+            let accepted_types = accept_content_type_list(
+                accept_header
+                    .to_str()
+                    .map_err(Into::into)
+                    .map_err(Error::Internal)?,
+            )?;
+
+            for accept in &accepted_types {
                 if accept == APPLICATION_OCTET_STREAM.as_ref() {
                     return Ok(Self::new(data, JsonOrSsz::Ssz));
                 }
+
+                if accept == APPLICATION_JSON.as_ref() {
+                    return Ok(Self::new(data, JsonOrSsz::Json));
+                }
+            }
+
+            if !accepted_types.is_empty() {
+                return Err(Error::AcceptedMediaNotSupported);
             }
         }
 
@@ -243,7 +258,7 @@ impl<T> EthResponse<T, (), JsonOrSsz> {
     }
 }
 
-fn accept_content_type(accept_header: &str) -> Result<Option<String>> {
+fn accept_content_type_list(accept_header: &str) -> Result<Vec<String>> {
     let mut scored_types = vec![];
 
     for media_type in MediaTypeList::new(accept_header) {
@@ -263,9 +278,10 @@ fn accept_content_type(accept_header: &str) -> Result<Option<String>> {
     scored_types.sort_by_key(|scored_type| scored_type.0);
 
     scored_types
-        .last()
+        .into_iter()
+        .rev()
         .map(|(_, essence)| essence)
-        .cloned()
+        .collect::<Vec<_>>()
         .pipe(Ok)
 }
 
@@ -274,23 +290,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_accept_content_type() -> Result<()> {
+    fn test_accept_content_type_list() -> Result<()> {
         assert_eq!(
-            accept_content_type("application/octet-stream;q=1,application/json;q=0.9")?,
-            Some("application/octet-stream".to_owned()),
+            accept_content_type_list("application/octet-stream;q=1,application/json;q=0.9")?,
+            vec![
+                "application/octet-stream".to_owned(),
+                "application/json".to_owned()
+            ],
         );
 
         assert_eq!(
-            accept_content_type("application/octet-stream;q=0.9,application/json;q=1")?,
-            Some("application/json".to_owned()),
+            accept_content_type_list("application/octet-stream;q=0.9,application/json;q=1")?,
+            vec![
+                "application/json".to_owned(),
+                "application/octet-stream".to_owned()
+            ],
         );
 
         assert_eq!(
-            accept_content_type("application/octet-stream")?,
-            Some("application/octet-stream".to_owned()),
+            accept_content_type_list("application/octet-stream")?,
+            vec!["application/octet-stream".to_owned()],
         );
 
-        assert_eq!(accept_content_type("")?, None);
+        assert!(accept_content_type_list("")?.is_empty());
 
         Ok(())
     }
