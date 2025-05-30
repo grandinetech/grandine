@@ -1,5 +1,5 @@
 use core::ops::RangeInclusive;
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Instant};
 
 use allocator as _;
 use anyhow::Result;
@@ -9,6 +9,7 @@ use database::{Database, DatabaseMode};
 use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdrawal_devnet_4};
 use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
+use itertools::Itertools as _;
 use log::info;
 use rand::seq::SliceRandom as _;
 use types::{
@@ -20,7 +21,7 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
-#[derive(Clone, Copy, Parser)]
+#[derive(Clone, Parser)]
 struct Options {
     #[clap(value_enum)]
     blocks: Blocks,
@@ -30,6 +31,13 @@ struct Options {
     mode: Mode,
     #[clap(long)]
     unfinalized_states_in_memory: Option<u64>,
+    /// Specifies the directory where benchmark database files will be stored.
+    /// If not provided, a temporary directory will be used by default.
+    #[clap(long)]
+    database_directory: Option<PathBuf>,
+    /// Number of blocks to process in batches.
+    #[clap(long, default_value_t = 64)]
+    batch_size: usize,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -337,6 +345,8 @@ fn run<P: Preset>(
         order,
         mode,
         unfinalized_states_in_memory,
+        database_directory,
+        batch_size,
     } = options;
 
     let BlockParameters {
@@ -371,12 +381,17 @@ fn run<P: Preset>(
 
     let anchor_state = beacon_state(first_slot, slot_width);
 
-    let database_dir = tempfile::Builder::new()
-        .prefix("ad_hoc_bench_db_")
-        .rand_bytes(10)
-        .tempdir()?;
+    let database_dir = database_directory
+        .map(Ok::<_, anyhow::Error>)
+        .unwrap_or_else(|| {
+            Ok(tempfile::Builder::new()
+                .prefix("ad_hoc_bench_db_")
+                .rand_bytes(10)
+                .tempdir()?
+                .into_path())
+        })?;
 
-    log::info!("database dir: {}", database_dir.path().display());
+    log::info!("database dir: {}", database_dir.as_path().display());
 
     let database = Database::persistent(
         "ad_hoc_bench_db",
@@ -411,24 +426,26 @@ fn run<P: Preset>(
 
     let start = Instant::now();
 
-    for block in blocks {
-        let slot = block.message().slot();
+    for chunk in &blocks.chunks(batch_size) {
+        for block in chunk {
+            let slot = block.message().slot();
 
-        controller.on_requested_block(block, None);
+            controller.on_requested_block(block, None);
 
-        if let Some(block_blobs) = blobs.remove(&slot) {
-            for blob in block_blobs {
-                controller.on_api_blob_sidecar(blob, None)
+            if let Some(block_blobs) = blobs.remove(&slot) {
+                for blob in block_blobs {
+                    controller.on_api_blob_sidecar(blob, None)
+                }
+            }
+
+            if mode == Mode::Synchronous {
+                controller.wait_for_tasks();
             }
         }
 
-        if mode == Mode::Synchronous {
+        if mode == Mode::Asynchronous {
             controller.wait_for_tasks();
         }
-    }
-
-    if mode == Mode::Asynchronous {
-        controller.wait_for_tasks();
     }
 
     let time = start.elapsed().as_secs_f64();

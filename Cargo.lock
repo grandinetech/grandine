@@ -16,6 +16,7 @@ dependencies = [
  "fork_choice_control",
  "fork_choice_store",
  "futures",
+ "itertools 0.14.0",
  "log",
  "rand 0.8.5",
  "tempfile",
