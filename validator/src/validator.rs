@@ -1119,6 +1119,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
+        if slot_head.optimistic {
+            warn!(
+                "validators cannot participate in aggregation because \
+                 chain head has not been fully verified by an execution engine",
+            );
+            return;
+        }
+
         let config = &self.chain_config;
         let phase = slot_head.phase();
 
