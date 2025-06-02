@@ -16,7 +16,10 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    phase0::{consts::GENESIS_SLOT, primitives::Slot},
+    phase0::{
+        consts::GENESIS_SLOT,
+        primitives::{Slot, H256},
+    },
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -38,6 +41,10 @@ struct Options {
     /// Number of blocks to process in batches.
     #[clap(long, default_value_t = 64)]
     batch_size: usize,
+    /// A list beacon block roots that beacon node rejects unconditionally.
+    /// Defaults to a list of default blacklisted blocks of the specified `Config`.
+    #[clap(long)]
+    blacklisted_blocks: Option<Vec<H256>>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -331,7 +338,7 @@ fn main() -> Result<()> {
 #[expect(clippy::float_arithmetic)]
 #[expect(clippy::too_many_lines)]
 fn run<P: Preset>(
-    chain_config: ChainConfig,
+    mut chain_config: ChainConfig,
     options: Options,
     beacon_state: impl FnOnce(Slot, usize) -> Arc<BeaconState<P>>,
     beacon_blocks: impl FnOnce(RangeInclusive<Slot>, usize) -> Vec<Arc<SignedBeaconBlock<P>>>,
@@ -347,7 +354,13 @@ fn run<P: Preset>(
         unfinalized_states_in_memory,
         database_directory,
         batch_size,
+        blacklisted_blocks,
     } = options;
+
+    if let Some(blacklisted_blocks) = blacklisted_blocks {
+        info!("setting blacklisted blocks to: {blacklisted_blocks:?}");
+        chain_config.blacklisted_blocks = blacklisted_blocks;
+    }
 
     let BlockParameters {
         first_slot,
@@ -391,7 +404,7 @@ fn run<P: Preset>(
                 .into_path())
         })?;
 
-    log::info!("database dir: {}", database_dir.as_path().display());
+    info!("database dir: {}", database_dir.as_path().display());
 
     let database = Database::persistent(
         "ad_hoc_bench_db",
