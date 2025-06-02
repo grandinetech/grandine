@@ -399,7 +399,7 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
 
-    // A list beacon block roots that beacon node rejects unconditionally
+    /// A list beacon block roots that beacon node rejects unconditionally
     #[clap(long)]
     blacklisted_blocks: Vec<H256>,
 }
