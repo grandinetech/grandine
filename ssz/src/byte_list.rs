@@ -51,8 +51,8 @@ impl<'de, N: Unsigned> Deserialize<'de> for ByteList<N> {
     }
 }
 
-impl<N> SszSize for ByteList<N> {
-    const SIZE: Size = Size::Variable { minimum_size: 0 };
+impl<N: Unsigned> SszSize for ByteList<N> {
+    const SIZE: Size = Size::for_list(u8::SIZE, N::USIZE);
 }
 
 impl<C, N: Unsigned> SszRead<C> for ByteList<N> {
@@ -61,7 +61,7 @@ impl<C, N: Unsigned> SszRead<C> for ByteList<N> {
     }
 }
 
-impl<N> SszWrite for ByteList<N> {
+impl<N: Unsigned> SszWrite for ByteList<N> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         self.bytes.write_variable(bytes)
     }

@@ -72,8 +72,11 @@ pub trait SszWrite: SszSize {
                 self.write_fixed(bytes.as_mut_slice());
                 Ok(bytes)
             }
-            Size::Variable { minimum_size } => {
-                let mut bytes = Vec::with_capacity(minimum_size);
+            Size::Variable {
+                minimum,
+                maximum: _,
+            } => {
+                let mut bytes = Vec::with_capacity(minimum);
                 self.write_variable(&mut bytes)?;
                 Ok(bytes)
             }
