@@ -94,21 +94,4 @@ impl<P: Preset> DataColumnCache<P> {
                 },
             )
     }
-
-    pub fn unpersisted_data_column_sidecars_by_block(
-        &self,
-        block_root: H256,
-    ) -> impl Iterator<Item = DataColumnSidecarWithId<P>> + '_ {
-        self.data_columns
-            .iter()
-            .filter(move |(identifier, (_, _, persisted))| {
-                !persisted && identifier.block_root == block_root
-            })
-            .map(
-                |(data_column_id, (data_column_sidecar, _, _))| DataColumnSidecarWithId {
-                    data_column_sidecar: data_column_sidecar.clone_arc(),
-                    data_column_id: *data_column_id,
-                },
-            )
-    }
 }
