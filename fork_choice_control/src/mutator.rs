@@ -1795,10 +1795,12 @@ where
                 }
 
                 self.notify_forkchoice_updated(&new_head);
+                self.maybe_spawn_preprocess_head_state_for_current_slot_task(block_slot);
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
             ApplyBlockChanges::Reorganized { old_head, .. } => {
                 self.notify_about_reorganization(wait_group.clone(), &old_head, ReorgSource::Block);
+                self.maybe_spawn_preprocess_head_state_for_current_slot_task(block_slot);
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
             ApplyBlockChanges::AlternateChainExtended { .. } => {}
@@ -2581,6 +2583,27 @@ where
             checkpoint,
             metrics: self.metrics.clone(),
         });
+    }
+
+    fn maybe_spawn_preprocess_head_state_for_current_slot_task(&self, block_slot: Slot) {
+        if !self.store.is_forward_synced() {
+            return;
+        }
+
+        let current_tick = self.store.tick();
+
+        if current_tick.slot == (block_slot + 1) && current_tick.is_before_attesting_interval() {
+            debug!("spawn preprocess state task for current slot: {block_slot}: {current_tick:?}");
+
+            self.spawn(PreprocessStateTask {
+                store_snapshot: self.owned_store(),
+                state_cache: self.state_cache.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                head_block_root: self.store.head().block_root,
+                next_slot: self.store.slot(),
+                metrics: self.metrics.clone(),
+            })
+        }
     }
 
     fn spawn_preprocess_head_state_for_next_slot_task(&self) {
