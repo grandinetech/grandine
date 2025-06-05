@@ -14,6 +14,7 @@ use itertools::Itertools as _;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -317,7 +318,7 @@ where
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
 
         ensure!(
-            requested_epoch <= store_epoch + P::MIN_SEED_LOOKAHEAD,
+            requested_epoch <= store_epoch + P::MinSeedLookahead::U64,
             Error::EpochTooFarInTheFuture {
                 requested_epoch,
                 store_epoch,
@@ -611,7 +612,7 @@ where
         let store_epoch = store.current_epoch();
 
         ensure!(
-            requested_epoch <= store_epoch + P::MIN_SEED_LOOKAHEAD,
+            requested_epoch <= store_epoch + P::MinSeedLookahead::U64,
             Error::EpochTooFarInTheFuture {
                 requested_epoch,
                 store_epoch,

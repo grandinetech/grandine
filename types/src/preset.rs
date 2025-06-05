@@ -4,7 +4,7 @@ use core::{
     fmt::Debug,
     hash::Hash,
     num::NonZeroU64,
-    ops::{Div, Mul, Sub},
+    ops::{Add, Div, Mul, Sub},
 };
 
 use arithmetic::NonZeroExt as _;
@@ -19,7 +19,7 @@ use ssz::{
 };
 use strum::{Display, EnumString};
 use typenum::{
-    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, True, Unsigned, B1, U1, U10, U1048576,
+    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, Sum, True, Unsigned, B1, U1, U10, U1048576,
     U1073741824, U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144,
     U32, U4, U4096, U512, U64, U65536, U8, U8192,
 };
@@ -95,6 +95,19 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
     type MaxVoluntaryExits: MerkleElements<SignedVoluntaryExit> + Eq + Debug + Send + Sync;
+    type MinSeedLookahead: Unsigned
+        + Add<
+            U1,
+            Output: Mul<
+                Self::SlotsPerEpoch,
+                Output: PersistentVectorElements<
+                    ValidatorIndex,
+                    UnhashedBundleSize<ValidatorIndex>,
+                > + Debug
+                            + Send
+                            + Sync,
+            >,
+        >;
     type SlotsPerEpoch: Unsigned + NonZero + Sub<B1>;
     type ValidatorRegistryLimit: FitsInU64 + NonZero + Debug + Send + Sync;
 
@@ -218,7 +231,6 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     const MIN_ATTESTATION_INCLUSION_DELAY: NonZeroU64 = NonZeroU64::MIN;
     const MIN_DEPOSIT_AMOUNT: Gwei = 1_000_000_000;
     const MIN_EPOCHS_TO_INACTIVITY_PENALTY: u64 = 4;
-    const MIN_SEED_LOOKAHEAD: u64 = 1;
     const MIN_SLASHING_PENALTY_QUOTIENT: NonZeroU64 = nonzero!(128_u64);
     const PROPORTIONAL_SLASHING_MULTIPLIER: u64 = 1;
     const PROPOSER_REWARD_QUOTIENT: NonZeroU64 = nonzero!(8_u64);
@@ -282,6 +294,7 @@ impl Preset for Mainnet {
     type MaxProposerSlashings = U16;
     type MaxValidatorsPerCommittee = U2048;
     type MaxVoluntaryExits = U16;
+    type MinSeedLookahead = U1;
     type SlotsPerEpoch = U32;
     type ValidatorRegistryLimit = U1099511627776;
 
@@ -364,6 +377,7 @@ impl Preset for Minimal {
         type MaxProposerSlashings;
         type MaxValidatorsPerCommittee;
         type MaxVoluntaryExits;
+        type MinSeedLookahead;
         type ValidatorRegistryLimit;
 
         // Bellatrix
@@ -462,6 +476,7 @@ impl Preset for Medalla {
         type MaxProposerSlashings;
         type MaxValidatorsPerCommittee;
         type MaxVoluntaryExits;
+        type MinSeedLookahead;
         type SlotsPerEpoch;
         type ValidatorRegistryLimit;
 
@@ -529,6 +544,9 @@ pub type SlotsPerEth1VotingPeriod<P> =
 
 pub type SlotsPerHistoricalRoot<P> =
     Prod<<P as Preset>::EpochsPerHistoricalRoot, <P as Preset>::SlotsPerEpoch>;
+
+pub type ProposerLookaheadLength<P> =
+    Prod<Sum<<P as Preset>::MinSeedLookahead, U1>, <P as Preset>::SlotsPerEpoch>;
 
 // This variable has been renamed a number of times and no longer even exists in `consensus-specs`,
 // but it's still needed in our implementation.
@@ -719,7 +737,7 @@ impl Phase0Preset {
             max_seed_lookahead: P::MAX_SEED_LOOKAHEAD,
             min_attestation_inclusion_delay: P::MIN_ATTESTATION_INCLUSION_DELAY,
             min_epochs_to_inactivity_penalty: P::MIN_EPOCHS_TO_INACTIVITY_PENALTY,
-            min_seed_lookahead: P::MIN_SEED_LOOKAHEAD,
+            min_seed_lookahead: P::MinSeedLookahead::U64,
             slots_per_epoch: P::SlotsPerEpoch::non_zero(),
             slots_per_historical_root: SlotsPerHistoricalRoot::<P>::non_zero(),
 
