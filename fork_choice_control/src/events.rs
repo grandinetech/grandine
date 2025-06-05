@@ -11,6 +11,7 @@ use log::warn;
 use prometheus_metrics::Metrics;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
+use ssz::ContiguousList;
 use strum::{AsRefStr, EnumString};
 use tap::Pipe as _;
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -64,7 +65,7 @@ pub enum Event<P: Preset> {
     BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
-    DataColumnSidecar(DataColumnSidecarEvent),
+    DataColumnSidecar(DataColumnSidecarEvent<P>),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttributes(PayloadAttributesEvent),
@@ -564,21 +565,23 @@ pub struct BlockEvent {
     pub execution_optimistic: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct DataColumnSidecarEvent {
+#[derive(Clone, Debug, Serialize)]
+pub struct DataColumnSidecarEvent<P: Preset> {
     pub block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub index: ColumnIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
+    pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
 }
 
-impl DataColumnSidecarEvent {
-    const fn new<P: Preset>(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
+impl<P: Preset> DataColumnSidecarEvent<P> {
+    fn new(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
         Self {
             block_root,
             index: data_column_sidecar.index,
             slot: data_column_sidecar.slot(),
+            kzg_commitments: data_column_sidecar.kzg_commitments.clone(),
         }
     }
 }
