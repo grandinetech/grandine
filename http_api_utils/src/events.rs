@@ -8,6 +8,7 @@ use helper_functions::misc;
 use log::warn;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
+use ssz::ContiguousList;
 use strum::{AsRefStr, EnumString};
 use tap::Pipe as _;
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -489,20 +490,22 @@ impl BlobSidecarEvent {
 }
 
 #[derive(Debug, Serialize)]
-struct DataColumnSidecarEvent {
+struct DataColumnSidecarEvent<P: Preset> {
     block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     index: ColumnIndex,
     #[serde(with = "serde_utils::string_or_native")]
     slot: Slot,
+    kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
 }
 
-impl DataColumnSidecarEvent {
-    const fn new<P: Preset>(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
+impl<P: Preset> DataColumnSidecarEvent<P> {
+    fn new(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
         Self {
             block_root,
             index: data_column_sidecar.index,
             slot: data_column_sidecar.slot(),
+            kzg_commitments: data_column_sidecar.kzg_commitments.clone(),
         }
     }
 }
