@@ -806,6 +806,22 @@ pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
         .collect()
 }
 
+pub fn compute_proposer_indices<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    epoch: Epoch,
+    seed: H256,
+    indices: &PackedIndices,
+) -> Result<Vec<ValidatorIndex>> {
+    let start_slot = compute_start_slot_at_epoch::<P>(epoch);
+    (0..P::SlotsPerEpoch::U64)
+        .map(|i| {
+            let seed = hashing::hash_256_64(seed, start_slot.saturating_add(i));
+            compute_proposer_index(config, state, indices, seed, epoch)
+        })
+        .collect::<Result<_>>()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
