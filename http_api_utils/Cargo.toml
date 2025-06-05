@@ -23,6 +23,7 @@ prometheus_metrics = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
+ssz = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tower = { workspace = true }
