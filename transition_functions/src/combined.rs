@@ -418,7 +418,7 @@ pub fn process_slots<P: Preset>(
                 }
 
                 if Toption::Some(last_slot_in_phase) == fulu_fork_slot {
-                    *state = fork::upgrade_to_fulu(config, electra_state.as_ref().clone()).into();
+                    *state = fork::upgrade_to_fulu(config, electra_state.as_ref().clone())?.into();
 
                     made_progress = true;
                 }
@@ -580,7 +580,7 @@ fn post_process_slots_for_epoch_report<P: Preset>(
                 let fulu_fork_slot = config.fork_slot::<P>(Phase::Fulu);
 
                 if Toption::Some(post_slot) == fulu_fork_slot {
-                    *state = fork::upgrade_to_fulu(config, electra_state.as_ref().clone()).into();
+                    *state = fork::upgrade_to_fulu(config, electra_state.as_ref().clone())?.into();
                 }
             }
             BeaconState::Fulu(_) => {}
