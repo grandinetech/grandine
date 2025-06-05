@@ -3966,6 +3966,7 @@ dependencies = [
  "serde",
  "serde_utils",
  "serde_with",
+ "ssz",
  "strum",
  "tap",
  "test-case",
