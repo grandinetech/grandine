@@ -88,6 +88,8 @@ pub mod fulu {
     mod spec_tests;
 }
 
+pub use collections::ProposerLookahead;
+
 mod collections;
 
 mod unphased {
