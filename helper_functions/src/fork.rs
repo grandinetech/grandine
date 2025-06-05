@@ -5,8 +5,10 @@ use anyhow::Result;
 use bls::{traits::SignatureBytes as _, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::PersistentList;
+use ssz::{PersistentList, PersistentVector};
 use std_ext::ArcExt as _;
+use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     altair::beacon_state::BeaconState as AltairBeaconState,
     bellatrix::{
@@ -35,6 +37,7 @@ use types::{
     },
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState as _},
+    ProposerLookahead,
 };
 
 use crate::{accessors, misc, mutators, phase0, predicates};
@@ -670,8 +673,11 @@ pub fn upgrade_to_electra<P: Preset>(
 pub fn upgrade_to_fulu<P: Preset>(
     config: &Config,
     pre: ElectraBeaconState<P>,
-) -> FuluBeaconState<P> {
+) -> Result<FuluBeaconState<P>> {
     let epoch = accessors::get_current_epoch(&pre);
+
+    // > [New in Fulu:EIP7917]
+    let proposer_lookahead = initialize_proposer_lookahead(config, &pre)?;
 
     let ElectraBeaconState {
         genesis_time,
@@ -720,7 +726,7 @@ pub fn upgrade_to_fulu<P: Preset>(
         epoch,
     };
 
-    FuluBeaconState {
+    Ok(FuluBeaconState {
         // > Versioning
         genesis_time,
         genesis_validators_root,
@@ -771,9 +777,26 @@ pub fn upgrade_to_fulu<P: Preset>(
         pending_deposits,
         pending_partial_withdrawals,
         pending_consolidations,
+        proposer_lookahead,
         // Cache
         cache,
+    })
+}
+
+fn initialize_proposer_lookahead<P: Preset>(
+    config: &Config,
+    state: &ElectraBeaconState<P>,
+) -> Result<ProposerLookahead<P>> {
+    let current_epoch = accessors::get_current_epoch(state);
+    let mut lookahead = vec![];
+
+    for i in 0..=P::MinSeedLookahead::U64 {
+        let indices =
+            accessors::get_beacon_proposer_indices(config, state, current_epoch.saturating_add(i))?;
+        lookahead.extend(indices);
     }
+
+    PersistentVector::try_from_iter(lookahead).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -896,7 +919,8 @@ mod spec_tests {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
 
-        let actual_post = upgrade_to_fulu::<P>(&P::default_config(), pre);
+        let actual_post = upgrade_to_fulu::<P>(&P::default_config(), pre)
+            .expect("upgrade from Electra to Fulu should succeed");
 
         assert_eq!(actual_post, expected_post);
     }
