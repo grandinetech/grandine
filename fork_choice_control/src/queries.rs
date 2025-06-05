@@ -15,6 +15,7 @@ use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -323,7 +324,7 @@ where
 
         let store_epoch = store.current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
-        let max_allowed_epoch = store_epoch + P::MIN_SEED_LOOKAHEAD;
+        let max_allowed_epoch = store_epoch + P::MinSeedLookahead::U64;
 
         // If it is the last slot of an epoch,
         // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
@@ -659,7 +660,7 @@ where
     ) -> Result<WithStatus<Arc<BeaconState<P>>>> {
         let store = self.store_snapshot();
         let store_epoch = store.current_epoch();
-        let max_allowed_epoch = store_epoch + P::MIN_SEED_LOOKAHEAD;
+        let max_allowed_epoch = store_epoch + P::MinSeedLookahead::U64;
 
         // If it is the last slot of an epoch,
         // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch

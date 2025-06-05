@@ -11,7 +11,7 @@ use crate::{
     collections::{
         Balances, EpochParticipation, Eth1DataVotes, HistoricalRoots, HistoricalSummaries,
         InactivityScores, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals,
-        RandaoMixes, RecentRoots, Slashings, Validators,
+        ProposerLookahead, RandaoMixes, RecentRoots, Slashings, Validators,
     },
     deneb::containers::ExecutionPayloadHeader,
     phase0::{
@@ -104,6 +104,8 @@ pub struct BeaconState<P: Preset> {
     pub pending_deposits: PendingDeposits<P>,
     pub pending_partial_withdrawals: PendingPartialWithdrawals<P>,
     pub pending_consolidations: PendingConsolidations<P>,
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    pub proposer_lookahead: ProposerLookahead<P>,
 
     // Cache
     #[derivative(PartialEq = "ignore")]

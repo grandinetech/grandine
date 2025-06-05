@@ -50,6 +50,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 transition_functions = { workspace = true }
 tynm = { workspace = true }
+typenum = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
