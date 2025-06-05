@@ -391,7 +391,7 @@ fn get_seed_by_epoch<P: Preset>(
 ) -> H256 {
     let mix = get_randao_mix(
         state,
-        epoch + P::EpochsPerHistoricalVector::U64 - P::MIN_SEED_LOOKAHEAD - 1,
+        epoch + P::EpochsPerHistoricalVector::U64 - P::MinSeedLookahead::U64 - 1,
     );
 
     hashing::hash_32_64_256(domain_type.to_fixed_bytes(), epoch, mix)
@@ -458,7 +458,14 @@ pub fn get_beacon_proposer_index<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
 ) -> Result<ValidatorIndex> {
-    get_or_try_init_beacon_proposer_index(config, state, true)
+    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+        proposer_lookahead
+            .get(state.slot() % P::SlotsPerEpoch::U64)
+            .copied()
+            .map_err(Into::into)
+    } else {
+        get_or_try_init_beacon_proposer_index(config, state, true)
+    }
 }
 
 pub fn get_or_try_init_beacon_proposer_index<P: Preset>(
@@ -904,6 +911,23 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
         .filter(|withdrawal| withdrawal.validator_index == validator_index)
         .map(|withdrawal| withdrawal.amount)
         .sum()
+}
+
+pub fn get_beacon_proposer_indices<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    epoch: Epoch,
+) -> Result<Vec<ValidatorIndex>> {
+    let indices = get_active_validator_indices_by_epoch(state, epoch);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_PROPOSER);
+
+    misc::compute_proposer_indices(
+        config,
+        state,
+        epoch,
+        seed,
+        &PackedIndices::U64(indices.into_iter().collect()),
+    )
 }
 
 #[cfg(test)]

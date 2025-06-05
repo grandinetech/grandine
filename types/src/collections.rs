@@ -15,9 +15,12 @@ use crate::{
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     phase0::{
         containers::{Eth1Data, PendingAttestation, Validator},
-        primitives::{Gwei, H256},
+        primitives::{Gwei, ValidatorIndex, H256},
     },
-    preset::{MaxAttestationsPerEpoch, Preset, SlotsPerEth1VotingPeriod, SlotsPerHistoricalRoot},
+    preset::{
+        MaxAttestationsPerEpoch, Preset, ProposerLookaheadLength, SlotsPerEth1VotingPeriod,
+        SlotsPerHistoricalRoot,
+    },
 };
 
 pub type RecentRoots<P> =
@@ -60,3 +63,9 @@ pub type PendingPartialWithdrawals<P> =
 
 pub type PendingConsolidations<P> =
     PersistentList<PendingConsolidation, <P as Preset>::PendingConsolidationsLimit>;
+
+pub type ProposerLookahead<P> = PersistentVector<
+    ValidatorIndex,
+    ProposerLookaheadLength<P>,
+    UnhashedBundleSize<ValidatorIndex>,
+>;
