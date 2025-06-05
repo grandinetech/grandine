@@ -1,13 +1,15 @@
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use helper_functions::{
-    accessors::{get_current_epoch, get_next_epoch},
+    accessors::{get_beacon_proposer_indices, get_current_epoch, get_next_epoch},
     electra::{initiate_validator_exit, is_eligible_for_activation_queue},
     misc::{compute_activation_exit_epoch, vec_of_default},
     predicates::{is_active_validator, is_eligible_for_activation},
 };
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
+use ssz::{PersistentVector, SszHash as _};
+use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     capella::containers::HistoricalSummary, config::Config,
     fulu::beacon_state::BeaconState as FuluBeaconState, preset::Preset, traits::BeaconState,
@@ -74,6 +76,9 @@ pub fn process_epoch(
 
     altair::process_participation_flag_updates(state);
     altair::process_sync_committee_updates(pubkey_cache, state)?;
+
+    // > [New in Fulu:EIP7917]
+    process_proposer_lookahead(config, state)?;
 
     state.cache.advance_epoch();
 
@@ -217,6 +222,28 @@ fn process_registry_updates<P: Preset>(
             .get_mut(validator_index)?
             .activation_epoch = activation_exit_epoch;
     }
+
+    Ok(())
+}
+
+fn process_proposer_lookahead<P: Preset>(
+    config: &Config,
+    state: &mut FuluBeaconState<P>,
+) -> Result<()> {
+    let mut proposer_lookahead = state.proposer_lookahead.into_iter().collect::<Vec<_>>();
+
+    let last_epoch_start = proposer_lookahead
+        .len()
+        .saturating_sub(P::SlotsPerEpoch::USIZE);
+    proposer_lookahead.copy_within(P::SlotsPerEpoch::USIZE.., 0);
+
+    let target_epoch = get_current_epoch(state).saturating_add(P::MinSeedLookahead::U64 + 1);
+    let last_proposers_indices = get_beacon_proposer_indices(config, state, target_epoch)?;
+    let refs = last_proposers_indices.iter().collect::<Vec<&_>>();
+    proposer_lookahead[last_epoch_start..].copy_from_slice(&refs);
+
+    state.proposer_lookahead =
+        PersistentVector::try_from_iter(proposer_lookahead.into_iter().copied())?;
 
     Ok(())
 }
@@ -415,6 +442,20 @@ mod spec_tests {
         run_pending_consolidations_case::<Minimal>(case);
     }
 
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/fulu/epoch_processing/proposer_lookahead/*/*"
+    )]
+    fn mainnet_process_look(case: Case) {
+        run_process_look_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/fulu/epoch_processing/proposer_lookahead/*/*"
+    )]
+    fn minimal_process_look(case: Case) {
+        run_process_look_case::<Minimal>(case);
+    }
+
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
             let (statistics, _, _) = altair::statistics(state);
@@ -533,6 +574,12 @@ mod spec_tests {
     fn run_pending_consolidations_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
             electra::process_pending_consolidations(state)
+        })
+    }
+
+    fn run_process_look_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |_, state| {
+            process_proposer_lookahead(&P::default_config(), state)
         })
     }
 
