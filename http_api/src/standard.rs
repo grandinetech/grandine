@@ -1925,18 +1925,14 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
-    let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
-    let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
+    let number_of_columns = controller.chain_config().number_of_columns;
 
     let data_column_identifiers = query
         .indices
-        .unwrap_or_else(|| (0..max_blobs_per_block).collect())
+        .unwrap_or_else(|| (0..number_of_columns).collect())
         .into_iter()
         .map(|index| {
-            ensure!(
-                index < max_blobs_per_block,
-                Error::InvalidColumnIndex(index)
-            );
+            ensure!(index < number_of_columns, Error::InvalidColumnIndex(index));
             Ok(DataColumnIdentifier { block_root, index })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1945,7 +1941,7 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
 
     let data_column_sidecars = DynamicList::try_from_iter_with_maximum(
         data_column_sidecars.into_iter(),
-        usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+        usize::try_from(number_of_columns).map_err(AnyhowError::new)?,
     )
     .map_err(AnyhowError::new)?;
 
