@@ -418,10 +418,6 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_verification_times.start_timer());
 
-        if let Some(metrics) = metrics.as_ref() {
-            metrics.data_column_sidecars_submitted_for_processing.inc();
-        }
-
         let _timer = metrics
             .as_ref()
             .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
@@ -436,8 +432,15 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             &origin,
         );
 
+        if result.is_err() {
+            if let Some(metrics) = metrics.as_ref() {
+                metrics.data_column_sidecars_submitted_for_processing.inc();
+            }
+        }
+
         if let Ok(DataColumnSidecarAction::Accept(_)) = result {
             if let Some(metrics) = metrics.as_ref() {
+                metrics.data_column_sidecars_submitted_for_processing.inc();
                 metrics.verified_gossip_data_column_sidecar.inc();
             }
         }
