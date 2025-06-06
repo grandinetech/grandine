@@ -29,14 +29,15 @@ use crate::{
     standard::{
         beacon_events, beacon_heads, beacon_state, blinded_block, blob_sidecars, block,
         block_attestations, block_attestations_v2, block_headers, block_id_headers, block_rewards,
-        block_root, config_spec, debug_fork_choice, deposit_contract, expected_withdrawals,
-        fork_schedule, genesis, get_state_validator_balances, get_state_validators, node_health,
-        node_identity, node_peer, node_peer_count, node_peers, node_syncing_status, node_version,
-        pool_attestations, pool_attestations_v2, pool_attester_slashings,
-        pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_proposer_slashings,
-        pool_voluntary_exits, post_state_validator_balances, post_state_validators,
-        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
+        block_root, config_spec, debug_beacon_data_column_sidecars, debug_fork_choice,
+        deposit_contract, expected_withdrawals, fork_schedule, genesis,
+        get_state_validator_balances, get_state_validators, node_health, node_identity, node_peer,
+        node_peer_count, node_peers, node_syncing_status, node_version, pool_attestations,
+        pool_attestations_v2, pool_attester_slashings, pool_attester_slashings_v2,
+        pool_bls_to_execution_changes, pool_proposer_slashings, pool_voluntary_exits,
+        post_state_validator_balances, post_state_validators, publish_blinded_block,
+        publish_blinded_block_v2, publish_block, publish_block_v2, state_committees,
+        state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_randao, state_root,
         state_sync_committees, state_validator, state_validator_identities,
         submit_pool_attestations, submit_pool_attestations_v2, submit_pool_attester_slashing,
@@ -471,7 +472,12 @@ fn eth_v1_config_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
 }
 
 fn eth_v1_debug_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
-    Router::new().route("/eth/v1/debug/fork_choice", get(debug_fork_choice))
+    Router::new()
+        .route("/eth/v1/debug/fork_choice", get(debug_fork_choice))
+        .route(
+            "/eth/v1/debug/beacon/data_column_sidecars/{block_id}",
+            get(debug_beacon_data_column_sidecars),
+        )
 }
 
 fn eth_v2_debug_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {

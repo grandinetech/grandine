@@ -16,7 +16,9 @@ use serde::{Serialize, Serializer};
 use ssz::{ReadError, H256};
 use thiserror::Error;
 use tokio::task::JoinError;
-use types::{deneb::primitives::BlobIndex, phase0::primitives::Slot};
+use types::{
+    deneb::primitives::BlobIndex, fulu::primitives::ColumnIndex, phase0::primitives::Slot,
+};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -77,6 +79,8 @@ pub enum Error {
     InvalidBytesBody(#[source] BytesRejection),
     #[error("invalid ssz bytes")]
     InvalidSszBody(#[source] ReadError),
+    #[error("invalid column index {0}")]
+    InvalidColumnIndex(ColumnIndex),
     #[error("invalid contribution and proofs")]
     InvalidContributionAndProofs(Vec<IndexedError>),
     #[error("invalid epoch")]
@@ -207,6 +211,7 @@ impl Error {
             | Self::InvalidBlock(_)
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
+            | Self::InvalidColumnIndex(_)
             | Self::InvalidRequestConsensusHeader(_)
             | Self::InvalidContributionAndProofs(_)
             | Self::InvalidEpoch(_)
