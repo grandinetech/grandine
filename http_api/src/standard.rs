@@ -68,7 +68,10 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     nonstandard::{
         BlockRewards, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev, WithStatus,
         WEI_IN_GWEI,
@@ -107,6 +110,12 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct BlobSidecarsQuery {
     indices: Option<Vec<BlobIndex>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DataColumnSidecarsQuery {
+    indices: Option<Vec<ColumnIndex>>,
 }
 
 #[derive(Deserialize)]
@@ -1898,6 +1907,48 @@ pub async fn debug_fork_choice<P: Preset, W: Wait>(
     // The use of `Json` instead of `EthResponse` is intentional.
     // This endpoint is supposed to return a bare object.
     Json(controller.fork_choice_context())
+}
+
+/// `GET /eth/v1/debug/beacon/data_column_sidecars/{block_id}`
+pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(block_id): EthPath<BlockId>,
+    EthQuery(query): EthQuery<DataColumnSidecarsQuery>,
+    headers: HeaderMap,
+) -> Result<EthResponse<DynamicList<Arc<DataColumnSidecar<P>>>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: block,
+        status,
+        finalized,
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = block.phase();
+    let block_root = block.message().hash_tree_root();
+    let number_of_columns = controller.chain_config().number_of_columns;
+
+    let data_column_identifiers = query
+        .indices
+        .unwrap_or_else(|| (0..number_of_columns).collect())
+        .into_iter()
+        .map(|index| {
+            ensure!(index < number_of_columns, Error::InvalidColumnIndex(index));
+            Ok(DataColumnIdentifier { block_root, index })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let data_column_sidecars = controller.data_column_sidecars_by_ids(data_column_identifiers)?;
+
+    let data_column_sidecars = DynamicList::try_from_iter_with_maximum(
+        data_column_sidecars.into_iter(),
+        usize::try_from(number_of_columns).map_err(AnyhowError::new)?,
+    )
+    .map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(data_column_sidecars, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(version))
 }
 
 /// `GET /eth/v2/debug/beacon/states/{state_id}`
