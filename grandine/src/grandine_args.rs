@@ -37,7 +37,7 @@ use http_api::HttpApiConfig;
 use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
 use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
-use log::warn;
+use log::{info, warn};
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
@@ -853,9 +853,6 @@ impl From<ValidatorApiOptions> for ValidatorApiConfig {
 enum Network {
     #[cfg(any(feature = "network-mainnet", test))]
     Mainnet,
-    #[cfg(any(feature = "network-goerli", test))]
-    #[clap(alias = "prater")]
-    Goerli,
     #[cfg(any(feature = "network-sepolia", test))]
     Sepolia,
     #[cfg(any(feature = "network-holesky", test))]
@@ -876,8 +873,6 @@ impl Network {
         match self {
             #[cfg(any(feature = "network-mainnet", test))]
             Self::Mainnet => Some(PredefinedNetwork::Mainnet),
-            #[cfg(any(feature = "network-goerli", test))]
-            Self::Goerli => Some(PredefinedNetwork::Goerli),
             #[cfg(any(feature = "network-sepolia", test))]
             Self::Sepolia => Some(PredefinedNetwork::Sepolia),
             #[cfg(any(feature = "network-holesky", test))]
@@ -1437,6 +1432,8 @@ fn verify_config(chain_config: &ChainConfig, file_path: Option<PathBuf>) -> Resu
         differences.is_empty(),
         Error::ConfigMismatch { differences },
     );
+
+    info!("configuration matches the one in configuration file");
 
     Ok(())
 }
