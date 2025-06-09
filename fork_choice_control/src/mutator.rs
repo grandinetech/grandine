@@ -1670,13 +1670,12 @@ where
         if self.store.has_unpersisted_data_column_sidecars()
             && (self.store.is_forward_synced()
                 || self.store.unpersisted_data_column_sidecars().count()
-                    >= self.store.sampling_columns_count())
+                    >= self.store.chain_config().number_of_columns())
         {
             self.spawn(PersistDataColumnSidecarsTask {
                 store_snapshot: self.owned_store(),
                 storage: self.storage.clone_arc(),
                 mutator_tx: self.owned_mutator_tx(),
-                block_root: None,
                 wait_group,
                 metrics: self.metrics.clone(),
             });
@@ -1695,6 +1694,7 @@ where
 
         self.spawn(ReconstructDataColumnSidecarsTask {
             store_snapshot: self.owned_store(),
+            storage: self.storage.clone_arc(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             block_root,
@@ -1722,14 +1722,7 @@ where
             &pending.block,
             &cells_and_kzg_proofs,
             self.store.chain_config(),
-        )?
-        .into_iter()
-        .filter_map(|data_column_sidecar| {
-            missing_indices
-                .contains(&data_column_sidecar.index)
-                .then_some(Arc::new(data_column_sidecar))
-        })
-        .collect::<Vec<_>>();
+        )?;
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
         data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
@@ -1739,7 +1732,10 @@ where
         );
 
         for data_column_sidecar in data_column_sidecars {
-            self.accept_data_column_sidecar(wait_group, &data_column_sidecar);
+            let data_column_sidecar = Arc::new(data_column_sidecar);
+            if missing_indices.contains(&data_column_sidecar.index) {
+                self.accept_data_column_sidecar(wait_group, &data_column_sidecar);
+            }
 
             if self.store.is_forward_synced() {
                 self.send_to_p2p(P2pMessage::PublishDataColumnSidecar(data_column_sidecar));
@@ -2332,11 +2328,10 @@ where
         self.event_channels
             .send_data_column_sidecar_event(block_root, data_column_sidecar);
 
-        // Since we need reconstruction whenever local head slot can't move on due to unreliable
-        // peers in unhealthy network, so we shouldn't persist every unpersisted data columns
-        // as it might include those that are associated with a unimported block, and when the
-        // local head can't move, then it can't spawn reconstruction because most of the cached
-        // has been persisted into storage, while it check only in memory.
+        // TODO(peerdas-fulu): We can't keep data column sidecars on cache for too long, and we
+        // also can't spawn persist task everytime data column accepted, doing either would bloat the memory usage.
+        // So we need a way to periodically persist cached data column sidecars into disk
+        // without got pruned whenever `data_column_cache.on_slot()` function called.
         if !self.storage.prune_storage_enabled()
             && accepted_data_columns == self.store.sampling_columns_count()
         {
@@ -2344,7 +2339,6 @@ where
                 store_snapshot: self.owned_store(),
                 storage: self.storage.clone_arc(),
                 mutator_tx: self.owned_mutator_tx(),
-                block_root: Some(block_root),
                 wait_group: wait_group.clone(),
                 metrics: self.metrics.clone(),
             });
@@ -3268,7 +3262,9 @@ where
         }
 
         let storage = self.storage.clone_arc();
-        let data_up_to_epoch = self.store.min_checked_data_availability_epoch();
+        let data_up_to_epoch = self
+            .store
+            .min_checked_data_availability_epoch(self.store.slot());
         let data_up_to_slot = misc::compute_start_slot_at_epoch::<P>(data_up_to_epoch);
         let blocks_up_to_epoch = self.store.min_checked_block_availability_epoch();
         let blocks_up_to_slot = misc::compute_start_slot_at_epoch::<P>(blocks_up_to_epoch);
@@ -3620,7 +3616,6 @@ where
             .saturating_sub(missing_indices.len());
 
         if self.store.is_forward_synced()
-            && available_columns_count > 0
             && available_columns_count * 2 >= self.store.chain_config().number_of_columns()
         {
             return BlockDataColumnAvailability::CompleteWithReconstruction;

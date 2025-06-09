@@ -2312,15 +2312,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.prune_after_finalization();
         }
 
+        self.blob_cache.on_slot(new_tick.slot);
         // TODO(peerdas-fulu): NEED REVIEW!
         //
         // While syncing, cached data column sidecars often got pruned whenever it struggle to get
         // all its sampling columns on time, because it is required to have all sampling columns to
         // spawn persisting task. As a result, it missed persisting those pruned data column sidecars.
-        if self.is_forward_synced() {
-            self.blob_cache.on_slot(new_tick.slot);
-            self.data_column_cache.on_slot(new_tick.slot);
-        }
+        self.data_column_cache.on_slot(new_tick.slot);
         self.prune_state_cache(true);
 
         let changes = if self.reorganized(old_head_segment_id) {
@@ -3742,8 +3740,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .unwrap_or(GENESIS_EPOCH)
     }
 
-    pub fn min_checked_data_availability_epoch(&self) -> Epoch {
-        if self.phase().is_peerdas_activated() {
+    pub fn min_checked_data_availability_epoch(&self, slot: Slot) -> Epoch {
+        if self
+            .chain_config
+            .phase_at_slot::<P>(slot)
+            .is_peerdas_activated()
+        {
             self.chain_config.fulu_fork_epoch.max(
                 self.tick
                     .epoch::<P>()
@@ -3764,7 +3766,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn should_check_data_availability_at_slot(&self, slot: Slot) -> bool {
-        misc::compute_epoch_at_slot::<P>(slot) >= self.min_checked_data_availability_epoch()
+        misc::compute_epoch_at_slot::<P>(slot) >= self.min_checked_data_availability_epoch(slot)
     }
 
     pub fn state_cache(&self) -> Arc<StateCacheProcessor<P>> {
@@ -3790,14 +3792,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.data_column_cache.unpersisted_data_column_sidecars()
     }
 
-    pub fn unpersisted_data_column_sidecars_by_block(
-        &self,
-        block_root: H256,
-    ) -> impl Iterator<Item = DataColumnSidecarWithId<P>> + '_ {
-        self.data_column_cache
-            .unpersisted_data_column_sidecars_by_block(block_root)
-    }
-
     pub fn store_sampling_columns(&mut self, sampling_columns: StdHashSet<ColumnIndex>) {
         self.sampling_columns = sampling_columns;
     }
@@ -3812,15 +3806,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub const fn sampling_columns(&self) -> &StdHashSet<ColumnIndex> {
         &self.sampling_columns
-    }
-
-    pub fn available_columns_at_block(&self, block_root: H256) -> Vec<Arc<DataColumnSidecar<P>>> {
-        self.sampling_columns
-            .iter()
-            .filter_map(|&index| {
-                self.cached_data_column_sidecar_by_id(DataColumnIdentifier { block_root, index })
-            })
-            .collect()
     }
 
     pub fn is_sidecars_construction_started(&self, block_root: &H256) -> bool {
