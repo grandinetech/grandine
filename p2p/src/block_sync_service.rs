@@ -710,11 +710,14 @@ impl<P: Preset> BlockSyncService<P> {
                                 columns_to_request.len(),
                                 columns_to_request.iter().join(", "),
                             );
+                            let preferred_peer = self
+                                .sync_manager
+                                .find_most_coverage_peer(&columns_to_request);
 
                             match self.sync_manager.map_peer_custody_columns(
                                 columns_to_request,
                                 None,
-                                Some(start_slot.saturating_add(count)),
+                                preferred_peer,
                                 Some(peer_id),
                             ) {
                                 Ok(peer_custody_columns_mapping) => {
@@ -828,12 +831,13 @@ impl<P: Preset> BlockSyncService<P> {
                     return Ok(());
                 }
 
+                let chain_config = self.controller.chain_config();
                 if self.sync_manager.is_local_head_not_progress(head_slot)
-                    && self
-                        .controller
-                        .chain_config()
+                    && chain_config
                         .phase_at_slot::<P>(head_slot + 1)
                         .is_peerdas_activated()
+                    && self.controller.sampling_columns_count() * 2
+                        >= chain_config.number_of_columns()
                 {
                     self.controller
                         .on_reconstruct_data_column_sidecars(head_slot + 1);
@@ -946,6 +950,9 @@ impl<P: Preset> BlockSyncService<P> {
             .filter(|blob_identifier| {
                 !self.received_blob_sidecars.contains_key(blob_identifier)
                     && !self.controller.contains_block(blob_identifier.block_root)
+                    && self
+                        .sync_manager
+                        .ready_to_request_blob_by_root(blob_identifier, peer_id)
             })
             .collect::<Vec<_>>();
 
@@ -1058,40 +1065,31 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
+        let preferred_peer = self.sync_manager.find_most_coverage_peer(&missing_indices);
         match self.sync_manager.map_peer_custody_columns(
             missing_indices,
             None,
-            (!self.is_forward_synced).then_some(slot),
+            preferred_peer,
             None,
         ) {
             Ok(peer_custody_columns_mapping) => {
                 for (peer_id, column_indices) in peer_custody_columns_mapping {
                     let request_id = self.request_id()?;
 
-                    let identifier = column_indices
-                        .into_iter()
-                        .map(|index| DataColumnIdentifier { block_root, index })
-                        .collect::<Vec<_>>();
-                    let data_column_identifiers = self
+                    let data_columns_by_root = DataColumnsByRootIdentifier {
+                        block_root,
+                        columns: ContiguousList::try_from(column_indices)
+                            .expect("column indices must not be more than NUMBER_OF_COLUMNS"),
+                    };
+
+                    if let Some(data_columns_by_root) = self
                         .sync_manager
-                        .add_data_columns_request_by_root(identifier, peer_id);
-
-                    if !data_column_identifiers.is_empty() {
-                        let columns = ContiguousList::try_from(
-                            data_column_identifiers
-                                .into_iter()
-                                .map(|id| id.index)
-                                .collect::<Vec<_>>(),
-                        )
-                        .expect("column indices must not be more than NUMBER_OF_COLUMNS");
-
+                        .add_data_columns_request_by_root(data_columns_by_root, peer_id)
+                    {
                         SyncToP2p::RequestDataColumnsByRoot(
                             request_id,
                             peer_id,
-                            vec![DataColumnsByRootIdentifier {
-                                block_root,
-                                columns,
-                            }],
+                            vec![data_columns_by_root],
                         )
                         .send(&self.sync_to_p2p_tx);
                     }

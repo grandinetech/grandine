@@ -500,7 +500,6 @@ pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub storage: Arc<Storage<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
-    pub block_root: Option<H256>,
     pub wait_group: W,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -511,7 +510,6 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
             store_snapshot,
             storage,
             mutator_tx,
-            block_root,
             wait_group,
             metrics,
         } = self;
@@ -522,15 +520,7 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
                 .start_timer()
         });
 
-        let data_column_sidecars = if let Some(block_root) = block_root {
-            store_snapshot
-                .unpersisted_data_column_sidecars_by_block(block_root)
-                .collect::<Vec<_>>()
-        } else {
-            store_snapshot
-                .unpersisted_data_column_sidecars()
-                .collect::<Vec<_>>()
-        };
+        let data_column_sidecars = store_snapshot.unpersisted_data_column_sidecars();
 
         match storage.append_data_column_sidecars(data_column_sidecars) {
             Ok(persisted_data_column_ids) => {
@@ -549,6 +539,7 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
 
 pub struct ReconstructDataColumnSidecarsTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub storage: Arc<Storage<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub block_root: H256,
@@ -558,16 +549,28 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
     fn run(self) {
         let Self {
             store_snapshot,
+            storage,
             mutator_tx,
             wait_group,
             block_root,
         } = self;
 
-        let available_columns = store_snapshot.available_columns_at_block(block_root);
+        let Ok(available_columns) = (0..store_snapshot.chain_config().number_of_columns)
+            .map(|index| {
+                let identifier = DataColumnIdentifier { block_root, index };
+                match store_snapshot.cached_data_column_sidecar_by_id(identifier) {
+                    Some(data_column_sidecar) => Ok(Some(data_column_sidecar)),
+                    None => storage.data_column_sidecar_by_id(identifier),
+                }
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|columns| columns.into_iter().flatten().collect::<Vec<_>>())
+        else {
+            warn!("failed to retrieve data column sidecar from storage");
+            return;
+        };
 
-        if !available_columns.is_empty()
-            && available_columns.len() * 2 >= store_snapshot.chain_config().number_of_columns()
-        {
+        if available_columns.len() * 2 >= store_snapshot.chain_config().number_of_columns() {
             let blob_count = available_columns
                 .first()
                 .expect("first data column sidecar must be available")
