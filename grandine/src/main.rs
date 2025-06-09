@@ -88,6 +88,7 @@ struct Context {
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
     checkpoint_sync_url: Option<RedactingUrl>,
+    checkpoint_sync_slot: Option<Slot>,
     force_checkpoint_sync: bool,
     back_sync_enabled: bool,
     eth1_rpc_urls: Vec<RedactingUrl>,
@@ -173,6 +174,7 @@ impl Context {
             validator_api_config,
             validator_config,
             checkpoint_sync_url,
+            checkpoint_sync_slot,
             force_checkpoint_sync,
             back_sync_enabled,
             eth1_rpc_urls,
@@ -260,11 +262,13 @@ impl Context {
                     "the requires attribute for force_checkpoint_sync \
                      ensures checkpoint_sync_url is present",
                 ),
+                checkpoint_sync_slot,
             }
         } else {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
+                checkpoint_sync_slot,
                 anchor_checkpoint_provider: anchor_checkpoint_provider.clone(),
             }
         };
@@ -350,6 +354,7 @@ fn try_main() -> Result<()> {
         genesis_state_file,
         genesis_state_download_url,
         checkpoint_sync_url,
+        checkpoint_sync_slot,
         force_checkpoint_sync,
         back_sync_enabled,
         eth1_rpc_urls,
@@ -521,6 +526,7 @@ fn try_main() -> Result<()> {
         validator_api_config,
         validator_config,
         checkpoint_sync_url,
+        checkpoint_sync_slot,
         force_checkpoint_sync,
         back_sync_enabled,
         eth1_rpc_urls,
