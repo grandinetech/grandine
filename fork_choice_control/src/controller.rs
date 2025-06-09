@@ -575,13 +575,10 @@ where
         let store_snapshot = self.store_snapshot();
         if let Some(block_root) = store_snapshot.get_delayed_block_at_slot(slot) {
             if !store_snapshot.is_sidecars_construction_started(block_root) {
-                let available_columns_count =
-                    store_snapshot.available_columns_at_block(*block_root).len();
+                let accepted = store_snapshot.accepted_data_column_sidecars_at_slot(slot);
 
-                if available_columns_count < store_snapshot.sampling_columns_count()
-                    && available_columns_count > 0
-                    && available_columns_count * 2
-                        >= store_snapshot.chain_config().number_of_columns()
+                if accepted < store_snapshot.sampling_columns_count()
+                    && accepted * 2 >= store_snapshot.chain_config().number_of_columns()
                 {
                     MutatorMessage::ReconstructMissingColumns {
                         wait_group: self.owned_wait_group(),
@@ -766,6 +763,10 @@ where
 
     pub fn sampling_columns(&self) -> HashSet<ColumnIndex> {
         self.store_snapshot().sampling_columns().clone()
+    }
+
+    pub fn sampling_columns_count(&self) -> usize {
+        self.store_snapshot().sampling_columns().len()
     }
 
     pub fn accepted_data_column_sidecar(
