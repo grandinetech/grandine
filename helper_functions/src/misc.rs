@@ -93,7 +93,8 @@ pub fn slots_since_epoch_start<P: Preset>(slot: Slot) -> u64 {
 
 #[must_use]
 pub const fn slots_in_epoch<P: Preset>(epoch: Epoch) -> Range<Slot> {
-    compute_start_slot_at_epoch::<P>(epoch)..compute_start_slot_at_epoch::<P>(epoch + 1)
+    let next_epoch = epoch.saturating_add(1);
+    compute_start_slot_at_epoch::<P>(epoch)..compute_start_slot_at_epoch::<P>(next_epoch)
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/5a4e568d2dc4cae6c470e0acbe4e48b01351500f/specs/altair/validator.md#sync-committee>
@@ -109,7 +110,7 @@ pub const fn start_of_sync_committee_period<P: Preset>(period: SyncCommitteePeri
 
 #[must_use]
 pub const fn compute_activation_exit_epoch<P: Preset>(epoch: Epoch) -> Epoch {
-    epoch + 1 + P::MAX_SEED_LOOKAHEAD
+    epoch.saturating_add(1 + P::MAX_SEED_LOOKAHEAD)
 }
 
 // > Return the 32-byte fork data root for the ``current_version`` and ``genesis_validators_root``.
