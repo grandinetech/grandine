@@ -67,7 +67,6 @@ const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN_IN_SECONDS: u64 = 12;
 const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
-const MAX_REQUEST_PEERS_PER_EPOCH: usize = 10;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum SyncTarget {
@@ -575,7 +574,6 @@ impl SyncManager {
         let slot_distance = remote_head_slot.saturating_sub(sync_start_slot);
         let batches_in_front = usize::try_from(slot_distance / slots_per_request + 1)?;
 
-        let mut start_peer_index = 0;
         let mut max_slot = local_head_slot;
         let blob_serve_range_slot = misc::blob_serve_range_slot::<P>(config, current_slot);
         let data_column_serve_range_slot =
@@ -606,22 +604,17 @@ impl SyncManager {
                         // TODO(peerdas-fulu): Distributes requested columns among the minimal set of peers,
                         // selected peers should be checked prior the assignment to make sure those peers
                         // can serve all of the requested columns.
-                        let end_peer_index = (start_peer_index
-                            + columns_to_request.len().min(MAX_REQUEST_PEERS_PER_EPOCH))
-                        .min(peers_to_sync.len());
-                        let peers_to_request = &peers_to_sync[start_peer_index..end_peer_index];
                         self.log(
                             Level::Debug,
                             format_args!(
-                                "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot} from peers: {:?}",
+                                "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
                                 columns_to_request.len(),
                                 columns_to_request.iter().join(", "),
-                                peers_to_request,
                             ),
                         );
                         match self.map_peer_custody_columns(
                             columns_to_request,
-                            Some(peers_to_request),
+                            Some(&peers_to_sync),
                             None,
                             None,
                         ) {
@@ -641,8 +634,6 @@ impl SyncManager {
                                             .ok(),
                                     });
                                 }
-
-                                start_peer_index = end_peer_index;
                             }
                             Err(_) => {
                                 self.log(
@@ -681,9 +672,7 @@ impl SyncManager {
             });
 
             // TODO(peerdas-fulu): review this max requests cap
-            if sync_batches.len() >= peers_to_sync.len() / 2
-                || start_peer_index == peers_to_sync.len()
-            {
+            if sync_batches.len() >= peers_to_sync.len() / 2 {
                 break;
             }
         }

@@ -195,8 +195,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         let slot = block.message().slot();
         let block_root = block.message().hash_tree_root();
 
-        if self.controller.contains_block(block_root) {
-            debug!("cannot fetch blobs from EL: block has been imported");
+        if self.controller.contains_block(block_root)
+            || self.sidecars_construction_started.contains_key(&block_root)
+        {
+            debug!("cannot fetch blobs from EL: block has been imported, or being importing");
             return;
         }
 
