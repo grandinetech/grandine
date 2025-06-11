@@ -2353,6 +2353,7 @@ dependencies = [
  "test-generator",
  "thiserror 1.0.69",
  "try_from_iterator",
+ "typenum",
  "types",
 ]
 
@@ -2637,7 +2638,6 @@ dependencies = [
  "test-case",
  "thiserror 1.0.69",
  "tokio",
- "try_from_iterator",
  "typenum",
  "types",
  "unwrap_none",
