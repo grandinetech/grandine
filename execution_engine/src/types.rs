@@ -989,7 +989,7 @@ pub struct BlobAndProofV1<P: Preset> {
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobAndProofV2<P: Preset> {
     pub blob: Blob<P>,
-    pub proofs: Arc<ContiguousVector<KzgProof, P::CellsPerExtBlob>>,
+    pub proofs: ContiguousVector<KzgProof, P::CellsPerExtBlob>,
 }
 
 pub enum EngineGetBlobsParams {
