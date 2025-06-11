@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use dashmap::DashMap;
-use derive_more::derive::Constructor;
+use derive_more::{derive::Constructor, IntoIterator};
 use eth2_libp2p::PeerId;
 use execution_engine::{BlobAndProofV1, BlobAndProofV2, EngineGetBlobsParams};
 use fork_choice_control::Wait;
@@ -12,8 +12,7 @@ use futures::{
 };
 use helper_functions::misc;
 use log::{debug, warn};
-use ssz::{ContiguousList, ContiguousVector, H256};
-use try_from_iterator::TryFromIterator as _;
+use ssz::{ContiguousList, H256};
 use types::{
     combined::SignedBeaconBlock,
     deneb::{containers::BlobIdentifier, primitives::BlobIndex},
@@ -232,13 +231,13 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                     .copied()
                     .map(misc::kzg_commitment_to_versioned_hash)
                     .collect::<Vec<_>>();
-                let mut data_column_sidecars = vec![];
 
+                let mut data_column_sidecars = vec![];
                 match self.api.get_blobs_v2::<P>(versioned_hashes).await {
                     Ok(blobs_and_proofs_opt) => {
                         if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
                             if blobs_and_proofs.len() == expected_blobs_count {
-                                let (received_blobs, cells_proofs): (Vec<_>, Vec<_>) =
+                                let (received_blobs, received_proofs): (Vec<_>, Vec<_>) =
                                     blobs_and_proofs
                                         .into_iter()
                                         .map(|BlobAndProofV2 { blob, proofs }| (blob, proofs))
@@ -248,83 +247,52 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     "received all {expected_blobs_count} blob sidecars from EL at slot: {slot}",
                                 );
 
-                                match cells_proofs
+                                let cells_proofs = received_proofs
                                     .into_iter()
-                                    .map(|proofs| {
-                                        ContiguousVector::try_from_iter(proofs.into_iter())
-                                            .map_err(Into::into)
-                                    })
-                                    .collect::<Result<Vec<_>>>()
-                                {
-                                    Ok(ext_proofs) => {
-                                        match eip_7594::try_compute_ext_cells::<P>(
-                                            &received_blobs,
-                                            self.controller.store_config().kzg_backend,
+                                    .flat_map(IntoIterator::into_iter)
+                                    .collect::<Vec<_>>();
+                                match eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                    &received_blobs,
+                                    &cells_proofs,
+                                    self.controller.store_config().kzg_backend,
+                                ) {
+                                    Ok(cells_and_kzg_proofs) => {
+                                        match eip_7594::construct_data_column_sidecars(
+                                            &block,
+                                            &cells_and_kzg_proofs,
+                                            self.controller.chain_config(),
                                         ) {
-                                            Ok(ext_cells) => {
-                                                let cells_and_kzg_proofs = ext_cells
-                                                    .into_iter()
-                                                    .zip(ext_proofs)
-                                                    .collect::<Vec<_>>();
+                                            Ok(data_columns) => {
+                                                self.sidecars_construction_started
+                                                    .insert(block_root, slot);
 
-                                                match eip_7594::construct_data_column_sidecars(
-                                                    &block,
-                                                    &cells_and_kzg_proofs,
-                                                    self.controller.chain_config(),
-                                                ) {
-                                                    Ok(data_columns) => {
-                                                        self.sidecars_construction_started
-                                                            .insert(block_root, slot);
-
-                                                        let sampling_columns = self
-                                                            .controller
+                                                for data_column_sidecar in
+                                                    data_columns.into_iter().filter(|column| {
+                                                        self.controller
                                                             .sampling_columns()
-                                                            .into_iter()
-                                                            .collect::<Vec<_>>();
-
-                                                        for data_column_sidecar in data_columns
-                                                            .into_iter()
-                                                            .filter(|column| {
-                                                                sampling_columns
-                                                                    .contains(&column.index)
-                                                            })
-                                                        {
-                                                            let data_column_identifier =
-                                                                DataColumnIdentifier {
-                                                                    block_root,
-                                                                    index: data_column_sidecar
-                                                                        .index,
-                                                                };
-
-                                                            if self
-                                                                .received_data_column_sidecars
-                                                                .insert(
-                                                                    data_column_identifier,
-                                                                    slot,
-                                                                )
-                                                                .is_none()
-                                                            {
-                                                                data_column_sidecars.push(
-                                                                    Arc::new(data_column_sidecar),
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(error) => warn!(
-                                                    "failed to construct data column sidecars with \
-                                                    cells and kzg proofs: {error:?}"
-                                                ),
+                                                            .contains(&column.index)
+                                                    })
+                                                {
+                                                    let identifier = DataColumnIdentifier {
+                                                        block_root,
+                                                        index: data_column_sidecar.index,
+                                                    };
+                                                    self.received_data_column_sidecars
+                                                        .insert(identifier, slot);
+                                                    data_column_sidecars
+                                                        .push(Arc::new(data_column_sidecar));
                                                 }
                                             }
                                             Err(error) => warn!(
-                                                "failed to convert blobs received from EL \
-                                            into extended cells: {error:?}"
+                                                "failed to construct data column sidecars with \
+                                            cells and kzg proofs: {error:?}"
                                             ),
                                         }
                                     }
                                     Err(error) => warn!(
-                                    "received cells proofs from EL with incorrect length: {error:?}"
-                                ),
+                                        "failed to convert blobs received from EL \
+                                    into extended cells: {error:?}"
+                                    ),
                                 }
                             } else {
                                 warn!(

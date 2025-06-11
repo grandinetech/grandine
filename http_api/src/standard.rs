@@ -1237,6 +1237,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
     {
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.as_ref(),
+            proofs.as_ref(),
             controller.store_config().kzg_backend,
         )?;
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
@@ -1304,6 +1305,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     {
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.unwrap_or_default().as_ref(),
+            proofs.unwrap_or_default().as_ref(),
             controller.store_config().kzg_backend,
         )?;
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
@@ -1396,6 +1398,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     {
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.as_ref(),
+            proofs.as_ref(),
             controller.store_config().kzg_backend,
         )?;
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
