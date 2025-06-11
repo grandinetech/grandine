@@ -4,24 +4,25 @@ use anyhow::{ensure, Result};
 use helper_functions::{misc, predicates::is_valid_merkle_branch};
 use itertools::Itertools as _;
 use kzg_utils::{
-    eip_7594::{
-        compute_cells, compute_cells_and_kzg_proofs, recover_cells_and_kzg_proofs,
-        verify_cell_kzg_proof_batch,
-    },
+    eip_7594::{compute_cells, recover_cells_and_kzg_proofs, verify_cell_kzg_proof_batch},
     KzgBackend,
 };
 use num_traits::One as _;
-use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
+use rayon::iter::{
+    IndexedParallelIterator as _, IntoParallelIterator as _, IntoParallelRefIterator as _,
+    ParallelIterator as _,
+};
 use sha2::{Digest as _, Sha256};
 use ssz::{ContiguousList, ContiguousVector, SszHash as _, Uint256};
 use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     combined::SignedBeaconBlock,
     config::Config,
-    deneb::primitives::Blob,
+    deneb::primitives::{Blob, KzgProof},
     fulu::{
         containers::{DataColumnSidecar, MatrixEntry},
-        primitives::{CellsAndKzgProofs, ColumnIndex, CustodyIndex, ExtCells},
+        primitives::{CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
     phase0::primitives::{NodeId, SubnetId},
     preset::Preset,
@@ -220,18 +221,6 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
 }
 
 /**
- * Return the full, flattened sequence of matrix entries.
- *
- * This helper demonstrates the relationship between blobs and the matrix of cells/proofs.
- */
-pub fn compute_matrix<P: Preset>(
-    blobs: &[Blob<P>],
-    backend: KzgBackend,
-) -> Result<Vec<MatrixEntry<P>>> {
-    try_convert_to_cells_and_kzg_proofs::<P>(blobs, backend).map(construct_full_matrix)
-}
-
-/**
  * Recover the full, flattened sequence of matrix entries.
  *
  * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
@@ -315,21 +304,21 @@ pub fn construct_data_column_sidecars<P: Preset>(
 
 pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
     blobs: &[Blob<P>],
+    kzg_proofs: &[KzgProof],
     backend: KzgBackend,
 ) -> Result<Vec<CellsAndKzgProofs<P>>> {
     blobs
         .par_iter()
-        .map(|blob| compute_cells_and_kzg_proofs::<P>(blob, backend))
-        .collect::<Result<Vec<_>>>()
-}
-
-pub fn try_compute_ext_cells<P: Preset>(
-    blobs: &[Blob<P>],
-    backend: KzgBackend,
-) -> Result<Vec<ExtCells<P>>> {
-    blobs
-        .par_iter()
-        .map(|blob| compute_cells::<P>(blob, backend))
+        .enumerate()
+        .map(|(i, blob)| {
+            compute_cells::<P>(blob, backend).and_then(|cells| {
+                let start = P::CellsPerExtBlob::USIZE.saturating_mul(i);
+                let end = P::CellsPerExtBlob::USIZE.saturating_add(start);
+                ContiguousVector::try_from_iter(kzg_proofs[start..end].iter().copied())
+                    .map(|proofs| (cells, proofs))
+                    .map_err(Into::into)
+            })
+        })
         .collect::<Result<Vec<_>>>()
 }
 
