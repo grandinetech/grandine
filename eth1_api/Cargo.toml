@@ -40,7 +40,6 @@ static_assertions = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 web3 = { workspace = true }
