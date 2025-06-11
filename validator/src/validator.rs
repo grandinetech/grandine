@@ -950,6 +950,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 {
                     let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
                         blobs.as_ref(),
+                        block_proofs.unwrap_or_default().as_ref(),
                         self.controller.store_config().kzg_backend,
                     )?;
                     for data_column_sidecar in eip_7594::construct_data_column_sidecars(
