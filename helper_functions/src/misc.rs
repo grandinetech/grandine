@@ -123,13 +123,29 @@ fn compute_fork_data_root(current_version: Version, genesis_validators_root: H25
     .hash_tree_root()
 }
 
-// > Return the 4-byte fork digest for the ``current_version`` and ``genesis_validators_root``.
+// > Return the 4-byte fork digest for the ``version`` and ``genesis_validators_root``
+// > XOR'd with the hash of the blob parameters for ``epoch``.
+//
 // > This is a digest primarily used for domain separation on the p2p layer.
 // > 4-bytes suffices for practical separation of forks/chains.
 #[must_use]
-pub fn compute_fork_digest(current_version: Version, genesis_validators_root: H256) -> ForkDigest {
-    let root = compute_fork_data_root(current_version, genesis_validators_root);
-    ForkDigest::from_slice(&root[..ForkDigest::len_bytes()])
+pub fn compute_fork_digest(
+    config: &Config,
+    genesis_validators_root: H256,
+    epoch: Epoch,
+) -> ForkDigest {
+    let fork_version = config.version_at_epoch(epoch);
+    let blob_params = config.get_blob_schedule_entry(epoch);
+    let blob_params_hash = hashing::hash_64_64(
+        blob_params.epoch,
+        blob_params
+            .max_blobs_per_block
+            .try_into()
+            .expect("number of max blobs should fit in u64"),
+    );
+    let root = compute_fork_data_root(fork_version, genesis_validators_root);
+    let bitmask_digest = root ^ blob_params_hash;
+    ForkDigest::from_slice(&bitmask_digest[..ForkDigest::len_bytes()])
 }
 
 #[must_use]
