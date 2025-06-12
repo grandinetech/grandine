@@ -158,7 +158,7 @@ pub struct Config {
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars_fulu: u64,
-    #[serde(with = "serde_utils::sorted_list_desc_by_key")]
+    #[serde(with = "serde_utils::sorted_list_asc_by_key")]
     pub blob_schedule: Vec<BlobScheduleEntry>,
 
     // Transition
@@ -293,7 +293,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Constructor, Debug, Deserialize, Serialize)]
+#[derive(Constructor, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct BlobScheduleEntry {
     #[serde(with = "serde_utils::string_or_native")]
@@ -770,6 +770,12 @@ impl Config {
         }
     }
 
+    #[must_use]
+    pub fn version_at_epoch(&self, epoch: Epoch) -> Version {
+        let phase = self.phase_at_epoch(epoch);
+        self.version(phase)
+    }
+
     #[inline]
     #[must_use]
     pub const fn fork_epoch(&self, phase: Phase) -> Epoch {
@@ -913,13 +919,16 @@ impl Config {
     }
 
     #[must_use]
-    pub fn get_max_blobs_per_block_post_fulu(&self, epoch: Epoch) -> usize {
+    pub fn get_blob_schedule_entry(&self, epoch: Epoch) -> BlobScheduleEntry {
         // There is no need to sort everytime the function called, `blob_schedule` has been sorted by
         // `epoch` in descending order.
         self.blob_schedule
             .iter()
-            .find_map(|entry| (epoch >= entry.epoch).then_some(entry.max_blobs_per_block))
-            .unwrap_or(self.max_blobs_per_block_electra)
+            .rev()
+            .find_map(|entry| (epoch >= entry.epoch).then_some(entry.clone()))
+            .unwrap_or_else(|| {
+                BlobScheduleEntry::new(self.electra_fork_epoch, self.max_blobs_per_block_electra)
+            })
     }
 
     #[must_use]
@@ -930,7 +939,7 @@ impl Config {
                 self.max_blobs_per_block
             }
             Phase::Electra => self.max_blobs_per_block_electra,
-            Phase::Fulu => self.get_max_blobs_per_block_post_fulu(epoch),
+            Phase::Fulu => self.get_blob_schedule_entry(epoch).max_blobs_per_block,
         };
 
         max_blobs
