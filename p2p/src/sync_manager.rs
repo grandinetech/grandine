@@ -50,8 +50,8 @@ struct ChainId {
 impl From<&StatusMessage> for ChainId {
     fn from(status: &StatusMessage) -> Self {
         Self {
-            finalized_root: status.finalized_root,
-            finalized_epoch: status.finalized_epoch,
+            finalized_root: status.finalized_root(),
+            finalized_epoch: status.finalized_epoch(),
         }
     }
 }
@@ -1074,7 +1074,7 @@ impl SyncManager {
         peers
             .iter()
             .filter_map(|peer_id| self.peers.get(peer_id))
-            .map(|status| status.head_slot)
+            .map(|status| status.head_slot())
             .max()
     }
 
@@ -1304,7 +1304,7 @@ impl SyncManager {
 
 #[cfg(test)]
 mod tests {
-    use eth2_libp2p::NetworkConfig;
+    use eth2_libp2p::{rpc::StatusMessageV1, NetworkConfig};
     use slog::{o, Drain};
     use std::sync::Arc;
     use std_ext::ArcExt;
@@ -1425,13 +1425,13 @@ mod tests {
         config.fulu_fork_epoch = 8;
         let config = Arc::new(config);
 
-        let peer_status = StatusMessage {
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
             finalized_epoch: 0,
             head_root: H256::default(),
             head_slot,
-        };
+        });
 
         let mut sync_manager = build_sync_manager(config.clone_arc());
 
@@ -1475,13 +1475,13 @@ mod tests {
         let local_finalized_slot = 1000;
         let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
 
-        let peer_status = StatusMessage {
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
             finalized_epoch: 248,
             head_root: H256::default(),
             head_slot: 20_000,
-        };
+        });
 
         let mut sync_manager = build_sync_manager(config.clone_arc());
 
@@ -1524,13 +1524,13 @@ mod tests {
         let local_finalized_slot = 1000;
         let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
 
-        let peer_status = StatusMessage {
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
             finalized_epoch: 248,
             head_root: H256::default(),
             head_slot: 20_000,
-        };
+        });
 
         let mut sync_manager = build_sync_manager(config.clone_arc());
 

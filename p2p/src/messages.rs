@@ -141,6 +141,7 @@ pub enum SyncToP2p {
     RequestDataColumnsByRoot(RequestId, PeerId, Vec<DataColumnsByRootIdentifier>),
     RequestPeerStatus(RequestId, PeerId),
     SubscribeToCoreTopics,
+    UpdateEarliestAvailableSlot(Slot),
 }
 
 impl SyncToP2p {

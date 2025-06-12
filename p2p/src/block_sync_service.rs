@@ -246,6 +246,13 @@ impl<P: Preset> BlockSyncService<P> {
             select! {
                 _ = interval.select_next_some() => {
                     self.request_blobs_and_blocks_if_ready()?;
+
+                    if self.sync_direction == SyncDirection::Back {
+                        if let Some(back_sync) = &self.back_sync {
+                            SyncToP2p::UpdateEarliestAvailableSlot(back_sync.current_slot())
+                                .send(&self.sync_to_p2p_tx);
+                        }
+                    }
                 },
 
                 message = match self.archiver_to_sync_rx.as_mut() {
