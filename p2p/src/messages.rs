@@ -240,6 +240,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     UpdateEnrSubnet(Subnet, bool),
     UpdateFork(EnrForkId),
     UpdateGossipsubParameters(u64, Slot),
+    UpdateNextForkDigest(ForkDigest, Epoch),
     Stop,
 }
 

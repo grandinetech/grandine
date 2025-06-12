@@ -521,6 +521,19 @@ impl<P: Preset> Network<P> {
             ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
+        if chain_config.is_peerdas_scheduled() && misc::is_epoch_start::<P>(slot) {
+            let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+            let (next_fork_epoch, next_fork_digest) = self.fork_context.next_fork(current_epoch);
+
+            if self.fork_context.current_fork_digest() != next_fork_digest {
+                self.fork_context
+                    .update_current_fork_digest(next_fork_digest);
+
+                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest, next_fork_epoch)
+                    .send(&self.network_to_service_tx);
+            }
+        }
+
         // Subscribe to the topics of the next phase.
         if let Some(next_phase) = chain_config.next_phase_at_slot::<P>(slot) {
             let next_phase_slot = chain_config
@@ -2293,6 +2306,9 @@ fn run_network_service<P: Preset>(
                             ) {
                                 warn!("unable to update gossipsub scoring parameters: {error:?}");
                             }
+                        }
+                        ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest, next_fork_epoch) => {
+                            service.update_next_fork_digest(next_fork_digest, next_fork_epoch);
                         }
                         ServiceInboundMessage::Stop => break,
                     }
