@@ -16,7 +16,7 @@ use eth2_libp2p::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
             DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
         },
-        GoodbyeReason, InboundRequestId, RequestType, StatusMessage,
+        GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
     },
     service::{api_types::AppRequestId, Network as Service},
     types::{core_topics_to_subscribe, EnrForkId, ForkContext, GossipEncoding},
@@ -130,6 +130,7 @@ pub struct Network<P: Preset> {
     #[expect(dead_code)]
     port_mappings: Option<PortMappings>,
     data_dumper: Arc<DataDumper>,
+    earliest_available_slot: Slot,
 }
 
 impl<P: Preset> Network<P> {
@@ -196,6 +197,8 @@ impl<P: Preset> Network<P> {
 
         run_network_service(service, network_to_service_rx, service_to_network_tx);
 
+        let earliest_available_slot = controller.anchor_block().message().slot();
+
         let network = Self {
             network_globals,
             controller,
@@ -210,6 +213,7 @@ impl<P: Preset> Network<P> {
             shutdown_rx,
             port_mappings,
             data_dumper,
+            earliest_available_slot,
         };
 
         Ok(network)
@@ -478,6 +482,9 @@ impl<P: Preset> Network<P> {
                         }
                         SyncToP2p::SubscribeToCoreTopics => {
                             self.subscribe_to_core_topics();
+                        }
+                        SyncToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.earliest_available_slot = slot;
                         }
                     }
                 },
@@ -1875,17 +1882,18 @@ impl<P: Preset> Network<P> {
             self.controller.finalized_root()
         };
 
-        StatusMessage {
+        StatusMessage::V2(StatusMessageV2 {
             fork_digest: fork_digest(&self.fork_context),
             finalized_root,
             finalized_epoch,
             head_root: head.block_root,
             head_slot: head.slot(),
-        }
+            earliest_available_slot: self.earliest_available_slot,
+        })
     }
 
     fn check_status(&self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
-        if local.fork_digest != remote.fork_digest {
+        if local.fork_digest() != remote.fork_digest() {
             debug!(
                 "local fork digest doesn't match remote fork digest \
                 (local: {local:?}, remote: {remote:?}, peer_id: {peer_id}); \
@@ -1905,28 +1913,29 @@ impl<P: Preset> Network<P> {
         }
 
         let info = SyncInfo {
-            head_slot: remote.head_slot,
-            head_root: remote.head_root,
-            finalized_epoch: remote.finalized_epoch,
-            finalized_root: remote.finalized_root,
+            head_slot: remote.head_slot(),
+            head_root: remote.head_root(),
+            finalized_epoch: remote.finalized_epoch(),
+            finalized_root: remote.finalized_root(),
+            earliest_available_slot: remote.earliest_available_slot(),
         };
 
         let (local_finalized_root_at_remote_finalized_epoch, sync_status) =
-            match local.finalized_epoch.cmp(&remote.finalized_epoch) {
+            match local.finalized_epoch().cmp(&remote.finalized_epoch()) {
                 Ordering::Less => (None, SyncStatus::Advanced { info }),
                 Ordering::Equal => {
                     let max_empty_slots = self.controller.store_config().max_empty_slots;
 
-                    let status = if remote.head_slot + max_empty_slots < local.head_slot {
+                    let status = if remote.head_slot() + max_empty_slots < local.head_slot() {
                         SyncStatus::Behind { info }
                     } else {
                         SyncStatus::Synced { info }
                     };
 
-                    (Some(local.finalized_root), status)
+                    (Some(local.finalized_root()), status)
                 }
                 Ordering::Greater => {
-                    let remote_finalized_slot = Self::start_of_epoch(remote.finalized_epoch);
+                    let remote_finalized_slot = Self::start_of_epoch(remote.finalized_epoch());
 
                     let finalized_root_at_slot = match self
                         .controller
@@ -1944,10 +1953,11 @@ impl<P: Preset> Network<P> {
             };
 
         if let Some(root) = local_finalized_root_at_remote_finalized_epoch {
-            if root != remote.finalized_root {
+            if root != remote.finalized_root() {
                 debug!(
                     "peer {peer_id} has different block finalized at epoch {} ({root:?} != {:?})",
-                    remote.finalized_epoch, remote.finalized_root,
+                    remote.finalized_epoch(),
+                    remote.finalized_root(),
                 );
 
                 P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
@@ -1961,13 +1971,14 @@ impl<P: Preset> Network<P> {
                 return;
             }
         } else if matches!(sync_status, SyncStatus::Behind { .. })
-            && local.finalized_root != H256::zero()
-            && remote.finalized_root != H256::zero()
+            && local.finalized_root() != H256::zero()
+            && remote.finalized_root() != H256::zero()
         {
             debug!(
                 "disconnecting peer {peer_id} due to missing historical data \
                  required to validate finalized root {:?} at epoch {}",
-                remote.finalized_root, remote.finalized_epoch,
+                remote.finalized_root(),
+                remote.finalized_epoch(),
             );
 
             P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);

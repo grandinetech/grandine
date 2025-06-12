@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use dashmap::DashMap;
-use derive_more::{derive::Constructor, IntoIterator};
+use derive_more::derive::Constructor;
 use eth2_libp2p::PeerId;
 use execution_engine::{BlobAndProofV1, BlobAndProofV2, EngineGetBlobsParams};
 use fork_choice_control::Wait;
@@ -184,7 +184,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         }
     }
 
-    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn get_blobs_v2(
         &self,
