@@ -72,6 +72,14 @@ const BLOCK_WITH_PADDING_FOR_64_BITS: Sha256Block = hex!("
 ");
 
 #[rustfmt::skip]
+const BLOCK_WITH_PADDING_FOR_128_BITS: Sha256Block = hex!("
+    00000000 00000000 80000000 00000000
+    00000000 00000000 00000000 00000000
+    00000000 00000000 00000000 00000000
+    00000000 00000000 00000000 00000080
+");
+
+#[rustfmt::skip]
 const BLOCK_WITH_PADDING_FOR_256_BITS: Sha256Block = hex!("
     00000000 00000000 00000000 00000000
     00000000 00000000 00000000 00000000
@@ -184,6 +192,16 @@ impl Sha256State {
 pub fn hash_64(value: u64) -> H256 {
     let mut block = BLOCK_WITH_PADDING_FOR_64_BITS;
     block[..8].copy_from_slice(&value.to_le_bytes());
+
+    Sha256State::default().compress_single(block).output()
+}
+
+#[inline]
+#[must_use]
+pub fn hash_64_64(a: u64, b: u64) -> H256 {
+    let mut block = BLOCK_WITH_PADDING_FOR_128_BITS;
+    block[..8].copy_from_slice(&a.to_le_bytes());
+    block[8..16].copy_from_slice(&b.to_le_bytes());
 
     Sha256State::default().compress_single(block).output()
 }
