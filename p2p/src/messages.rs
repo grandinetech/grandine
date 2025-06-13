@@ -59,6 +59,7 @@ pub enum P2pToSync<P: Preset> {
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
+    PeerCgcUpdated(PeerId),
     Stop,
 }
 
@@ -215,6 +216,7 @@ impl<P: Preset> P2pToSlasher<P> {
 }
 
 pub enum ServiceInboundMessage<P: Preset> {
+    AttemptToUpdateCustodyGroupCount(u64),
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
     Publish(PubsubMessage<P>),
@@ -227,6 +229,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     SubscribeNewForkTopics(Phase, ForkDigest),
     Unsubscribe(GossipTopic),
     UnsubscribeFromForkTopicsExcept(ForkDigest),
+    UpdateCustodyRequirements(Epoch, u64),
     UpdateEnrSubnet(Subnet, bool),
     UpdateFork(EnrForkId),
     UpdateGossipsubParameters(u64, Slot),
@@ -258,7 +261,10 @@ impl<P: Preset> ServiceOutboundMessage<P> {
 pub enum SubnetServiceToP2p {
     // Use `BTreeMap` to make serialization deterministic for snapshot testing.
     // `Vec` would work too and would be slightly faster.
+    AttemptToUpdateCustodyGroupCount(u64),
     UpdateAttestationSubnets(AttestationSubnetActions),
+    UpdateCustodyRequirements(Epoch, u64),
+    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubnets(BTreeMap<SubnetId, SyncCommitteeSubnetAction>),
 }
 
@@ -271,8 +277,11 @@ impl SubnetServiceToP2p {
 }
 
 pub enum ToSubnetService {
+    AttemptToUpdateCustodyGroupCount(u64),
     SetRegisteredValidators(Vec<PublicKeyBytes>, Vec<ValidatorIndex>),
     UpdateBeaconCommitteeSubscriptions(Slot, Vec<BeaconCommitteeSubscription>, Sender<Result<()>>),
+    UpdateCustodyRequirements(Epoch, u64),
+    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubscriptions(Epoch, Vec<SyncCommitteeSubscription>),
 }
 
