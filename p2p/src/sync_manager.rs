@@ -225,6 +225,15 @@ impl SyncManager {
             .collect_vec()
     }
 
+    pub fn update_peer_cgc(&mut self, peer_id: PeerId) {
+        self.log(
+            Level::Debug,
+            format_args!("update peer custody group count (peer_id: {peer_id})"),
+        );
+
+        self.update_peer_columns_custody(peer_id);
+    }
+
     pub fn retry_batch(
         &mut self,
         app_request_id: AppRequestId,
@@ -329,13 +338,13 @@ impl SyncManager {
                                 self.get_data_column_range_received(start_slot)
                             {
                                 self.network_globals
-                                    .sampling_columns
+                                    .sampling_columns()
                                     .iter()
                                     .filter(|index| !received_response.contains(index))
                                     .copied()
                                     .collect()
                             } else {
-                                self.network_globals.sampling_columns.clone()
+                                self.network_globals.sampling_columns()
                             };
 
                             if !columns_to_request.is_empty() {
@@ -514,7 +523,7 @@ impl SyncManager {
                 && self
                     .get_data_column_range_received(self.last_sync_range.start)
                     .is_some_and(|received| {
-                        received.len() < self.network_globals.sampling_columns.len()
+                        received.len() < self.network_globals.sampling_columns_count()
                     })
             {
                 // Keep requesting the last sync range for remaining data columns
@@ -588,7 +597,7 @@ impl SyncManager {
 
             if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
                 if data_column_serve_range_slot < max_slot {
-                    let mut columns_to_request = self.network_globals.sampling_columns.clone();
+                    let mut columns_to_request = self.network_globals.sampling_columns().clone();
                     if let Some(received_response) = self.get_data_column_range_received(start_slot)
                     {
                         if !redownloads_increased {
@@ -955,10 +964,24 @@ impl SyncManager {
         }
     }
 
+    fn update_peer_columns_custody(&mut self, peer_id: PeerId) {
+        for column_index in &self.network_globals.sampling_columns() {
+            let custodial_peers = self.custodial_peers.entry(*column_index).or_default();
+            if self
+                .network_globals
+                .is_custody_peer_of(*column_index, &peer_id)
+            {
+                custodial_peers.insert(peer_id);
+            } else if custodial_peers.contains(&peer_id) {
+                custodial_peers.remove(&peer_id);
+            }
+        }
+    }
+
     pub fn refresh_custodial_peers(&mut self) {
         let custodial_peers = self
             .network_globals
-            .sampling_columns
+            .sampling_columns()
             .iter()
             .map(|column_index| {
                 (
