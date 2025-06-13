@@ -587,6 +587,8 @@ pub async fn run_after_genesis<P: Preset>(
         metrics.clone(),
         validator_statistics.clone(),
         validator_channels,
+        network_config.network_dir.as_deref(),
+        network_config.subscribe_all_data_column_subnets,
     );
 
     let p2p_channels = Channels {
@@ -624,7 +626,7 @@ pub async fn run_after_genesis<P: Preset>(
     .await?;
 
     if chain_config.is_peerdas_scheduled() {
-        let sampling_columns = network.network_globals().sampling_columns.clone();
+        let sampling_columns = network.network_globals().sampling_columns();
         controller.on_store_sampling_columns(sampling_columns);
     }
 

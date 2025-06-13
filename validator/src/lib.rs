@@ -6,6 +6,7 @@ pub use crate::{
 };
 
 mod api;
+// mod custody;
 mod messages;
 mod misc;
 mod own_beacon_committee_members;

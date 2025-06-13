@@ -554,6 +554,9 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::DataColumnSidecarRejected(data_column_identifier) => {
                             self.received_data_column_sidecars.remove(&data_column_identifier);
                         }
+                        P2pToSync::PeerCgcUpdated(peer_id) => {
+                            self.sync_manager.update_peer_cgc(peer_id);
+                        }
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
 

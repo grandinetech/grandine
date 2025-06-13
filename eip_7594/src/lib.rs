@@ -24,9 +24,9 @@ use types::{
         containers::{DataColumnSidecar, MatrixEntry},
         primitives::{CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
-    phase0::primitives::{NodeId, SubnetId},
+    phase0::primitives::{Gwei, NodeId, SubnetId, ValidatorIndex},
     preset::Preset,
-    traits::SignedBeaconBlock as _,
+    traits::{BeaconState, SignedBeaconBlock as _},
 };
 
 use error::Error;
@@ -133,6 +133,28 @@ pub fn compute_subnets_for_node(
     }
 
     Ok(subnets)
+}
+
+pub fn compute_custody_subnets_and_columns_for_node(
+    raw_node_id: [u8; 32],
+    custody_group_count: u64,
+    config: &Config,
+) -> Result<(HashSet<SubnetId>, HashSet<ColumnIndex>)> {
+    let custody_groups = get_custody_groups(raw_node_id, custody_group_count, config)?;
+
+    let mut custody_subnets = HashSet::new();
+    for custody_index in &custody_groups {
+        let subnets = compute_subnets_from_custody_group(*custody_index, config)?;
+        custody_subnets.extend(subnets);
+    }
+
+    let mut custody_columns = HashSet::new();
+    for custody_index in &custody_groups {
+        let columns = compute_columns_for_custody_group(*custody_index, config)?;
+        custody_columns.extend(columns);
+    }
+
+    Ok((custody_subnets, custody_columns))
 }
 
 /// Verify if the data column sidecar is valid.
@@ -354,6 +376,29 @@ pub fn construct_cells_and_kzg_proofs<P: Preset>(
     }
 
     Ok(result.into_values().collect())
+}
+
+pub fn get_validator_custody_requirement<P: Preset>(
+    last_finalized_state: &impl BeaconState<P>,
+    validator_indices: &HashSet<ValidatorIndex>,
+    config: &Config,
+) -> u64 {
+    let total_node_balance = validator_indices
+        .iter()
+        .map(|index| {
+            last_finalized_state
+                .validators()
+                .get(*index)
+                .map(|validator| validator.effective_balance)
+        })
+        .process_results(|iter| iter.sum::<Gwei>())
+        .unwrap_or(0);
+
+    let count = total_node_balance.saturating_div(config.balance_per_additional_custody_group);
+
+    count
+        .max(config.validator_custody_requirement)
+        .min(config.number_of_custody_groups)
 }
 
 fn construct_full_matrix<P: Preset>(
