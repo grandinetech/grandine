@@ -311,6 +311,10 @@ impl<P: Preset> Context<P> {
             validator_to_slasher_tx: None,
         };
 
+        let mut network_config = NetworkConfig::default();
+        network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
+        let network_config = Arc::new(network_config);
+
         let validator = Validator::new(
             validator_config.clone_arc(),
             block_producer.clone_arc(),
@@ -326,11 +330,9 @@ impl<P: Preset> Context<P> {
             None,
             None,
             validator_channels,
+            network_config.network_dir.as_deref(),
+            network_config.subscribe_all_data_column_subnets,
         );
-
-        let mut network_config = NetworkConfig::default();
-        network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
-        let network_config = Arc::new(network_config);
 
         let subnet_service = SubnetService::new(
             attestation_agg_pool.clone_arc(),

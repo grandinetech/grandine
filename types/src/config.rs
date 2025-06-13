@@ -176,6 +176,10 @@ pub struct Config {
     pub number_of_custody_groups: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub samples_per_slot: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_custody_requirement: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub balance_per_additional_custody_group: Gwei,
 
     #[serde(skip_serializing)]
     pub blacklisted_blocks: Vec<H256>,
@@ -284,6 +288,8 @@ impl Default for Config {
             number_of_columns: 128,
             number_of_custody_groups: 128,
             samples_per_slot: 8,
+            validator_custody_requirement: 8,
+            balance_per_additional_custody_group: 32_000_000_000,
 
             blacklisted_blocks: vec![],
 
