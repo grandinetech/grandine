@@ -204,10 +204,7 @@ where
     }
 
     pub fn on_store_sampling_columns(&self, sampling_columns: HashSet<ColumnIndex>) {
-        if !self.store_snapshot().has_sampling_columns_stored() {
-            MutatorMessage::StoreSamplingColumns { sampling_columns }
-                .send(&self.owned_mutator_tx());
-        }
+        MutatorMessage::StoreSamplingColumns { sampling_columns }.send(&self.owned_mutator_tx());
     }
 
     // This should be called at the start of every tick.
@@ -766,7 +763,7 @@ where
     }
 
     pub fn sampling_columns_count(&self) -> usize {
-        self.store_snapshot().sampling_columns().len()
+        self.store_snapshot().sampling_columns_count()
     }
 
     pub fn accepted_data_column_sidecar(
