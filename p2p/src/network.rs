@@ -8,6 +8,7 @@ use std::{
 use anyhow::{bail, Result};
 use data_dumper::DataDumper;
 use dedicated_executor::DedicatedExecutor;
+use eip_7594::compute_custody_subnets_and_columns_for_node;
 use enum_iterator::Sequence as _;
 use eth1_api::{BlobFetcherToP2p, RealController};
 use eth2_libp2p::{
@@ -131,6 +132,7 @@ pub struct Network<P: Preset> {
     port_mappings: Option<PortMappings>,
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
+    last_nfd_update_epoch: Option<Epoch>,
 }
 
 impl<P: Preset> Network<P> {
@@ -214,6 +216,7 @@ impl<P: Preset> Network<P> {
             port_mappings,
             data_dumper,
             earliest_available_slot,
+            last_nfd_update_epoch: None,
         };
 
         Ok(network)
@@ -484,15 +487,24 @@ impl<P: Preset> Network<P> {
                             self.subscribe_to_core_topics();
                         }
                         SyncToP2p::UpdateEarliestAvailableSlot(slot) => {
-                            self.earliest_available_slot = slot;
+                            self.update_earliest_available_slot(slot);
                         }
                     }
                 },
 
                 message = self.channels.subnet_service_to_p2p_rx.select_next_some() => {
                     match message {
+                        SubnetServiceToP2p::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
+                            self.attempt_to_update_custody_group_count(custody_group_count);
+                        }
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
+                        }
+                        SubnetServiceToP2p::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
+                            self.update_custody_requirements(advertise_epoch, custody_group_count);
+                        }
+                        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
                         }
                         SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions) => {
                             self.update_sync_committee_subnets(actions);
@@ -511,7 +523,7 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
-    fn on_slot(&self, slot: Slot) {
+    fn on_slot(&mut self, slot: Slot) {
         P2pToSync::Slot(slot).send(&self.channels.p2p_to_sync_tx);
 
         let chain_config = self.controller.chain_config();
@@ -528,11 +540,13 @@ impl<P: Preset> Network<P> {
             ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
-        if chain_config.is_peerdas_scheduled() && misc::is_epoch_start::<P>(slot) {
-            let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(current_epoch)
+        {
             let (next_fork_epoch, next_fork_digest) = self.fork_context.next_fork(current_epoch);
 
             if self.fork_context.current_fork_digest() != next_fork_digest {
+                self.last_nfd_update_epoch = Some(current_epoch);
                 self.fork_context
                     .update_current_fork_digest(next_fork_digest);
 
@@ -919,6 +933,69 @@ impl<P: Preset> Network<P> {
         }
     }
 
+    fn attempt_to_update_custody_group_count(&self, custody_group_count: u64) {
+        // Attempt to update `cgc` in ENR and Metadata to `custody_group_count` as scheduled
+        ServiceInboundMessage::AttemptToUpdateCustodyGroupCount(custody_group_count)
+            .send(&self.network_to_service_tx);
+    }
+
+    fn update_custody_requirements(&self, advertise_epoch: Epoch, custody_group_count: u64) {
+        let node_id = self.network_globals.local_enr().node_id().raw();
+        let config = self.controller.chain_config();
+        let sampling_size = config.sampling_size(custody_group_count);
+
+        match compute_custody_subnets_and_columns_for_node(node_id, sampling_size, config) {
+            Ok((sampling_subnets, sampling_columns)) => {
+                // Subscribe to more data column subnets if custody increased, otherwise unsubscribe
+                // existing subnets
+                let current_sampling_subnets = self.network_globals.sampling_subnets();
+                if sampling_subnets.len() > current_sampling_subnets.len() {
+                    for subnet_id in sampling_subnets
+                        .into_iter()
+                        .filter(|subnet_id| !current_sampling_subnets.contains(subnet_id))
+                    {
+                        let subnet = Subnet::DataColumn(subnet_id);
+
+                        debug!("subscribing to data column subnet {subnet_id}");
+                        if let Some(topic) = self.subnet_gossip_topic(subnet) {
+                            ServiceInboundMessage::Subscribe(topic)
+                                .send(&self.network_to_service_tx);
+                        }
+                    }
+                } else {
+                    for subnet_id in current_sampling_subnets
+                        .into_iter()
+                        .filter(|subnet_id| !sampling_subnets.contains(subnet_id))
+                    {
+                        let subnet = Subnet::DataColumn(subnet_id);
+
+                        debug!("unsubscribing from data column subnet {subnet_id}");
+                        if let Some(topic) = self.subnet_gossip_topic(subnet) {
+                            ServiceInboundMessage::Unsubscribe(topic)
+                                .send(&self.network_to_service_tx);
+                        }
+                    }
+                }
+
+                ServiceInboundMessage::UpdateCustodyRequirements(
+                    advertise_epoch,
+                    custody_group_count,
+                )
+                .send(&self.network_to_service_tx);
+
+                // Lastly, update `sampling_columns` in fork choice store
+                self.controller.on_store_sampling_columns(sampling_columns);
+            }
+            Err(error) => {
+                error!("Failed to update custody requirements (error: {error:?})");
+            }
+        }
+    }
+
+    const fn update_earliest_available_slot(&mut self, slot: Slot) {
+        self.earliest_available_slot = slot;
+    }
+
     fn handle_network_event(&self, network_event: NetworkEvent<P>) {
         match network_event {
             NetworkEvent::PeerConnectedIncoming(peer_id) => {
@@ -970,6 +1047,10 @@ impl<P: Preset> Network<P> {
                 debug!("libp2p listening on {multiaddr}");
             }
             NetworkEvent::ZeroListeners => debug!("libp2p has zero listeners"),
+            NetworkEvent::PeerUpdatedCustodyGroupCount(peer_id) => {
+                debug!("peer {peer_id} has updated their advertised custody group count");
+                P2pToSync::PeerCgcUpdated(peer_id).send(&self.channels.p2p_to_sync_tx);
+            }
         }
     }
 
@@ -2261,6 +2342,9 @@ fn run_network_service<P: Preset>(
 
                 message = network_to_service_rx.select_next_some() => {
                     match message {
+                        ServiceInboundMessage::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
+                            service.attempt_to_update_custody_group_count(custody_group_count);
+                        }
                         ServiceInboundMessage::DiscoverSubnetPeers(subnet_discoveries) => {
                             service.discover_subnet_peers(subnet_discoveries);
                         }
@@ -2302,6 +2386,9 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest) => {
                             service.unsubscribe_from_fork_topics_except(fork_digest);
+                        }
+                        ServiceInboundMessage::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
+                            service.update_custody_requirements(advertise_epoch, custody_group_count);
                         }
                         ServiceInboundMessage::UpdateEnrSubnet(subnet, advertise) => {
                             service.update_enr_subnet(subnet, advertise);
