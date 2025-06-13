@@ -264,6 +264,7 @@ pub enum SubnetServiceToP2p {
     AttemptToUpdateCustodyGroupCount(u64),
     UpdateAttestationSubnets(AttestationSubnetActions),
     UpdateCustodyRequirements(Epoch, u64),
+    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubnets(BTreeMap<SubnetId, SyncCommitteeSubnetAction>),
 }
 
@@ -280,6 +281,7 @@ pub enum ToSubnetService {
     SetRegisteredValidators(Vec<PublicKeyBytes>, Vec<ValidatorIndex>),
     UpdateBeaconCommitteeSubscriptions(Slot, Vec<BeaconCommitteeSubscription>, Sender<Result<()>>),
     UpdateCustodyRequirements(Epoch, u64),
+    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubscriptions(Epoch, Vec<SyncCommitteeSubscription>),
 }
 

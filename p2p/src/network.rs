@@ -134,6 +134,7 @@ pub struct Network<P: Preset> {
     port_mappings: Option<PortMappings>,
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
+    last_nfd_update_epoch: Option<Epoch>,
 }
 
 impl<P: Preset> Network<P> {
@@ -217,6 +218,7 @@ impl<P: Preset> Network<P> {
             port_mappings,
             data_dumper,
             earliest_available_slot,
+            last_nfd_update_epoch: None,
         };
 
         Ok(network)
@@ -487,7 +489,7 @@ impl<P: Preset> Network<P> {
                             self.subscribe_to_core_topics();
                         }
                         SyncToP2p::UpdateEarliestAvailableSlot(slot) => {
-                            self.earliest_available_slot = slot;
+                            self.update_earliest_available_slot(slot);
                         }
                     }
                 },
@@ -502,6 +504,9 @@ impl<P: Preset> Network<P> {
                         }
                         SubnetServiceToP2p::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
                             self.update_custody_requirements(advertise_epoch, custody_group_count);
+                        }
+                        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
                         }
                         SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions) => {
                             self.update_sync_committee_subnets(actions);
@@ -520,7 +525,7 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
-    fn on_slot(&self, slot: Slot) {
+    fn on_slot(&mut self, slot: Slot) {
         P2pToSync::Slot(slot).send(&self.channels.p2p_to_sync_tx);
 
         let chain_config = self.controller.chain_config();
@@ -537,11 +542,13 @@ impl<P: Preset> Network<P> {
             ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
-        if chain_config.is_peerdas_scheduled() && misc::is_epoch_start::<P>(slot) {
-            let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(current_epoch)
+        {
             let (next_fork_epoch, next_fork_digest) = self.fork_context.next_fork(current_epoch);
 
             if self.fork_context.current_fork_digest() != next_fork_digest {
+                self.last_nfd_update_epoch = Some(current_epoch);
                 self.fork_context
                     .update_current_fork_digest(next_fork_digest);
 
@@ -985,6 +992,10 @@ impl<P: Preset> Network<P> {
                 error!("Failed to update custody requirements (error: {error:?})");
             }
         }
+    }
+
+    const fn update_earliest_available_slot(&mut self, slot: Slot) {
+        self.earliest_available_slot = slot;
     }
 
     fn handle_network_event(&self, network_event: NetworkEvent<RequestId, P>) {

@@ -81,7 +81,7 @@ use types::{
 use validator_statistics::ValidatorStatistics;
 
 use crate::{
-    custody::ValidatorCustody,
+    // custody::ValidatorCustody,
     messages::{ApiToValidator, InternalMessage},
     misc::{Aggregator, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
@@ -160,8 +160,9 @@ pub struct Validator<P: Preset, W: Wait> {
     internal_rx: UnboundedReceiver<InternalMessage>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
-    validator_custody: ValidatorCustody,
+    // validator_custody: ValidatorCustody,
     subscribe_to_all_data_column_subnets: bool,
+    last_cgc_update_epoch: Option<Epoch>,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -182,7 +183,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         metrics: Option<Arc<Metrics>>,
         validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P, W>,
-        network_dir: Option<&Path>,
+        _network_dir: Option<&Path>,
         subscribe_to_all_data_column_subnets: bool,
     ) -> Self {
         let Channels {
@@ -203,10 +204,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             signer.clone_arc(),
         ));
 
-        let validator_custody = ValidatorCustody::load_updates_schedule(
-            network_dir,
-            controller.chain_config().clone_arc(),
-        );
+        // let validator_custody = ValidatorCustody::load_updates_schedule(
+        //     network_dir,
+        //     controller.chain_config().clone_arc(),
+        // );
 
         Self {
             chain_config: controller.chain_config().clone_arc(),
@@ -243,8 +244,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             internal_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
-            validator_custody,
+            // validator_custody,
             subscribe_to_all_data_column_subnets,
+            last_cgc_update_epoch: None,
         }
     }
 
@@ -583,12 +585,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.register_validators(current_epoch).await;
         }
 
-        if tick.is_start_of_epoch::<P>()
+        if self.last_cgc_update_epoch != Some(current_epoch)
             && !self.subscribe_to_all_data_column_subnets
             && self.chain_config.is_peerdas_scheduled()
             && !self.signer.load().no_keys()
         {
-            self.handle_custody_requirements_update(current_epoch);
+            self.last_cgc_update_epoch = Some(current_epoch);
+            self.handle_custody_requirements_update(slot);
         }
 
         self.track_collection_metrics().await;
@@ -1955,7 +1958,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.update_sync_committee_subscriptions(&beacon_state);
     }
 
-    fn handle_custody_requirements_update(&mut self, current_epoch: Epoch) {
+    fn handle_custody_requirements_update(&self, current_slot: Slot) {
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
         let last_finalized_state = self.controller.last_finalized_state().value;
         let own_validator_indices = self.own_validator_indices(&last_finalized_state);
         let validator_custody_requirement = eip_7594::get_validator_custody_requirement(
@@ -1967,15 +1971,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // If there is no scheduled custody updates, update `cgc` in ENR and metadata for the first
         // time. otherwise, it will attempt to update if there is an update scheduled at the
         // current epoch.
-        let advertise_cgc = if self.validator_custody.is_empty() {
-            self.validator_custody
-                .schedule_custody_update(0, validator_custody_requirement);
-            validator_custody_requirement
-        } else {
-            self.validator_custody.at_epoch(current_epoch)
-        };
-        ToSubnetService::AttemptToUpdateCustodyGroupCount(advertise_cgc)
-            .send(&self.subnet_service_tx);
+        // let advertise_cgc = if self.validator_custody.is_empty() {
+        //     self.validator_custody
+        //         .schedule_custody_update(0, validator_custody_requirement);
+        //     validator_custody_requirement
+        // } else {
+        //     self.validator_custody.at_epoch(current_epoch)
+        // };
+        // ToSubnetService::AttemptToUpdateCustodyGroupCount(advertise_cgc)
+        //     .send(&self.subnet_service_tx);
 
         let current_sampling_size: u64 = self
             .controller
@@ -1984,14 +1988,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .expect("sampling size should be able to fit into u64");
         let current_custody_requirements =
             current_sampling_size.saturating_div(self.chain_config.columns_per_group());
-        if validator_custody_requirement != current_custody_requirements {
+        if validator_custody_requirement > current_custody_requirements {
             // Schedule custody requirements update on ENR and metadata after `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS` epochs
-            let advertise_epoch = current_epoch.saturating_add(
-                self.chain_config
-                    .min_epochs_for_data_column_sidecars_requests,
-            );
-            self.validator_custody
-                .schedule_custody_update(advertise_epoch, validator_custody_requirement);
+            // let advertise_epoch = current_epoch.saturating_add(
+            //     self.chain_config
+            //         .min_epochs_for_data_column_sidecars_requests,
+            // );
+            // self.validator_custody
+            //     .schedule_custody_update(advertise_epoch, validator_custody_requirement);
 
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
             ToSubnetService::UpdateCustodyRequirements(
@@ -1999,6 +2003,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 validator_custody_requirement,
             )
             .send(&self.subnet_service_tx);
+
+            ToSubnetService::AttemptToUpdateCustodyGroupCount(validator_custody_requirement)
+                .send(&self.subnet_service_tx);
+
+            ToSubnetService::UpdateEarliestAvailableSlot(current_slot)
+                .send(&self.subnet_service_tx);
         }
     }
 
