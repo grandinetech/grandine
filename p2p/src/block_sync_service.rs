@@ -624,22 +624,19 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
+        let snapshot = self.controller.snapshot();
+        let head_slot = snapshot.head_slot();
+        let local_finalized_slot =
+            misc::compute_start_slot_at_epoch::<P>(snapshot.finalized_epoch());
+
+        self.set_forward_synced(snapshot.is_forward_synced())?;
+
         let batches = match self.sync_direction {
             SyncDirection::Forward => {
-                let snapshot = self.controller.snapshot();
-                let head_slot = snapshot.head_slot();
-
-                let local_finalized_slot =
-                    misc::compute_start_slot_at_epoch::<P>(snapshot.finalized_epoch());
-
-                if snapshot.is_forward_synced() {
-                    self.set_forward_synced(true)?;
-
-                    if self.slot.saturating_sub(head_slot) < MISSED_SLOTS_TO_TRIGGER_SYNC {
-                        return Ok(());
-                    }
-                } else {
-                    self.set_forward_synced(false)?;
+                if self.is_forward_synced
+                    && self.slot.saturating_sub(head_slot) < MISSED_SLOTS_TO_TRIGGER_SYNC
+                {
+                    return Ok(());
                 }
 
                 self.sync_manager.build_forward_sync_batches::<P>(
