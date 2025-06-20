@@ -234,6 +234,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
 
         capella::validate_bls_to_execution_change(
             self.controller.chain_config(),
+            self.controller.pubkey_cache(),
             state,
             signed_bls_to_execution_change,
         )?;

@@ -39,6 +39,7 @@ operation_pools = { workspace = true }
 p2p = { workspace = true }
 prometheus_metrics = { workspace = true }
 prometheus-client = { workspace = true }
+pubkey_cache = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

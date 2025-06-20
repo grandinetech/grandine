@@ -1,4 +1,4 @@
-use bls::{AggregateSignatureBytes, CachedPublicKey, PublicKeyBytes, SignatureBytes};
+use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use serde::{Deserialize, Serialize};
 use ssz::{BitList, ContiguousList, ProofWithLength, Ssz};
 
@@ -226,7 +226,7 @@ pub struct SigningData {
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct Validator {
-    pub pubkey: CachedPublicKey,
+    pub pubkey: PublicKeyBytes,
     pub withdrawal_credentials: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub effective_balance: Gwei,

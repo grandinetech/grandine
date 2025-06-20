@@ -11,6 +11,7 @@ use fork_choice_store::{
 };
 use helper_functions::misc;
 use itertools::Itertools as _;
+use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
@@ -516,15 +517,19 @@ where
         let head = store.head();
 
         self.state_cache()
-            .state_at_slot(&store, head.block_root, store.slot())
+            .state_at_slot(self.pubkey_cache(), &store, head.block_root, store.slot())
     }
 
     pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();
 
-        self.state_cache()
-            .state_at_slot(&store, head.block_root, store.slot() + 1)
+        self.state_cache().state_at_slot(
+            self.pubkey_cache(),
+            &store,
+            head.block_root,
+            store.slot() + 1,
+        )
     }
 
     // The `block_root` and `state` parameters are needed
@@ -536,17 +541,21 @@ where
     ) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
 
-        if let Some(state) = self
-            .state_cache()
-            .try_state_at_slot(&store, block_root, slot)?
+        if let Some(state) =
+            self.state_cache()
+                .try_state_at_slot(self.pubkey_cache(), &store, block_root, slot)?
         {
             return Ok(state);
         }
 
         if let Some(state) = self.storage().state_post_block(block_root)? {
-            return self
-                .state_cache()
-                .process_slots(&store, state, block_root, slot);
+            return self.state_cache().process_slots(
+                self.pubkey_cache(),
+                &store,
+                state,
+                block_root,
+                slot,
+            );
         }
 
         bail!(Error::StateNotFound { block_root })
@@ -572,7 +581,7 @@ where
 
         let state = self
             .state_cache()
-            .state_at_slot(&store, head.block_root, requested_slot)
+            .state_at_slot(self.pubkey_cache(), &store, head.block_root, requested_slot)
             .unwrap_or_else(|_| head.state(&store));
 
         Ok(WithStatus {
@@ -590,6 +599,7 @@ where
     #[must_use]
     pub fn snapshot(&self) -> Snapshot<P> {
         Snapshot {
+            pubkey_cache: self.pubkey_cache().clone_arc(),
             store_snapshot: self.store_snapshot(),
             state_cache: self.state_cache().clone_arc(),
             storage: self.storage(),
@@ -798,6 +808,7 @@ pub struct BlockWithRoot<P: Preset> {
 /// [wiki]: https://github.com/facebook/rocksdb/wiki/Snapshot/e09da0053d05583919354cfaf834b8e8edd97be8
 #[expect(clippy::struct_field_names)]
 pub struct Snapshot<'storage, P: Preset> {
+    pubkey_cache: Arc<PubkeyCache>,
     // Use a `Guard` instead of an owned snapshot unlike in tasks based on the intuition that
     // `Snapshot`s will be less common than tasks.
     store_snapshot: Guard<Arc<Store<P, Storage<P>>>>,
@@ -826,7 +837,7 @@ impl<P: Preset> Snapshot<'_, P> {
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
         self.state_cache
-            .try_state_at_slot(&self.store_snapshot, root, slot)
+            .try_state_at_slot(&self.pubkey_cache, &self.store_snapshot, root, slot)
     }
 
     #[expect(clippy::missing_const_for_fn, reason = "false positive")]
@@ -923,9 +934,12 @@ impl<P: Preset> Snapshot<'_, P> {
         let store = &self.store_snapshot;
 
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
-            let state = self
-                .state_cache
-                .state_at_slot(store, chain_link.block_root, slot)?;
+            let state = self.state_cache.state_at_slot(
+                &self.pubkey_cache,
+                store,
+                chain_link.block_root,
+                slot,
+            )?;
 
             return Ok(Some(WithStatus {
                 value: state,

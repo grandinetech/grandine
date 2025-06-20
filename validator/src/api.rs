@@ -632,7 +632,7 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
         return Err(Error::ValidatorNotOwned { pubkey });
     }
 
-    let validator_index = accessors::index_of_public_key(&state, pubkey)
+    let validator_index = accessors::index_of_public_key(&state, &pubkey)
         .ok_or(Error::ValidatorNotFound { pubkey })?;
 
     let voluntary_exit = VoluntaryExit {

@@ -6,6 +6,13 @@ use super::PublicKey as PublicKeyTrait;
 
 pub const COMPRESSED_SIZE: usize = 48;
 
+// Both `zkcrypto` and `blst` use the same decompressed public key length,
+// but other implementations may differ:
+// https://github.com/lovesh/signature-schemes/issues/13#issue-518231751
+// This should ideally be an associated constant in the `PublicKey` trait,
+// but that requires `generic_const_exprs` to be stable.
+pub const DECOMPRESSED_SIZE: usize = 96;
+
 pub trait PublicKeyBytes<C = ()>:
     AsRef<[u8]>
     + AsMut<[u8]>

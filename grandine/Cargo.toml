@@ -47,6 +47,7 @@ p2p = { workspace = true }
 panics = { workspace = true }
 predefined_chains = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
 runtime = { workspace = true }

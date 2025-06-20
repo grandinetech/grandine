@@ -6,6 +6,7 @@ use eth1_api::{DepositEvent, Eth1Block};
 use futures::stream::{Stream, TryStreamExt as _};
 use genesis::Incremental;
 use log::info;
+use pubkey_cache::PubkeyCache;
 use ssz::{SszRead as _, SszWrite as _};
 use thiserror::Error;
 use types::{
@@ -31,6 +32,7 @@ enum Error {
 
 pub async fn wait<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     store_directory: PathBuf,
     mut blocks: impl Stream<Item = Result<Eth1Block>> + Unpin + Send,
     eth1_chain: &Eth1Chain,
@@ -50,7 +52,7 @@ pub async fn wait<P: Preset>(
         incremental.set_eth1_timestamp(block.timestamp);
 
         for DepositEvent { data, index } in block.deposit_events {
-            incremental.add_deposit_data(data, index)?;
+            incremental.add_deposit_data(pubkey_cache, data, index)?;
         }
 
         if let Err(error) = incremental.validate() {
@@ -58,7 +60,8 @@ pub async fn wait<P: Preset>(
             continue;
         }
 
-        let (genesis_state, mut deposit_tree) = incremental.finish(block.hash, None)?;
+        let (genesis_state, mut deposit_tree) =
+            incremental.finish(pubkey_cache, block.hash, None)?;
 
         let genesis_time = genesis_state.genesis_time();
 

@@ -68,6 +68,30 @@ impl StorageConfig {
         Database::persistent("beacon_fork_choice", path, self.db_size, mode, restart_tx)
     }
 
+    pub fn pubkey_cache_database(
+        &self,
+        custom_path: Option<PathBuf>,
+        mode: DatabaseMode,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
+    ) -> Result<Database> {
+        let path = custom_path.unwrap_or_else(|| {
+            self.directories
+                .store_directory
+                .clone()
+                .unwrap_or_default()
+                .join("pubkey_cache")
+        });
+
+        if mode.is_read_only() {
+            ensure!(
+                path.fs_err_try_exists()?,
+                "pubkey_cache database path does not exist: {path:?}",
+            );
+        }
+
+        Database::persistent("pubkey_cache", path, self.db_size, mode, restart_tx)
+    }
+
     pub fn sync_database(
         &self,
         custom_path: Option<PathBuf>,

@@ -35,6 +35,7 @@ pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<
         .filter_module("operation_pools", LevelFilter::Info)
         .filter_module("p2p", LevelFilter::Info)
         .filter_module("prometheus_metrics", LevelFilter::Info)
+        .filter_module("pubkey_cache", LevelFilter::Info)
         .filter_module("runtime", LevelFilter::Info)
         .filter_module("signer", LevelFilter::Info)
         .filter_module("slasher", LevelFilter::Info)

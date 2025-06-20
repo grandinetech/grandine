@@ -1,7 +1,7 @@
 use bls12_381::{G1Affine, G1Projective};
 use derive_more::From;
 
-use bls_core::{error::Error, traits::PublicKey as PublicKeyTrait};
+use bls_core::{error::Error, traits::PublicKey as PublicKeyTrait, DECOMPRESSED_SIZE};
 
 use super::public_key_bytes::PublicKeyBytes;
 
@@ -39,8 +39,23 @@ impl PublicKeyTrait for PublicKey {
     type PublicKeyBytes = PublicKeyBytes;
 
     #[inline]
-    fn aggregate_in_place(&mut self, other: Self) {
+    fn aggregate_in_place(&mut self, other: &Self) {
         self.0 = self.as_raw().add(other.as_raw());
+    }
+
+    fn deserialize_from_decompressed_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self(
+            G1Affine::from_uncompressed(
+                bytes.try_into().map_err(|_| Error::DeserializationFailed)?,
+            )
+            .into_option()
+            .ok_or(Error::DeserializationFailed)?
+            .into(),
+        ))
+    }
+
+    fn serialize_to_decompressed_bytes(&self) -> [u8; DECOMPRESSED_SIZE] {
+        G1Affine::from(self.as_raw()).to_uncompressed()
     }
 }
 

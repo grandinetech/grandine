@@ -9,6 +9,7 @@ use helper_functions::{
     slot_report::{NullSlotReport, RealSlotReport, SlotReport},
     verifier::{MultiVerifier, NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
+use pubkey_cache::PubkeyCache;
 use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{
@@ -50,11 +51,13 @@ pub enum Statistics {
 
 pub fn untrusted_state_transition<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     signed_block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
     custom_state_transition(
         config,
+        pubkey_cache,
         state,
         signed_block,
         ProcessSlots::Always,
@@ -67,11 +70,13 @@ pub fn untrusted_state_transition<P: Preset>(
 
 pub fn trusted_state_transition<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     signed_block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
     custom_state_transition(
         config,
+        pubkey_cache,
         state,
         signed_block,
         ProcessSlots::Always,
@@ -84,6 +89,7 @@ pub fn trusted_state_transition<P: Preset>(
 
 pub fn state_transition_for_report<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     signed_block: &SignedBeaconBlock<P>,
 ) -> Result<RealSlotReport> {
@@ -91,6 +97,7 @@ pub fn state_transition_for_report<P: Preset>(
 
     custom_state_transition(
         config,
+        pubkey_cache,
         state,
         signed_block,
         ProcessSlots::IfNeeded,
@@ -106,6 +113,7 @@ pub fn state_transition_for_report<P: Preset>(
 #[expect(clippy::too_many_arguments)]
 pub fn custom_state_transition<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &SignedBeaconBlock<P>,
     process_slots: ProcessSlots,
@@ -116,7 +124,7 @@ pub fn custom_state_transition<P: Preset>(
 ) -> Result<()> {
     // > Process slots (including those with no blocks) since block
     if process_slots.should_process(state, block.message()) {
-        self::process_slots(config, state, block.message().slot())?;
+        self::process_slots(config, pubkey_cache, state, block.message().slot())?;
     }
 
     let process_slots = ProcessSlots::Never;
@@ -124,6 +132,7 @@ pub fn custom_state_transition<P: Preset>(
     match (state, block) {
         (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => phase0::state_transition(
             config,
+            pubkey_cache,
             state,
             block,
             process_slots,
@@ -133,6 +142,7 @@ pub fn custom_state_transition<P: Preset>(
         ),
         (BeaconState::Altair(state), SignedBeaconBlock::Altair(block)) => altair::state_transition(
             config,
+            pubkey_cache,
             state,
             block,
             process_slots,
@@ -143,6 +153,7 @@ pub fn custom_state_transition<P: Preset>(
         (BeaconState::Bellatrix(state), SignedBeaconBlock::Bellatrix(block)) => {
             bellatrix::state_transition(
                 config,
+                pubkey_cache,
                 state,
                 block,
                 process_slots,
@@ -155,6 +166,7 @@ pub fn custom_state_transition<P: Preset>(
         (BeaconState::Capella(state), SignedBeaconBlock::Capella(block)) => {
             capella::state_transition(
                 config,
+                pubkey_cache,
                 state,
                 block,
                 process_slots,
@@ -166,6 +178,7 @@ pub fn custom_state_transition<P: Preset>(
         }
         (BeaconState::Deneb(state), SignedBeaconBlock::Deneb(block)) => deneb::state_transition(
             config,
+            pubkey_cache,
             state,
             block,
             process_slots,
@@ -177,6 +190,7 @@ pub fn custom_state_transition<P: Preset>(
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
             electra::state_transition(
                 config,
+                pubkey_cache,
                 state,
                 block,
                 process_slots,
@@ -198,6 +212,7 @@ pub fn custom_state_transition<P: Preset>(
 
 pub fn verify_base_signature_with_head_state<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     head_state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
@@ -213,39 +228,41 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
     );
 
     let signing_root = misc::compute_signing_root(block.message(), domain);
+    let pubkey_bytes = accessors::public_key(head_state, block.message().proposer_index())?;
 
     SingleVerifier.verify_singular(
         signing_root,
         block.signature(),
-        accessors::public_key(head_state, block.message().proposer_index())?,
+        pubkey_cache.get_or_insert(*pubkey_bytes)?,
         SignatureKind::Block,
     )
 }
 
 pub fn verify_signatures<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
     match (state, block) {
         (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => {
-            phase0::verify_signatures(config, state, block, verifier)
+            phase0::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Altair(state), SignedBeaconBlock::Altair(block)) => {
-            altair::verify_signatures(config, state, block, verifier)
+            altair::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Bellatrix(state), SignedBeaconBlock::Bellatrix(block)) => {
-            bellatrix::verify_signatures(config, state, block, verifier)
+            bellatrix::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Capella(state), SignedBeaconBlock::Capella(block)) => {
-            capella::verify_signatures(config, state, block, verifier)
+            capella::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Deneb(state), SignedBeaconBlock::Deneb(block)) => {
-            deneb::verify_signatures(config, state, block, verifier)
+            deneb::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
-            electra::verify_signatures(config, state, block, verifier)
+            electra::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         _ => {
             // This match arm will silently match any new phases.
@@ -260,8 +277,10 @@ pub fn verify_signatures<P: Preset>(
     }
 }
 
+#[expect(clippy::too_many_lines)]
 pub fn process_slots<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     slot: Slot,
 ) -> Result<()> {
@@ -307,7 +326,12 @@ pub fn process_slots<P: Preset>(
                 }
 
                 if Toption::Some(last_slot_in_phase) == altair_fork_slot {
-                    *state = fork::upgrade_to_altair(config, phase0_state.as_ref().clone())?.into();
+                    *state = fork::upgrade_to_altair(
+                        config,
+                        pubkey_cache,
+                        phase0_state.as_ref().clone(),
+                    )?
+                    .into();
 
                     made_progress = true;
                 }
@@ -320,7 +344,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if altair_state.slot < last_slot_in_phase {
-                    altair::process_slots(config, altair_state, last_slot_in_phase)?;
+                    altair::process_slots(config, pubkey_cache, altair_state, last_slot_in_phase)?;
 
                     made_progress = true;
                 }
@@ -340,7 +364,12 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if bellatrix_state.slot < last_slot_in_phase {
-                    bellatrix::process_slots(config, bellatrix_state, last_slot_in_phase)?;
+                    bellatrix::process_slots(
+                        config,
+                        pubkey_cache,
+                        bellatrix_state,
+                        last_slot_in_phase,
+                    )?;
 
                     made_progress = true;
                 }
@@ -360,7 +389,12 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if capella_state.slot < last_slot_in_phase {
-                    capella::process_slots(config, capella_state, last_slot_in_phase)?;
+                    capella::process_slots(
+                        config,
+                        pubkey_cache,
+                        capella_state,
+                        last_slot_in_phase,
+                    )?;
 
                     made_progress = true;
                 }
@@ -379,7 +413,7 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if deneb_state.slot < last_slot_in_phase {
-                    deneb::process_slots(config, deneb_state, last_slot_in_phase)?;
+                    deneb::process_slots(config, pubkey_cache, deneb_state, last_slot_in_phase)?;
 
                     made_progress = true;
                 }
@@ -391,7 +425,7 @@ pub fn process_slots<P: Preset>(
                 }
             }
             BeaconState::Electra(electra_state) => {
-                electra::process_slots(config, electra_state, slot)?;
+                electra::process_slots(config, pubkey_cache, electra_state, slot)?;
 
                 made_progress = true;
             }
@@ -436,43 +470,54 @@ pub fn process_justification_and_finalization(state: &mut BeaconState<impl Prese
     Ok(())
 }
 
-pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<impl Preset>,
+) -> Result<()> {
     match state {
         BeaconState::Phase0(state) => phase0::process_epoch(config, state),
-        BeaconState::Altair(state) => altair::process_epoch(config, state),
-        BeaconState::Bellatrix(state) => bellatrix::process_epoch(config, state),
-        BeaconState::Capella(state) => capella::process_epoch(config, state),
-        BeaconState::Deneb(state) => deneb::process_epoch(config, state),
-        BeaconState::Electra(state) => electra::process_epoch(config, state),
+        BeaconState::Altair(state) => altair::process_epoch(config, pubkey_cache, state),
+        BeaconState::Bellatrix(state) => bellatrix::process_epoch(config, pubkey_cache, state),
+        BeaconState::Capella(state) => capella::process_epoch(config, pubkey_cache, state),
+        BeaconState::Deneb(state) => deneb::process_epoch(config, pubkey_cache, state),
+        BeaconState::Electra(state) => electra::process_epoch(config, pubkey_cache, state),
     }
 }
 
-pub fn epoch_report(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<EpochReport> {
-    process_slots_for_epoch_report(config, state)?;
+pub fn epoch_report(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<impl Preset>,
+) -> Result<EpochReport> {
+    process_slots_for_epoch_report(config, pubkey_cache, state)?;
 
     let report = match state {
         BeaconState::Phase0(state) => phase0::epoch_report(config, state)?.into(),
-        BeaconState::Altair(state) => altair::epoch_report(config, state)?.into(),
-        BeaconState::Bellatrix(state) => bellatrix::epoch_report(config, state)?.into(),
-        BeaconState::Capella(state) => capella::epoch_report(config, state)?.into(),
-        BeaconState::Deneb(state) => deneb::epoch_report(config, state)?.into(),
-        BeaconState::Electra(state) => electra::epoch_report(config, state)?.into(),
+        BeaconState::Altair(state) => altair::epoch_report(config, pubkey_cache, state)?.into(),
+        BeaconState::Bellatrix(state) => {
+            bellatrix::epoch_report(config, pubkey_cache, state)?.into()
+        }
+        BeaconState::Capella(state) => capella::epoch_report(config, pubkey_cache, state)?.into(),
+        BeaconState::Deneb(state) => deneb::epoch_report(config, pubkey_cache, state)?.into(),
+        BeaconState::Electra(state) => electra::epoch_report(config, pubkey_cache, state)?.into(),
     };
 
-    post_process_slots_for_epoch_report(config, state)?;
+    post_process_slots_for_epoch_report(config, pubkey_cache, state)?;
 
     Ok(report)
 }
 
 fn process_slots_for_epoch_report<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
 ) -> Result<()> {
     let next_epoch = accessors::get_next_epoch(state);
     let last_slot = misc::compute_start_slot_at_epoch::<P>(next_epoch) - 1;
 
     if state.slot() < last_slot {
-        process_slots(config, state, last_slot)?;
+        process_slots(config, pubkey_cache, state, last_slot)?;
     }
 
     unphased::process_slot(state);
@@ -484,6 +529,7 @@ fn process_slots_for_epoch_report<P: Preset>(
 
 fn post_process_slots_for_epoch_report<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
 ) -> Result<()> {
     let post_slot = state.slot() + 1;
@@ -502,7 +548,12 @@ fn post_process_slots_for_epoch_report<P: Preset>(
                 let altair_fork_slot = config.fork_slot::<P>(Phase::Altair);
 
                 if Toption::Some(post_slot) == altair_fork_slot {
-                    *state = fork::upgrade_to_altair(config, phase0_state.as_ref().clone())?.into();
+                    *state = fork::upgrade_to_altair(
+                        config,
+                        pubkey_cache,
+                        phase0_state.as_ref().clone(),
+                    )?
+                    .into();
                 }
             }
             BeaconState::Altair(altair_state) => {
@@ -544,6 +595,7 @@ fn post_process_slots_for_epoch_report<P: Preset>(
 
 pub fn process_untrusted_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     slot_report: impl SlotReport,
@@ -555,20 +607,29 @@ pub fn process_untrusted_block<P: Preset>(
         MultiVerifier::default()
     };
 
-    process_block(config, state, block, verifier, slot_report)
+    process_block(config, pubkey_cache, state, block, verifier, slot_report)
 }
 
 pub fn process_trusted_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     slot_report: impl SlotReport,
 ) -> Result<()> {
-    process_block(config, state, block, NullVerifier, slot_report)
+    process_block(
+        config,
+        pubkey_cache,
+        state,
+        block,
+        NullVerifier,
+        slot_report,
+    )
 }
 
 fn process_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     verifier: impl Verifier,
@@ -576,22 +637,22 @@ fn process_block<P: Preset>(
 ) -> Result<()> {
     match (state, block) {
         (BeaconState::Phase0(state), BeaconBlock::Phase0(block)) => {
-            phase0::process_block(config, state, block, verifier, slot_report)
+            phase0::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (BeaconState::Altair(state), BeaconBlock::Altair(block)) => {
-            altair::process_block(config, state, block, verifier, slot_report)
+            altair::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (BeaconState::Bellatrix(state), BeaconBlock::Bellatrix(block)) => {
-            bellatrix::process_block(config, state, block, verifier, slot_report)
+            bellatrix::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (BeaconState::Capella(state), BeaconBlock::Capella(block)) => {
-            capella::process_block(config, state, block, verifier, slot_report)
+            capella::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (BeaconState::Deneb(state), BeaconBlock::Deneb(block)) => {
-            deneb::process_block(config, state, block, verifier, slot_report)
+            deneb::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (BeaconState::Electra(state), BeaconBlock::Electra(block)) => {
-            electra::process_block(config, state, block, verifier, slot_report)
+            electra::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (state, _) => {
             // This match arm will silently match any new phases.
@@ -608,27 +669,28 @@ fn process_block<P: Preset>(
 
 pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
     match (state, block) {
         (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => {
-            phase0::process_block_for_gossip(config, state, block)
+            phase0::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (BeaconState::Altair(state), SignedBeaconBlock::Altair(block)) => {
-            altair::process_block_for_gossip(config, state, block)
+            altair::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (BeaconState::Bellatrix(state), SignedBeaconBlock::Bellatrix(block)) => {
-            bellatrix::process_block_for_gossip(config, state, block)
+            bellatrix::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (BeaconState::Capella(state), SignedBeaconBlock::Capella(block)) => {
-            capella::process_block_for_gossip(config, state, block)
+            capella::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (BeaconState::Deneb(state), SignedBeaconBlock::Deneb(block)) => {
-            deneb::process_block_for_gossip(config, state, block)
+            deneb::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
-            electra::process_block_for_gossip(config, state, block)
+            electra::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (state, _) => {
             // This match arm will silently match any new phases.
@@ -645,6 +707,7 @@ pub fn process_block_for_gossip<P: Preset>(
 
 pub fn process_untrusted_blinded_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
     slot_report: impl SlotReport,
@@ -656,20 +719,29 @@ pub fn process_untrusted_blinded_block<P: Preset>(
         MultiVerifier::default()
     };
 
-    process_blinded_block(config, state, block, verifier, slot_report)
+    process_blinded_block(config, pubkey_cache, state, block, verifier, slot_report)
 }
 
 pub fn process_trusted_blinded_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
     slot_report: impl SlotReport,
 ) -> Result<()> {
-    process_blinded_block(config, state, block, NullVerifier, slot_report)
+    process_blinded_block(
+        config,
+        pubkey_cache,
+        state,
+        block,
+        NullVerifier,
+        slot_report,
+    )
 }
 
 fn process_blinded_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
     verifier: impl Verifier,
@@ -677,16 +749,44 @@ fn process_blinded_block<P: Preset>(
 ) -> Result<()> {
     match (state, block) {
         (BeaconState::Bellatrix(state), BlindedBeaconBlock::Bellatrix(block)) => {
-            bellatrix::custom_process_blinded_block(config, state, block, verifier, slot_report)
+            bellatrix::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                block,
+                verifier,
+                slot_report,
+            )
         }
         (BeaconState::Capella(state), BlindedBeaconBlock::Capella(block)) => {
-            capella::custom_process_blinded_block(config, state, block, verifier, slot_report)
+            capella::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                block,
+                verifier,
+                slot_report,
+            )
         }
         (BeaconState::Deneb(state), BlindedBeaconBlock::Deneb(block)) => {
-            deneb::custom_process_blinded_block(config, state, block, verifier, slot_report)
+            deneb::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                block,
+                verifier,
+                slot_report,
+            )
         }
         (BeaconState::Electra(state), BlindedBeaconBlock::Electra(block)) => {
-            electra::custom_process_blinded_block(config, state, block, verifier, slot_report)
+            electra::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                block,
+                verifier,
+                slot_report,
+            )
         }
         (state, _) => {
             // This match arm will silently match any new phases.
@@ -703,28 +803,35 @@ fn process_blinded_block<P: Preset>(
 
 pub fn process_deposit_data(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<impl Preset>,
     deposit_data: DepositData,
 ) -> Result<Option<ValidatorIndex>> {
     match state {
-        BeaconState::Phase0(state) => phase0::process_deposit_data(config, state, deposit_data),
-        BeaconState::Altair(state) => altair::process_deposit_data(config, state, deposit_data),
+        BeaconState::Phase0(state) => {
+            phase0::process_deposit_data(config, pubkey_cache, state, deposit_data)
+        }
+        BeaconState::Altair(state) => {
+            altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
+        }
         BeaconState::Bellatrix(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Bellatrix does not modify `process_deposit_data`.
-            altair::process_deposit_data(config, state, deposit_data)
+            altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Capella(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Capella does not modify `process_deposit_data`.
-            altair::process_deposit_data(config, state, deposit_data)
+            altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Deneb(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Deneb does not modify `process_deposit_data`.
-            altair::process_deposit_data(config, state, deposit_data)
+            altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
-        BeaconState::Electra(state) => electra::process_deposit_data(config, state, deposit_data),
+        BeaconState::Electra(state) => {
+            electra::process_deposit_data(config, pubkey_cache, state, deposit_data)
+        }
     }
 }
 
@@ -868,18 +975,20 @@ mod spec_tests {
     }
 
     fn run_slots_case<P: Preset>(config: &Config, case: Case) {
+        let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz::<_, BeaconState<P>>(config, "pre");
         let expected_post = case.ssz(config, "post");
         let slots = case.yaml::<u64>("slots");
         let last_slot = state.slot() + slots;
 
-        process_slots(config, &mut state, last_slot)
+        process_slots(config, &pubkey_cache, &mut state, last_slot)
             .expect("every slot processing test should perform processing successfully");
 
         assert_eq!(state, expected_post);
     }
 
     fn run_blocks_case<P: Preset>(config: &Config, case: Case) {
+        let pubkey_cache = PubkeyCache::default();
         let pre = case.ssz::<_, BeaconState<P>>(config, "pre");
         let blocks_count = case.meta().blocks_count;
         let blocks = case.numbered(config, "blocks", 0..blocks_count);
@@ -889,7 +998,7 @@ mod spec_tests {
             let mut state = pre.clone();
 
             for block in blocks.clone() {
-                untrusted_state_transition(config, &mut state, &block)?;
+                untrusted_state_transition(config, &pubkey_cache, &mut state, &block)?;
             }
 
             Ok(state)
@@ -905,6 +1014,7 @@ mod spec_tests {
 
                 assert_still_succeeds_with_blinded_blocks(
                     config,
+                    &pubkey_cache,
                     &mut state,
                     blocks,
                     &expected_post_state,
@@ -916,6 +1026,7 @@ mod spec_tests {
     }
 
     fn run_transition_case<P: Preset>(case: Case) {
+        let pubkey_cache = PubkeyCache::default();
         let meta = case.meta();
         let blocks_count = meta.blocks_count;
         let fork_epoch = meta.fork_epoch;
@@ -935,14 +1046,14 @@ mod spec_tests {
         assert_eq!(expected_post.phase(), post_phase);
 
         for pre_block in case.numbered(&config, "blocks", 0..pre_block_count) {
-            untrusted_state_transition(&config, &mut state, &pre_block)
+            untrusted_state_transition(&config, &pubkey_cache, &mut state, &pre_block)
                 .expect("every transition test should process pre-phase blocks successfully");
         }
 
         assert!(accessors::get_current_epoch(&state) < fork_epoch);
 
         for post_block in case.numbered(&config, "blocks", pre_block_count..blocks_count) {
-            untrusted_state_transition(&config, &mut state, &post_block)
+            untrusted_state_transition(&config, &pubkey_cache, &mut state, &post_block)
                 .expect("every transition test should process post-phase blocks successfully");
         }
 
@@ -982,6 +1093,7 @@ mod spec_tests {
     // Having official test cases for blinded block processing would be nice.
     fn assert_still_succeeds_with_blinded_blocks<P: Preset>(
         config: &Config,
+        pubkey_cache: &PubkeyCache,
         state: &mut BeaconState<P>,
         blocks: impl IntoIterator<Item = SignedBeaconBlock<P>>,
         expected_post_state: &BeaconState<P>,
@@ -989,7 +1101,7 @@ mod spec_tests {
         blocks
             .into_iter()
             .try_for_each(|block| {
-                process_slots(config, state, block.message().slot())?;
+                process_slots(config, pubkey_cache, state, block.message().slot())?;
 
                 let (message, _) = block.split();
 
@@ -1004,6 +1116,7 @@ mod spec_tests {
 
                 process_untrusted_blinded_block(
                     config,
+                    pubkey_cache,
                     state,
                     &blinded_block,
                     NullSlotReport,

@@ -17,6 +17,7 @@ types = { workspace = true }
 
 [dev-dependencies]
 factory = { workspace = true }
+pubkey_cache = { workspace = true }
 tokio = { workspace = true }
 
 [lints]

@@ -83,7 +83,7 @@ impl ValidatorId {
     pub fn validator_index<P: Preset>(self, state: &BeaconState<P>) -> Option<ValidatorIndex> {
         match self {
             Self::ValidatorIndex(validator_index) => Some(validator_index),
-            Self::PublicKey(pubkey) => accessors::index_of_public_key(state, pubkey),
+            Self::PublicKey(pubkey) => accessors::index_of_public_key(state, &pubkey),
         }
     }
 }

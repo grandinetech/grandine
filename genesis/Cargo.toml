@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 deposit_tree = { workspace = true }
 helper_functions = { workspace = true }
+pubkey_cache = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }

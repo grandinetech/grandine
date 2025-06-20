@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bls::{
     traits::PublicKey as _, AggregatePublicKey, AggregatePublicKeyBytes, PublicKey, PublicKeyBytes,
     SignatureBytes,
@@ -41,7 +43,7 @@ fn eth_aggregate_pubkeys(case: Case) {
 
     #[rustfmt::skip]
     let result = itertools::process_results(
-        input.into_iter().map(PublicKey::try_from),
+        input.into_iter().map(|bytes| PublicKey::try_from(bytes).map(Arc::new)),
         |public_keys| AggregatePublicKey::aggregate_nonempty(public_keys),
     );
 
@@ -71,13 +73,13 @@ fn eth_fast_aggregate_verify(case: Case) {
 
     let result = pubkeys
         .into_iter()
-        .map(PublicKey::try_from)
+        .map(|bytes| PublicKey::try_from(bytes).map(Arc::new))
         .collect::<Result<Vec<_>, _>>()
         .map(|public_keys| {
             SingleVerifier.verify_aggregate_allowing_empty(
                 message,
                 signature,
-                public_keys.iter(),
+                public_keys,
                 SignatureKind::SyncAggregate,
             )
         });

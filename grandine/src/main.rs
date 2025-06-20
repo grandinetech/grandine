@@ -25,6 +25,7 @@ use log::{error, info, warn};
 use logging::PEER_LOG_METRICS;
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
+use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder};
 use runtime::{MetricsConfig, RuntimeConfig, StorageConfig};
 use signer::{KeyOrigin, Signer};
@@ -230,9 +231,22 @@ impl Context {
 
         let (restart_tx, restart_rx) = futures::channel::mpsc::unbounded();
 
+        let pubkey_cache_database = if storage_config.in_memory {
+            Database::in_memory()
+        } else {
+            storage_config.pubkey_cache_database(
+                None,
+                DatabaseMode::ReadWrite,
+                Some(restart_tx.clone()),
+            )?
+        };
+
+        let pubkey_cache = Arc::new(PubkeyCache::load(pubkey_cache_database));
+
         let anchor_checkpoint_provider = genesis_checkpoint_provider::<P>(
             &chain_config,
             &eth1_config,
+            &pubkey_cache,
             &storage_config,
             genesis_state_file,
             predefined_network,
@@ -247,6 +261,7 @@ impl Context {
         if let Some(command) = command {
             return handle_command(
                 chain_config,
+                &pubkey_cache,
                 &storage_config,
                 command,
                 &anchor_checkpoint_provider,
@@ -271,6 +286,7 @@ impl Context {
 
         runtime::run_after_genesis(
             chain_config,
+            pubkey_cache,
             RuntimeConfig {
                 back_sync_enabled,
                 detect_doppelgangers,
@@ -654,6 +670,7 @@ fn ensure_ports_not_in_use(
 #[expect(clippy::too_many_lines)]
 fn handle_command<P: Preset>(
     chain_config: Arc<ChainConfig>,
+    pubkey_cache: &Arc<PubkeyCache>,
     storage_config: &StorageConfig,
     command: GrandineCommand,
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
@@ -682,6 +699,7 @@ fn handle_command<P: Preset>(
 
             let storage = Storage::new(
                 chain_config,
+                pubkey_cache.clone_arc(),
                 storage_database,
                 *archival_epoch_interval,
                 *storage_mode,
@@ -690,6 +708,7 @@ fn handle_command<P: Preset>(
             let output_dir = output_dir.unwrap_or(std::env::current_dir()?);
 
             fork_choice_control::export_state_and_blocks(
+                pubkey_cache,
                 &storage,
                 from,
                 to,
@@ -705,7 +724,13 @@ fn handle_command<P: Preset>(
             input_dir,
         } => {
             let input_dir = input_dir.unwrap_or(std::env::current_dir()?);
-            fork_choice_control::replay_blocks::<P>(&chain_config, &input_dir, from, to)?;
+            fork_choice_control::replay_blocks::<P>(
+                &chain_config,
+                pubkey_cache,
+                &input_dir,
+                from,
+                to,
+            )?;
         }
         GrandineCommand::Interchange(interchange_command) => {
             let genesis_validators_root = anchor_checkpoint_provider
@@ -780,6 +805,7 @@ fn handle_command<P: Preset>(
 async fn genesis_checkpoint_provider<P: Preset>(
     chain_config: &Arc<ChainConfig>,
     eth1_config: &Arc<Eth1Config>,
+    pubkey_cache: &PubkeyCache,
     storage_config: &StorageConfig,
     genesis_state_file: Option<PathBuf>,
     predefined_network: Option<PredefinedNetwork>,
@@ -833,6 +859,7 @@ async fn genesis_checkpoint_provider<P: Preset>(
 
     let genesis_state = eth1::wait_for_genesis(
         chain_config,
+        pubkey_cache,
         store_directory,
         eth1_block_stream,
         &eth1_chain,

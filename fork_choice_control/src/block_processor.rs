@@ -12,6 +12,7 @@ use helper_functions::{
     slot_report::{NullSlotReport, RealSlotReport, SlotReport, SyncAggregateRewards},
     verifier::Verifier,
 };
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash;
 use state_cache::StateWithRewards;
 use std_ext::ArcExt as _;
@@ -33,6 +34,7 @@ use crate::Storage;
 #[derive(Constructor)]
 pub struct BlockProcessor<P: Preset> {
     chain_config: Arc<ChainConfig>,
+    pubkey_cache: Arc<PubkeyCache>,
     state_cache: Arc<StateCacheProcessor<P>>,
 }
 
@@ -49,6 +51,7 @@ impl<P: Preset> BlockProcessor<P> {
 
                 combined::process_untrusted_block(
                     &self.chain_config,
+                    &self.pubkey_cache,
                     state.make_mut(),
                     block,
                     &mut slot_report,
@@ -72,6 +75,7 @@ impl<P: Preset> BlockProcessor<P> {
 
                 combined::process_trusted_block(
                     &self.chain_config,
+                    &self.pubkey_cache,
                     state.make_mut(),
                     block,
                     &mut slot_report,
@@ -95,6 +99,7 @@ impl<P: Preset> BlockProcessor<P> {
 
                 combined::process_untrusted_blinded_block(
                     &self.chain_config,
+                    &self.pubkey_cache,
                     state.make_mut(),
                     block,
                     &mut slot_report,
@@ -118,6 +123,7 @@ impl<P: Preset> BlockProcessor<P> {
 
                 combined::process_trusted_blinded_block(
                     &self.chain_config,
+                    &self.pubkey_cache,
                     state.make_mut(),
                     block,
                     &mut slot_report,
@@ -145,6 +151,7 @@ impl<P: Preset> BlockProcessor<P> {
             .get_or_insert_with(block_root, block.message().slot(), true, || {
                 combined::custom_state_transition(
                     &self.chain_config,
+                    &self.pubkey_cache,
                     state.make_mut(),
                     block,
                     process_slots,
@@ -170,10 +177,15 @@ impl<P: Preset> BlockProcessor<P> {
             // > Make a copy of the state to avoid mutability issues
             let state = self
                 .state_cache
-                .try_state_at_slot(store, parent.block_root, block_slot)?
+                .try_state_at_slot(&self.pubkey_cache, store, parent.block_root, block_slot)?
                 .unwrap_or_else(|| parent.state(store));
 
-            combined::process_block_for_gossip(&self.chain_config, &state, block)?;
+            combined::process_block_for_gossip(
+                &self.chain_config,
+                &self.pubkey_cache,
+                &state,
+                block,
+            )?;
 
             Ok(None)
         })
@@ -196,6 +208,7 @@ impl<P: Preset> BlockProcessor<P> {
                 let state = self
                     .state_cache
                     .try_state_at_slot_for_block_sync(
+                        &self.pubkey_cache,
                         store,
                         parent.block_root,
                         block.message().slot(),

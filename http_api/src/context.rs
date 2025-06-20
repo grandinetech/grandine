@@ -27,6 +27,7 @@ use liveness_tracker::LivenessTracker;
 use once_cell::sync::OnceCell;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{NetworkConfig, SubnetService, SyncToApi};
+use pubkey_cache::PubkeyCache;
 use reqwest::Client;
 use signer::{KeyOrigin, Signer, Web3SignerConfig};
 use slashing_protection::{SlashingProtector, DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT};
@@ -133,8 +134,11 @@ impl<P: Preset> Context<P> {
             execution_service_tx,
         ));
 
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+
         let storage = Arc::new(Storage::new(
             chain_config.clone_arc(),
+            pubkey_cache.clone_arc(),
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::Standard,
@@ -165,6 +169,7 @@ impl<P: Preset> Context<P> {
 
         let (controller, mutator_handle) = Controller::new(
             chain_config,
+            pubkey_cache,
             store_config,
             anchor_block,
             anchor_state.clone_arc(),
@@ -488,8 +493,9 @@ impl Context<Mainnet> {
 
 impl Context<Minimal> {
     pub fn minimal_minimal_all_keys() -> Self {
+        let pubkey_cache = PubkeyCache::default();
         let chain_config = ChainConfig::minimal();
-        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
+        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config, &pubkey_cache);
         let validator_keys = Self::interop_validator_keys(genesis_state.validators().len_u64());
 
         let anchor_checkpoint_provider =
@@ -513,12 +519,14 @@ impl Context<Minimal> {
 
     pub fn minimal_minimal_4_epochs() -> Self {
         let chain_config = ChainConfig::minimal();
-        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config, &pubkey_cache);
         let anchor_checkpoint_provider =
             AnchorCheckpointProvider::custom_from_genesis(genesis_state.clone_arc());
 
-        let extra_blocks = factory::full_blocks_up_to_epoch(&chain_config, genesis_state, 4)
-            .expect("blocks should be constructed successfully");
+        let extra_blocks =
+            factory::full_blocks_up_to_epoch(&chain_config, &pubkey_cache, genesis_state, 4)
+                .expect("blocks should be constructed successfully");
 
         let FinalizedCheckpoint {
             block: anchor_block,
@@ -538,7 +546,8 @@ impl Context<Minimal> {
 
     pub fn minimal_rapid_upgrade_none() -> Self {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
-        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config, &pubkey_cache);
         let anchor_checkpoint_provider =
             AnchorCheckpointProvider::custom_from_genesis(genesis_state);
 
@@ -560,7 +569,8 @@ impl Context<Minimal> {
 
     pub fn minimal_rapid_upgrade_all_keys() -> Self {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
-        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config, &pubkey_cache);
         let validator_keys = Self::interop_validator_keys(genesis_state.validators().len_u64());
         let anchor_checkpoint_provider =
             AnchorCheckpointProvider::custom_from_genesis(genesis_state);
@@ -583,13 +593,15 @@ impl Context<Minimal> {
 
     pub fn minimal_rapid_upgrade_all_phases_all_keys() -> Self {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
-        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config);
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config, &pubkey_cache);
         let anchor_checkpoint_provider =
             AnchorCheckpointProvider::custom_from_genesis(genesis_state.clone_arc());
         let validator_keys = Self::interop_validator_keys(genesis_state.validators().len_u64());
 
         let extra_blocks = factory::full_blocks_up_to_epoch(
             &chain_config,
+            &pubkey_cache,
             genesis_state,
             Phase::CARDINALITY
                 .try_into()
@@ -613,8 +625,11 @@ impl Context<Minimal> {
         }
     }
 
-    fn min_genesis_state(chain_config: &ChainConfig) -> (Arc<BeaconState<Minimal>>, DepositTree) {
-        factory::min_genesis_state(chain_config)
+    fn min_genesis_state(
+        chain_config: &ChainConfig,
+        pubkey_cache: &PubkeyCache,
+    ) -> (Arc<BeaconState<Minimal>>, DepositTree) {
+        factory::min_genesis_state(chain_config, pubkey_cache)
             .expect("configurations used in this impl block should be valid")
     }
 }

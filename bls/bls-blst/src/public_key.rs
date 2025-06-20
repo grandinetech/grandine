@@ -1,7 +1,7 @@
 use blst::min_pk::{AggregatePublicKey as RawAggregatePublicKey, PublicKey as RawPublicKey};
 use derive_more::From;
 
-use bls_core::{error::Error, traits::PublicKey as PublicKeyTrait};
+use bls_core::{error::Error, traits::PublicKey as PublicKeyTrait, DECOMPRESSED_SIZE};
 
 use super::public_key_bytes::PublicKeyBytes;
 
@@ -30,11 +30,21 @@ impl PublicKeyTrait for PublicKey {
     type PublicKeyBytes = PublicKeyBytes;
 
     #[inline]
-    fn aggregate_in_place(&mut self, other: Self) {
+    fn aggregate_in_place(&mut self, other: &Self) {
         let mut self_aggregate = RawAggregatePublicKey::from_public_key(self.as_raw());
         let other_aggregate = RawAggregatePublicKey::from_public_key(other.as_raw());
         self_aggregate.add_aggregate(&other_aggregate);
         self.0 = self_aggregate.to_public_key();
+    }
+
+    fn deserialize_from_decompressed_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(RawPublicKey::deserialize(bytes)
+            .map_err(|_| Error::DeserializationFailed)?
+            .into())
+    }
+
+    fn serialize_to_decompressed_bytes(&self) -> [u8; DECOMPRESSED_SIZE] {
+        self.as_raw().serialize()
     }
 }
 

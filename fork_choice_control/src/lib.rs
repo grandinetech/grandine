@@ -25,8 +25,8 @@ pub use crate::{
     specialized::{AdHocBenchController, BenchController},
     storage::{
         get, save, BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot,
-        PrefixableKey, SlotBlobId, SlotByStateRoot, StateByBlockRoot, StateCheckpoint,
-        StateLoadStrategy, Storage, UnfinalizedBlockByRoot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+        SlotBlobId, SlotByStateRoot, StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage,
+        UnfinalizedBlockByRoot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},
     wait::Wait,

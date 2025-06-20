@@ -19,6 +19,7 @@ fork_choice_store = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+pubkey_cache = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 types = { workspace = true }

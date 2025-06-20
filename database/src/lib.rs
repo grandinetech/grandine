@@ -21,6 +21,15 @@ use unwrap_none::UnwrapNone as _;
 const GROWTH_STEP: ByteSize = ByteSize::mib(256);
 const MAX_NAMED_DATABASES: usize = 10;
 
+pub trait PrefixableKey {
+    const PREFIX: &'static str;
+
+    #[must_use]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
+}
+
 #[derive(Debug)]
 pub enum RestartMessage {
     StorageMapFull(libmdbx::Error),

@@ -206,7 +206,7 @@ impl ValidatorMetrics {
         let validator_active = validator_keys
             .iter()
             .filter(|pubkey| {
-                accessors::index_of_public_key(&state, **pubkey)
+                accessors::index_of_public_key(&state, pubkey)
                     .and_then(|validator_index| state.validators().get(validator_index).ok())
                     .is_some_and(|validator| {
                         predicates::is_active_validator(validator, current_epoch)

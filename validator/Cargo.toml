@@ -63,6 +63,7 @@ eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
 hex-literal = { workspace = true }
 interop = { workspace = true }
+pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

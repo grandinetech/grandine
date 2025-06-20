@@ -22,6 +22,7 @@ use fork_choice_store::{
 };
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
+use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
@@ -58,6 +59,7 @@ impl Criterion {
         let store_before_next_ordinary_slot = LazyCell::new(|| {
             let run = || -> Result<_> {
                 let config = Arc::new(Config::holesky());
+                let pubkey_cache = Arc::new(PubkeyCache::default());
                 let anchor_state = CAPELLA_BEACON_STATE.force().clone_arc();
                 let anchor_slot = anchor_state.slot();
 
@@ -67,6 +69,7 @@ impl Criterion {
 
                 let storage = Arc::new(Storage::new(
                     config.clone_arc(),
+                    pubkey_cache.clone_arc(),
                     Database::in_memory(),
                     DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
                     StorageMode::Standard,
@@ -74,6 +77,7 @@ impl Criterion {
 
                 let mut store = Store::new(
                     config.clone_arc(),
+                    pubkey_cache.clone_arc(),
                     StoreConfig::default(),
                     anchor_block,
                     anchor_state,
@@ -90,7 +94,7 @@ impl Criterion {
                         .into_iter()
                         .at_most_one()?
                     {
-                        process_block(&mut store, &block)?
+                        process_block(&pubkey_cache, &mut store, &block)?
                     }
 
                     for attestation in holesky::aggregate_attestations_by_slot(slot) {
@@ -162,6 +166,7 @@ fn process_slot<P: Preset>(store: &mut Store<P, Storage<P>>, slot: Slot) -> Resu
 }
 
 fn process_block<P: Preset>(
+    pubkey_cache: &PubkeyCache,
     store: &mut Store<P, Storage<P>>,
     block: &Arc<SignedBeaconBlock<P>>,
 ) -> Result<()> {
@@ -195,6 +200,7 @@ fn process_block<P: Preset>(
         if checkpoint_state.slot() < checkpoint_slot {
             combined::process_slots(
                 store.chain_config(),
+                pubkey_cache,
                 checkpoint_state.make_mut(),
                 checkpoint_slot,
             )?;

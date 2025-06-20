@@ -11,6 +11,7 @@ use crate::predicates;
 /// [`is_fully_withdrawable_validator`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#is_fully_withdrawable_validator)
 ///
 /// > Check if ``validator`` is fully withdrawable.
+#[must_use]
 pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epoch: Epoch) -> bool {
     predicates::has_eth1_withdrawal_credential(validator)
         && validator.withdrawable_epoch <= epoch
@@ -20,6 +21,7 @@ pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epo
 /// [`is_partially_withdrawable_validator`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#is_partially_withdrawable_validator)
 ///
 /// > Check if ``validator`` is partially withdrawable.
+#[must_use]
 pub fn is_partially_withdrawable_validator<P: Preset>(
     validator: &Validator,
     balance: Gwei,

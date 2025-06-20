@@ -87,10 +87,15 @@ impl<P: Preset> Storage<P> {
             }
 
             if let Some((block, _)) = self.finalized_block_by_slot(slot)? {
-                combined::untrusted_state_transition(self.config(), state.make_mut(), &block)?;
+                combined::untrusted_state_transition(
+                    self.config(),
+                    &self.pubkey_cache,
+                    state.make_mut(),
+                    &block,
+                )?;
                 previous_block = Some(block);
             } else {
-                combined::process_slots(self.config(), state.make_mut(), slot)?;
+                combined::process_slots(self.config(), &self.pubkey_cache, state.make_mut(), slot)?;
             }
 
             batch.push(serialize(SlotByStateRoot(state.hash_tree_root()), slot)?);
@@ -170,6 +175,7 @@ mod tests {
     use database::Database;
     use eth2_cache_utils::mainnet;
     use itertools::{EitherOrBoth, Itertools as _};
+    use pubkey_cache::PubkeyCache;
     use types::phase0::consts::GENESIS_SLOT;
 
     use crate::StorageMode;
@@ -260,6 +266,7 @@ mod tests {
     fn build_test_storage<P: Preset>() -> Storage<P> {
         Storage::new(
             Arc::new(P::default_config()),
+            Arc::new(PubkeyCache::default()),
             Database::in_memory(),
             NonZeroU64::MIN,
             StorageMode::Standard,

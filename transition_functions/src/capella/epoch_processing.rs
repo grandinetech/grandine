@@ -1,6 +1,7 @@
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use helper_functions::{accessors::get_next_epoch, misc::vec_of_default};
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use types::{
     capella::{beacon_state::BeaconState, containers::HistoricalSummary},
@@ -18,7 +19,11 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<impl Preset>,
+) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -61,14 +66,18 @@ pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> R
     process_historical_summaries_update(state)?;
 
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(pubkey_cache, state)?;
 
     state.cache.advance_epoch();
 
     Ok(())
 }
 
-pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> Result<EpochReport> {
+pub fn epoch_report<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
     altair::process_justification_and_finalization(state, statistics);
@@ -109,7 +118,7 @@ pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> R
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(pubkey_cache, state)?;
 
     state.cache.advance_epoch();
 
@@ -301,7 +310,7 @@ mod spec_tests {
     }
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (statistics, _, _) = altair::statistics(state);
 
             altair::process_justification_and_finalization(state, statistics);
@@ -311,7 +320,7 @@ mod spec_tests {
     }
 
     fn run_inactivity_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (_, summaries, participation) = altair::statistics(state);
 
             altair::process_inactivity_updates(
@@ -326,7 +335,7 @@ mod spec_tests {
     }
 
     fn run_rewards_and_penalties_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (statistics, summaries, participation) = altair::statistics(state);
 
             let deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
@@ -344,7 +353,7 @@ mod spec_tests {
     }
 
     fn run_registry_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let mut summaries: Vec<ValidatorSummary> = vec_of_default(state);
 
             unphased::process_registry_updates(
@@ -356,7 +365,7 @@ mod spec_tests {
     }
 
     fn run_slashings_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (_, summaries, _) = altair::statistics(state);
 
             bellatrix::process_slashings::<_, ()>(state, summaries);
@@ -366,7 +375,7 @@ mod spec_tests {
     }
 
     fn run_eth1_data_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_eth1_data_reset(state);
 
             Ok(())
@@ -374,7 +383,7 @@ mod spec_tests {
     }
 
     fn run_effective_balance_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_effective_balance_updates(state);
 
             Ok(())
@@ -382,7 +391,7 @@ mod spec_tests {
     }
 
     fn run_slashings_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_slashings_reset(state);
 
             Ok(())
@@ -390,7 +399,7 @@ mod spec_tests {
     }
 
     fn run_randao_mixes_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_randao_mixes_reset(state);
 
             Ok(())
@@ -398,11 +407,11 @@ mod spec_tests {
     }
 
     fn run_historical_summaries_update_case<P: Preset>(case: Case) {
-        run_case::<P>(case, process_historical_summaries_update);
+        run_case::<P>(case, |_, state| process_historical_summaries_update(state));
     }
 
     fn run_participation_flag_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             altair::process_participation_flag_updates(state);
 
             Ok(())
@@ -415,12 +424,13 @@ mod spec_tests {
 
     fn run_case<P: Preset>(
         case: Case,
-        sub_transition: impl FnOnce(&mut BeaconState<P>) -> Result<()>,
+        sub_transition: impl FnOnce(&PubkeyCache, &mut BeaconState<P>) -> Result<()>,
     ) {
+        let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz_default("pre");
         let post_option = case.try_ssz_default("post");
 
-        let result = sub_transition(&mut state).map(|()| state);
+        let result = sub_transition(&pubkey_cache, &mut state).map(|()| state);
 
         if let Some(expected_post) = post_option {
             let actual_post = result.expect("epoch processing should succeed");

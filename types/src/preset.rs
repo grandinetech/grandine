@@ -8,7 +8,7 @@ use core::{
 };
 
 use arithmetic::NonZeroExt as _;
-use bls::CachedPublicKey;
+use bls::PublicKeyBytes;
 use generic_array::ArrayLength;
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
@@ -100,8 +100,8 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
 
     // Altair
     type SyncCommitteeSize: ContiguousVectorElements<ValidatorIndex>
-        + ContiguousVectorElements<CachedPublicKey>
-        + MerkleElements<CachedPublicKey>
+        + ContiguousVectorElements<PublicKeyBytes>
+        + MerkleElements<PublicKeyBytes>
         + BitVectorBits
         + MerkleBits
         + Div<SyncCommitteeSubnetCount, Output: BitVectorBits + MerkleBits + NonZero>

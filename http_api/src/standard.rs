@@ -15,10 +15,7 @@ use axum::{
     Json,
 };
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
-use bls::{
-    traits::{CachedPublicKey as _, SignatureBytes as _},
-    PublicKeyBytes, SignatureBytes,
-};
+use bls::{traits::SignatureBytes as _, PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, Eth1Api};
@@ -592,7 +589,7 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
         .filter_map(|(index, validator)| {
             if !ids.is_empty() {
                 let validator_index = ValidatorId::ValidatorIndex(index);
-                let validator_pubkey = ValidatorId::PublicKey(*validator.pubkey.as_bytes());
+                let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
 
                 let allowed_by_id =
                     ids.contains(&validator_index) || ids.contains(&validator_pubkey);
@@ -604,7 +601,7 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
 
             Some(StateValidatorIdentityResponse {
                 index,
-                pubkey: validator.pubkey.to_bytes(),
+                pubkey: validator.pubkey,
                 activation_epoch: validator.activation_epoch,
             })
         });
@@ -706,7 +703,7 @@ fn state_validator_balances<P: Preset, W: Wait>(
         validator_ids.is_empty()
             || validator_ids.iter().any(|validator_id| match validator_id {
                 ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                ValidatorId::PublicKey(pubkey) => validator.pubkey.as_bytes() == pubkey,
+                ValidatorId::PublicKey(pubkey) => &validator.pubkey == pubkey,
             })
     })
     .map(|(index, _, balance)| StateValidatorBalanceResponse { index, balance })
@@ -821,7 +818,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
     let validator_indices = committee
         .pubkeys
         .iter()
-        .filter_map(|pubkey| accessors::index_of_public_key(state, pubkey.to_bytes()))
+        .filter_map(|pubkey| accessors::index_of_public_key(state, pubkey))
         .collect_vec();
 
     let validators = validator_indices.clone();
@@ -1380,6 +1377,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
 
     let sync_committee_deltas = transition_functions::combined::state_transition_for_report(
         &chain_config,
+        controller.pubkey_cache(),
         state.make_mut(),
         &block,
     )?
@@ -1993,7 +1991,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
                         .enumerate()
                         .filter(|(_, validator_index)| indices.contains(validator_index))
                         .map(move |(validator_committee_index, validator_index)| {
-                            let pubkey = accessors::public_key(state, validator_index)?.to_bytes();
+                            let pubkey = *accessors::public_key(state, validator_index)?;
 
                             Ok(ValidatorAttesterDutyResponse {
                                 committee_index,
@@ -2044,7 +2042,7 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
             let validator_index =
                 accessors::get_beacon_proposer_index_at_slot(&chain_config, &state, slot)?;
 
-            let pubkey = accessors::public_key(&state, validator_index)?.to_bytes();
+            let pubkey = *accessors::public_key(&state, validator_index)?;
 
             Ok(ValidatorProposerDutyResponse {
                 pubkey,
@@ -2119,7 +2117,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
             }
 
             Ok(Some(ValidatorSyncDutyResponse {
-                pubkey: validator_pubkey.to_bytes(),
+                pubkey: *validator_pubkey,
                 validator_index,
                 validator_sync_committee_indices,
             }))
@@ -2255,7 +2253,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     );
 
     let execution_payload_header_handle =
-        block_build_context.get_execution_payload_header(public_key.to_bytes());
+        block_build_context.get_execution_payload_header(*public_key);
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
@@ -2373,7 +2371,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     );
 
     let execution_payload_header_handle =
-        block_build_context.get_execution_payload_header(public_key.to_bytes());
+        block_build_context.get_execution_payload_header(*public_key);
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
@@ -2777,7 +2775,7 @@ fn state_validators<P: Preset, W: Wait>(
     .filter(|(index, validator, _)| {
         if !ids.is_empty() {
             let validator_index = ValidatorId::ValidatorIndex(*index);
-            let validator_pubkey = ValidatorId::PublicKey(*validator.pubkey.as_bytes());
+            let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
 
             let allowed_by_id = ids.contains(&validator_index) || ids.contains(&validator_pubkey);
 

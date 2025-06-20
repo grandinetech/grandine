@@ -322,7 +322,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
 
         let mut validator_indices = pubkeys
             .into_iter()
-            .filter_map(|pubkey| accessors::index_of_public_key(&beacon_state, pubkey))
+            .filter_map(|pubkey| accessors::index_of_public_key(&beacon_state, &pubkey))
             .collect::<HashSet<_>>();
 
         if let Some(validator_statistics) = validator_statistics.as_ref() {

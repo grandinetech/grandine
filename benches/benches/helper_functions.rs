@@ -7,11 +7,11 @@
 use std::sync::Arc;
 
 use allocator as _;
-use bls::traits::CachedPublicKey as _;
 use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconState};
 use helper_functions::accessors;
+use pubkey_cache::PubkeyCache;
 use ssz::Hc;
 use std_ext::ArcExt as _;
 use types::{
@@ -85,24 +85,20 @@ impl Criterion {
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(1))
             .bench_function("decompressed public keys cached", |bencher| {
+                let pubkey_cache = PubkeyCache::default();
                 let state = state.force();
 
                 for validator in state.validators() {
-                    validator.pubkey.decompress().ok();
+                    pubkey_cache.get_or_insert(validator.pubkey).ok();
                 }
 
-                bencher.iter_with_large_drop(|| get_next_sync_committee(state))
+                bencher.iter_with_large_drop(|| get_next_sync_committee(&pubkey_cache, state))
             })
             .bench_function("decompressed public keys not cached", |bencher| {
-                let mut state = state.force().clone_arc();
+                let pubkey_cache = PubkeyCache::default();
+                let state = state.force().clone_arc();
 
-                // Clear decompressed keys. Doing this using `PersistentList::update` has no effect
-                // because decompressed keys are ignored when comparing `CachedPublicKey`.
-                for validator in state.validators_mut() {
-                    validator.pubkey = validator.pubkey.to_bytes().into();
-                }
-
-                bencher.iter_with_large_drop(|| get_next_sync_committee(&state))
+                bencher.iter_with_large_drop(|| get_next_sync_committee(&pubkey_cache, &state))
             });
 
         self
@@ -119,10 +115,13 @@ fn get_beacon_proposer_index(config: &Config, state: &BeaconState<impl Preset>) 
         .expect("proposer index should be computed successfully")
 }
 
-fn get_next_sync_committee<P: Preset>(state: &BeaconState<P>) -> Arc<Hc<SyncCommittee<P>>> {
+fn get_next_sync_committee<P: Preset>(
+    pubkey_cache: &PubkeyCache,
+    state: &BeaconState<P>,
+) -> Arc<Hc<SyncCommittee<P>>> {
     // `get_next_sync_committee` only computes the committee correctly when `state` is at a sync
     // committee period boundary, but it performs roughly the same amount of computation either way,
     // which is good enough for benchmarking.
-    accessors::get_next_sync_committee(state)
+    accessors::get_next_sync_committee(pubkey_cache, state)
         .expect("next sync committee should be computed successfully")
 }

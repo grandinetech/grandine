@@ -24,6 +24,7 @@ itertools = { workspace = true }
 kzg_utils = { workspace = true }
 log = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }

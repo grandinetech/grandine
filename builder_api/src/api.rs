@@ -10,6 +10,7 @@ use itertools::Itertools as _;
 use log::{debug, info};
 use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use reqwest::{
     header::{HeaderValue, ACCEPT, CONTENT_TYPE},
     Client, Response, StatusCode,
@@ -70,6 +71,7 @@ pub enum BuilderApiError {
 
 pub struct Api {
     config: BuilderConfig,
+    pubkey_cache: Arc<PubkeyCache>,
     client: Client,
     metrics: Option<Arc<Metrics>>,
     supports_block_ssz: ArcSwap<Option<bool>>,
@@ -78,9 +80,15 @@ pub struct Api {
 
 impl Api {
     #[must_use]
-    pub fn new(config: BuilderConfig, client: Client, metrics: Option<Arc<Metrics>>) -> Self {
+    pub fn new(
+        config: BuilderConfig,
+        pubkey_cache: Arc<PubkeyCache>,
+        client: Client,
+        metrics: Option<Arc<Metrics>>,
+    ) -> Self {
         Self {
             config,
+            pubkey_cache,
             client,
             metrics,
             supports_block_ssz: ArcSwap::from_pointee(None),
@@ -263,28 +271,28 @@ impl Api {
         validate_phase(chain_config.phase_at_slot::<P>(slot), builder_bid.phase())?;
 
         let signature = builder_bid.signature();
-        let public_key = builder_bid.pubkey().into();
+        let public_key = self.pubkey_cache.get_or_insert(builder_bid.pubkey())?;
 
         match &builder_bid {
             SignedBuilderBid::Bellatrix(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, public_key)?
             }
             SignedBuilderBid::Capella(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, public_key)?
             }
             SignedBuilderBid::Deneb(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, public_key)?
             }
             SignedBuilderBid::Electra(builder_bid) => {
                 builder_bid
                     .message
-                    .verify(chain_config, signature, &public_key)?
+                    .verify(chain_config, signature, public_key)?
             }
         }
 
@@ -493,6 +501,7 @@ mod tests {
                 builder_max_skipped_slots_per_epoch: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
                 builder_max_skipped_slots: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
             },
+            PubkeyCache::default().into(),
             Client::new(),
             None,
         );

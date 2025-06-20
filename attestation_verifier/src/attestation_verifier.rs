@@ -25,6 +25,7 @@ use helper_functions::{
 use itertools::Either;
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
 use std_ext::ArcExt as _;
 use types::{
@@ -402,12 +403,15 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                 let aggregator_index = message.aggregator_index();
                 let selection_proof = message.selection_proof();
 
-                let public_key = accessors::public_key(state, aggregator_index)?;
+                let public_key = self
+                    .controller
+                    .pubkey_cache()
+                    .get_or_insert(*accessors::public_key(state, aggregator_index)?)?;
 
                 verifier.verify_singular(
                     message.slot().signing_root(config, state),
                     selection_proof,
-                    public_key,
+                    public_key.clone_arc(),
                     SignatureKind::SelectionProof,
                 )?;
 
@@ -422,7 +426,12 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
             }
         }
 
-        let attestation_triples = attestation_batch_triples(config, messages.iter(), state)?;
+        let attestation_triples = attestation_batch_triples(
+            config,
+            self.controller.pubkey_cache(),
+            messages.iter(),
+            state,
+        )?;
 
         verifier.extend(attestation_triples, SignatureKind::Attestation)?;
 
@@ -543,6 +552,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
 
         let triples = attestation_batch_triples(
             self.controller.chain_config(),
+            self.controller.pubkey_cache(),
             results.iter().filter_map(|result| {
                 if let Ok(AttestationAction::Accept {
                     ref attestation, ..
@@ -564,6 +574,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
 
 fn attestation_batch_triples<'a, P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     attestations: impl IntoIterator<IntoIter = impl Iterator<Item = &'a Attestation<P>> + Send>,
     state: &BeaconState<P>,
 ) -> Result<Vec<Triple>> {
@@ -579,6 +590,7 @@ fn attestation_batch_triples<'a, P: Preset>(
 
                     predicates::validate_constructed_indexed_attestation(
                         config,
+                        pubkey_cache,
                         state,
                         &indexed_attestation,
                         &mut triple,
@@ -593,6 +605,7 @@ fn attestation_batch_triples<'a, P: Preset>(
 
                     predicates::validate_constructed_indexed_attestation(
                         config,
+                        pubkey_cache,
                         state,
                         &indexed_attestation,
                         &mut triple,
@@ -608,6 +621,7 @@ fn attestation_batch_triples<'a, P: Preset>(
 
                     predicates::validate_constructed_indexed_attestation(
                         config,
+                        pubkey_cache,
                         state,
                         &indexed_attestation,
                         &mut triple,

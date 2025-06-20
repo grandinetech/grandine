@@ -20,6 +20,7 @@ itertools = { workspace = true }
 num-integer = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true, optional = true }
+pubkey_cache = { workspace = true }
 rayon = { workspace = true }
 rc-box = { workspace = true }
 serde = { workspace = true }

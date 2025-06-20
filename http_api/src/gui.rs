@@ -2,7 +2,7 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Result;
-use bls::{traits::CachedPublicKey as _, PublicKeyBytes};
+use bls::PublicKeyBytes;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
@@ -318,14 +318,15 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
     let registered_keys = receiver.await?;
 
     let skip_validator = |validator: &Validator| {
-        let bytes = validator.pubkey.as_bytes();
+        let pubkey = validator.pubkey;
 
-        !registered_keys.contains(bytes)
-            && !validator_keys.contains(bytes)
-            && !query.pubkeys.contains(bytes)
+        !registered_keys.contains(&pubkey)
+            && !validator_keys.contains(&pubkey)
+            && !query.pubkeys.contains(&pubkey)
     };
 
     let config = controller.chain_config().as_ref();
+    let pubkey_cache = controller.pubkey_cache();
     let snapshot = controller.snapshot();
 
     let mut state;
@@ -359,7 +360,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         assert_eq!(state.slot(), slot_before_previous_epoch);
 
         if previous_epoch > GENESIS_EPOCH {
-            combined::process_slots(config, state.make_mut(), start_slot)?;
+            combined::process_slots(config, pubkey_cache, state.make_mut(), start_slot)?;
         }
 
         previous_epoch_sync_committee_assignments =
@@ -376,6 +377,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                 .then(|| {
                     combined::state_transition_for_report(
                         config,
+                        pubkey_cache,
                         state.make_mut(),
                         &block_with_root.block,
                     )
@@ -393,7 +395,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         }
 
         let start_slot = misc::compute_start_slot_at_epoch::<P>(query.start);
-        combined::process_slots(config, state.make_mut(), start_slot)?;
+        combined::process_slots(config, pubkey_cache, state.make_mut(), start_slot)?;
     }
 
     for current_epoch in query.start..query.end {
@@ -419,6 +421,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                 .then(|| {
                     combined::state_transition_for_report(
                         config,
+                        pubkey_cache,
                         state.make_mut(),
                         &block_with_root.block,
                     )
@@ -435,7 +438,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             }
         }
 
-        match combined::epoch_report(config, state.make_mut())? {
+        match combined::epoch_report(config, pubkey_cache, state.make_mut())? {
             EpochReport::Phase0(Phase0EpochReport {
                 statistics,
                 summaries,
@@ -508,7 +511,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     };
 
                     validator_reports
-                        .entry(validator.pubkey.to_bytes())
+                        .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
                         .accumulate(validator, current_epoch, validator_report);
                 }
@@ -596,7 +599,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     };
 
                     validator_reports
-                        .entry(validator.pubkey.to_bytes())
+                        .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
                         .accumulate(validator, current_epoch, validator_report);
                 }
@@ -630,6 +633,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                 .then(|| {
                     combined::state_transition_for_report(
                         config,
+                        pubkey_cache,
                         state.make_mut(),
                         &block_with_root.block,
                     )
@@ -640,7 +644,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             current_epoch_slot_reports.insert(slot, slot_report);
         }
 
-        match combined::epoch_report(config, state.make_mut())? {
+        match combined::epoch_report(config, pubkey_cache, state.make_mut())? {
             EpochReport::Phase0(Phase0EpochReport {
                 statistics,
                 summaries,
@@ -713,7 +717,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     };
 
                     validator_reports
-                        .entry(validator.pubkey.to_bytes())
+                        .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
                         .accumulate(validator, current_epoch, validator_report);
                 }
@@ -801,7 +805,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     };
 
                     validator_reports
-                        .entry(validator.pubkey.to_bytes())
+                        .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
                         .accumulate(validator, current_epoch, validator_report);
                 }
@@ -826,7 +830,7 @@ pub fn get_validator_owned<P: Preset, W: Wait>(
         .iter()
         .copied()
         .filter_map(|pubkey| {
-            let validator_index = accessors::index_of_public_key(&head_state, pubkey)?;
+            let validator_index = accessors::index_of_public_key(&head_state, &pubkey)?;
             Some((pubkey, validator_index))
         })
         .collect()
@@ -846,7 +850,7 @@ pub async fn get_validator_registered<P: Preset, W: Wait>(
         .await?
         .into_iter()
         .filter_map(|pubkey| {
-            let validator_index = accessors::index_of_public_key(&head_state, pubkey)?;
+            let validator_index = accessors::index_of_public_key(&head_state, &pubkey)?;
             Some((pubkey, validator_index))
         })
         .collect();
@@ -1025,6 +1029,7 @@ fn slot_deltas(
 #[cfg(test)]
 mod tests {
     use helper_functions::mutators;
+    use pubkey_cache::PubkeyCache;
     use types::{config::Config, preset::Minimal};
 
     use super::*;
@@ -1032,8 +1037,9 @@ mod tests {
     #[test]
     fn previous_epoch_proposal_assignments_works_when_active_validators_change() -> Result<()> {
         let config = Config::minimal();
+        let pubkey_cache = PubkeyCache::default();
 
-        let (mut state, _) = factory::min_genesis_state::<Minimal>(&config)?;
+        let (mut state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         // Change the set of active validators to trigger a bug that was present in
         // `get_beacon_proposer_index_at_slot`. Building blocks for testing is tedious,
@@ -1045,11 +1051,11 @@ mod tests {
         let exit_epoch = state.validators().get(exiting_validator_index)?.exit_epoch;
         let start_slot = misc::compute_start_slot_at_epoch::<Minimal>(exit_epoch);
 
-        combined::process_slots(&config, state.make_mut(), start_slot - 1)?;
+        combined::process_slots(&config, &pubkey_cache, state.make_mut(), start_slot - 1)?;
 
         let proposal_assignments_before_exit = current_epoch_proposal_assignments(&config, &state)?;
 
-        combined::process_slots(&config, state.make_mut(), start_slot)?;
+        combined::process_slots(&config, &pubkey_cache, state.make_mut(), start_slot)?;
 
         let proposal_assignments_after_exit = previous_epoch_proposal_assignments(&config, &state)?;
 

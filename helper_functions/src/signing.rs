@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use anyhow::Result;
-use bls::{traits::SecretKey as _, CachedPublicKey, SecretKey, Signature, SignatureBytes};
+use bls::{traits::SecretKey as _, PublicKey, SecretKey, Signature, SignatureBytes};
 use derive_more::From;
 use ssz::{Ssz, SszHash};
 use types::{
@@ -76,12 +78,12 @@ pub trait SignForAllForks: SszHash {
         &self,
         config: &Config,
         signature_bytes: SignatureBytes,
-        cached_public_key: &CachedPublicKey,
+        public_key: Arc<PublicKey>,
     ) -> Result<()> {
         SingleVerifier.verify_singular(
             self.signing_root(config),
             signature_bytes,
-            cached_public_key,
+            public_key,
             Self::SIGNATURE_KIND,
         )
     }
@@ -111,12 +113,12 @@ pub trait SignForAllForksWithGenesis<P: Preset>: SszHash {
         config: &Config,
         beacon_state: &(impl BeaconState<P> + ?Sized),
         signature_bytes: SignatureBytes,
-        cached_public_key: &CachedPublicKey,
+        public_key: Arc<PublicKey>,
     ) -> Result<()> {
         SingleVerifier.verify_singular(
             self.signing_root(config, beacon_state),
             signature_bytes,
-            cached_public_key,
+            public_key,
             Self::SIGNATURE_KIND,
         )
     }
@@ -148,12 +150,12 @@ pub trait SignForSingleFork<P: Preset>: SszHash {
         config: &Config,
         beacon_state: &(impl BeaconState<P> + ?Sized),
         signature_bytes: SignatureBytes,
-        cached_public_key: &CachedPublicKey,
+        public_key: Arc<PublicKey>,
     ) -> Result<()> {
         SingleVerifier.verify_singular(
             self.signing_root(config, beacon_state),
             signature_bytes,
-            cached_public_key,
+            public_key,
             Self::SIGNATURE_KIND,
         )
     }
@@ -190,12 +192,12 @@ pub trait SignForSingleForkAtSlot<P: Preset>: SszHash {
         beacon_state: &(impl BeaconState<P> + ?Sized),
         slot: Slot,
         signature_bytes: SignatureBytes,
-        cached_public_key: &CachedPublicKey,
+        public_key: Arc<PublicKey>,
     ) -> Result<()> {
         SingleVerifier.verify_singular(
             self.signing_root(config, beacon_state, slot),
             signature_bytes,
-            cached_public_key,
+            public_key,
             Self::SIGNATURE_KIND,
         )
     }

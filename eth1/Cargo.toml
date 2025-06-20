@@ -19,6 +19,7 @@ genesis = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }

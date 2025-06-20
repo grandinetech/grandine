@@ -5,10 +5,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Error as AnyhowError, Result};
-use bls::{
-    traits::{CachedPublicKey as _, Signature as _},
-    AggregateSignature, PublicKeyBytes, SignatureBytes,
-};
+use bls::{traits::Signature as _, AggregateSignature, PublicKeyBytes, SignatureBytes};
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
@@ -32,6 +29,7 @@ use operation_pools::{
     SyncCommitteeAggPool,
 };
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use ssz::{BitList, BitVector, ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -127,6 +125,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
 
         let producer_context = Arc::new(ProducerContext {
             chain_config: controller.chain_config().clone_arc(),
+            pubkey_cache: controller.pubkey_cache().clone_arc(),
             proposer_configs,
             builder_api,
             controller,
@@ -349,6 +348,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             AttesterSlashing::Phase0(ref attester_slashing) => {
                 unphased::validate_attester_slashing(
                     &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
                     &state,
                     attester_slashing,
                 )
@@ -356,6 +356,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             AttesterSlashing::Electra(ref attester_slashing) => {
                 unphased::validate_attester_slashing(
                     &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
                     &state,
                     attester_slashing,
                 )
@@ -400,6 +401,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
 
         let outcome = match unphased::validate_proposer_slashing(
             &self.producer_context.chain_config,
+            &self.producer_context.pubkey_cache,
             &state,
             slashing,
         ) {
@@ -443,12 +445,18 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             | BeaconState::Altair(_)
             | BeaconState::Bellatrix(_)
             | BeaconState::Capella(_)
-            | BeaconState::Deneb(_) => {
-                unphased::validate_voluntary_exit(&self.producer_context.chain_config, &state, exit)
-            }
-            BeaconState::Electra(state) => {
-                electra::validate_voluntary_exit(&self.producer_context.chain_config, state, exit)
-            }
+            | BeaconState::Deneb(_) => unphased::validate_voluntary_exit(
+                &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
+                &state,
+                exit,
+            ),
+            BeaconState::Electra(state) => electra::validate_voluntary_exit(
+                &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
+                state,
+                exit,
+            ),
         };
 
         let outcome = match result {
@@ -559,6 +567,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
 
 struct ProducerContext<P: Preset, W: Wait> {
     chain_config: Arc<ChainConfig>,
+    pubkey_cache: Arc<PubkeyCache>,
     proposer_configs: Arc<ProposerConfigs>,
     builder_api: Option<Arc<BuilderApi>>,
     controller: ApiController<P, W>,
@@ -1133,6 +1142,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
             unphased::validate_proposer_slashing(
                 &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
                 &self.beacon_state,
                 *slashing,
             )
@@ -1170,6 +1180,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 AttesterSlashing::Phase0(attester_slashing) => {
                     unphased::validate_attester_slashing(
                         &self.producer_context.chain_config,
+                        &self.producer_context.pubkey_cache,
                         &self.beacon_state,
                         attester_slashing,
                     )
@@ -1177,6 +1188,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 AttesterSlashing::Electra(attester_slashing) => {
                     unphased::validate_attester_slashing(
                         &self.producer_context.chain_config,
+                        &self.producer_context.pubkey_cache,
                         &self.beacon_state,
                         attester_slashing,
                     )
@@ -1218,6 +1230,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 AttesterSlashing::Phase0(attester_slashing) => {
                     unphased::validate_attester_slashing(
                         &self.producer_context.chain_config,
+                        &self.producer_context.pubkey_cache,
                         &self.beacon_state,
                         attester_slashing,
                     )
@@ -1225,6 +1238,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 AttesterSlashing::Electra(attester_slashing) => {
                     unphased::validate_attester_slashing(
                         &self.producer_context.chain_config,
+                        &self.producer_context.pubkey_cache,
                         &self.beacon_state,
                         attester_slashing,
                     )
@@ -1273,6 +1287,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let split_index = itertools::partition(exits.iter_mut(), |voluntary_exit| {
             unphased::validate_voluntary_exit(
                 &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
                 &self.beacon_state,
                 *voluntary_exit,
             )
@@ -1371,6 +1386,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .filter(|bls_to_execution_change| {
                 capella::validate_bls_to_execution_change(
                     &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
                     state,
                     *bls_to_execution_change,
                 )
@@ -1769,9 +1785,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .unwrap_or_else(|| {
                 let proposer_pubkey =
                     accessors::public_key(&self.beacon_state, self.proposer_index)?;
+
                 self.producer_context
                     .proposer_configs
-                    .fee_recipient(proposer_pubkey.to_bytes())
+                    .fee_recipient(*proposer_pubkey)
             })
     }
 

@@ -41,6 +41,7 @@ use operation_pools::{
 use p2p::{
     BlockSyncService, BlockSyncServiceChannels, Channels, Network, NetworkConfig, SubnetService,
 };
+use pubkey_cache::PubkeyCache;
 use signer::Signer;
 use slasher::{Databases, Slasher, SlasherConfig};
 use slashing_protection::SlashingProtector;
@@ -76,6 +77,7 @@ pub struct RuntimeConfig {
 #[expect(clippy::too_many_lines)]
 pub async fn run_after_genesis<P: Preset>(
     chain_config: Arc<ChainConfig>,
+    pubkey_cache: Arc<PubkeyCache>,
     runtime_config: RuntimeConfig,
     store_config: StoreConfig,
     validator_api_config: Option<ValidatorApiConfig>,
@@ -208,6 +210,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let storage = Arc::new(Storage::new(
         chain_config.clone_arc(),
+        pubkey_cache.clone_arc(),
         storage_database,
         archival_epoch_interval,
         storage_mode,
@@ -250,6 +253,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let (controller, mutator_handle) = Controller::new(
         chain_config.clone_arc(),
+        pubkey_cache.clone_arc(),
         store_config,
         anchor_block,
         anchor_state.clone_arc(),
@@ -403,6 +407,7 @@ pub async fn run_after_genesis<P: Preset>(
     let builder_api = builder_config.map(|builder_config| {
         Arc::new(BuilderApi::new(
             builder_config,
+            pubkey_cache,
             signer_snapshot.client().clone(),
             metrics.clone(),
         ))

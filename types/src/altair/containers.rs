@@ -1,4 +1,4 @@
-use bls::{AggregatePublicKeyBytes, AggregateSignatureBytes, CachedPublicKey, SignatureBytes};
+use bls::{AggregatePublicKeyBytes, AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, ContiguousList, ContiguousVector, Ssz};
 use typenum::Log2;
@@ -135,7 +135,7 @@ pub struct SyncAggregatorSelectionData {
 pub struct SyncCommittee<P: Preset> {
     // The vector has to be boxed because it's large enough to cause stack overflows when not in
     // release mode.
-    pub pubkeys: Box<ContiguousVector<CachedPublicKey, P::SyncCommitteeSize>>,
+    pub pubkeys: Box<ContiguousVector<PublicKeyBytes, P::SyncCommitteeSize>>,
     pub aggregate_pubkey: AggregatePublicKeyBytes,
 }
 

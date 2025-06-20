@@ -11,6 +11,7 @@ use execution_engine::{
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
+use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
@@ -34,6 +35,7 @@ use crate::{
 };
 
 pub struct Context<P: Preset> {
+    pubkey_cache: Arc<PubkeyCache>,
     controller: Option<Arc<TestController<P>>>,
     #[expect(
         dead_code,
@@ -60,14 +62,23 @@ impl<P: Preset> Drop for Context<P> {
 impl<P: Preset> Context<P> {
     fn with_config(config: Config) -> Result<Self> {
         let config = Arc::new(config);
-        let (genesis_state, _) = factory::min_genesis_state(&config)?;
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+        let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)?;
         let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
-        Ok(Self::new(config, genesis_block, genesis_state, true))
+
+        Ok(Self::new(
+            config,
+            pubkey_cache,
+            genesis_block,
+            genesis_state,
+            true,
+        ))
     }
 
     #[must_use]
     pub fn new(
         config: Arc<Config>,
+        pubkey_cache: Arc<PubkeyCache>,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         optimistic_merge_block_validation: bool,
@@ -84,6 +95,7 @@ impl<P: Preset> Context<P> {
 
         let (controller, mutator_handle) = TestController::with_p2p_tx(
             config,
+            pubkey_cache.clone_arc(),
             anchor_block,
             anchor_state,
             execution_engine.clone_arc(),
@@ -91,6 +103,7 @@ impl<P: Preset> Context<P> {
         );
 
         Self {
+            pubkey_cache,
             controller: Some(controller),
             mutator_handle,
             p2p_rx,
@@ -152,8 +165,14 @@ impl<P: Preset> Context<P> {
         slot: Slot,
         graffiti: H256,
     ) -> (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>) {
-        factory::empty_block(self.config(), pre_state.clone_arc(), slot, graffiti)
-            .expect("block should be constructed successfully")
+        factory::empty_block(
+            self.config(),
+            &self.pubkey_cache,
+            pre_state.clone_arc(),
+            slot,
+            graffiti,
+        )
+        .expect("block should be constructed successfully")
     }
 
     #[must_use]
@@ -170,6 +189,7 @@ impl<P: Preset> Context<P> {
 
         factory::block_with_payload(
             self.config(),
+            &self.pubkey_cache,
             pre_state.clone_arc(),
             slot,
             graffiti,
@@ -187,8 +207,14 @@ impl<P: Preset> Context<P> {
     ) -> (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>) {
         let pre_state = pre_state.clone_arc();
 
-        factory::block_justifying_previous_epoch(self.config(), pre_state, epoch, graffiti)
-            .expect("block should be constructed successfully")
+        factory::block_justifying_previous_epoch(
+            self.config(),
+            &self.pubkey_cache,
+            pre_state,
+            epoch,
+            graffiti,
+        )
+        .expect("block should be constructed successfully")
     }
 
     #[must_use]
@@ -200,8 +226,15 @@ impl<P: Preset> Context<P> {
     ) -> (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>) {
         let pre_state = pre_state.clone_arc();
 
-        factory::block_justifying_current_epoch(self.config(), pre_state, epoch, graffiti, None)
-            .expect("block should be constructed successfully")
+        factory::block_justifying_current_epoch(
+            self.config(),
+            &self.pubkey_cache,
+            pre_state,
+            epoch,
+            graffiti,
+            None,
+        )
+        .expect("block should be constructed successfully")
     }
 
     #[must_use]
@@ -224,6 +257,7 @@ impl<P: Preset> Context<P> {
 
         factory::block_justifying_current_epoch(
             self.config(),
+            &self.pubkey_cache,
             pre_state,
             epoch,
             graffiti,
@@ -565,9 +599,14 @@ impl<P: Preset> Context<P> {
         epoch: Epoch,
         validator_index: ValidatorIndex,
     ) -> Option<P2pMessage<P>> {
-        let (attestation, subnet_id) =
-            factory::singular_attestation(self.config(), state.clone_arc(), epoch, validator_index)
-                .expect("attestation should be constructed successfully");
+        let (attestation, subnet_id) = factory::singular_attestation(
+            self.config(),
+            &self.pubkey_cache,
+            state.clone_arc(),
+            epoch,
+            validator_index,
+        )
+        .expect("attestation should be constructed successfully");
 
         self.controller()
             .on_singular_attestation(AttestationItem::unverified(

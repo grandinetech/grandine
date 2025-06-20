@@ -20,6 +20,7 @@ itertools = { workspace = true }
 log = { workspace = true }
 mime = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }

@@ -29,6 +29,7 @@ types = { workspace = true }
 duplicate = { workspace = true }
 factory = { workspace = true }
 hex-literal = { workspace = true }
+pubkey_cache = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }

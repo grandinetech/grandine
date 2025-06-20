@@ -8,7 +8,6 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-bls = { workspace = true }
 eth1_api = { workspace = true }
 fork_choice_control = { workspace = true }
 helper_functions = { workspace = true }

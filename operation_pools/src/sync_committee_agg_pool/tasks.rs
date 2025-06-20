@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{ensure, Result};
-use bls::traits::CachedPublicKey as _;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;
@@ -14,6 +13,8 @@ use helper_functions::{
 };
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
+use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
@@ -210,6 +211,7 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
             controller.chain_config(),
             signed_contribution_and_proof,
             &beacon_state,
+            controller.pubkey_cache(),
         )?;
 
         if is_valid {
@@ -321,6 +323,7 @@ impl<P: Preset, W: Wait> HandleExternalMessageTask<P, W> {
             message,
             subnet_id,
             &beacon_state,
+            controller.pubkey_cache(),
         )?;
 
         if is_valid {
@@ -365,6 +368,7 @@ fn validate_external_contribution_and_proof<P: Preset>(
     config: &Config,
     signed_contribution_and_proof: SignedContributionAndProof<P>,
     beacon_state: &BeaconState<P>,
+    pubkey_cache: &PubkeyCache,
 ) -> Result<bool> {
     if signed_contribution_and_proof.message.contribution.slot != beacon_state.slot() {
         return Ok(false);
@@ -414,6 +418,8 @@ fn validate_external_contribution_and_proof<P: Preset>(
 
     let mut verifier = MultiVerifier::default();
 
+    let pubkey = pubkey_cache.get_or_insert(aggregator.pubkey)?;
+
     verifier.verify_singular(
         SyncAggregatorSelectionData {
             slot: contribution.slot,
@@ -421,14 +427,14 @@ fn validate_external_contribution_and_proof<P: Preset>(
         }
         .signing_root(config, beacon_state),
         contribution_and_proof.selection_proof,
-        &aggregator.pubkey,
+        pubkey.clone_arc(),
         SignatureKind::SyncCommitteeSelectionProof,
     )?;
 
     verifier.verify_singular(
         contribution_and_proof.signing_root(config, beacon_state),
         signed_contribution_and_proof.signature,
-        &aggregator.pubkey,
+        pubkey,
         SignatureKind::ContributionAndProof,
     )?;
 
@@ -436,7 +442,7 @@ fn validate_external_contribution_and_proof<P: Preset>(
         .iter()
         .zip(contribution.aggregation_bits)
         .filter(|(_, bit)| *bit)
-        .map(|(pubkey, _)| pubkey.decompress());
+        .map(|(pubkey, _)| pubkey_cache.get_or_insert(*pubkey));
 
     let signing_root =
         contribution
@@ -462,6 +468,7 @@ fn validate_external_message<P: Preset>(
     message: SyncCommitteeMessage,
     subnet_id: SubnetId,
     beacon_state: &BeaconState<P>,
+    pubkey_cache: &PubkeyCache,
 ) -> Result<bool> {
     if message.slot != beacon_state.slot() {
         return Ok(false);
@@ -488,7 +495,8 @@ fn validate_external_message<P: Preset>(
         "subnet ID is invalid",
     );
 
-    let validator_pubkey = &state.validators().get(validator_index)?.pubkey;
+    let validator_pubkey =
+        pubkey_cache.get_or_insert(state.validators().get(validator_index)?.pubkey)?;
 
     message.beacon_block_root.verify(
         config,

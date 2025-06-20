@@ -106,7 +106,7 @@ impl DoppelgangerProtection {
             let mut snapshot = snapshot.as_ref().clone();
 
             for public_key in &filtered_public_keys {
-                match accessors::index_of_public_key(beacon_state, *public_key) {
+                match accessors::index_of_public_key(beacon_state, public_key) {
                     Some(validator_index) => {
                         snapshot.tracked_validators
                             .entry(*public_key)
@@ -261,7 +261,7 @@ impl LivenessChecker {
 
 #[cfg(test)]
 mod tests {
-    use bls::traits::CachedPublicKey as _;
+    use pubkey_cache::PubkeyCache;
     use types::{config::Config, preset::Minimal};
 
     use super::*;
@@ -273,7 +273,7 @@ mod tests {
     }
 
     fn minimal_beacon_state() -> Arc<BeaconState<Minimal>> {
-        factory::min_genesis_state::<Minimal>(&Config::minimal())
+        factory::min_genesis_state::<Minimal>(&Config::minimal(), &PubkeyCache::default())
             .expect("should build beacon state")
             .0
     }
@@ -282,9 +282,8 @@ mod tests {
         state: &BeaconState<Minimal>,
         validator_index: ValidatorIndex,
     ) -> PublicKeyBytes {
-        accessors::public_key(state, validator_index)
+        *accessors::public_key(state, validator_index)
             .unwrap_or_else(|_| panic!("validator at position {validator_index} should exist"))
-            .to_bytes()
     }
 
     #[test]

@@ -26,6 +26,7 @@ use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use log::{error, warn};
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -81,6 +82,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Store<P: Preset, S: Storage<P>> {
     chain_config: Arc<ChainConfig>,
+    pubkey_cache: Arc<PubkeyCache>,
     store_config: StoreConfig,
     // The fork choice rule does not need a precise timestamp.
     tick: Tick,
@@ -223,6 +225,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn new(
         chain_config: Arc<ChainConfig>,
+        pubkey_cache: Arc<PubkeyCache>,
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
@@ -266,6 +269,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         Self {
             chain_config,
+            pubkey_cache,
             store_config,
             tick: Tick::start_of_slot(anchor_state.slot()),
             justified_checkpoint: checkpoint,
@@ -1010,6 +1014,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // > Check the block is valid and compute the post-state
             combined::custom_state_transition(
                 &self.chain_config,
+                &self.pubkey_cache,
                 state.make_mut(),
                 block,
                 ProcessSlots::IfNeeded,
@@ -1203,6 +1208,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -1324,20 +1330,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if !signature_validated && origin.verify_signatures() {
             let chain_config = &self.chain_config;
+            let pubkey = self.pubkey_cache.get_or_insert(*public_key)?;
 
             // > The `aggregate_and_proof.selection_proof` is a valid signature of the
             // > `aggregate.data.slot` by the validator with index
             // > `aggregate_and_proof.aggregator_index`.
-            if let Err(error) =
-                slot.verify(chain_config, &target_state, selection_proof, public_key)
-            {
+            if let Err(error) = slot.verify(
+                chain_config,
+                &target_state,
+                selection_proof,
+                pubkey.clone_arc(),
+            ) {
                 bail!(error.context(Error::InvalidSelectionProof {
                     aggregate_and_proof,
                 }));
             }
 
             // > The aggregator signature, `signed_aggregate_and_proof.signature`, is valid.
-            if let Err(error) = message.verify(chain_config, &target_state, signature, public_key) {
+            if let Err(error) = message.verify(chain_config, &target_state, signature, pubkey) {
                 bail!(error.context(Error::InvalidAggregateAndProofSignature {
                     aggregate_and_proof,
                 }));
@@ -1665,6 +1675,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if validate_indexed {
                     predicates::validate_constructed_indexed_attestation(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         target_state,
                         &indexed_attestation,
                         SingleVerifier,
@@ -1682,6 +1693,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if validate_indexed {
                     predicates::validate_constructed_indexed_attestation(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         target_state,
                         &indexed_attestation,
                         SingleVerifier,
@@ -1699,6 +1711,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if validate_indexed {
                     predicates::validate_constructed_indexed_attestation(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         target_state,
                         &indexed_attestation,
                         SingleVerifier,
@@ -1722,12 +1735,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if origin.verify_signatures() {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         self.justified_state(),
                         attester_slashing,
                     )
                 } else {
                     unphased::validate_attester_slashing_with_verifier(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         self.justified_state(),
                         attester_slashing,
                         NullVerifier,
@@ -1738,12 +1753,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if origin.verify_signatures() {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         self.justified_state(),
                         attester_slashing,
                     )
                 } else {
                     unphased::validate_attester_slashing_with_verifier(
                         &self.chain_config,
+                        &self.pubkey_cache,
                         self.justified_state(),
                         attester_slashing,
                         NullVerifier,
@@ -1833,7 +1850,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .message
                 .signing_root(&self.chain_config, &state),
             blob_sidecar.signed_block_header.signature,
-            accessors::public_key(&state, block_header.proposer_index)?,
+            self.pubkey_cache
+                .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
             SignatureKind::BlockInBlobSidecar,
         )?;
 
@@ -3117,8 +3135,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         assert!(!blocks_to_process.is_empty());
 
         for block in blocks_to_process.into_iter().rev() {
-            combined::trusted_state_transition(self.chain_config(), state.make_mut(), block)
-                .expect("state transition should succeed because block is already in store");
+            combined::trusted_state_transition(
+                self.chain_config(),
+                &self.pubkey_cache,
+                state.make_mut(),
+                block,
+            )
+            .expect("state transition should succeed because block is already in store");
         }
 
         state

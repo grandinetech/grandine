@@ -1,4 +1,5 @@
 use core::num::NonZeroU64;
+use std::sync::Arc;
 
 use blst::{
     blst_scalar,
@@ -48,7 +49,7 @@ impl SignatureTrait for Signature {
     type PublicKey = PublicKey;
 
     #[must_use]
-    fn verify(&self, message: impl AsRef<[u8]>, public_key: Self::PublicKey) -> bool {
+    fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool {
         let result = self.as_raw().verify(
             true,
             message.as_ref(),
@@ -70,12 +71,17 @@ impl SignatureTrait for Signature {
     }
 
     #[must_use]
-    fn fast_aggregate_verify<'keys>(
+    fn fast_aggregate_verify(
         &self,
         message: impl AsRef<[u8]>,
-        public_keys: impl IntoIterator<Item = &'keys PublicKey>,
+        public_keys: impl IntoIterator<Item = Arc<PublicKey>>,
     ) -> bool {
-        let public_keys = public_keys.into_iter().map(PublicKey::as_raw).collect_vec();
+        let raw_keys = public_keys
+            .into_iter()
+            .map(|key| *key.as_raw())
+            .collect_vec();
+
+        let public_keys = raw_keys.iter().collect_vec();
 
         let result = self.as_raw().fast_aggregate_verify(
             true,
@@ -149,7 +155,7 @@ mod tests {
         let public_key = SecretKey::to_public_key(&secret_key);
         let signature = SecretKey::sign(&secret_key, MESSAGE);
 
-        assert!(Signature::verify(&signature, MESSAGE, public_key));
+        assert!(Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     #[test]
@@ -158,7 +164,7 @@ mod tests {
         let public_key = PublicKey::default();
         let signature = SecretKey::sign(&secret_key, MESSAGE);
 
-        assert!(!Signature::verify(&signature, MESSAGE, public_key));
+        assert!(!Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     #[test]
@@ -167,7 +173,7 @@ mod tests {
         let public_key = SecretKey::to_public_key(&secret_key);
         let signature = Signature::default();
 
-        assert!(!Signature::verify(&signature, MESSAGE, public_key));
+        assert!(!Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     fn secret_key() -> SecretKey {

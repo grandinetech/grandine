@@ -46,6 +46,7 @@ members = [
     'panics',
     'predefined_chains',
     'prometheus_metrics',
+    'pubkey_cache',
     'runtime',
     'serde_utils',
     'shuffling',
@@ -509,6 +510,7 @@ p2p = { path = 'p2p' }
 panics = { path = 'panics' }
 predefined_chains = { path = 'predefined_chains' }
 prometheus_metrics = { path = 'prometheus_metrics' }
+pubkey_cache = { path = 'pubkey_cache' }
 runtime = { path = 'runtime' }
 serde_utils = { path = 'serde_utils' }
 shuffling = { path = 'shuffling' }
