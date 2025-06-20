@@ -18,6 +18,7 @@ fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
+pubkey_cache = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 types = { workspace = true }

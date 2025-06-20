@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
 use helper_functions::misc;
+use pubkey_cache::PubkeyCache;
 use ssz::Hc;
 use types::{
     altair::beacon_state::BeaconState, config::Config, phase0::primitives::Slot, preset::Preset,
@@ -10,6 +11,7 @@ use crate::unphased::{self, Error};
 
 pub fn process_slots<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut Hc<BeaconState<P>>,
     slot: Slot,
 ) -> Result<()> {
@@ -26,7 +28,7 @@ pub fn process_slots<P: Preset>(
 
         // > Process epoch on the start slot of the next epoch
         if misc::is_epoch_start::<P>(state.slot + 1) {
-            epoch_processing::process_epoch(config, state)?;
+            epoch_processing::process_epoch(config, pubkey_cache, state)?;
         }
 
         state.slot += 1;

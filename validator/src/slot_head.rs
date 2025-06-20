@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{traits::CachedPublicKey as _, CachedPublicKey, PublicKeyBytes, SignatureBytes};
+use bls::{PublicKeyBytes, SignatureBytes};
 use futures::lock::Mutex;
 use helper_functions::{
     accessors, misc, predicates,
@@ -51,7 +51,7 @@ impl<P: Preset> SlotHead<P> {
     }
 
     #[must_use]
-    pub fn public_key(&self, validator_index: ValidatorIndex) -> &CachedPublicKey {
+    pub fn public_key(&self, validator_index: ValidatorIndex) -> &PublicKeyBytes {
         &self
             .beacon_state
             .validators()
@@ -171,11 +171,9 @@ impl<P: Preset> SlotHead<P> {
         signer: &Signer,
         block: &(impl SignForSingleFork<P> + Debug + Send + Sync),
         message: SigningMessage<'_, P>,
-        cached_public_key: &CachedPublicKey,
+        public_key: PublicKeyBytes,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
     ) -> Option<SignatureBytes> {
-        let public_key = cached_public_key.to_bytes();
-
         match signer
             .load()
             .sign_triples(

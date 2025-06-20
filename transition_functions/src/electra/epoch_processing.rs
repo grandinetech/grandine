@@ -16,6 +16,7 @@ use helper_functions::{
     predicates::{is_active_validator, is_eligible_for_activation},
     signing::SignForAllForks as _,
 };
+use pubkey_cache::PubkeyCache;
 use ssz::{PersistentList, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -44,7 +45,11 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset>) -> Result<()> {
+pub fn process_epoch(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut ElectraBeaconState<impl Preset>,
+) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
         .get()
@@ -80,7 +85,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
     process_registry_updates(config, state, summaries.as_mut_slice())?;
     process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
-    process_pending_deposits(config, state)?;
+    process_pending_deposits(config, pubkey_cache, state)?;
     process_pending_consolidations(state)?;
     process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
@@ -90,7 +95,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
     process_historical_summaries_update(state)?;
 
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(pubkey_cache, state)?;
 
     state.cache.advance_epoch();
 
@@ -99,6 +104,7 @@ pub fn process_epoch(config: &Config, state: &mut ElectraBeaconState<impl Preset
 
 pub fn epoch_report<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut ElectraBeaconState<P>,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
@@ -141,7 +147,7 @@ pub fn epoch_report<P: Preset>(
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(state)?;
+    altair::process_sync_committee_updates(pubkey_cache, state)?;
 
     state.cache.advance_epoch();
 
@@ -223,6 +229,7 @@ fn process_registry_updates<P: Preset>(
 
 fn process_pending_deposits<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
     let next_epoch = get_current_epoch(state) + 1;
@@ -256,7 +263,7 @@ fn process_pending_deposits<P: Preset>(
         let mut is_validator_exited = false;
         let mut is_validator_withdrawn = false;
 
-        if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
+        if let Some(validator_index) = accessors::index_of_public_key(state, &deposit.pubkey) {
             let validator = state.validators().get(validator_index)?;
 
             is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH;
@@ -265,7 +272,7 @@ fn process_pending_deposits<P: Preset>(
 
         if is_validator_withdrawn {
             // > Deposited balance will never become active. Increase balance but do not consume churn
-            apply_pending_deposit(config, state, deposit)?;
+            apply_pending_deposit(config, pubkey_cache, state, deposit)?;
         } else if is_validator_exited {
             // > Validator is exiting, postpone the deposit until after withdrawable epoch
             deposits_to_postpone.push(*deposit);
@@ -279,7 +286,7 @@ fn process_pending_deposits<P: Preset>(
 
             // > Consume churn and apply deposit.
             processed_amount += deposit.amount;
-            apply_pending_deposit(config, state, deposit)?;
+            apply_pending_deposit(config, pubkey_cache, state, deposit)?;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.
@@ -306,6 +313,7 @@ fn process_pending_deposits<P: Preset>(
 
 fn apply_pending_deposit<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
     deposit: &PendingDeposit,
 ) -> Result<()> {
@@ -316,12 +324,12 @@ fn apply_pending_deposit<P: Preset>(
         ..
     } = deposit;
 
-    if let Some(validator_index) = accessors::index_of_public_key(state, deposit.pubkey) {
+    if let Some(validator_index) = accessors::index_of_public_key(state, &deposit.pubkey) {
         increase_balance(balance(state, validator_index)?, *amount);
-    } else if is_valid_deposit_signature(config, deposit) {
+    } else if is_valid_deposit_signature(config, pubkey_cache, deposit) {
         block_processing::add_validator_to_registry::<P>(
             state,
-            (*pubkey).into(),
+            *pubkey,
             *withdrawal_credentials,
             *amount,
         )?;
@@ -330,7 +338,11 @@ fn apply_pending_deposit<P: Preset>(
     Ok(())
 }
 
-fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit) -> bool {
+fn is_valid_deposit_signature(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    deposit: &PendingDeposit,
+) -> bool {
     let PendingDeposit {
         pubkey,
         withdrawal_credentials,
@@ -345,8 +357,9 @@ fn is_valid_deposit_signature(config: &Config, deposit: &PendingDeposit) -> bool
         amount,
     };
 
-    deposit_message
-        .verify(config, signature, &pubkey.into())
+    pubkey_cache
+        .get_or_insert(pubkey)
+        .and_then(|decompressed| deposit_message.verify(config, signature, decompressed))
         .is_ok()
 }
 
@@ -703,7 +716,7 @@ mod spec_tests {
     }
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (statistics, _, _) = altair::statistics(state);
 
             altair::process_justification_and_finalization(state, statistics);
@@ -713,7 +726,7 @@ mod spec_tests {
     }
 
     fn run_inactivity_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (_, summaries, participation) = altair::statistics(state);
 
             altair::process_inactivity_updates(
@@ -728,7 +741,7 @@ mod spec_tests {
     }
 
     fn run_rewards_and_penalties_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (statistics, summaries, participation) = altair::statistics(state);
 
             let deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
@@ -746,7 +759,7 @@ mod spec_tests {
     }
 
     fn run_registry_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let mut summaries: Vec<ValidatorSummary> = vec_of_default(state);
 
             process_registry_updates(&P::default_config(), state, summaries.as_mut_slice())
@@ -754,7 +767,7 @@ mod spec_tests {
     }
 
     fn run_slashings_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             let (_, summaries, _) = altair::statistics(state);
 
             process_slashings::<_, ()>(state, summaries);
@@ -764,7 +777,7 @@ mod spec_tests {
     }
 
     fn run_eth1_data_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_eth1_data_reset(state);
 
             Ok(())
@@ -772,7 +785,7 @@ mod spec_tests {
     }
 
     fn run_effective_balance_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             process_effective_balance_updates(state);
 
             Ok(())
@@ -780,7 +793,7 @@ mod spec_tests {
     }
 
     fn run_slashings_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_slashings_reset(state);
 
             Ok(())
@@ -788,7 +801,7 @@ mod spec_tests {
     }
 
     fn run_randao_mixes_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             unphased::process_randao_mixes_reset(state);
 
             Ok(())
@@ -796,11 +809,11 @@ mod spec_tests {
     }
 
     fn run_historical_summaries_update_case<P: Preset>(case: Case) {
-        run_case::<P>(case, process_historical_summaries_update);
+        run_case::<P>(case, |_, state| process_historical_summaries_update(state));
     }
 
     fn run_participation_flag_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
+        run_case::<P>(case, |_, state| {
             altair::process_participation_flag_updates(state);
 
             Ok(())
@@ -812,23 +825,24 @@ mod spec_tests {
     }
 
     fn run_pending_deposits_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |state| {
-            process_pending_deposits(&P::default_config(), state)
+        run_case::<P>(case, |pubkey_cache, state| {
+            process_pending_deposits(&P::default_config(), pubkey_cache, state)
         });
     }
 
     fn run_pending_consolidations_case<P: Preset>(case: Case) {
-        run_case::<P>(case, process_pending_consolidations)
+        run_case::<P>(case, |_, state| process_pending_consolidations(state))
     }
 
     fn run_case<P: Preset>(
         case: Case,
-        sub_transition: impl FnOnce(&mut ElectraBeaconState<P>) -> Result<()>,
+        sub_transition: impl FnOnce(&PubkeyCache, &mut ElectraBeaconState<P>) -> Result<()>,
     ) {
+        let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz_default("pre");
         let post_option = case.try_ssz_default("post");
 
-        let result = sub_transition(&mut state).map(|()| state);
+        let result = sub_transition(&pubkey_cache, &mut state).map(|()| state);
 
         if let Some(expected_post) = post_option {
             let actual_post = result.expect("epoch processing should succeed");

@@ -5,6 +5,7 @@ use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use deposit_tree::DepositTree;
 use helper_functions::{accessors, misc, mutators::increase_balance};
+use pubkey_cache::PubkeyCache;
 use ssz::{PersistentList, PersistentVector, SszHash as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -151,6 +152,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
 
     pub fn add_deposit_data(
         &mut self,
+        pubkey_cache: &PubkeyCache,
         data: DepositData,
         deposit_index: DepositIndex,
     ) -> Result<()> {
@@ -164,13 +166,13 @@ impl<'config, P: Preset> Incremental<'config, P> {
         eth1_data.deposit_count = self.deposit_tree.deposit_count;
 
         if let Some(validator_index) =
-            combined::process_deposit_data(self.config, &mut self.beacon_state, data)?
+            combined::process_deposit_data(self.config, pubkey_cache, &mut self.beacon_state, data)?
         {
             if let Some(state) = self.beacon_state.post_electra_mut() {
                 let pending_deposits = state.pending_deposits().clone();
 
                 for deposit in &pending_deposits {
-                    let validator_index = accessors::index_of_public_key(state, deposit.pubkey)
+                    let validator_index = accessors::index_of_public_key(state, &deposit.pubkey)
                         .expect(
                             "public keys in state.pending_deposits are taken from state.validators",
                         );
@@ -215,6 +217,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
 
     pub fn finish(
         self,
+        pubkey_cache: &PubkeyCache,
         eth1_block_hash: ExecutionBlockHash,
         execution_payload_header: Option<ExecutionPayloadHeader<P>>,
     ) -> Result<(BeaconState<P>, DepositTree)> {
@@ -235,7 +238,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
         // > [New in Altair] Fill in sync committees
         // > Note: A duplicate committee is assigned for the current and next committee at genesis
         if let Some(state) = beacon_state.post_altair_mut() {
-            let sync_committee = accessors::get_next_sync_committee(state)?;
+            let sync_committee = accessors::get_next_sync_committee(pubkey_cache, state)?;
             *state.current_sync_committee_mut() = sync_committee.clone_arc();
             *state.next_sync_committee_mut() = sync_committee;
         }
@@ -398,6 +401,7 @@ mod spec_tests {
 
     fn run_initialization_case(case: Case, phase: Phase) {
         let config = Arc::new(Config::minimal().start_and_stay_in(phase));
+        let pubkey_cache = PubkeyCache::default();
 
         let Eth1 {
             eth1_block_hash,
@@ -436,12 +440,12 @@ mod spec_tests {
 
         for (deposit, index) in deposits.zip(0..) {
             incremental
-                .add_deposit_data(deposit.data, index)
+                .add_deposit_data(&pubkey_cache, deposit.data, index)
                 .expect("deposits are not enough to fill tree and have correct indices");
         }
 
         let (actual_genesis_state, _) = incremental
-            .finish(eth1_block_hash, execution_payload_header)
+            .finish(&pubkey_cache, eth1_block_hash, execution_payload_header)
             .expect("genesis state should be constructed successfully");
 
         assert_eq!(actual_genesis_state, expected_genesis_state);
@@ -478,15 +482,16 @@ mod extra_tests {
     #[test]
     fn genesis_add_deposit_data_activates_validator_if_top_up_maxes_balance() -> Result<()> {
         let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
         let half_deposit_data = half_deposit_data::<Mainnet>()?;
         let eth1_block_hash = ExecutionBlockHash::default();
 
         let mut incremental = Incremental::<Mainnet>::new(&config);
 
-        incremental.add_deposit_data(half_deposit_data, 0)?;
-        incremental.add_deposit_data(half_deposit_data, 1)?;
+        incremental.add_deposit_data(&pubkey_cache, half_deposit_data, 0)?;
+        incremental.add_deposit_data(&pubkey_cache, half_deposit_data, 1)?;
 
-        let (beacon_state, _) = incremental.finish(eth1_block_hash, None)?;
+        let (beacon_state, _) = incremental.finish(&pubkey_cache, eth1_block_hash, None)?;
 
         assert_eq!(beacon_state.validators().len_usize(), 1);
         assert_eq!(

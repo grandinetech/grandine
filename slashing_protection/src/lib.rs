@@ -999,6 +999,7 @@ fn move_slashing_protection_db_to_validator_dir(
 mod tests {
     use duplicate::duplicate_item;
     use hex_literal::hex;
+    use pubkey_cache::PubkeyCache;
     use serde::{de::IgnoredAny, Deserialize};
     use tempfile::{Builder, TempDir};
     use test_case::test_case;
@@ -1194,6 +1195,7 @@ mod tests {
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_current_epoch(constructor: Constructor) -> Result<()> {
         let config = Config::minimal();
+        let pubkey_cache = PubkeyCache::default();
 
         let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
@@ -1215,7 +1217,7 @@ mod tests {
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
 
-        let (mut state, _) = factory::min_genesis_state::<Minimal>(&config)?;
+        let (mut state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         let attestation = build_own_attestation(2, 32);
 
@@ -1266,12 +1268,13 @@ mod tests {
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_attestation_pruning(constructor: Constructor) -> Result<()> {
         let config = Config::minimal();
+        let pubkey_cache = PubkeyCache::default();
 
         let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
 
-        let (state, _) = factory::min_genesis_state::<Minimal>(&config)?;
+        let (state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         let attestation_1 = build_own_attestation(2, 32);
         let attestation_2 = build_own_attestation(34, 64);

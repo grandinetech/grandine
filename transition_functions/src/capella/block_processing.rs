@@ -13,6 +13,7 @@ use helper_functions::{
     verifier::{SingleVerifier, Triple, Verifier},
 };
 use itertools::izip;
+use pubkey_cache::PubkeyCache;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use ssz::SszHash as _;
 use tap::Pipe as _;
@@ -55,6 +56,7 @@ use prometheus_metrics::METRICS;
 /// [lost]:                            https://github.com/ethereum/consensus-specs/commit/2dbc33327084d2814958f92eb0a838b9bc161903#diff-e96c612010477fc9536e3ff1ef1a1d5dR343-R346
 pub fn process_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     mut verifier: impl Verifier,
@@ -69,6 +71,7 @@ pub fn process_block<P: Preset>(
 
     custom_process_block(
         config,
+        pubkey_cache,
         state,
         block,
         NullExecutionEngine,
@@ -81,6 +84,7 @@ pub fn process_block<P: Preset>(
 
 pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
@@ -93,7 +97,7 @@ pub fn process_block_for_gossip<P: Preset>(
     SingleVerifier.verify_singular(
         block.message.signing_root(config, state),
         block.signature,
-        accessors::public_key(state, block.message.proposer_index)?,
+        pubkey_cache.get_or_insert(*accessors::public_key(state, block.message.proposer_index)?)?,
         SignatureKind::Block,
     )?;
 
@@ -102,6 +106,7 @@ pub fn process_block_for_gossip<P: Preset>(
 
 pub fn custom_process_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BeaconBlock<P>,
     execution_engine: impl ExecutionEngine<P>,
@@ -130,14 +135,22 @@ pub fn custom_process_block<P: Preset>(
         execution_engine,
     )?;
 
-    unphased::process_randao(config, state, &block.body, &mut verifier)?;
+    unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
     // > [Modified in Capella]
-    process_operations(config, state, &block.body, &mut verifier, &mut slot_report)?;
+    process_operations(
+        config,
+        pubkey_cache,
+        state,
+        &block.body,
+        &mut verifier,
+        &mut slot_report,
+    )?;
 
     altair::process_sync_aggregate(
         config,
+        pubkey_cache,
         state,
         block.body.sync_aggregate,
         verifier,
@@ -209,6 +222,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
 
 pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut impl PostCapellaBeaconState<P>,
     body: &(impl PostCapellaBeaconBlockBody<P> + PreElectraBeaconBlockBody<P>),
     mut verifier: V,
@@ -227,6 +241,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     for proposer_slashing in body.proposer_slashings().iter().copied() {
         bellatrix::process_proposer_slashing(
             config,
+            pubkey_cache,
             state,
             proposer_slashing,
             &mut verifier,
@@ -237,6 +252,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     for attester_slashing in body.attester_slashings() {
         bellatrix::process_attester_slashing(
             config,
+            pubkey_cache,
             state,
             attester_slashing,
             &mut verifier,
@@ -254,6 +270,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
         for attestation in body.attestations() {
             unphased::validate_attestation_with_verifier(
                 config,
+                pubkey_cache,
                 state,
                 attestation,
                 &mut verifier,
@@ -270,6 +287,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
 
                 unphased::validate_attestation_with_verifier(
                     config,
+                    pubkey_cache,
                     state,
                     attestation,
                     &mut triple,
@@ -289,18 +307,34 @@ pub fn process_operations<P: Preset, V: Verifier>(
     // The conditional is not needed for correctness.
     // It only serves to avoid overhead when processing blocks with no deposits.
     if !body.deposits().is_empty() {
-        let combined_deposits =
-            unphased::validate_deposits(config, state, body.deposits().iter().copied())?;
+        let combined_deposits = unphased::validate_deposits(
+            config,
+            pubkey_cache,
+            state,
+            body.deposits().iter().copied(),
+        )?;
 
         altair::apply_deposits(state, body.deposits().len(), combined_deposits, slot_report)?;
     }
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {
-        unphased::process_voluntary_exit(config, state, voluntary_exit, &mut verifier)?;
+        unphased::process_voluntary_exit(
+            config,
+            pubkey_cache,
+            state,
+            voluntary_exit,
+            &mut verifier,
+        )?;
     }
 
     for bls_to_execution_change in body.bls_to_execution_changes().iter().copied() {
-        process_bls_to_execution_change(config, state, bls_to_execution_change, &mut verifier)?;
+        process_bls_to_execution_change(
+            config,
+            pubkey_cache,
+            state,
+            bls_to_execution_change,
+            &mut verifier,
+        )?;
     }
 
     Ok(())
@@ -309,12 +343,14 @@ pub fn process_operations<P: Preset, V: Verifier>(
 /// [`process_bls_to_execution_change`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#new-process_bls_to_execution_change)
 pub fn process_bls_to_execution_change<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut impl PostCapellaBeaconState<P>,
     bls_to_execution_change: SignedBlsToExecutionChange,
     verifier: impl Verifier,
 ) -> Result<()> {
     validate_bls_to_execution_change_with_verifier(
         config,
+        pubkey_cache,
         state,
         bls_to_execution_change,
         verifier,
@@ -334,11 +370,13 @@ pub fn process_bls_to_execution_change<P: Preset>(
 
 pub fn validate_bls_to_execution_change<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &(impl PostCapellaBeaconState<P> + ?Sized),
     bls_to_execution_change: SignedBlsToExecutionChange,
 ) -> Result<()> {
     validate_bls_to_execution_change_with_verifier(
         config,
+        pubkey_cache,
         state,
         bls_to_execution_change,
         SingleVerifier,
@@ -347,6 +385,7 @@ pub fn validate_bls_to_execution_change<P: Preset>(
 
 fn validate_bls_to_execution_change_with_verifier<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &(impl PostCapellaBeaconState<P> + ?Sized),
     bls_to_execution_change: SignedBlsToExecutionChange,
     mut verifier: impl Verifier,
@@ -365,7 +404,7 @@ fn validate_bls_to_execution_change_with_verifier<P: Preset>(
     verifier.verify_singular(
         address_change.signing_root(config, state),
         bls_to_execution_change.signature,
-        &address_change.from_bls_pubkey.into(),
+        pubkey_cache.get_or_insert(address_change.from_bls_pubkey)?,
         SignatureKind::BlsToExecutionChange,
     )?;
 
@@ -589,7 +628,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |config, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
+        |config, _, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/capella/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/capella/operations/block_header/*/*",
@@ -597,9 +636,10 @@ mod spec_tests {
 
     processing_tests! {
         process_proposer_slashing,
-        |config, state, proposer_slashing, _| {
+        |config, pubkey_cache, state, proposer_slashing, _| {
             bellatrix::process_proposer_slashing(
                 config,
+                pubkey_cache,
                 state,
                 proposer_slashing,
                 SingleVerifier,
@@ -613,9 +653,10 @@ mod spec_tests {
 
     processing_tests! {
         process_attester_slashing,
-        |config, state, attester_slashing: AttesterSlashing<P>, _| {
+        |config, pubkey_cache, state, attester_slashing: AttesterSlashing<P>, _| {
             bellatrix::process_attester_slashing(
                 config,
+                pubkey_cache,
                 state,
                 &attester_slashing,
                 SingleVerifier,
@@ -629,9 +670,10 @@ mod spec_tests {
 
     processing_tests! {
         process_attestation,
-        |config, state, attestation, bls_setting| {
+        |config, pubkey_cache, state, attestation, bls_setting| {
             process_attestation(
                 config,
+                pubkey_cache,
                 state,
                 &attestation,
                 bls_setting,
@@ -644,9 +686,10 @@ mod spec_tests {
 
     processing_tests! {
         process_bls_to_execution_change,
-        |config, state, bls_to_execution_change, _| {
+        |config, pubkey_cache, state, bls_to_execution_change, _| {
             process_bls_to_execution_change(
                 config,
+                pubkey_cache,
                 state,
                 bls_to_execution_change,
                 SingleVerifier,
@@ -659,7 +702,7 @@ mod spec_tests {
 
     processing_tests! {
         process_deposit,
-        |config, state, deposit, _| process_deposit(config, state, deposit),
+        |config, pubkey_cache, state, deposit, _| process_deposit(config, pubkey_cache, state, deposit),
         "deposit",
         "consensus-spec-tests/tests/mainnet/capella/operations/deposit/*/*",
         "consensus-spec-tests/tests/minimal/capella/operations/deposit/*/*",
@@ -669,9 +712,9 @@ mod spec_tests {
     // so we need to test it separately.
     processing_tests! {
         process_deposit_data,
-        |config, state, deposit, _| {
+        |config, pubkey_cache, state, deposit, _| {
             unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
-            altair::process_deposit_data(config, state, deposit.data)?;
+            altair::process_deposit_data(config, pubkey_cache, state, deposit.data)?;
             Ok(())
         },
         "deposit",
@@ -681,9 +724,10 @@ mod spec_tests {
 
     processing_tests! {
         process_voluntary_exit,
-        |config, state, voluntary_exit, _| {
+        |config, pubkey_cache, state, voluntary_exit, _| {
             unphased::process_voluntary_exit(
                 config,
+                pubkey_cache,
                 state,
                 voluntary_exit,
                 SingleVerifier,
@@ -696,9 +740,10 @@ mod spec_tests {
 
     processing_tests! {
         process_sync_aggregate,
-        |config, state, sync_aggregate, _| {
+        |config, pubkey_cache, state, sync_aggregate, _| {
             altair::process_sync_aggregate(
                 config,
+                pubkey_cache,
                 state,
                 sync_aggregate,
                 SingleVerifier,
@@ -712,8 +757,8 @@ mod spec_tests {
 
     validation_tests! {
         validate_proposer_slashing,
-        |config, state, proposer_slashing| {
-            unphased::validate_proposer_slashing(config, state, proposer_slashing)
+        |config, pubkey_cache, state, proposer_slashing| {
+            unphased::validate_proposer_slashing(config, pubkey_cache, state, proposer_slashing)
         },
         "proposer_slashing",
         "consensus-spec-tests/tests/mainnet/capella/operations/proposer_slashing/*/*",
@@ -722,8 +767,8 @@ mod spec_tests {
 
     validation_tests! {
         validate_attester_slashing,
-        |config, state, attester_slashing: AttesterSlashing<P>| {
-            unphased::validate_attester_slashing(config, state, &attester_slashing)
+        |config, pubkey_cache, state, attester_slashing: AttesterSlashing<P>| {
+            unphased::validate_attester_slashing(config, pubkey_cache, state, &attester_slashing)
         },
         "attester_slashing",
         "consensus-spec-tests/tests/mainnet/capella/operations/attester_slashing/*/*",
@@ -732,8 +777,8 @@ mod spec_tests {
 
     validation_tests! {
         validate_voluntary_exit,
-        |config, state, voluntary_exit| {
-            unphased::validate_voluntary_exit(config, state, voluntary_exit)
+        |config, pubkey_cache, state, voluntary_exit| {
+            unphased::validate_voluntary_exit(config, pubkey_cache, state, voluntary_exit)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/capella/operations/voluntary_exit/*/*",
@@ -742,8 +787,8 @@ mod spec_tests {
 
     validation_tests! {
         validate_bls_to_execution_change,
-        |config, state, bls_to_execution_change| {
-            validate_bls_to_execution_change(config, state, bls_to_execution_change)
+        |config, pubkey_cache, state, bls_to_execution_change| {
+            validate_bls_to_execution_change(config, pubkey_cache, state, bls_to_execution_change)
         },
         "address_change",
         "consensus-spec-tests/tests/mainnet/capella/operations/bls_to_execution_change/*/*",
@@ -773,15 +818,28 @@ mod spec_tests {
     fn run_processing_case<P: Preset, O: SszReadDefault>(
         case: Case,
         operation_name: &str,
-        processing_function: impl FnOnce(&Config, &mut BeaconState<P>, O, BlsSetting) -> Result<()>,
+        processing_function: impl FnOnce(
+            &Config,
+            &PubkeyCache,
+            &mut BeaconState<P>,
+            O,
+            BlsSetting,
+        ) -> Result<()>,
     ) {
+        let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz_default("pre");
         let operation = case.ssz_default(operation_name);
         let post_option = case.try_ssz_default("post");
         let bls_setting = case.meta().bls_setting;
 
-        let result = processing_function(&P::default_config(), &mut state, operation, bls_setting)
-            .map(|()| state);
+        let result = processing_function(
+            &P::default_config(),
+            &pubkey_cache,
+            &mut state,
+            operation,
+            bls_setting,
+        )
+        .map(|()| state);
 
         if let Some(expected_post) = post_option {
             let actual_post = result.expect("operation processing should succeed");
@@ -794,13 +852,15 @@ mod spec_tests {
     fn run_validation_case<P: Preset, O: SszReadDefault, R: Debug>(
         case: Case,
         operation_name: &str,
-        validation_function: impl FnOnce(&Config, &mut BeaconState<P>, O) -> Result<R>,
+        validation_function: impl FnOnce(&Config, &PubkeyCache, &mut BeaconState<P>, O) -> Result<R>,
     ) {
+        let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz_default("pre");
         let operation = case.ssz_default(operation_name);
         let post_exists = case.exists("post");
 
-        let result = validation_function(&P::default_config(), &mut state, operation);
+        let result =
+            validation_function(&P::default_config(), &pubkey_cache, &mut state, operation);
 
         if post_exists {
             result.expect("validation should succeed");
@@ -850,6 +910,7 @@ mod spec_tests {
 
     fn process_attestation<P: Preset>(
         config: &Config,
+        pubkey_cache: &PubkeyCache,
         state: &mut BeaconState<P>,
         attestation: &Attestation<P>,
         bls_setting: BlsSetting,
@@ -858,6 +919,7 @@ mod spec_tests {
             BlsSetting::Optional | BlsSetting::Required => {
                 unphased::validate_attestation_with_verifier(
                     config,
+                    pubkey_cache,
                     state,
                     attestation,
                     SingleVerifier,
@@ -865,6 +927,7 @@ mod spec_tests {
             }
             BlsSetting::Ignored => unphased::validate_attestation_with_verifier(
                 config,
+                pubkey_cache,
                 state,
                 attestation,
                 NullVerifier,
@@ -876,11 +939,12 @@ mod spec_tests {
 
     fn process_deposit<P: Preset>(
         config: &Config,
+        pubkey_cache: &PubkeyCache,
         state: &mut BeaconState<P>,
         deposit: Deposit,
     ) -> Result<()> {
         let combined_deposits =
-            unphased::validate_deposits(config, state, core::iter::once(deposit))?;
+            unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
 
         altair::apply_deposits(state, 1, combined_deposits, NullSlotReport)
     }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, ensure, Result};
 use bls::{
-    traits::{CachedPublicKey as _, SecretKey as _, Signature as _},
+    traits::{SecretKey as _, Signature as _},
     AggregateSignature,
 };
 use deposit_tree::DepositTree;
@@ -18,6 +18,7 @@ use helper_functions::{
     slot_report::NullSlotReport,
 };
 use itertools::{Either, Itertools as _};
+use pubkey_cache::PubkeyCache;
 use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use transition_functions::{capella, combined};
@@ -59,9 +60,13 @@ use types::{
 
 type BlockWithState<P> = (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>);
 
-pub fn min_genesis_state<P: Preset>(config: &Config) -> Result<(Arc<BeaconState<P>>, DepositTree)> {
+pub fn min_genesis_state<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+) -> Result<(Arc<BeaconState<P>>, DepositTree)> {
     let (genesis_state, deposit_tree) = interop::quick_start_beacon_state(
         config,
+        pubkey_cache,
         config.min_genesis_time,
         config.min_genesis_active_validator_count,
     )?;
@@ -71,11 +76,12 @@ pub fn min_genesis_state<P: Preset>(config: &Config) -> Result<(Arc<BeaconState<
 
 pub fn empty_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre_state: Arc<BeaconState<P>>,
     slot: Slot,
     graffiti: H256,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestations = core::iter::empty();
     let deposits = ContiguousList::default();
@@ -84,6 +90,7 @@ pub fn empty_block<P: Preset>(
 
     block(
         config,
+        pubkey_cache,
         advanced_state,
         eth1_data,
         graffiti,
@@ -96,12 +103,13 @@ pub fn empty_block<P: Preset>(
 
 pub fn block_justifying_previous_epoch<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre_state: Arc<BeaconState<P>>,
     epoch: Epoch,
     graffiti: H256,
 ) -> Result<BlockWithState<P>> {
     let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-    let advanced_state = advance_state(config, pre_state, block_slot)?;
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::slots_in_epoch::<P>(epoch - 1);
     let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
@@ -111,6 +119,7 @@ pub fn block_justifying_previous_epoch<P: Preset>(
 
     block(
         config,
+        pubkey_cache,
         advanced_state,
         eth1_data,
         graffiti,
@@ -123,13 +132,14 @@ pub fn block_justifying_previous_epoch<P: Preset>(
 
 pub fn block_justifying_current_epoch<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre_state: Arc<BeaconState<P>>,
     epoch: Epoch,
     graffiti: H256,
     execution_payload: Option<ExecutionPayload<P>>,
 ) -> Result<BlockWithState<P>> {
     let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch + 1) - 1;
-    let advanced_state = advance_state(config, pre_state, block_slot)?;
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::compute_start_slot_at_epoch::<P>(epoch)..block_slot;
     let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
@@ -138,6 +148,7 @@ pub fn block_justifying_current_epoch<P: Preset>(
 
     block(
         config,
+        pubkey_cache,
         advanced_state,
         eth1_data,
         graffiti,
@@ -150,11 +161,12 @@ pub fn block_justifying_current_epoch<P: Preset>(
 
 pub fn block_with_deposits<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre_state: Arc<BeaconState<P>>,
     slot: Slot,
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
     let eth1_data = advanced_state.eth1_data();
     let graffiti = H256::zero();
     let attestations = core::iter::empty();
@@ -163,6 +175,7 @@ pub fn block_with_deposits<P: Preset>(
 
     block(
         config,
+        pubkey_cache,
         advanced_state,
         eth1_data,
         graffiti,
@@ -175,12 +188,13 @@ pub fn block_with_deposits<P: Preset>(
 
 pub fn block_with_eth1_vote_and_deposits<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre_state: Arc<BeaconState<P>>,
     slot: Slot,
     eth1_vote: Eth1Data,
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
     let graffiti = H256::zero();
     let attestations = core::iter::empty();
     let sync_aggregate = SyncAggregate::empty();
@@ -188,6 +202,7 @@ pub fn block_with_eth1_vote_and_deposits<P: Preset>(
 
     block(
         config,
+        pubkey_cache,
         advanced_state,
         eth1_vote,
         graffiti,
@@ -200,12 +215,13 @@ pub fn block_with_eth1_vote_and_deposits<P: Preset>(
 
 pub fn block_with_payload<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre_state: Arc<BeaconState<P>>,
     slot: Slot,
     graffiti: H256,
     execution_payload: ExecutionPayload<P>,
 ) -> Result<BlockWithState<P>> {
-    let advanced_state = advance_state(config, pre_state, slot)?;
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestations = core::iter::empty();
     let deposits = ContiguousList::default();
@@ -214,6 +230,7 @@ pub fn block_with_payload<P: Preset>(
 
     block(
         config,
+        pubkey_cache,
         advanced_state,
         eth1_data,
         graffiti,
@@ -226,6 +243,7 @@ pub fn block_with_payload<P: Preset>(
 
 pub fn full_blocks_up_to_epoch<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     genesis_state: Arc<BeaconState<P>>,
     end_epoch: Epoch,
 ) -> Result<Vec<Arc<SignedBeaconBlock<P>>>> {
@@ -237,7 +255,7 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
 
     // This has to be a loop because it moves out of `pre_state`.
     for slot in start_slot..=end_slot {
-        let advanced_state = advance_state(config, pre_state, slot)?;
+        let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
         let eth1_data = advanced_state.eth1_data();
         let graffiti = H256::zero();
         let attestations = full_block_attestations(config, &advanced_state, (slot - 1)..slot)?;
@@ -247,6 +265,7 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
 
         let (block, post_state) = block(
             config,
+            pubkey_cache,
             advanced_state,
             eth1_data,
             graffiti,
@@ -265,12 +284,13 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
 
 pub fn singular_attestation<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: Arc<BeaconState<P>>,
     epoch: Epoch,
     validator_index: ValidatorIndex,
 ) -> Result<(Attestation<P>, SubnetId)> {
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-    let state_in_epoch = advance_state(config, state, start_slot)?;
+    let state_in_epoch = advance_state(config, pubkey_cache, state, start_slot)?;
 
     for slot in misc::slots_in_epoch::<P>(epoch) {
         let committees = accessors::beacon_committees(&state_in_epoch, slot)?;
@@ -398,6 +418,7 @@ pub fn execution_payload<P: Preset>(
 #[expect(clippy::too_many_lines)]
 fn block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     advanced_state: Arc<BeaconState<P>>,
     eth1_data: Eth1Data,
     graffiti: H256,
@@ -541,6 +562,7 @@ fn block<P: Preset>(
 
     combined::process_untrusted_block(
         config,
+        pubkey_cache,
         post_state.make_mut(),
         &without_state_root,
         NullSlotReport,
@@ -689,7 +711,7 @@ fn full_sync_aggregate<P: Preset>(
         .pubkeys
         .iter()
         .map(|pubkey| {
-            accessors::index_of_public_key(advanced_state, pubkey.to_bytes()).expect(
+            accessors::index_of_public_key(advanced_state, pubkey).expect(
                 "public keys in advanced_state.current_sync_committee \
                  are taken from advanced_state.validators",
             )
@@ -707,11 +729,12 @@ fn full_sync_aggregate<P: Preset>(
 
 fn advance_state<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     mut state: Arc<BeaconState<P>>,
     slot: Slot,
 ) -> Result<Arc<BeaconState<P>>> {
     if state.slot() < slot {
-        combined::process_slots(config, state.make_mut(), slot)?;
+        combined::process_slots(config, pubkey_cache, state.make_mut(), slot)?;
     }
 
     Ok(state)

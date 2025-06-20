@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bls12_381::{
     hash_to_curve::{ExpandMsgXmd, HashToCurve},
     pairing, G1Affine, G1Projective, G2Affine, G2Projective, Scalar,
@@ -42,7 +44,7 @@ impl SignatureTrait for Signature {
     type PublicKey = PublicKey;
 
     #[must_use]
-    fn verify(&self, message: impl AsRef<[u8]>, public_key: Self::PublicKey) -> bool {
+    fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool {
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
@@ -60,10 +62,10 @@ impl SignatureTrait for Signature {
     }
 
     #[must_use]
-    fn fast_aggregate_verify<'keys>(
+    fn fast_aggregate_verify(
         &self,
         message: impl AsRef<[u8]>,
-        public_keys: impl IntoIterator<Item = &'keys PublicKey>,
+        public_keys: impl IntoIterator<Item = Arc<PublicKey>>,
     ) -> bool {
         if bool::from(self.as_raw().is_identity()) {
             return false;
@@ -145,7 +147,7 @@ mod tests {
         let public_key = SecretKey::to_public_key(&secret_key);
         let signature = SecretKey::sign(&secret_key, MESSAGE);
 
-        assert!(Signature::verify(&signature, MESSAGE, public_key));
+        assert!(Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     #[test]
@@ -154,7 +156,7 @@ mod tests {
         let public_key = PublicKey::default();
         let signature = SecretKey::sign(&secret_key, MESSAGE);
 
-        assert!(!Signature::verify(&signature, MESSAGE, public_key));
+        assert!(!Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     #[test]
@@ -163,7 +165,7 @@ mod tests {
         let public_key = SecretKey::to_public_key(&secret_key);
         let signature = Signature::default();
 
-        assert!(!Signature::verify(&signature, MESSAGE, public_key));
+        assert!(!Signature::verify(&signature, MESSAGE, &public_key));
     }
 
     fn secret_key() -> SecretKey {

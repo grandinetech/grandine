@@ -35,6 +35,7 @@ num_cpus = { workspace = true }
 panics = { workspace = true }
 parking_lot = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }

@@ -3,11 +3,12 @@ use core::{
     ops::{Div as _, Index as _},
 };
 
-use anyhow::{ensure, Error as AnyhowError, Result};
+use anyhow::{ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{traits::CachedPublicKey as _, SignatureBytes};
+use bls::SignatureBytes;
 use itertools::Itertools as _;
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use tap::TryConv as _;
 use typenum::Unsigned as _;
@@ -82,24 +83,41 @@ pub fn is_slashable_attestation_data(data_1: AttestationData, data_2: Attestatio
 // When calling directly, use `SingleVerifier` or call `finalize` manually.
 pub fn validate_constructed_indexed_attestation<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &impl BeaconState<P>,
     indexed_attestation: &impl IndexedAttestation<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
-    validate_indexed_attestation(config, state, indexed_attestation, verifier, false)
+    validate_indexed_attestation(
+        config,
+        pubkey_cache,
+        state,
+        indexed_attestation,
+        verifier,
+        false,
+    )
 }
 
 pub fn validate_received_indexed_attestation<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &impl BeaconState<P>,
     indexed_attestation: &impl IndexedAttestation<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
-    validate_indexed_attestation(config, state, indexed_attestation, verifier, true)
+    validate_indexed_attestation(
+        config,
+        pubkey_cache,
+        state,
+        indexed_attestation,
+        verifier,
+        true,
+    )
 }
 
 fn validate_indexed_attestation<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &impl BeaconState<P>,
     indexed_attestation: &impl IndexedAttestation<P>,
     mut verifier: impl Verifier,
@@ -126,9 +144,7 @@ fn validate_indexed_attestation<P: Preset>(
         indexed_attestation
             .attesting_indices()
             .map(|validator_index| {
-                accessors::public_key(state, validator_index)?
-                    .decompress()
-                    .map_err(AnyhowError::new)
+                pubkey_cache.get_or_insert(*accessors::public_key(state, validator_index)?)
             }),
         |public_keys| {
             verifier.verify_aggregate(
@@ -826,6 +842,7 @@ mod extra_tests {
 
     #[test]
     fn validate_received_indexed_attestation_index_set_not_sorted() {
+        let pubkey_cache = PubkeyCache::default();
         let state = Phase0BeaconState::<Mainnet>::default();
 
         let attestation = IndexedAttestation {
@@ -835,6 +852,7 @@ mod extra_tests {
 
         validate_received_indexed_attestation(
             &Config::mainnet(),
+            &pubkey_cache,
             &state,
             &attestation,
             SingleVerifier,
@@ -844,6 +862,7 @@ mod extra_tests {
 
     #[test]
     fn validate_received_indexed_attestation_nonexistent_validators() {
+        let pubkey_cache = PubkeyCache::default();
         let state = Phase0BeaconState::<Mainnet>::default();
 
         let attestation = IndexedAttestation {
@@ -853,6 +872,7 @@ mod extra_tests {
 
         validate_received_indexed_attestation(
             &Config::mainnet(),
+            &pubkey_cache,
             &state,
             &attestation,
             SingleVerifier,
@@ -862,6 +882,7 @@ mod extra_tests {
 
     #[test]
     fn validate_received_indexed_attestation_invalid_signature() {
+        let pubkey_cache = PubkeyCache::default();
         let state = Phase0BeaconState::<Mainnet> {
             validators: [
                 inactive_validator(),
@@ -880,6 +901,7 @@ mod extra_tests {
 
         validate_received_indexed_attestation(
             &Config::mainnet(),
+            &pubkey_cache,
             &state,
             &attestation,
             SingleVerifier,
@@ -889,6 +911,7 @@ mod extra_tests {
 
     #[test]
     fn validate_received_indexed_attestation_valid_signature() -> Result<()> {
+        let pubkey_cache = PubkeyCache::default();
         let config = Config::mainnet();
 
         let secret_key_1 = b"????????????????????????????????"
@@ -932,7 +955,13 @@ mod extra_tests {
             signature: aggregate_signature.into(),
         };
 
-        validate_received_indexed_attestation(&config, &state, &attestation, SingleVerifier)
+        validate_received_indexed_attestation(
+            &config,
+            &pubkey_cache,
+            &state,
+            &attestation,
+            SingleVerifier,
+        )
     }
 
     fn inactive_validator() -> Validator {

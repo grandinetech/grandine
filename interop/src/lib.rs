@@ -7,6 +7,7 @@ use genesis::Incremental;
 use helper_functions::{misc, signing::SignForAllForks};
 use hex_literal::hex;
 use num_bigint::BigUint;
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use types::{
     combined::BeaconState as CombinedBeaconState,
@@ -37,6 +38,7 @@ const CURVE_ORDER: &[u8] =
 /// <https://github.com/ethereum/eth2.0-pm/tree/b7c76e7a9d036ce73ca6aa0b7065db92f7728f41/interop/mocked_start#quick-start-genesis>
 pub fn quick_start_beacon_state<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     genesis_time: UnixSeconds,
     validator_count: NonZeroU64,
 ) -> Result<(CombinedBeaconState<P>, DepositTree)> {
@@ -46,14 +48,14 @@ pub fn quick_start_beacon_state<P: Preset>(
 
     for index in 0..validator_count.get() {
         let deposit_data = quick_start_deposit_data::<P>(config, &secret_key(index));
-        incremental.add_deposit_data(deposit_data, index)?;
+        incremental.add_deposit_data(pubkey_cache, deposit_data, index)?;
     }
 
     // > Clients must not run is_valid_genesis_state as this state is already considered valid.
     // > Specifically, we do not check nor care about MIN_GENESIS_TIME in these coordinated starts.
 
     let (mut genesis_state, deposit_tree) =
-        incremental.finish(QUICK_START_ETH1_BLOCK_HASH, None)?;
+        incremental.finish(pubkey_cache, QUICK_START_ETH1_BLOCK_HASH, None)?;
 
     *genesis_state.genesis_time_mut() = genesis_time;
 

@@ -15,5 +15,6 @@ hashing = { workspace = true }
 helper_functions = { workspace = true }
 hex-literal = { workspace = true }
 num-bigint = { workspace = true }
+pubkey_cache = { workspace = true }
 ssz = { workspace = true }
 types = { workspace = true }

@@ -8,10 +8,10 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use dashmap::DashMap;
 use data_dumper::DataDumper;
-use database::Database;
+use database::{Database, PrefixableKey as _};
 use eth1_api::RealController;
 use eth2_libp2p::{PeerAction, PeerId, ReportSource};
-use fork_choice_control::{PrefixableKey as _, StorageMode, SyncMessage};
+use fork_choice_control::{StorageMode, SyncMessage};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future::Either,

@@ -791,6 +791,7 @@ mod tests {
     use std::collections::hash_map::{Entry as HashMapEntry, HashMap};
 
     use eth2_cache_utils::{goerli, holesky};
+    use pubkey_cache::PubkeyCache;
     use ssz::BitList;
     use std_ext::ArcExt as _;
     use transition_functions::unphased;
@@ -832,6 +833,7 @@ mod tests {
     #[cfg(feature = "eth2-cache")]
     fn test_goerli_greedy_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::goerli());
+        let pubkey_cache = PubkeyCache::default();
         let slot = 547_813;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = goerli::beacon_state(slot, 6);
@@ -869,13 +871,19 @@ mod tests {
             "the packer should include as many attestations that add new votes as possible",
         );
 
-        assert_attestations_are_valid_and_add_new_bits(&config, &state, &proposable_attestations)
+        assert_attestations_are_valid_and_add_new_bits(
+            &config,
+            &pubkey_cache,
+            &state,
+            &proposable_attestations,
+        )
     }
 
     #[test]
     #[cfg(feature = "eth2-cache")]
     fn test_goerli_optimal_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::goerli());
+        let pubkey_cache = PubkeyCache::default();
         let slot = 547_813;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = goerli::beacon_state(slot, 6);
@@ -914,13 +922,19 @@ mod tests {
             "the packer should include as many attestations that add new votes as possible",
         );
 
-        assert_attestations_are_valid_and_add_new_bits(&config, &state, &proposable_attestations)
+        assert_attestations_are_valid_and_add_new_bits(
+            &config,
+            &pubkey_cache,
+            &state,
+            &proposable_attestations,
+        )
     }
 
     #[test]
     #[cfg(feature = "eth2-cache")]
     fn test_holesky_greedy_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::holesky());
+        let pubkey_cache = PubkeyCache::default();
         let slot = 50_015;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = holesky::beacon_state(slot, 8);
@@ -959,13 +973,19 @@ mod tests {
             "the packer should include as many attestations that add new votes as possible",
         );
 
-        assert_attestations_are_valid_and_add_new_bits(&config, &state, &proposable_attestations)
+        assert_attestations_are_valid_and_add_new_bits(
+            &config,
+            &pubkey_cache,
+            &state,
+            &proposable_attestations,
+        )
     }
 
     #[test]
     #[cfg(feature = "eth2-cache")]
     fn test_holesky_optimal_aggregate_attestation_packing() -> Result<()> {
         let config = Arc::new(Config::holesky());
+        let pubkey_cache = PubkeyCache::default();
         let slot = 50_015;
         let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
         let state = holesky::beacon_state(slot, 8);
@@ -1005,11 +1025,17 @@ mod tests {
             "the packer should include as many attestations that add new votes as possible",
         );
 
-        assert_attestations_are_valid_and_add_new_bits(&config, &state, &proposable_attestations)
+        assert_attestations_are_valid_and_add_new_bits(
+            &config,
+            &pubkey_cache,
+            &state,
+            &proposable_attestations,
+        )
     }
 
     fn assert_attestations_are_valid_and_add_new_bits<'attestations, P: Preset>(
         config: &Config,
+        pubkey_cache: &PubkeyCache,
         state: &BeaconState<P>,
         attestations: impl IntoIterator<Item = &'attestations Attestation<P>>,
     ) -> Result<()> {
@@ -1035,7 +1061,7 @@ mod tests {
                 }
             }
 
-            unphased::validate_attestation(config, state, attestation)?;
+            unphased::validate_attestation(config, pubkey_cache, state, attestation)?;
         }
 
         Ok(())

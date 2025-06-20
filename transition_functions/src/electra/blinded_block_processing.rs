@@ -7,6 +7,7 @@ use helper_functions::{
     slot_report::SlotReport,
     verifier::Verifier,
 };
+use pubkey_cache::PubkeyCache;
 use ssz::{ContiguousList, PersistentList, SszHash as _};
 use tap::TryConv as _;
 use try_from_iterator::TryFromIterator as _;
@@ -33,6 +34,7 @@ use prometheus_metrics::METRICS;
 
 pub fn custom_process_blinded_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
     mut verifier: impl Verifier,
@@ -53,11 +55,12 @@ pub fn custom_process_blinded_block<P: Preset>(
     // > [Modified in Capella]
     process_execution_payload(config, state, &block.body)?;
 
-    unphased::process_randao(config, state, &block.body, &mut verifier)?;
+    unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
     block_processing::process_operations(
         config,
+        pubkey_cache,
         state,
         &block.body,
         &mut verifier,
@@ -81,6 +84,7 @@ pub fn custom_process_blinded_block<P: Preset>(
 
     altair::process_sync_aggregate(
         config,
+        pubkey_cache,
         state,
         block.body.sync_aggregate,
         verifier,

@@ -4,6 +4,7 @@ use clock::Tick;
 use duplicate::duplicate_item;
 use execution_engine::PayloadStatusWithBlockHash;
 use helper_functions::misc;
+use pubkey_cache::PubkeyCache;
 use serde::Deserialize;
 use spec_test_utils::Case;
 use ssz::ContiguousList;
@@ -151,13 +152,21 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
     let anchor_state = case.ssz::<_, Arc<BeaconState<P>>>(config.as_ref(), "anchor_state");
     let steps = case.yaml::<Vec<Step>>("steps");
     let genesis_time = anchor_state.genesis_time();
+    let pubkey_cache = Arc::new(PubkeyCache::default());
 
     let tick_at_time = |time| {
         Tick::at_time(config, time, genesis_time)
             .expect("configurations used in tests have valid values of SECONDS_PER_SLOT")
     };
 
-    let mut context = Context::<P>::new(config.clone_arc(), anchor_block, anchor_state, false);
+    let mut context = Context::<P>::new(
+        config.clone_arc(),
+        pubkey_cache,
+        anchor_block,
+        anchor_state,
+        false,
+    );
+
     let mut last_payload_status: Option<PayloadStatusWithBlockHash> = None;
 
     for step in steps {

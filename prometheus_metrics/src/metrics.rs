@@ -132,6 +132,7 @@ pub struct Metrics {
     pub fc_attester_slashing_task_times: Histogram,
     pub fc_preprocess_state_task_times: Histogram,
     pub fc_checkpoint_state_task_times: Histogram,
+    pub fc_persist_pubkey_cache_task_times: Histogram,
 
     // Cache metrics
     pub active_validator_indices_ordered_init_count: IntCounter,
@@ -320,7 +321,7 @@ impl Metrics {
 
             block_insertion_times: Histogram::with_opts(histogram_opts!(
                 "MUTATOR_BLOCK_INSERTION_TIMES",
-                "Mutator Block insertion times",
+                "Mutator Block insertion times (from submission)",
             ))?,
 
             block_processing_times: Histogram::with_opts(histogram_opts!(
@@ -566,6 +567,11 @@ impl Metrics {
             fc_preprocess_state_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_PREPROCESS_STATE_TASK_TIMES",
                 "Forkchoice PreprocessStateTask times",
+            ))?,
+
+            fc_persist_pubkey_cache_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_PERSIST_PUBKEY_CACHE_TASK_TIMES",
+                "Forkchoice PersistPubkeyCacheTask times",
             ))?,
 
             fc_checkpoint_state_task_times: Histogram::with_opts(histogram_opts!(
@@ -860,6 +866,7 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_attester_slashing_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_preprocess_state_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_checkpoint_state_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_persist_pubkey_cache_task_times.clone()))?;
         default_registry.register(Box::new(
             self.active_validator_indices_ordered_init_count.clone(),
         ))?;

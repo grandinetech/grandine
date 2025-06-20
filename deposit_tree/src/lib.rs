@@ -181,6 +181,7 @@ enum Error {
 )]
 #[cfg(test)]
 mod tests {
+    use pubkey_cache::PubkeyCache;
     use spec_test_utils::Case;
     use std_ext::ArcExt as _;
     use test_generator::test_resources;
@@ -288,8 +289,10 @@ mod tests {
     #[test]
     fn extend_and_construct_proofs_handles_vote_for_multiple_deposits() -> Result<()> {
         let config = Config::minimal();
+        let pubkey_cache = PubkeyCache::default();
 
-        let (mut state_0, deposit_tree_0) = factory::min_genesis_state::<Minimal>(&config)?;
+        let (mut state_0, deposit_tree_0) =
+            factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         // Enough deposits to fill block #1 and leave one for block #2.
         let block_0_count = state_0.eth1_deposit_index();
@@ -342,8 +345,11 @@ mod tests {
             )?
             .try_into()?;
 
-        let (_, state_1) = factory::block_with_deposits(&config, state_0, 1, block_1_deposits)?;
-        let (_, state_2) = factory::block_with_deposits(&config, state_1, 2, block_2_deposits)?;
+        let (_, state_1) =
+            factory::block_with_deposits(&config, &pubkey_cache, state_0, 1, block_1_deposits)?;
+
+        let (_, state_2) =
+            factory::block_with_deposits(&config, &pubkey_cache, state_1, 2, block_2_deposits)?;
 
         assert_eq!(state_2.eth1_deposit_index(), block_2_count);
 

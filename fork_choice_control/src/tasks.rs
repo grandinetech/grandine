@@ -19,6 +19,7 @@ use helper_functions::{
 };
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use types::{
     combined::{
@@ -425,6 +426,7 @@ pub struct CheckpointStateTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub checkpoint: Checkpoint,
+    pub pubkey_cache: Arc<PubkeyCache>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -436,6 +438,7 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
             mutator_tx,
             wait_group,
             checkpoint,
+            pubkey_cache,
             metrics,
         } = self;
 
@@ -446,13 +449,14 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        let checkpoint_state = match state_cache.try_state_at_slot(&store_snapshot, root, slot) {
-            Ok(state) => state,
-            Err(error) => {
-                warn!("failed to compute checkpoint state: {error:?}");
-                return;
-            }
-        };
+        let checkpoint_state =
+            match state_cache.try_state_at_slot(&pubkey_cache, &store_snapshot, root, slot) {
+                Ok(state) => state,
+                Err(error) => {
+                    warn!("failed to compute checkpoint state: {error:?}");
+                    return;
+                }
+            };
 
         MutatorMessage::CheckpointState {
             wait_group,
@@ -469,6 +473,7 @@ pub struct PreprocessStateTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub head_block_root: H256,
     pub next_slot: Slot,
+    pub pubkey_cache: Arc<PubkeyCache>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -480,6 +485,7 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
             mutator_tx,
             head_block_root,
             next_slot,
+            pubkey_cache,
             metrics,
         } = self;
 
@@ -487,7 +493,12 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_preprocess_state_task_times.start_timer());
 
-        match state_cache.state_at_slot_quiet(&store_snapshot, head_block_root, next_slot) {
+        match state_cache.state_at_slot_quiet(
+            &pubkey_cache,
+            &store_snapshot,
+            head_block_root,
+            next_slot,
+        ) {
             Ok(state) => {
                 if let Err(error) =
                     initialize_preprocessed_state_cache(store_snapshot.chain_config(), &state)
@@ -501,6 +512,34 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
                 warn!("failed to preprocess beacon state for the next slot: {error:?}");
             }
         }
+    }
+}
+
+pub struct PersistPubkeyCacheTask<P: Preset, W> {
+    pub pubkey_cache: Arc<PubkeyCache>,
+    pub state: Arc<CombinedBeaconState<P>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PersistPubkeyCacheTask<P, W> {
+    fn run(self) {
+        let Self {
+            pubkey_cache,
+            state,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_persist_pubkey_cache_task_times.start_timer());
+
+        if let Err(error) = pubkey_cache.persist(&state) {
+            warn!("failed to persist pubkey cache to disk: {error:?}");
+        }
+
+        drop(wait_group);
     }
 }
 

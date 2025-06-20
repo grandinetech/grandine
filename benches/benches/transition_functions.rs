@@ -13,6 +13,7 @@ use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
 use helper_functions::{accessors, misc};
+use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased};
 use types::{
@@ -212,7 +213,16 @@ impl Criterion {
 
                 bencher.iter_batched_ref(
                     || state.clone_arc(),
-                    |state| empty_slots_with_single_state(config, state.make_mut(), last_slot),
+                    |state| {
+                        let pubkey_cache = PubkeyCache::default();
+
+                        empty_slots_with_single_state(
+                            config,
+                            &pubkey_cache,
+                            state.make_mut(),
+                            last_slot,
+                        )
+                    },
                     BatchSize::SmallInput,
                 );
             })
@@ -222,7 +232,16 @@ impl Criterion {
 
                 bencher.iter_batched(
                     || state.clone_arc(),
-                    |state| empty_slots_with_intermediate_states(config, state, last_slot),
+                    |state| {
+                        let pubkey_cache = PubkeyCache::default();
+
+                        empty_slots_with_intermediate_states(
+                            config,
+                            &pubkey_cache,
+                            state,
+                            last_slot,
+                        )
+                    },
                     BatchSize::SmallInput,
                 );
             });
@@ -238,6 +257,8 @@ impl Criterion {
         state: &LazyBeaconState<P>,
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
+        let pubkey_cache = PubkeyCache::default();
+
         let state_before_last_epoch_processing = LazyCell::new(|| {
             let [_, transition_blocks @ .., last_block] = blocks.force() else {
                 panic!("blocks should contain at least two blocks")
@@ -250,10 +271,15 @@ impl Criterion {
 
             let mut state = state.force().clone_arc();
 
-            trusted_blocks_with_single_state(config, state.make_mut(), transition_blocks);
+            trusted_blocks_with_single_state(
+                config,
+                &pubkey_cache,
+                state.make_mut(),
+                transition_blocks,
+            );
 
             if state.slot() < pre_slot {
-                empty_slots_with_single_state(config, state.make_mut(), pre_slot);
+                empty_slots_with_single_state(config, &pubkey_cache, state.make_mut(), pre_slot);
             }
 
             unphased::process_slot(state.make_mut());
@@ -274,7 +300,7 @@ impl Criterion {
                 bencher.iter_batched_ref(
                     || state_before_last_epoch_processing.clone(),
                     |state| {
-                        combined::process_epoch(config, state.make_mut())
+                        combined::process_epoch(config, &pubkey_cache, state.make_mut())
                             .expect("epoch processing should succeed")
                     },
                     BatchSize::SmallInput,
@@ -320,38 +346,65 @@ impl Criterion {
         self.benchmark_group(group_name)
             .throughput(Throughput::Elements(blocks.count()))
             .bench_function("untrusted with single state", |bencher| {
+                let pubkey_cache = PubkeyCache::default();
                 let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched_ref(
                     || state.force().clone_arc(),
-                    |state| untrusted_blocks_with_single_state(config, state.make_mut(), rest),
+                    |state| {
+                        untrusted_blocks_with_single_state(
+                            config,
+                            &pubkey_cache,
+                            state.make_mut(),
+                            rest,
+                        )
+                    },
                     BatchSize::SmallInput,
                 );
             })
             .bench_function("untrusted with intermediate states", |bencher| {
+                let pubkey_cache = PubkeyCache::default();
                 let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched(
                     || state.force().clone_arc(),
-                    |state| untrusted_blocks_with_intermediate_states(config, state, rest),
+                    |state| {
+                        untrusted_blocks_with_intermediate_states(
+                            config,
+                            &pubkey_cache,
+                            state,
+                            rest,
+                        )
+                    },
                     BatchSize::SmallInput,
                 );
             })
             .bench_function("trusted with single state", |bencher| {
+                let pubkey_cache = PubkeyCache::default();
                 let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched_ref(
                     || state.force().clone_arc(),
-                    |state| trusted_blocks_with_single_state(config, state.make_mut(), rest),
+                    |state| {
+                        trusted_blocks_with_single_state(
+                            config,
+                            &pubkey_cache,
+                            state.make_mut(),
+                            rest,
+                        )
+                    },
                     BatchSize::SmallInput,
                 );
             })
             .bench_function("trusted with intermediate states", |bencher| {
+                let pubkey_cache = PubkeyCache::default();
                 let rest = LazyCell::force(&rest);
 
                 bencher.iter_batched(
                     || state.force().clone_arc(),
-                    |state| trusted_blocks_with_intermediate_states(config, state, rest),
+                    |state| {
+                        trusted_blocks_with_intermediate_states(config, &pubkey_cache, state, rest)
+                    },
                     BatchSize::SmallInput,
                 );
             });
@@ -365,21 +418,24 @@ impl Criterion {
 
 fn empty_slots_with_single_state<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     last_slot: Slot,
 ) {
-    combined::process_slots(config, state, last_slot).expect("slot processing should succeed");
+    combined::process_slots(config, pubkey_cache, state, last_slot)
+        .expect("slot processing should succeed");
 }
 
 fn empty_slots_with_intermediate_states<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: Arc<BeaconState<P>>,
     last_slot: Slot,
 ) -> Vec<Arc<BeaconState<P>>> {
     core::iter::successors(Some(state), |previous_state| {
         let mut state = previous_state.clone_arc();
         let slot = state.slot() + 1;
-        empty_slots_with_single_state(config, state.make_mut(), slot);
+        empty_slots_with_single_state(config, pubkey_cache, state.make_mut(), slot);
         Some(state)
     })
     .take_while(|state| state.slot() <= last_slot)
@@ -388,17 +444,19 @@ fn empty_slots_with_intermediate_states<P: Preset>(
 
 fn untrusted_blocks_with_single_state<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     blocks: &[Arc<SignedBeaconBlock<P>>],
 ) {
     for block in blocks {
-        combined::untrusted_state_transition(config, state, block)
+        combined::untrusted_state_transition(config, pubkey_cache, state, block)
             .expect("state transition should succeed");
     }
 }
 
 fn untrusted_blocks_with_intermediate_states<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: Arc<BeaconState<P>>,
     blocks: &[Arc<SignedBeaconBlock<P>>],
 ) -> Vec<Arc<BeaconState<P>>> {
@@ -406,6 +464,7 @@ fn untrusted_blocks_with_intermediate_states<P: Preset>(
         .chain(blocks.iter().scan(state, |state, block| {
             untrusted_blocks_with_single_state(
                 config,
+                pubkey_cache,
                 state.make_mut(),
                 core::slice::from_ref(block),
             );
@@ -416,17 +475,19 @@ fn untrusted_blocks_with_intermediate_states<P: Preset>(
 
 fn trusted_blocks_with_single_state<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     blocks: &[Arc<SignedBeaconBlock<P>>],
 ) {
     for block in blocks {
-        combined::trusted_state_transition(config, state, block)
+        combined::trusted_state_transition(config, pubkey_cache, state, block)
             .expect("state transition should succeed");
     }
 }
 
 fn trusted_blocks_with_intermediate_states<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: Arc<BeaconState<P>>,
     blocks: &[Arc<SignedBeaconBlock<P>>],
 ) -> Vec<Arc<BeaconState<P>>> {
@@ -434,6 +495,7 @@ fn trusted_blocks_with_intermediate_states<P: Preset>(
         .chain(blocks.iter().scan(state, |state, block| {
             trusted_blocks_with_single_state(
                 config,
+                pubkey_cache,
                 state.make_mut(),
                 core::slice::from_ref(block),
             );

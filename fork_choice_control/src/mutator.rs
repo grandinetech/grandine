@@ -43,6 +43,7 @@ use itertools::{Either, Itertools as _};
 use log::{debug, error, info, warn};
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use types::{
@@ -72,7 +73,7 @@ use crate::{
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        PersistBlobSidecarsTask, PreprocessStateTask,
+        PersistBlobSidecarsTask, PersistPubkeyCacheTask, PreprocessStateTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -81,6 +82,7 @@ use crate::{
 
 #[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
+    pubkey_cache: Arc<PubkeyCache>,
     store: Arc<Store<P, Storage<P>>>,
     store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
     state_cache: Arc<StateCacheProcessor<P>>,
@@ -139,6 +141,7 @@ where
 {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
+        pubkey_cache: Arc<PubkeyCache>,
         store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
         state_cache: Arc<StateCacheProcessor<P>>,
         block_processor: Arc<BlockProcessor<P>>,
@@ -157,6 +160,7 @@ where
         validator_tx: VS,
     ) -> Self {
         Self {
+            pubkey_cache,
             store: store_snapshot.load_full(),
             store_snapshot,
             state_cache,
@@ -415,6 +419,7 @@ where
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
+            self.persist_pubkey_cache(wait_group);
         }
 
         self.update_store_snapshot();
@@ -1721,6 +1726,7 @@ where
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
+            self.persist_pubkey_cache(wait_group);
         }
 
         // Call `Store::apply_attester_slashing` after `Store::archive_finalized` to reduce the
@@ -2579,6 +2585,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             checkpoint,
+            pubkey_cache: self.pubkey_cache.clone_arc(),
             metrics: self.metrics.clone(),
         });
     }
@@ -2594,6 +2601,21 @@ where
             mutator_tx: self.owned_mutator_tx(),
             head_block_root: self.store.head().block_root,
             next_slot: self.store.slot() + 1,
+            pubkey_cache: self.pubkey_cache.clone_arc(),
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    fn spawn_pubkey_cache_persist_task(
+        &self,
+        pubkey_cache: Arc<PubkeyCache>,
+        wait_group: W,
+        state: Arc<BeaconState<P>>,
+    ) {
+        self.spawn(PersistPubkeyCacheTask {
+            pubkey_cache,
+            state,
+            wait_group,
             metrics: self.metrics.clone(),
         })
     }
@@ -2711,6 +2733,17 @@ where
             })?;
 
         Ok(())
+    }
+
+    fn persist_pubkey_cache(&self, wait_group: &W) {
+        let store = &self.store;
+        let chain_link = store.last_finalized();
+
+        self.spawn_pubkey_cache_persist_task(
+            self.pubkey_cache.clone_arc(),
+            wait_group.clone(),
+            chain_link.state(store),
+        );
     }
 
     // This method should only be called when `Mutator.store` is in a consistent state.
@@ -2908,6 +2941,7 @@ where
                 low_priority_tasks,
             );
 
+            self.pubkey_cache.track_collection_metrics(metrics);
             self.store.track_collection_metrics(metrics);
         }
     }

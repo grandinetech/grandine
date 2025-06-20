@@ -2,11 +2,9 @@ use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{
-    traits::{CachedPublicKey as _, SignatureBytes as _},
-    SignatureBytes,
-};
+use bls::{traits::SignatureBytes as _, SignatureBytes};
 use itertools::Itertools as _;
+use pubkey_cache::PubkeyCache;
 use ssz::PersistentList;
 use std_ext::ArcExt as _;
 use types::{
@@ -42,6 +40,7 @@ use crate::{accessors, misc, mutators, phase0, predicates};
 
 pub fn upgrade_to_altair<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre: Phase0BeaconState<P>,
 ) -> Result<AltairBeaconState<P>> {
     let epoch = accessors::get_current_epoch(&pre);
@@ -125,7 +124,7 @@ pub fn upgrade_to_altair<P: Preset>(
     // > Fill in sync committees
     // > Note: A duplicate committee is assigned for the current and next committee at the fork
     // >       boundary
-    let sync_committee = accessors::get_next_sync_committee(&post)?;
+    let sync_committee = accessors::get_next_sync_committee(pubkey_cache, &post)?;
     post.current_sync_committee = sync_committee.clone_arc();
     post.next_sync_committee = sync_committee;
 
@@ -642,7 +641,7 @@ pub fn upgrade_to_electra<P: Preset>(
         validator.activation_eligibility_epoch = FAR_FUTURE_EPOCH;
 
         let withdrawal_credentials = validator.withdrawal_credentials;
-        let pubkey = validator.pubkey.to_bytes();
+        let pubkey = validator.pubkey;
 
         post.pending_deposits_mut().push(PendingDeposit {
             pubkey,
@@ -728,8 +727,9 @@ mod spec_tests {
     fn run_altair_case<P: Preset>(case: Case) {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
+        let pubkey_cache = PubkeyCache::default();
 
-        let actual_post = upgrade_to_altair::<P>(&P::default_config(), pre)
+        let actual_post = upgrade_to_altair::<P>(&P::default_config(), &pubkey_cache, pre)
             .expect("upgrade from Phase 0 to Altair to should succeed");
 
         assert_eq!(actual_post, expected_post);

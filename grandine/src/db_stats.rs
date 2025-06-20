@@ -2,11 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bytesize::ByteSize;
-use database::DatabaseMode;
+use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
-    BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot,
-    PrefixableKey as _, SlotBlobId, SlotByStateRoot, StateByBlockRoot, StateCheckpoint,
-    UnfinalizedBlockByRoot,
+    BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot, SlotBlobId,
+    SlotByStateRoot, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
 use log::{info, warn};
 use runtime::StorageConfig;

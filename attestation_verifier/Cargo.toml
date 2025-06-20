@@ -19,6 +19,7 @@ helper_functions = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true }
 rayon = { workspace = true }
 std_ext = { workspace = true }
 types = { workspace = true }

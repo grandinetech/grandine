@@ -10,4 +10,6 @@ pub enum Error {
     NoPublicKeysToAggregate,
     #[error("failed to decompress point")]
     DecompressionFailed,
+    #[error("failed to deserialize bytes")]
+    DeserializationFailed,
 }

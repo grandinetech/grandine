@@ -11,6 +11,7 @@ use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use genesis::Incremental;
 use itertools::Itertools as _;
+use pubkey_cache::PubkeyCache;
 use types::{config::Config, phase0::primitives::ExecutionBlockHash, preset::Mainnet};
 
 const DEPOSIT_COUNT: u64 = 1024;
@@ -27,6 +28,7 @@ fn main() {
 impl Criterion {
     fn benchmark_quick_start_beacon_state(&mut self) -> &mut Self {
         let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
 
         let deposit_data = LazyCell::new(|| {
             (0..DEPOSIT_COUNT)
@@ -47,12 +49,12 @@ impl Criterion {
 
                     for (data, index) in deposit_data.iter().copied().zip(0..) {
                         incremental
-                            .add_deposit_data(data, index)
+                            .add_deposit_data(&pubkey_cache, data, index)
                             .expect("deposit data processing should succeed");
                     }
 
                     incremental
-                        .finish(ExecutionBlockHash::default(), None)
+                        .finish(&pubkey_cache, ExecutionBlockHash::default(), None)
                         .expect("genesis state should be constructed successfully")
                 });
             });

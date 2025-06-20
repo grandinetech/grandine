@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
 
-use bls::traits::CachedPublicKey as _;
 use helper_functions::accessors;
 use serde::Serialize;
 use typenum::Unsigned as _;
@@ -39,7 +38,7 @@ pub fn current_epoch_sync_committee_assignments<P: Preset>(
         HashMap::<_, SyncCommitteeAssignment>::with_capacity(P::SyncCommitteeSize::USIZE);
 
     for (position, pubkey) in state.current_sync_committee().pubkeys.iter().enumerate() {
-        let validator_index = accessors::index_of_public_key(state, pubkey.to_bytes())
+        let validator_index = accessors::index_of_public_key(state, pubkey)
             .expect("public keys in state.current_sync_committee are taken from state.validators");
 
         sync_committee_assignments

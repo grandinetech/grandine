@@ -10,6 +10,7 @@ use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdr
 use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
 use log::info;
+use pubkey_cache::PubkeyCache;
 use rand::seq::SliceRandom as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -388,6 +389,7 @@ fn run<P: Preset>(
 
     let (controller, _mutator_handle) = AdHocBenchController::with_p2p_tx(
         chain_config,
+        Arc::new(PubkeyCache::default()),
         store_config,
         anchor_block,
         anchor_state,

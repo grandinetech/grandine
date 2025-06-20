@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use bls::{traits::CachedPublicKey as _, PublicKeyBytes};
+use bls::PublicKeyBytes;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use p2p::SyncCommitteeSubscription;
@@ -101,12 +101,9 @@ fn sync_committee_subscriptions<P: Preset>(
         .pubkeys
         .iter()
         .enumerate()
-        .filter(|(_, public_key)| own_public_keys.contains(&public_key.to_bytes()))
+        .filter(|(_, public_key)| own_public_keys.contains(public_key))
         .filter_map(|(position, public_key)| {
-            Some((
-                accessors::index_of_public_key(state, public_key.to_bytes())?,
-                position,
-            ))
+            Some((accessors::index_of_public_key(state, public_key)?, position))
         })
         .into_group_map()
         .into_iter()

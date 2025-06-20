@@ -7,6 +7,7 @@ use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 use anyhow::{bail, Result};
 use features::Feature;
 use log::{info, warn};
+use pubkey_cache::PubkeyCache;
 use state_cache::{QueryOptions, StateCache, StateWithRewards};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -101,11 +102,13 @@ impl<P: Preset> StateCacheProcessor<P> {
 
     pub fn try_state_at_slot<S: Storage<P>>(
         &self,
+        pubkey_cache: &PubkeyCache,
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         self.try_get_state_at_slot(
+            pubkey_cache,
             store,
             block_root,
             slot,
@@ -121,11 +124,13 @@ impl<P: Preset> StateCacheProcessor<P> {
     // the only way for the chain to progress in long periods without blocks.
     pub fn try_state_at_slot_for_block_sync<S: Storage<P>>(
         &self,
+        pubkey_cache: &PubkeyCache,
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         self.try_get_state_at_slot(
+            pubkey_cache,
             store,
             block_root,
             slot,
@@ -136,22 +141,25 @@ impl<P: Preset> StateCacheProcessor<P> {
 
     pub fn state_at_slot<S: Storage<P>>(
         &self,
+        pubkey_cache: &PubkeyCache,
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
-        self.try_state_at_slot(store, block_root, slot)?
+        self.try_state_at_slot(pubkey_cache, store, block_root, slot)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
     }
 
     pub fn state_at_slot_quiet<S: Storage<P>>(
         &self,
+        pubkey_cache: &PubkeyCache,
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
         self.try_get_state_at_slot(
+            pubkey_cache,
             store,
             block_root,
             slot,
@@ -164,12 +172,14 @@ impl<P: Preset> StateCacheProcessor<P> {
 
     pub fn process_slots<S: Storage<P>>(
         &self,
+        pubkey_cache: &PubkeyCache,
         store: &Store<P, S>,
         state: Arc<BeaconState<P>>,
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
         let post_state = process_slots(
+            pubkey_cache,
             store,
             state,
             block_root,
@@ -193,6 +203,7 @@ impl<P: Preset> StateCacheProcessor<P> {
 
     fn try_get_state_at_slot<S: Storage<P>>(
         &self,
+        pubkey_cache: &PubkeyCache,
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
@@ -214,6 +225,7 @@ impl<P: Preset> StateCacheProcessor<P> {
                 };
 
                 let state = process_slots(
+                    pubkey_cache,
                     store,
                     state,
                     block_root,
@@ -230,7 +242,9 @@ impl<P: Preset> StateCacheProcessor<P> {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn process_slots<P: Preset, S: Storage<P>>(
+    pubkey_cache: &PubkeyCache,
     store: &Store<P, S>,
     mut state: Arc<BeaconState<P>>,
     block_root: H256,
@@ -278,7 +292,7 @@ fn process_slots<P: Preset, S: Storage<P>>(
 
     let started_at = std::time::Instant::now();
     let process_slots_result =
-        combined::process_slots(store.chain_config(), state.make_mut(), slot);
+        combined::process_slots(store.chain_config(), pubkey_cache, state.make_mut(), slot);
 
     currently_processing.fetch_sub(1, Ordering::SeqCst);
 

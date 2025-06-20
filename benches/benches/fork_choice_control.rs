@@ -14,6 +14,7 @@ use easy_ext::ext;
 use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
 use eth2_libp2p::GossipId;
 use fork_choice_control::BenchController;
+use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{
@@ -140,6 +141,7 @@ impl Criterion {
         blocks: &LazyBeaconBlocks<P>,
     ) -> &mut Self {
         let config = Arc::new(config);
+        let pubkey_cache = Arc::new(PubkeyCache::default());
 
         let controller_with_blocks = || {
             let (first_block, remaining_blocks) = blocks
@@ -150,7 +152,10 @@ impl Criterion {
             let config = config.clone_arc();
             let first_block = first_block.clone_arc();
             let state = state.force().clone_arc();
-            let (controller, mutator_handle) = BenchController::quiet(config, first_block, state);
+
+            let (controller, mutator_handle) =
+                BenchController::quiet(config, pubkey_cache.clone_arc(), first_block, state);
+
             let blocks = remaining_blocks.to_vec();
 
             (controller, mutator_handle, blocks)
@@ -237,9 +242,11 @@ impl Criterion {
                 .expect("blocks should contain at least one block");
 
             let config = Arc::new(config);
+            let pubkey_cache = Arc::new(PubkeyCache::default());
             let first_block = first_block.clone_arc();
             let state = state.force().clone_arc();
-            let (controller, mutator_handle) = BenchController::quiet(config, first_block, state);
+            let (controller, mutator_handle) =
+                BenchController::quiet(config, pubkey_cache, first_block, state);
             let blocks = remaining_blocks.to_vec();
 
             process_blocks_in_their_slots(&controller, blocks, expected_head_block_root);

@@ -6,10 +6,9 @@ use std::{
 };
 
 use anyhow::{bail, ensure, Result};
-use database::Database;
+use database::{Database, PrefixableKey};
 use derive_more::Display;
 use eth1_api::RealController;
-use fork_choice_control::PrefixableKey;
 use fork_choice_store::{BlobSidecarAction, BlobSidecarOrigin};
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
@@ -334,6 +333,7 @@ impl<P: Preset> Batch<P> {
 
                 transition_functions::combined::verify_base_signature_with_head_state(
                     config,
+                    controller.pubkey_cache(),
                     &head_state,
                     block,
                 )?;

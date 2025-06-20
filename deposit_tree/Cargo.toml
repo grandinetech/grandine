@@ -18,6 +18,7 @@ types = { workspace = true }
 [dev-dependencies]
 factory = { workspace = true }
 interop = { workspace = true }
+pubkey_cache = { workspace = true }
 spec_test_utils = { workspace = true }
 std_ext = { workspace = true }
 test-generator = { workspace = true }

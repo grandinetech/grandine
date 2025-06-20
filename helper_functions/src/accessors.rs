@@ -8,13 +8,11 @@ use std::sync::Arc;
 use anyhow::{bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{
-    traits::{CachedPublicKey as _, PublicKey as _},
-    AggregatePublicKey, CachedPublicKey, PublicKeyBytes,
-};
+use bls::{traits::PublicKey as _, AggregatePublicKey, PublicKeyBytes};
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;
+use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
 use ssz::{ContiguousVector, FitsInU64, Hc, SszHash as _};
 use std_ext::CopyExt as _;
@@ -180,17 +178,17 @@ pub fn get_randao_mix<P: Preset>(state: &(impl BeaconState<P> + ?Sized), epoch: 
 pub fn public_key<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     validator_index: ValidatorIndex,
-) -> Result<&CachedPublicKey> {
+) -> Result<&PublicKeyBytes> {
     Ok(&state.validators().get(validator_index)?.pubkey)
 }
 
 #[must_use]
 pub fn index_of_public_key<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
-    public_key: PublicKeyBytes,
+    public_key: &PublicKeyBytes,
 ) -> Option<ValidatorIndex> {
     get_or_init_validator_indices(state, true)
-        .get(&public_key)
+        .get(public_key)
         .copied()
 }
 
@@ -209,7 +207,7 @@ pub fn get_or_init_validator_indices<P: Preset>(
         state
             .validators()
             .into_iter()
-            .map(|validator| validator.pubkey.to_bytes())
+            .map(|validator| validator.pubkey)
             .zip(0..)
             .collect()
     })
@@ -668,11 +666,12 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
 }
 
 pub fn get_next_sync_committee<P: Preset>(
+    pubkey_cache: &PubkeyCache,
     state: &(impl BeaconState<P> + ?Sized),
 ) -> Result<Arc<Hc<SyncCommittee<P>>>> {
     let indices = get_next_sync_committee_indices(state)?;
 
-    let mut pubkeys = Box::<ContiguousVector<CachedPublicKey, _>>::default();
+    let mut pubkeys = Box::<ContiguousVector<PublicKeyBytes, _>>::default();
 
     for (pubkey, validator_index) in pubkeys.iter_mut().zip(indices) {
         let validator = state.validators().get(validator_index)?;
@@ -680,8 +679,10 @@ pub fn get_next_sync_committee<P: Preset>(
     }
 
     let aggregate_pubkey = itertools::process_results(
-        pubkeys.iter().map(CachedPublicKey::decompress),
-        |public_keys| AggregatePublicKey::aggregate_nonempty(public_keys.copied()),
+        pubkeys
+            .iter()
+            .map(|bytes| pubkey_cache.get_or_insert(*bytes)),
+        |public_keys| AggregatePublicKey::aggregate_nonempty(public_keys),
     )??
     .into();
 
@@ -764,7 +765,7 @@ pub fn get_attestation_participation_flags<P: Preset>(
 pub fn get_sync_subcommittee_pubkeys<P: Preset>(
     state: &(impl PostAltairBeaconState<P> + ?Sized),
     subcommittee_index: SubcommitteeIndex,
-) -> Result<&[CachedPublicKey]> {
+) -> Result<&[PublicKeyBytes]> {
     let current_epoch = get_current_epoch(state);
     let next_slot_epoch = misc::compute_epoch_at_slot::<P>(state.slot() + 1);
 

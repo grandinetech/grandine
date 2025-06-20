@@ -29,6 +29,7 @@ use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSe
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::EventChannels;
 use prometheus_metrics::Metrics;
+use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
@@ -67,6 +68,7 @@ pub struct Controller<P: Preset, E, A, W: Wait> {
     store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
     block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
+    pubkey_cache: Arc<PubkeyCache>,
     state_at_slot_cache: Arc<StateAtSlotCache<P>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<Storage<P>>,
@@ -94,6 +96,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         chain_config: Arc<ChainConfig>,
+        pubkey_cache: Arc<PubkeyCache>,
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
@@ -116,6 +119,7 @@ where
 
         let mut store = Store::new(
             chain_config.clone_arc(),
+            pubkey_cache.clone_arc(),
             store_config,
             anchor_block,
             anchor_state,
@@ -132,9 +136,14 @@ where
         let thread_pool = ThreadPool::new()?;
         let (mutator_tx, mutator_rx) = std::sync::mpsc::channel();
 
-        let block_processor = Arc::new(BlockProcessor::new(chain_config, state_cache.clone_arc()));
+        let block_processor = Arc::new(BlockProcessor::new(
+            chain_config,
+            pubkey_cache.clone_arc(),
+            state_cache.clone_arc(),
+        ));
 
         let mut mutator = Mutator::new(
+            pubkey_cache.clone_arc(),
             store_snapshot.clone_arc(),
             state_cache.clone_arc(),
             block_processor.clone_arc(),
@@ -172,6 +181,7 @@ where
             store_snapshot,
             block_processor,
             execution_engine,
+            pubkey_cache,
             state_at_slot_cache,
             state_cache,
             storage,
@@ -571,6 +581,10 @@ where
 
     pub const fn block_processor(&self) -> &Arc<BlockProcessor<P>> {
         &self.block_processor
+    }
+
+    pub const fn pubkey_cache(&self) -> &Arc<PubkeyCache> {
+        &self.pubkey_cache
     }
 
     pub(crate) const fn state_at_slot_cache(&self) -> &Arc<StateAtSlotCache<P>> {

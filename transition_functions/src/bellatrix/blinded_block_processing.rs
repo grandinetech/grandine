@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
 use helper_functions::{accessors, misc, predicates, slot_report::SlotReport, verifier::Verifier};
+use pubkey_cache::PubkeyCache;
 
 use types::{
     bellatrix::{
@@ -18,6 +19,7 @@ use crate::{
 
 pub fn custom_process_blinded_block<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     block: &BlindedBeaconBlock<P>,
     mut verifier: impl Verifier,
@@ -35,11 +37,12 @@ pub fn custom_process_blinded_block<P: Preset>(
     // See <https://github.com/ethereum/builder-specs/blob/v0.3.0/specs/bellatrix/validator.md#responsibilities-during-the-merge-transition>.
     process_execution_payload(config, state, &block.body)?;
 
-    unphased::process_randao(config, state, &block.body, &mut verifier)?;
+    unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
     block_processing::process_operations(
         config,
+        pubkey_cache,
         state,
         &block.body,
         &mut verifier,
@@ -48,6 +51,7 @@ pub fn custom_process_blinded_block<P: Preset>(
 
     altair::process_sync_aggregate(
         config,
+        pubkey_cache,
         state,
         block.body.sync_aggregate,
         verifier,

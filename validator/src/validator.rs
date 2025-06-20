@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Error as AnyhowError, Result};
 use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
-use bls::{traits::CachedPublicKey as _, PublicKeyBytes, Signature, SignatureBytes};
+use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},
@@ -753,7 +753,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let public_key = slot_head.public_key(proposer_index);
         let signer_snapshot = self.signer.load();
 
-        if !signer_snapshot.has_key(public_key.to_bytes()) {
+        if !signer_snapshot.has_key(*public_key) {
             return Ok(());
         }
 
@@ -763,14 +763,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(DoppelgangerProtection::load);
 
         if let Some(doppelganger_protection) = &doppelganger_protection {
-            if !doppelganger_protection.is_validator_active(public_key.to_bytes()) {
+            if !doppelganger_protection.is_validator_active(*public_key) {
                 info!(
                     "Validator {public_key:?} skipping proposer duty in slot {} \
                      since not enough time has passed to ensure there are \
                      no doppelganger validators participating on network. \
                      Validator will start performing duties on slot {}.",
                     slot_head.slot(),
-                    doppelganger_protection.tracking_end_slot::<P>(public_key.to_bytes()),
+                    doppelganger_protection.tracking_end_slot::<P>(*public_key),
                 );
                 return Ok(());
             }
@@ -783,7 +783,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let graffiti = self
             .proposer_configs
-            .graffiti_bytes(public_key.to_bytes())?
+            .graffiti_bytes(*public_key)?
             .unwrap_or_else(|| self.next_graffiti());
 
         let block_build_context = self.block_producer.new_build_context(
@@ -798,7 +798,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         );
 
         let execution_payload_header_handle =
-            block_build_context.get_execution_payload_header(public_key.to_bytes());
+            block_build_context.get_execution_payload_header(*public_key);
 
         let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
@@ -809,7 +809,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 SigningMessage::RandaoReveal { epoch },
                 RandaoEpoch::from(epoch).signing_root(&self.chain_config, &slot_head.beacon_state),
                 Some(slot_head.beacon_state.as_ref().into()),
-                public_key.to_bytes(),
+                *public_key,
             )
             .await;
 
@@ -817,11 +817,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             Ok(signature) => signature.into(),
             Err(error) => {
                 warn!(
-                    "failed to sign RANDAO reveal (epoch: {}, public_key: {}): {:?}",
-                    epoch,
-                    public_key.to_bytes(),
-                    error,
+                    "failed to sign RANDAO reveal (epoch: {epoch}, public_key: {public_key}): \
+                    {error:?}",
                 );
+
                 return Ok(());
             }
         };
@@ -866,7 +865,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         &self.signer,
                         &blinded_block,
                         (&blinded_block).into(),
-                        public_key,
+                        *public_key,
                         self.slashing_protector.clone_arc(),
                     )
                     .await
@@ -917,7 +916,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         &self.signer,
                         &block,
                         (&block).into(),
-                        public_key,
+                        *public_key,
                         self.slashing_protector.clone_arc(),
                     )
                     .await
@@ -1604,9 +1603,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .pubkeys
                 .iter()
                 .filter_map(|public_key| {
-                    let public_key = public_key.to_bytes();
-
-                    if !own_public_keys.contains(&public_key) {
+                    if !own_public_keys.contains(public_key) {
                         return None;
                     }
 
@@ -1621,7 +1618,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                     Ok(SyncCommitteeMember {
                         validator_index,
-                        public_key,
+                        public_key: *public_key,
                         subnets,
                     })
                 })

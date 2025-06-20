@@ -3,7 +3,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{bail, ensure, Context as _, Error as AnyhowError, Result};
 use arithmetic::U64Ext as _;
-use database::Database;
+use database::{Database, PrefixableKey};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
@@ -11,6 +11,7 @@ use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use log::{debug, info, warn};
 use nonzero_ext::nonzero;
+use pubkey_cache::PubkeyCache;
 use reqwest::Client;
 use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
@@ -59,6 +60,7 @@ pub struct Storage<P> {
     pub(crate) database: Arc<Database>,
     pub(crate) archival_epoch_interval: NonZeroU64,
     storage_mode: StorageMode,
+    pub(crate) pubkey_cache: Arc<PubkeyCache>,
     phantom: PhantomData<P>,
 }
 
@@ -66,12 +68,14 @@ impl<P: Preset> Storage<P> {
     #[must_use]
     pub fn new(
         config: Arc<Config>,
+        pubkey_cache: Arc<PubkeyCache>,
         database: Database,
         archival_epoch_interval: NonZeroU64,
         storage_mode: StorageMode,
     ) -> Self {
         Self {
             config,
+            pubkey_cache,
             database: Arc::new(database),
             archival_epoch_interval,
             storage_mode,
@@ -196,6 +200,11 @@ impl<P: Preset> Storage<P> {
                 unfinalized_blocks = Box::new(core::iter::empty());
                 loaded_from_remote = false;
             }
+        }
+
+        // decompress and load all missing anchor state pubkeys into cache
+        if let Err(error) = self.pubkey_cache.load_and_persist_state_keys(&anchor_state) {
+            warn!("error occurred while loading anchor state keys into pubkey_cache: {error:?}");
         }
 
         let anchor_slot = anchor_block.message().slot();
@@ -640,11 +649,16 @@ impl<P: Preset> Storage<P> {
         // `blocks` here are needed to transition state closer to `slot`.
         for result in blocks.rev() {
             let block = result?;
-            combined::trusted_state_transition(&self.config, state.make_mut(), &block)?;
+            combined::trusted_state_transition(
+                &self.config,
+                &self.pubkey_cache,
+                state.make_mut(),
+                &block,
+            )?;
         }
 
         if state.slot() < slot {
-            combined::process_slots(&self.config, state.make_mut(), slot)?;
+            combined::process_slots(&self.config, &self.pubkey_cache, state.make_mut(), slot)?;
         }
 
         Ok(Some(state))
@@ -684,7 +698,12 @@ impl<P: Preset> Storage<P> {
         };
 
         for block in blocks.into_iter().rev() {
-            combined::trusted_state_transition(&self.config, state.make_mut(), &block)?;
+            combined::trusted_state_transition(
+                &self.config,
+                &self.pubkey_cache,
+                state.make_mut(),
+                &block,
+            )?;
         }
 
         Ok(Some(state))
@@ -980,15 +999,6 @@ type StateStorage<'storage, P> = (
     UnfinalizedBlocks<'storage, P>,
 );
 
-pub trait PrefixableKey {
-    const PREFIX: &'static str;
-
-    #[must_use]
-    fn has_prefix(bytes: &[u8]) -> bool {
-        bytes.starts_with(Self::PREFIX.as_bytes())
-    }
-}
-
 #[derive(Ssz)]
 // A `bound_for_read` attribute like this must be added when deriving `SszRead` for any type that
 // contains a block or state. The name of the `C` type parameter is hardcoded in `ssz_derive`.
@@ -1221,6 +1231,7 @@ mod tests {
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
             StorageMode::Standard,
@@ -1285,6 +1296,7 @@ mod tests {
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
             StorageMode::Standard,
@@ -1324,6 +1336,7 @@ mod tests {
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
             StorageMode::Standard,
@@ -1392,6 +1405,7 @@ mod tests {
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
             StorageMode::Standard,

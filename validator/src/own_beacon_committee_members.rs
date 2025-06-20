@@ -131,7 +131,7 @@ impl OwnBeaconCommitteeMembers {
             .keys()
             .copied()
             .filter_map(|public_key| {
-                let validator_index = accessors::index_of_public_key(state, public_key)?;
+                let validator_index = accessors::index_of_public_key(state, &public_key)?;
                 Some((validator_index, public_key))
             })
             .collect::<HashMap<_, _>>();
@@ -242,6 +242,7 @@ fn slot_index_from_slot(slot: Slot) -> usize {
 #[cfg(test)]
 mod tests {
     use bls::traits::SecretKey as _;
+    use pubkey_cache::PubkeyCache;
     use reqwest::Client;
     use signer::{KeyOrigin, Web3SignerConfig};
     use types::preset::Minimal;
@@ -280,7 +281,8 @@ mod tests {
         ));
 
         let config = Arc::new(ChainConfig::minimal());
-        let (state, _) = factory::min_genesis_state::<Minimal>(&config)?;
+        let pubkey_cache = PubkeyCache::default();
+        let (state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         let own_members = OwnBeaconCommitteeMembers::new(config, signer);
 
