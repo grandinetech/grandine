@@ -123,13 +123,23 @@ fn compute_fork_data_root(current_version: Version, genesis_validators_root: H25
     .hash_tree_root()
 }
 
+// > Return the 4-byte fork digest for the ``current_version`` and ``genesis_validators_root``.
+// > This is a digest primarily used for domain separation on the p2p layer.
+// > 4-bytes suffices for practical separation of forks/chains.
+fn compute_fork_digest_pre_fulu(
+    current_version: Version,
+    genesis_validators_root: H256,
+) -> ForkDigest {
+    let root = compute_fork_data_root(current_version, genesis_validators_root);
+    ForkDigest::from_slice(&root[..ForkDigest::len_bytes()])
+}
+
 // > Return the 4-byte fork digest for the ``version`` and ``genesis_validators_root``
 // > XOR'd with the hash of the blob parameters for ``epoch``.
 //
 // > This is a digest primarily used for domain separation on the p2p layer.
 // > 4-bytes suffices for practical separation of forks/chains.
-#[must_use]
-pub fn compute_fork_digest(
+fn compute_fork_digest_post_fulu(
     config: &Config,
     genesis_validators_root: H256,
     epoch: Epoch,
@@ -146,6 +156,20 @@ pub fn compute_fork_digest(
     let root = compute_fork_data_root(fork_version, genesis_validators_root);
     let bitmask_digest = root ^ blob_params_hash;
     ForkDigest::from_slice(&bitmask_digest[..ForkDigest::len_bytes()])
+}
+
+#[must_use]
+pub fn compute_fork_digest(
+    config: &Config,
+    genesis_validators_root: H256,
+    epoch: Epoch,
+) -> ForkDigest {
+    if config.phase_at_epoch(epoch).is_peerdas_activated() {
+        compute_fork_digest_post_fulu(config, genesis_validators_root, epoch)
+    } else {
+        let fork_version = config.version_at_epoch(epoch);
+        compute_fork_digest_pre_fulu(fork_version, genesis_validators_root)
+    }
 }
 
 #[must_use]

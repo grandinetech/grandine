@@ -57,7 +57,7 @@ use types::{
     },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        consts::GENESIS_EPOCH,
         containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, NodeId, Slot, SubnetId, H256},
     },
@@ -134,7 +134,6 @@ pub struct Network<P: Preset> {
     port_mappings: Option<PortMappings>,
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
-    last_nfd_update_epoch: Option<Epoch>,
 }
 
 impl<P: Preset> Network<P> {
@@ -218,7 +217,6 @@ impl<P: Preset> Network<P> {
             port_mappings,
             data_dumper,
             earliest_available_slot,
-            last_nfd_update_epoch: None,
         };
 
         Ok(network)
@@ -525,12 +523,13 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
-    fn on_slot(&mut self, slot: Slot) {
+    fn on_slot(&self, slot: Slot) {
         P2pToSync::Slot(slot).send(&self.channels.p2p_to_sync_tx);
 
         let chain_config = self.controller.chain_config();
         let phase_by_slot = chain_config.phase_at_slot::<P>(slot);
         let phase_by_state = self.fork_context.current_fork();
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
         self.fork_context.update_current_fork(phase_by_slot);
 
@@ -540,21 +539,6 @@ impl<P: Preset> Network<P> {
             let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
             ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
-        }
-
-        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(current_epoch)
-        {
-            let (next_fork_epoch, next_fork_digest) = self.fork_context.next_fork(current_epoch);
-
-            if self.fork_context.current_fork_digest() != next_fork_digest {
-                self.last_nfd_update_epoch = Some(current_epoch);
-                self.fork_context
-                    .update_current_fork_digest(next_fork_digest);
-
-                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest, next_fork_epoch)
-                    .send(&self.network_to_service_tx);
-            }
         }
 
         // Subscribe to the topics of the next phase.
@@ -573,9 +557,24 @@ impl<P: Preset> Network<P> {
             }
         }
 
-        if Some(phase_by_slot) > Phase::first() && misc::is_epoch_start::<P>(slot) {
-            let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        // Update `nfd` and `next_fork_epoch` field in `eth2` in ENR in advance before the fork.
+        if chain_config.is_peerdas_scheduled() {
+            let (next_fork_epoch, next_fork_digest) = self.fork_context.next_fork(epoch);
+            let next_fork_slot = misc::compute_start_slot_at_epoch::<P>(next_fork_epoch);
 
+            if self.fork_context.current_fork_digest() != next_fork_digest
+                && (next_fork_digest == ForkDigest::default()
+                    || slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_fork_slot)
+            {
+                self.fork_context
+                    .update_current_fork_digest(next_fork_digest);
+
+                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest, next_fork_epoch)
+                    .send(&self.network_to_service_tx);
+            }
+        }
+
+        if Some(phase_by_slot) > Phase::first() && misc::is_epoch_start::<P>(slot) {
             // Unsubscribe from the topics of previous phases.
             if chain_config.fork_epoch(phase_by_slot) + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
                 if let Some(fork_digest) = self.fork_context.to_context_bytes(phase_by_slot) {
@@ -610,9 +609,14 @@ impl<P: Preset> Network<P> {
             // > `current_fork_version` is the fork version at the node's current epoch defined \
             // > by the wall-clock time (not necessarily the epoch to which the node is sync)
             next_fork_version = chain_config.version(chain_config.phase_at_slot::<P>(slot));
+            // > Furthermore, the existing `next_fork_epoch` field under the `eth2` entry MUST be
+            // > set to the epoch of the next fork, whether a regular fork, _or a BPO fork_.
+            //
             // > If no future fork is planned,
             // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
-            next_fork_epoch = FAR_FUTURE_EPOCH;
+            next_fork_epoch = fork_context
+                .next_fork(misc::compute_epoch_at_slot::<P>(slot))
+                .0;
         }
 
         EnrForkId {
@@ -1996,7 +2000,7 @@ impl<P: Preset> Network<P> {
 
     fn check_status(&self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
         if local.fork_digest() != remote.fork_digest() {
-            debug!(
+            warn!(
                 "local fork digest doesn't match remote fork digest \
                 (local: {local:?}, remote: {remote:?}, peer_id: {peer_id}); \
                 disconnecting from peer",
@@ -2056,7 +2060,7 @@ impl<P: Preset> Network<P> {
 
         if let Some(root) = local_finalized_root_at_remote_finalized_epoch {
             if root != remote.finalized_root() {
-                debug!(
+                warn!(
                     "peer {peer_id} has different block finalized at epoch {} ({root:?} != {:?})",
                     remote.finalized_epoch(),
                     remote.finalized_root(),
