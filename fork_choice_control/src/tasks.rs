@@ -38,7 +38,7 @@ use types::{
 
 use crate::{
     block_processor::BlockProcessor, messages::MutatorMessage, misc::VerifyAggregateAndProofResult,
-    storage::Storage,
+    state_at_slot_cache::StateAtSlotCache, storage::Storage,
 };
 
 pub trait Run {
@@ -512,4 +512,20 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     accessors::get_or_init_validator_indices(state, false);
 
     Ok(())
+}
+
+pub struct StateAtSlotCacheFlushTask<P: Preset> {
+    pub state_at_slot_cache: Arc<StateAtSlotCache<P>>,
+}
+
+impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
+    fn run(self) {
+        let Self {
+            state_at_slot_cache,
+        } = self;
+
+        if let Err(error) = state_at_slot_cache.flush() {
+            warn!("failed to flush state at slot cache: {error:?}");
+        }
+    }
 }

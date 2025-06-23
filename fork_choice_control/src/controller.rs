@@ -51,10 +51,11 @@ use crate::{
     },
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
+    state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
-        BlockVerifyForGossipTask,
+        BlockVerifyForGossipTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -66,6 +67,7 @@ pub struct Controller<P: Preset, E, A, W: Wait> {
     store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
     block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
+    state_at_slot_cache: Arc<StateAtSlotCache<P>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<Storage<P>>,
     thread_pool: ThreadPool<P, E, W>,
@@ -164,10 +166,13 @@ where
                 .context(Error::MutatorFailed)
         })?;
 
+        let state_at_slot_cache = Arc::new(StateAtSlotCache::build());
+
         let controller = Arc::new(Self {
             store_snapshot,
             block_processor,
             execution_engine,
+            state_at_slot_cache,
             state_cache,
             storage,
             thread_pool,
@@ -201,7 +206,13 @@ where
             wait_group: self.owned_wait_group(),
             tick,
         }
-        .send(&self.mutator_tx)
+        .send(&self.mutator_tx);
+
+        if tick.is_start_of_slot() {
+            self.spawn(StateAtSlotCacheFlushTask {
+                state_at_slot_cache: self.state_at_slot_cache.clone_arc(),
+            });
+        }
     }
 
     pub fn on_back_sync_status(&self, is_back_synced: bool) {
@@ -560,6 +571,10 @@ where
 
     pub const fn block_processor(&self) -> &Arc<BlockProcessor<P>> {
         &self.block_processor
+    }
+
+    pub(crate) const fn state_at_slot_cache(&self) -> &Arc<StateAtSlotCache<P>> {
+        &self.state_at_slot_cache
     }
 
     pub(crate) const fn state_cache(&self) -> &Arc<StateCacheProcessor<P>> {

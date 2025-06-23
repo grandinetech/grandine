@@ -26,7 +26,7 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
-        PersistBlobSidecarsTask, PreprocessStateTask, Run,
+        PersistBlobSidecarsTask, PreprocessStateTask, Run, StateAtSlotCacheFlushTask,
     },
     wait::Wait,
 };
@@ -129,6 +129,7 @@ enum LowPriorityTask<P: Preset, W> {
     BlockAttestations(BlockAttestationsTask<P, W>),
     AttesterSlashing(AttesterSlashingTask<P, W>),
     PersistBlobSidecarsTask(PersistBlobSidecarsTask<P, W>),
+    StateAtSlotCacheFlush(StateAtSlotCacheFlushTask<P>),
 }
 
 impl<P: Preset, W> Run for LowPriorityTask<P, W> {
@@ -139,6 +140,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::BlockAttestations(task) => task.run(),
             Self::AttesterSlashing(task) => task.run(),
             Self::PersistBlobSidecarsTask(task) => task.run(),
+            Self::StateAtSlotCacheFlush(task) => task.run(),
         }
     }
 }
@@ -202,6 +204,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for AttesterSlashingTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for PersistBlobSidecarsTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for StateAtSlotCacheFlushTask<P> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
     }

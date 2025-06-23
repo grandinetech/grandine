@@ -291,6 +291,27 @@ where
         self.snapshot().state_at_slot(slot)
     }
 
+    pub fn state_at_slot_cached(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        let finalized_slot = self.snapshot().finalized_slot();
+
+        if slot < finalized_slot {
+            let state_from_cache = self.state_at_slot_cache().get_or_try_init(slot, || {
+                Ok(self
+                    .state_at_slot(slot)?
+                    .map(|with_status| with_status.value))
+            })?;
+
+            if let Some(state) = state_from_cache {
+                return Ok(Some(WithStatus::valid(state, true)));
+            }
+        }
+
+        self.state_at_slot(slot)
+    }
+
     pub fn state_before_or_at_slot(
         &self,
         block_root: H256,
@@ -807,6 +828,12 @@ impl<P: Preset> Snapshot<'_, P> {
     #[must_use]
     pub fn finalized_epoch(&self) -> Epoch {
         self.store_snapshot.finalized_epoch()
+    }
+
+    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
+    #[must_use]
+    pub fn finalized_slot(&self) -> Slot {
+        self.store_snapshot.finalized_slot()
     }
 
     #[expect(clippy::missing_const_for_fn, reason = "false positive")]
