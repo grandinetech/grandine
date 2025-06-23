@@ -41,6 +41,7 @@ mod misc;
 mod mutator;
 mod queries;
 mod specialized;
+mod state_at_slot_cache;
 mod storage;
 mod storage_back_sync;
 mod storage_tool;

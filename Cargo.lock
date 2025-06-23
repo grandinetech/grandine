@@ -2941,6 +2941,7 @@ dependencies = [
  "arc-swap",
  "arithmetic",
  "bytesize",
+ "cached",
  "clock",
  "crossbeam-utils",
  "database",
