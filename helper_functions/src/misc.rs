@@ -10,6 +10,7 @@ use arithmetic::{U64Ext as _, UsizeExt as _};
 use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
 use itertools::{izip, Itertools as _};
+use sha2::{Digest as _, Sha256};
 use ssz::{BitVector, ByteVector, ContiguousVector, MerkleTree, SszHash};
 use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
@@ -145,16 +146,17 @@ fn compute_fork_digest_post_fulu(
     epoch: Epoch,
 ) -> ForkDigest {
     let fork_version = config.version_at_epoch(epoch);
-    let blob_params = config.get_blob_schedule_entry(epoch);
-    let blob_params_hash = hashing::hash_64_64(
-        blob_params.epoch,
-        blob_params
-            .max_blobs_per_block
-            .try_into()
-            .expect("number of max blobs should fit in u64"),
+    let blob_entry = config.get_blob_schedule_entry(epoch);
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&blob_entry.epoch.to_le_bytes());
+    bytes[8..].copy_from_slice(
+        &u64::try_from(blob_entry.max_blobs_per_block)
+            .expect("number of max blobs should fit in u64")
+            .to_le_bytes(),
     );
+    let hash = H256::from_slice(&Sha256::digest(bytes));
     let root = compute_fork_data_root(fork_version, genesis_validators_root);
-    let bitmask_digest = root ^ blob_params_hash;
+    let bitmask_digest = root ^ hash;
     ForkDigest::from_slice(&bitmask_digest[..ForkDigest::len_bytes()])
 }
 
