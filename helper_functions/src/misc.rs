@@ -10,6 +10,7 @@ use arithmetic::{U64Ext as _, UsizeExt as _};
 use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
 use itertools::{izip, Itertools as _};
+use sha2::{Digest as _, Sha256};
 use ssz::{BitVector, ByteVector, ContiguousVector, MerkleTree, SszHash};
 use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
@@ -123,29 +124,54 @@ fn compute_fork_data_root(current_version: Version, genesis_validators_root: H25
     .hash_tree_root()
 }
 
+// > Return the 4-byte fork digest for the ``current_version`` and ``genesis_validators_root``.
+// > This is a digest primarily used for domain separation on the p2p layer.
+// > 4-bytes suffices for practical separation of forks/chains.
+fn compute_fork_digest_pre_fulu(
+    current_version: Version,
+    genesis_validators_root: H256,
+) -> ForkDigest {
+    let root = compute_fork_data_root(current_version, genesis_validators_root);
+    ForkDigest::from_slice(&root[..ForkDigest::len_bytes()])
+}
+
 // > Return the 4-byte fork digest for the ``version`` and ``genesis_validators_root``
 // > XOR'd with the hash of the blob parameters for ``epoch``.
 //
 // > This is a digest primarily used for domain separation on the p2p layer.
 // > 4-bytes suffices for practical separation of forks/chains.
+fn compute_fork_digest_post_fulu(
+    config: &Config,
+    genesis_validators_root: H256,
+    epoch: Epoch,
+) -> ForkDigest {
+    let fork_version = config.version_at_epoch(epoch);
+    let blob_entry = config.get_blob_schedule_entry(epoch);
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&blob_entry.epoch.to_le_bytes());
+    bytes[8..].copy_from_slice(
+        &u64::try_from(blob_entry.max_blobs_per_block)
+            .expect("number of max blobs should fit in u64")
+            .to_le_bytes(),
+    );
+    let hash = H256::from_slice(&Sha256::digest(bytes));
+    let root = compute_fork_data_root(fork_version, genesis_validators_root);
+    let bitmask_digest = root ^ hash;
+    ForkDigest::from_slice(&bitmask_digest[..ForkDigest::len_bytes()])
+}
+
 #[must_use]
 pub fn compute_fork_digest(
     config: &Config,
     genesis_validators_root: H256,
     epoch: Epoch,
 ) -> ForkDigest {
-    let fork_version = config.version_at_epoch(epoch);
-    let blob_params = config.get_blob_schedule_entry(epoch);
-    let blob_params_hash = hashing::hash_64_64(
-        blob_params.epoch,
-        blob_params
-            .max_blobs_per_block
-            .try_into()
-            .expect("number of max blobs should fit in u64"),
-    );
-    let root = compute_fork_data_root(fork_version, genesis_validators_root);
-    let bitmask_digest = root ^ blob_params_hash;
-    ForkDigest::from_slice(&bitmask_digest[..ForkDigest::len_bytes()])
+    if config.phase_at_epoch(epoch).is_peerdas_activated() {
+        compute_fork_digest_post_fulu(config, genesis_validators_root, epoch)
+    } else {
+        let fork_version = config.version_at_epoch(epoch);
+        compute_fork_digest_pre_fulu(fork_version, genesis_validators_root)
+    }
 }
 
 #[must_use]
