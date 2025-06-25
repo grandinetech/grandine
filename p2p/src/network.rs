@@ -56,9 +56,9 @@ use types::{
     },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        consts::GENESIS_EPOCH,
         containers::{ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, ForkDigest, NodeId, Slot, SubnetId, H256},
+        primitives::{Epoch, NodeId, Slot, SubnetId, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -529,59 +529,65 @@ impl<P: Preset> Network<P> {
         let chain_config = self.controller.chain_config();
         let phase_by_slot = chain_config.phase_at_slot::<P>(slot);
         let phase_by_state = self.fork_context.current_fork();
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
         self.fork_context.update_current_fork(phase_by_slot);
 
-        if phase_by_slot != phase_by_state {
-            info!("switching from {phase_by_state} to {phase_by_slot}");
+        if let Some(new_fork_digest) = self.fork_context.fork_digest_at_epoch(epoch) {
+            let current_fork_digest = self.fork_context.current_fork_digest();
+            if current_fork_digest != *new_fork_digest {
+                if phase_by_slot == phase_by_state {
+                    info!("updating fork digest from {current_fork_digest} to {new_fork_digest}");
+                } else {
+                    info!("switching from {phase_by_state} to {phase_by_slot}");
+                }
 
-            let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
-
-            ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
-        }
-
-        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(current_epoch)
-        {
-            let (next_fork_epoch, next_fork_digest) = self.fork_context.next_fork(current_epoch);
-
-            if self.fork_context.current_fork_digest() != next_fork_digest {
-                self.last_nfd_update_epoch = Some(current_epoch);
                 self.fork_context
-                    .update_current_fork_digest(next_fork_digest);
+                    .update_current_fork_digest(*new_fork_digest);
+                let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
-                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest, next_fork_epoch)
+                ServiceInboundMessage::UpdateFork(new_enr_fork_id)
                     .send(&self.network_to_service_tx);
             }
         }
 
+        // Update `nfd` and `next_fork_epoch` field in `eth2` in ENR.
+        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
+            let (_, next_fork_digest) = self.fork_context.next_fork(epoch);
+
+            if self.fork_context.next_fork_digest() != next_fork_digest
+                || self.last_nfd_update_epoch.is_none()
+            {
+                self.fork_context.update_next_fork_digest(next_fork_digest);
+
+                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
+                    .send(&self.network_to_service_tx);
+            }
+
+            self.last_nfd_update_epoch = Some(epoch);
+        }
+
         // Subscribe to the topics of the next phase.
-        if let Some(next_phase) = chain_config.next_phase_at_slot::<P>(slot) {
-            let next_phase_slot = chain_config
-                .fork_slot::<P>(next_phase)
-                .expect("Config::next_phase_at_slot ensures that the phase is enabled");
+        if let Some((fork_epoch, fork_digest)) = self.fork_context.next_fork_at_slot::<P>(slot) {
+            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(*fork_epoch);
+            let next_phase = chain_config.phase_at_slot::<P>(next_phase_slot);
 
             if slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_phase_slot {
-                if let Some(fork_digest) = self.fork_context.to_context_bytes(next_phase) {
-                    info!("subscribing to new topics from {next_phase}");
+                info!("subscribing to new topics for {next_phase} with digest {fork_digest}");
 
-                    ServiceInboundMessage::SubscribeNewForkTopics(next_phase, fork_digest)
-                        .send(&self.network_to_service_tx);
-                }
+                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, *fork_digest)
+                    .send(&self.network_to_service_tx);
             }
         }
 
         if Some(phase_by_slot) > Phase::first() && misc::is_epoch_start::<P>(slot) {
-            let epoch = misc::compute_epoch_at_slot::<P>(slot);
-
             // Unsubscribe from the topics of previous phases.
-            if chain_config.fork_epoch(phase_by_slot) + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
-                if let Some(fork_digest) = self.fork_context.to_context_bytes(phase_by_slot) {
-                    info!("unsubscribing from old topics");
+            if self.fork_context.current_fork_epoch() + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
+                info!("unsubscribing from old topics");
 
-                    ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
-                        .send(&self.network_to_service_tx);
-                }
+                let fork_digest = self.fork_context.current_fork_digest();
+                ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
+                    .send(&self.network_to_service_tx);
             }
         }
     }
@@ -608,13 +614,18 @@ impl<P: Preset> Network<P> {
             // > `current_fork_version` is the fork version at the node's current epoch defined \
             // > by the wall-clock time (not necessarily the epoch to which the node is sync)
             next_fork_version = chain_config.version(chain_config.phase_at_slot::<P>(slot));
+            // > Furthermore, the existing `next_fork_epoch` field under the `eth2` entry MUST be
+            // > set to the epoch of the next fork, whether a regular fork, _or a BPO fork_.
+            //
             // > If no future fork is planned,
             // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
-            next_fork_epoch = FAR_FUTURE_EPOCH;
+            next_fork_epoch = fork_context
+                .next_fork(misc::compute_epoch_at_slot::<P>(slot))
+                .0;
         }
 
         EnrForkId {
-            fork_digest: fork_digest(fork_context),
+            fork_digest: fork_context.current_fork_digest(),
             next_fork_version,
             next_fork_epoch,
         }
@@ -1964,7 +1975,7 @@ impl<P: Preset> Network<P> {
         };
 
         StatusMessage::V2(StatusMessageV2 {
-            fork_digest: fork_digest(&self.fork_context),
+            fork_digest: self.fork_context.current_fork_digest(),
             finalized_root,
             finalized_epoch,
             head_root: head.block_root,
@@ -2308,12 +2319,6 @@ enum Error {
     EndSlotOverflow { start_slot: u64, difference: u64 },
 }
 
-fn fork_digest(fork_context: &ForkContext) -> ForkDigest {
-    fork_context
-        .to_context_bytes(fork_context.current_fork())
-        .expect("fork digest for current fork are added when fork context is created")
-}
-
 fn run_network_service<P: Preset>(
     mut service: Service<P>,
     mut network_to_service_rx: UnboundedReceiver<ServiceInboundMessage<P>>,
@@ -2405,8 +2410,8 @@ fn run_network_service<P: Preset>(
                                 warn!("unable to update gossipsub scoring parameters: {error:?}");
                             }
                         }
-                        ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest, next_fork_epoch) => {
-                            service.update_next_fork_digest(next_fork_digest, next_fork_epoch);
+                        ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest) => {
+                            service.update_next_fork_digest(next_fork_digest);
                         }
                         ServiceInboundMessage::Stop => break,
                     }
