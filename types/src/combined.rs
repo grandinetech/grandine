@@ -1409,6 +1409,30 @@ impl<P: Preset> SszWrite for LightClientOptimisticUpdate<P> {
     }
 }
 
+impl<P: Preset> LightClientOptimisticUpdate<P> {
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Altair(_) => Phase::Altair,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
+            Self::Fulu(_) => Phase::Fulu,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature_slot(&self) -> Slot {
+        match self {
+            Self::Altair(update) => update.signature_slot,
+            Self::Capella(update) => update.signature_slot,
+            Self::Deneb(update) => update.signature_slot,
+            Self::Electra(update) => update.signature_slot,
+            Self::Fulu(update) => update.signature_slot,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum LightClientUpdate<P: Preset> {
     // Boxed to pass `clippy::large_enum_variant`.
@@ -1774,30 +1798,6 @@ impl<P: Preset> AttesterSlashing<P> {
         match self {
             Self::Phase0(_) => None,
             Self::Electra(attester_slashing) => Some(attester_slashing),
-        }
-    }
-}
-
-impl<P: Preset> LightClientOptimisticUpdate<P> {
-    #[must_use]
-    pub const fn phase(&self) -> Phase {
-        match self {
-            Self::Altair(_) => Phase::Altair,
-            Self::Capella(_) => Phase::Capella,
-            Self::Deneb(_) => Phase::Deneb,
-            Self::Electra(_) => Phase::Electra,
-            Self::Fulu(_) => Phase::Fulu,
-        }
-    }
-
-    #[must_use]
-    pub const fn signature_slot(&self) -> Slot {
-        match self {
-            Self::Altair(update) => update.signature_slot,
-            Self::Capella(update) => update.signature_slot,
-            Self::Deneb(update) => update.signature_slot,
-            Self::Electra(update) => update.signature_slot,
-            Self::Fulu(update) => update.signature_slot,
         }
     }
 }
