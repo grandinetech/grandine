@@ -25,7 +25,10 @@ use types::{
 };
 
 use crate::{
-    misc::{MutatorRejectionReason, VerifyAggregateAndProofResult, VerifyAttestationResult},
+    misc::{
+        MutatorRejectionReason, ProcessingTimings, VerifyAggregateAndProofResult,
+        VerifyAttestationResult,
+    },
     unbounded_sink::UnboundedSink,
 };
 
@@ -75,7 +78,7 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         result: Result<BlockAction<P>>,
         origin: BlockOrigin,
-        submission_time: Instant,
+        processing_timings: ProcessingTimings,
         block_root: H256,
     },
     AggregateAndProof {

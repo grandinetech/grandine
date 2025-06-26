@@ -1,3 +1,4 @@
+use core::time::Duration;
 use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
@@ -33,6 +34,50 @@ pub struct Delayed<P: Preset> {
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessingTimings {
+    pub delay_duration: Duration,
+    pub delay_time: Option<Instant>,
+    pub submission_time: Instant,
+}
+
+impl ProcessingTimings {
+    pub fn new() -> Self {
+        Self {
+            delay_duration: Duration::ZERO,
+            delay_time: None,
+            submission_time: Instant::now(),
+        }
+    }
+
+    pub fn delayed(self) -> Self {
+        self.next(Some(Instant::now()))
+    }
+
+    pub fn processing(self) -> Self {
+        self.next(None)
+    }
+
+    fn next(self, new_delay_time: Option<Instant>) -> Self {
+        let Self {
+            delay_duration,
+            delay_time,
+            submission_time,
+        } = self;
+
+        let delay_duration = delay_duration
+            + delay_time
+                .map(|delay_time| Instant::now().duration_since(delay_time))
+                .unwrap_or_default();
+
+        Self {
+            delay_duration,
+            delay_time: new_delay_time,
+            submission_time,
+        }
+    }
 }
 
 impl<P: Preset> Delayed<P> {
@@ -84,14 +129,14 @@ impl<P: Preset> WaitingForCheckpointState<P> {
 pub struct PendingBlock<P: Preset> {
     pub block: Arc<SignedBeaconBlock<P>>,
     pub origin: BlockOrigin,
-    pub submission_time: Instant,
+    pub processing_timings: ProcessingTimings,
 }
 
 pub struct PendingChainLink<P: Preset> {
     pub chain_link: ChainLink<P>,
     pub attester_slashing_results: Vec<Result<Vec<ValidatorIndex>>>,
     pub origin: BlockOrigin,
-    pub submission_time: Instant,
+    pub processing_timings: ProcessingTimings,
 }
 
 #[derive(Debug)]

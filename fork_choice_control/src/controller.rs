@@ -49,7 +49,7 @@ use crate::{
         AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
         SyncMessage, ValidatorMessage,
     },
-    misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
+    misc::{ProcessingTimings, VerifyAggregateAndProofResult, VerifyAttestationResult},
     mutator::Mutator,
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
@@ -555,7 +555,7 @@ where
             wait_group,
             block,
             origin,
-            submission_time: Instant::now(),
+            processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),
         })
     }

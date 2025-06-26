@@ -65,8 +65,9 @@ use crate::{
     },
     misc::{
         BlockBlobAvailability, Delayed, MutatorRejectionReason, PendingAggregateAndProof,
-        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink, ReorgSource,
-        VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
+        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink, ProcessingTimings,
+        ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
+        WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
@@ -199,9 +200,11 @@ where
                     wait_group,
                     result,
                     origin,
-                    submission_time,
+                    processing_timings,
                     block_root,
-                } => self.handle_block(wait_group, result, origin, submission_time, block_root)?,
+                } => {
+                    self.handle_block(wait_group, result, origin, processing_timings, block_root)?
+                }
                 MutatorMessage::AggregateAndProof { wait_group, result } => {
                     self.handle_aggregate_and_proof(&wait_group, result)?
                 }
@@ -297,7 +300,7 @@ where
         for result in blocks.chain(core::iter::once(Ok(last_block))) {
             let block = result?;
             let origin = BlockOrigin::Persisted;
-            let submission_time = Instant::now();
+            let processing_timings = ProcessingTimings::new();
 
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
@@ -317,7 +320,7 @@ where
                 wait_group.clone(),
                 result,
                 origin,
-                submission_time,
+                processing_timings,
                 block_root,
             )?;
         }
@@ -489,7 +492,7 @@ where
         wait_group: W,
         result: Result<BlockAction<P>>,
         origin: BlockOrigin,
-        submission_time: Instant,
+        processing_timings: ProcessingTimings,
         block_root: H256,
     ) -> Result<()> {
         match result {
@@ -533,7 +536,7 @@ where
                     chain_link,
                     attester_slashing_results,
                     origin,
-                    submission_time,
+                    processing_timings,
                 };
 
                 self.accept_block(&wait_group, pending_chain_link)?;
@@ -551,10 +554,12 @@ where
                 );
             }
             Ok(BlockAction::DelayUntilBlobs(block, state)) => {
+                let processing_timings = processing_timings.delayed();
+
                 let pending_block = PendingBlock {
                     block,
                     origin,
-                    submission_time,
+                    processing_timings,
                 };
 
                 let block_blob_availability = self.block_blob_availability(
@@ -618,12 +623,13 @@ where
                 }
             }
             Ok(BlockAction::DelayUntilParent(block)) => {
+                let processing_timings = processing_timings.delayed();
                 let parent_root = block.message().parent_root();
 
                 let pending_block = PendingBlock {
                     block,
                     origin,
-                    submission_time,
+                    processing_timings,
                 };
 
                 if self.store.contains_block(parent_root) {
@@ -644,12 +650,13 @@ where
                 }
             }
             Ok(BlockAction::DelayUntilSlot(block)) => {
+                let processing_timings = processing_timings.delayed();
                 let slot = block.message().slot();
 
                 let pending_block = PendingBlock {
                     block,
                     origin,
-                    submission_time,
+                    processing_timings,
                 };
 
                 if slot <= self.store.slot() {
@@ -670,11 +677,12 @@ where
                 attester_slashing_results,
                 checkpoint,
             )) => {
+                let processing_timings = processing_timings.delayed();
                 let pending_chain_link = PendingChainLink {
                     chain_link,
                     attester_slashing_results,
                     origin,
-                    submission_time,
+                    processing_timings,
                 };
 
                 if self.store.contains_checkpoint_state(checkpoint) {
@@ -1518,9 +1526,10 @@ where
             chain_link,
             attester_slashing_results,
             origin,
-            submission_time,
+            processing_timings,
         } = pending_chain_link;
 
+        let processing_timings = processing_timings.processing();
         let block_root = chain_link.block_root;
         let block = &chain_link.block;
 
@@ -1631,14 +1640,26 @@ where
             }
         }
 
-        let processing_duration = insertion_time.duration_since(submission_time);
+        let ProcessingTimings {
+            delay_duration,
+            submission_time,
+            ..
+        } = processing_timings;
+
+        let insertion_duration = insertion_time.duration_since(submission_time);
+        let processing_duration = insertion_duration.saturating_sub(delay_duration);
 
         features::log!(
             LogBlockProcessingTime,
-            "block {block_root:?} processed in {processing_duration:?}",
+            "block {block_root:?} inserted in {insertion_duration:?}, \
+            processed in {processing_duration:?}",
         );
 
         if let Some(metrics) = self.metrics.as_ref() {
+            metrics
+                .block_insertion_times
+                .observe(insertion_duration.as_secs_f64());
+
             metrics
                 .block_processing_times
                 .observe(processing_duration.as_secs_f64());
@@ -2263,8 +2284,10 @@ where
         let PendingBlock {
             block,
             origin,
-            submission_time,
+            processing_timings,
         } = pending_block;
+
+        let processing_timings = processing_timings.processing();
 
         self.spawn(BlockTask {
             store_snapshot: self.owned_store(),
@@ -2274,7 +2297,7 @@ where
             wait_group,
             block,
             origin,
-            submission_time,
+            processing_timings,
             metrics: self.metrics.clone(),
         });
     }
@@ -2956,7 +2979,7 @@ fn reply_delayed_block_validation_result<P: Preset>(
     let PendingBlock {
         block,
         origin,
-        submission_time,
+        processing_timings,
     } = pending_block;
 
     if let BlockOrigin::Api(Some(sender)) = origin {
@@ -2965,13 +2988,13 @@ fn reply_delayed_block_validation_result<P: Preset>(
         PendingBlock {
             block,
             origin: BlockOrigin::Api(None),
-            submission_time,
+            processing_timings,
         }
     } else {
         PendingBlock {
             block,
             origin,
-            submission_time,
+            processing_timings,
         }
     }
 }
