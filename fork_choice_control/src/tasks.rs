@@ -37,8 +37,11 @@ use types::{
 };
 
 use crate::{
-    block_processor::BlockProcessor, messages::MutatorMessage, misc::VerifyAggregateAndProofResult,
-    state_at_slot_cache::StateAtSlotCache, storage::Storage,
+    block_processor::BlockProcessor,
+    messages::MutatorMessage,
+    misc::{ProcessingTimings, VerifyAggregateAndProofResult},
+    state_at_slot_cache::StateAtSlotCache,
+    storage::Storage,
 };
 
 pub trait Run {
@@ -65,7 +68,7 @@ pub struct BlockTask<P: Preset, E, W> {
     pub wait_group: W,
     pub block: Arc<SignedBeaconBlock<P>>,
     pub origin: BlockOrigin,
-    pub submission_time: Instant,
+    pub processing_timings: ProcessingTimings,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -79,7 +82,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             wait_group,
             block,
             origin,
-            submission_time,
+            processing_timings,
             metrics,
         } = self;
 
@@ -137,7 +140,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             wait_group,
             result,
             origin,
-            submission_time,
+            processing_timings,
             block_root,
         }
         .send(&mutator_tx);

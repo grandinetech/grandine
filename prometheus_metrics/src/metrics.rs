@@ -65,6 +65,7 @@ pub struct Metrics {
     mutator_attestations: IntCounterVec,
     mutator_aggregate_and_proofs: IntCounterVec,
 
+    pub block_insertion_times: Histogram,
     pub block_processing_times: Histogram,
     pub block_post_processing_times: Histogram,
 
@@ -316,6 +317,11 @@ impl Metrics {
                 ),
                 &["type"],
             )?,
+
+            block_insertion_times: Histogram::with_opts(histogram_opts!(
+                "MUTATOR_BLOCK_INSERTION_TIMES",
+                "Mutator Block insertion times",
+            ))?,
 
             block_processing_times: Histogram::with_opts(histogram_opts!(
                 "MUTATOR_BLOCK_PROCESSING_TIMES",
@@ -781,6 +787,7 @@ impl Metrics {
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
+        default_registry.register(Box::new(self.block_insertion_times.clone()))?;
         default_registry.register(Box::new(self.block_processing_times.clone()))?;
         default_registry.register(Box::new(self.block_post_processing_times.clone()))?;
         default_registry.register(Box::new(
