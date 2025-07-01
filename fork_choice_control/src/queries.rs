@@ -295,9 +295,9 @@ where
         &self,
         slot: Slot,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
-        let finalized_slot = self.snapshot().finalized_slot();
+        let store = self.store_snapshot();
 
-        if slot < finalized_slot {
+        if slot < store.finalized_slot() {
             let state_from_cache = self.state_at_slot_cache().get_or_try_init(slot, || {
                 Ok(self
                     .state_at_slot(slot)?
@@ -308,6 +308,17 @@ where
                 return Ok(Some(WithStatus::valid(state, true)));
             }
         }
+
+        let store_epoch = store.current_epoch();
+        let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        ensure!(
+            requested_epoch <= store_epoch + P::MIN_SEED_LOOKAHEAD,
+            Error::EpochTooFarInTheFuture {
+                requested_epoch,
+                store_epoch,
+            },
+        );
 
         self.state_at_slot(slot)
     }
