@@ -1943,6 +1943,7 @@ pub async fn node_health<P: Preset, W: Wait>(
 /// `POST /eth/v1/validator/duties/attester/{epoch}`
 pub async fn validator_attester_duties<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorAttesterDutyResponse>>, Error> {
@@ -1950,10 +1951,16 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
     let (state, relative_epoch) = match accessors::relative_epoch(&head_state.value, epoch) {
         Ok(relative_epoch) => (head_state, relative_epoch),
-        Err(_) => (
-            controller.preprocessed_state_at_epoch(epoch)?,
-            RelativeEpoch::Current,
-        ),
+        Err(_) => {
+            let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+            let state_with_status = state_id::state(
+                &StateId::Slot(start_slot),
+                &controller,
+                &anchor_checkpoint_provider,
+            )?;
+
+            (state_with_status, RelativeEpoch::Current)
+        }
     };
 
     let WithStatus {
@@ -2014,14 +2021,21 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 pub async fn validator_proposer_duties<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
+    let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+
     let WithStatus {
         value: state,
         status,
         // `duties` responses are not supposed to contain a `finalized` field.
         finalized: _,
-    } = controller.preprocessed_state_at_epoch(epoch)?;
+    } = state_id::state(
+        &StateId::Slot(start_slot),
+        &controller,
+        &anchor_checkpoint_provider,
+    )?;
 
     let dependent_root = controller.dependent_root(&state, epoch)?;
 

@@ -20,7 +20,7 @@ use thiserror::Error;
 use types::{combined::BeaconState, phase0::primitives::Slot, preset::Preset};
 
 const CACHE_EXPIRATION_IN_SECONDS: u64 = 3600;
-const CACHE_LOCK_TIMEOUT: Duration = Duration::from_secs(300);
+const CACHE_LOCK_TIMEOUT: Duration = Duration::from_secs(1000);
 const CACHE_SIZE: usize = 5;
 
 #[derive(Debug, Error)]
