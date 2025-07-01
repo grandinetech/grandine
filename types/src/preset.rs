@@ -858,6 +858,8 @@ pub struct ElectraPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_effective_balance_electra: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
+    max_pending_deposits_per_epoch: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     max_pending_partials_per_withdrawals_sweep: u64,
     #[serde(with = "serde_utils::string_or_native")]
     max_withdrawal_requests_per_payload: u64,
@@ -884,6 +886,7 @@ impl ElectraPreset {
             max_consolidation_requests_per_payload: P::MaxConsolidationRequestsPerPayload::U64,
             max_deposit_requests_per_payload: P::MaxDepositRequestsPerPayload::U64,
             max_effective_balance_electra: P::MAX_EFFECTIVE_BALANCE_ELECTRA,
+            max_pending_deposits_per_epoch: P::MAX_PENDING_DEPOSITS_PER_EPOCH,
             max_pending_partials_per_withdrawals_sweep:
                 P::MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,
             max_withdrawal_requests_per_payload: P::MaxWithdrawalRequestsPerPayload::U64,
