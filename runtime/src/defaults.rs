@@ -16,7 +16,7 @@ pub const DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS: u64 = 5;
 pub const DEFAULT_REQUEST_TIMEOUT: u64 = 30000;
 pub const DEFAULT_TARGET_PEERS: usize = 100;
 pub const DEFAULT_TARGET_SUBNET_PEERS: usize = 3;
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1000);
 
 #[must_use]
 pub fn default_network_config() -> NetworkConfig {
