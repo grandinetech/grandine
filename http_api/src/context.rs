@@ -228,7 +228,10 @@ impl<P: Preset> Context<P> {
 
         let slashing_protector = Arc::new(Mutex::new(slashing_protector));
 
-        let validator_config = Arc::new(ValidatorConfig::default());
+        let validator_config = Arc::new(ValidatorConfig {
+            disable_blockprint_graffiti: true,
+            ..Default::default()
+        });
 
         let keymanager = Arc::new(KeyManager::new_in_memory(
             signer.clone_arc(),

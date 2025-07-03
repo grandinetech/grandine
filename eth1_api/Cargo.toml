@@ -22,6 +22,7 @@ features = { workspace = true }
 fork_choice_control = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
+grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
@@ -34,6 +35,7 @@ prometheus_metrics = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_utils = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
 std_ext = { workspace = true }

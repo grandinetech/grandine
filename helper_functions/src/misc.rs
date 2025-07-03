@@ -667,6 +667,15 @@ pub fn get_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
     }
 }
 
+pub fn parse_graffiti(string: &str) -> Result<H256> {
+    ensure!(string.len() <= H256::len_bytes(), Error::GraffitiTooLong);
+
+    let mut graffiti = H256::zero();
+    graffiti[..string.len()].copy_from_slice(string.as_bytes());
+
+    Ok(graffiti)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

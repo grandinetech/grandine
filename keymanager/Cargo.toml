@@ -13,6 +13,7 @@ derive_more = { workspace = true }
 eip_2335 = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
+helper_functions = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }

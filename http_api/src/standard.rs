@@ -1208,7 +1208,9 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         proofs,
         blobs,
         ..
-    } = execution_payload.ok_or(Error::ExecutionPayloadNotAvailable)?;
+    } = execution_payload
+        .ok_or(Error::ExecutionPayloadNotAvailable)?
+        .result;
 
     let (message, signature) = signed_blinded_block.split();
 
@@ -1250,7 +1252,9 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
         proofs,
         blobs,
         ..
-    } = execution_payload.ok_or(Error::ExecutionPayloadNotAvailable)?;
+    } = execution_payload
+        .ok_or(Error::ExecutionPayloadNotAvailable)?
+        .result;
 
     let (message, signature) = signed_blinded_block.split();
 
@@ -2215,6 +2219,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
+    State(validator_config): State<Arc<ValidatorConfig>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQuery>,
 ) -> Result<EthResponse<ValidatorBlindedBlock<P>>, Error> {
@@ -2238,7 +2243,6 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
         return Err(Error::UnableToProduceBlindedBlock);
     };
 
-    let graffiti = graffiti.unwrap_or_default();
     let public_key = accessors::public_key(&beacon_state, proposer_index)?;
 
     let block_build_context = block_producer.new_build_context(
@@ -2247,6 +2251,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
         proposer_index,
         BlockBuildOptions {
             graffiti,
+            disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             ..BlockBuildOptions::default()
         },
@@ -2279,6 +2284,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
+    State(validator_config): State<Arc<ValidatorConfig>>,
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQuery>,
     headers: HeaderMap,
@@ -2296,7 +2302,6 @@ pub async fn validator_block<P: Preset, W: Wait>(
     let block_root = controller.head().value.block_root;
     let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
-    let graffiti = graffiti.unwrap_or_default();
 
     let block_build_context = block_producer.new_build_context(
         beacon_state.clone_arc(),
@@ -2304,6 +2309,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
         proposer_index,
         BlockBuildOptions {
             graffiti,
+            disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             ..BlockBuildOptions::default()
         },
@@ -2352,7 +2358,6 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         return Err(Error::UnableToProduceBeaconBlock);
     };
 
-    let graffiti = graffiti.unwrap_or_default();
     let public_key = accessors::public_key(&beacon_state, proposer_index)?;
 
     let builder_boost_factor = builder_boost_factor
@@ -2365,6 +2370,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         proposer_index,
         BlockBuildOptions {
             graffiti,
+            disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
         },

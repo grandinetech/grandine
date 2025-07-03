@@ -19,7 +19,7 @@ use fork_choice_control::{StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
-use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
+use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use http_api::HttpApiConfig;
 use log::{error, info, warn};
 use logging::PEER_LOG_METRICS;
@@ -372,6 +372,7 @@ fn try_main() -> Result<()> {
         data_dir,
         validators,
         keystore_storage_password_file,
+        disable_blockprint_graffiti,
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
@@ -433,6 +434,7 @@ fn try_main() -> Result<()> {
     }
 
     let validator_config = Arc::new(ValidatorConfig {
+        disable_blockprint_graffiti,
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
@@ -456,7 +458,7 @@ fn try_main() -> Result<()> {
     // Create a single one for the whole application and reuse it through `Signer::client`.
     let client = ClientBuilder::new()
         .timeout(request_timeout)
-        .user_agent(APPLICATION_VERSION_WITH_PLATFORM)
+        .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
         .connection_verbose(true)
         .build()?;
 

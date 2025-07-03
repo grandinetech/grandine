@@ -784,7 +784,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let graffiti = self
             .proposer_configs
             .graffiti_bytes(*public_key)?
-            .unwrap_or_else(|| self.next_graffiti());
+            .or_else(|| self.next_graffiti());
 
         let block_build_context = self.block_producer.new_build_context(
             slot_head.beacon_state.clone_arc(),
@@ -792,6 +792,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             proposer_index,
             BlockBuildOptions {
                 graffiti,
+                disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
                 builder_boost_factor: self.validator_config.default_builder_boost_factor,
                 ..BlockBuildOptions::default()
             },
@@ -1421,16 +1422,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn next_graffiti(&mut self) -> H256 {
+    fn next_graffiti(&mut self) -> Option<H256> {
         if self.validator_config.graffiti.is_empty() {
-            return H256::default();
+            return None;
         }
 
         let index = self.next_graffiti_index;
 
         self.next_graffiti_index = (index + 1) % self.validator_config.graffiti.len();
 
-        self.validator_config.graffiti[index]
+        Some(self.validator_config.graffiti[index])
     }
 
     fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {

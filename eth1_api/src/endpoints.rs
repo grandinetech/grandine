@@ -4,9 +4,14 @@ use std::{collections::HashSet, sync::Arc};
 use arc_swap::ArcSwap;
 use derive_more::Debug;
 use itertools::Itertools as _;
+use std_ext::ArcExt as _;
 use types::redacting_url::RedactingUrl;
 
+use crate::ClientVersionV1;
+
 const ORDERING: Ordering = Ordering::SeqCst;
+
+pub type ClientVersions = Vec<ClientVersionV1>;
 
 #[derive(Debug)]
 #[expect(clippy::partial_pub_fields)]
@@ -15,6 +20,7 @@ pub struct Endpoint {
     pub is_fallback: bool,
     pub url: RedactingUrl,
     capabilities: ArcSwap<HashSet<String>>,
+    client_versions: ArcSwap<ClientVersions>,
 }
 
 impl Endpoint {
@@ -28,6 +34,14 @@ impl Endpoint {
 
     pub fn set_capabilities(&self, capabilities: HashSet<String>) {
         self.capabilities.store(Arc::new(capabilities));
+    }
+
+    pub fn set_client_versions(&self, client_versions: Vec<ClientVersionV1>) {
+        self.client_versions.store(Arc::new(client_versions));
+    }
+
+    pub fn get_client_versions(&self) -> Arc<ClientVersions> {
+        self.client_versions.load().clone_arc()
     }
 
     pub fn set_online_status(&self, is_online: bool) {
@@ -49,6 +63,7 @@ impl Endpoints {
                 is_fallback: index > 0,
                 url,
                 capabilities: ArcSwap::from_pointee(HashSet::default()),
+                client_versions: ArcSwap::from_pointee(vec![]),
             })
             .collect();
 

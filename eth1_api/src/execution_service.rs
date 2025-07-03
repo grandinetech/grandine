@@ -23,7 +23,7 @@ use types::{
 
 use crate::{
     eth1_api::Eth1Api, messages::Eth1ApiToBlobFetcher, misc::ApiController,
-    spawn_exchange_capabilities_task,
+    spawn_exchange_capabilities_and_versions_task,
 };
 
 #[derive(Constructor)]
@@ -40,7 +40,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         while let Some(message) = self.rx.next().await {
             match message {
                 ExecutionServiceMessage::ExchangeCapabilities => {
-                    spawn_exchange_capabilities_task(
+                    spawn_exchange_capabilities_and_versions_task(
                         self.api.clone_arc(),
                         &self.dedicated_executor,
                     );

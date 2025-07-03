@@ -6,7 +6,11 @@ edition = { workspace = true }
 
 [dependencies]
 const_format = { workspace = true }
-git-version = { workspace = true }
+git-version = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[features]
+default = ['git-version']
+stub-grandine-version = []
