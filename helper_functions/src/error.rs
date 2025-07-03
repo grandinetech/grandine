@@ -32,6 +32,8 @@ pub(crate) enum Error {
     EpochOverflow,
     #[error("failed to select proposer")]
     FailedToSelectProposer,
+    #[error("graffiti must be no longer than {} bytes", H256::len_bytes())]
+    GraffitiTooLong,
     #[error("no validators are active")]
     NoActiveValidators,
     #[error("no committee attesters for {index} committee")]

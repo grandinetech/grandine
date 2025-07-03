@@ -42,6 +42,7 @@ pub struct GrandineConfig {
     pub data_dir: PathBuf,
     pub validators: Option<Validators>,
     pub keystore_storage_password_file: Option<PathBuf>,
+    pub disable_blockprint_graffiti: bool,
     pub graffiti: Vec<H256>,
     pub max_empty_slots: u64,
     pub suggested_fee_recipient: ExecutionAddress,
@@ -84,6 +85,7 @@ impl GrandineConfig {
             back_sync_enabled,
             eth1_rpc_urls,
             data_dir,
+            disable_blockprint_graffiti,
             graffiti,
             suggested_fee_recipient,
             default_builder_boost_factor,
@@ -122,6 +124,11 @@ impl GrandineConfig {
 
         info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
         info!("graffiti: {graffiti:?}");
+
+        if *disable_blockprint_graffiti {
+            info!("blockprint graffiti disabled");
+        }
+
         info!("HTTP API address: {}", http_api_config.address);
 
         if let Some(metrics_server_config) = &metrics_config.metrics_server_config {

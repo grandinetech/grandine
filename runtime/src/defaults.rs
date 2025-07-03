@@ -1,7 +1,7 @@
 use core::{num::NonZeroU16, time::Duration};
 
 use bytesize::ByteSize;
-use grandine_version::APPLICATION_VERSION_WITH_PLATFORM;
+use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use nonzero_ext::nonzero;
 use p2p::NetworkConfig;
 
@@ -21,6 +21,6 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1000);
 #[must_use]
 pub fn default_network_config() -> NetworkConfig {
     let mut config = NetworkConfig::default();
-    config.identify_agent_version = Some(APPLICATION_VERSION_WITH_PLATFORM.to_owned());
+    config.identify_agent_version = Some(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM.to_owned());
     config
 }

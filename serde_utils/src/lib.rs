@@ -5,6 +5,7 @@ pub use crate::{
 
 pub mod alternate_display;
 pub mod bool_as_empty_string;
+pub mod hex_slice;
 pub mod prefixed_hex_or_bytes_array;
 pub mod prefixed_hex_or_bytes_cow;
 pub mod prefixed_hex_or_bytes_generic_array;

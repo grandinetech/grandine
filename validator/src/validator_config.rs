@@ -10,6 +10,7 @@ use types::{
 #[derive(Clone, Debug, Derivative)]
 #[derivative(Default)]
 pub struct ValidatorConfig {
+    pub disable_blockprint_graffiti: bool,
     pub graffiti: Vec<H256>,
     #[derivative(Default(value = "32"))]
     pub max_empty_slots: u64,

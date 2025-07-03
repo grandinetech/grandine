@@ -9,7 +9,7 @@ use bls::{traits::Signature as _, AggregateSignature, PublicKeyBytes, SignatureB
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
-use eth1_api::{ApiController, Eth1ExecutionEngine};
+use eth1_api::{ApiController, Eth1ExecutionEngine, WithClientVersions};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
     PayloadAttributesV3, PayloadId,
@@ -87,14 +87,17 @@ use types::{
     traits::{BeaconState as _, PostBellatrixBeaconState},
 };
 
-use crate::misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock};
+use crate::misc::{build_graffiti, PayloadIdEntry, ProposerData, ValidatorBlindedBlock};
 
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
 pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
 pub type LocalExecutionPayloadJoinHandle<P> =
-    JoinHandle<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>>;
+    JoinHandle<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
+
+type PayloadCache<P> =
+    Mutex<SizedCache<H256, WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
 
 #[derive(Default)]
 pub struct Options {
@@ -486,14 +489,17 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     pub async fn publish_signed_blinded_block(
         &self,
         block: &SignedBlindedBeaconBlock<P>,
-    ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
+    ) -> Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         let header_root = block.execution_payload_header().hash_tree_root();
         let mut payload_cache = self.producer_context.payload_cache.lock().await;
         let local_payload = payload_cache.cache_get(&header_root);
 
         match local_payload {
             Some(payload) => Some(payload.clone()),
-            None => self.publish_signed_blinded_block_using_builder(block).await,
+            None => self
+                .publish_signed_blinded_block_using_builder(block)
+                .await
+                .map(WithClientVersions::none),
         }
     }
 
@@ -580,7 +586,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     proposer_slashings: Mutex<Vec<ProposerSlashing>>,
     attester_slashings: Mutex<Vec<AttesterSlashing<P>>>,
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
-    payload_cache: Mutex<SizedCache<H256, WithBlobsAndMev<ExecutionPayload<P>, P>>>,
+    payload_cache: PayloadCache<P>,
     payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
     metrics: Option<Arc<Metrics>>,
     fake_execution_payloads: bool,
@@ -588,7 +594,8 @@ struct ProducerContext<P: Preset, W: Wait> {
 
 #[derive(Clone, Copy, Default)]
 pub struct BlockBuildOptions {
-    pub graffiti: H256,
+    pub graffiti: Option<H256>,
+    pub disable_blockprint_graffiti: bool,
     pub skip_randao_verification: bool,
     pub builder_boost_factor: Uint256,
 }
@@ -737,7 +744,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let slot = self.beacon_state.slot();
         let proposer_index = self.proposer_index;
         let parent_root = self.head_block_root;
-        let graffiti = self.options.graffiti;
+        let graffiti = self.options.graffiti.unwrap_or_default();
 
         // This is a placeholder that is overwritten later using `with_state_root`.
         // We define this explicitly instead of using struct update syntax to ensure
@@ -1046,21 +1053,27 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
-        let with_blobs_and_mev = if let Some(handle) = local_execution_payload_handle {
-            handle.await?.map(|value| value.map(Some))
+        let payload_with_data = if let Some(handle) = local_execution_payload_handle {
+            handle
+                .await?
+                .map(|value| value.map(|value| value.map(Some)))
         } else {
             None
         };
 
-        let WithBlobsAndMev {
-            value: execution_payload,
-            commitments,
-            proofs,
-            blobs,
-            mev,
-            execution_requests,
-        } = match with_blobs_and_mev {
-            Some(payload_with_mev) => payload_with_mev,
+        let WithClientVersions {
+            client_versions,
+            result:
+                WithBlobsAndMev {
+                    value: execution_payload,
+                    commitments,
+                    proofs,
+                    blobs,
+                    mev,
+                    execution_requests,
+                },
+        } = match payload_with_data {
+            Some(payload_with_mev_and_versions) => payload_with_mev_and_versions,
             None => {
                 if self.beacon_state.post_capella().is_some()
                     || post_merge_state(&self.beacon_state).is_some()
@@ -1068,14 +1081,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     return Err(AnyhowError::msg("no execution payload to include in block"));
                 }
 
-                WithBlobsAndMev::with_default(None)
+                WithClientVersions::none(WithBlobsAndMev::with_default(None))
             }
         };
 
-        let without_state_root_with_payload = block_without_state_root
+        let mut without_state_root_with_payload = block_without_state_root
             .with_execution_payload(execution_payload)?
             .with_blob_kzg_commitments(commitments)
             .with_execution_requests(execution_requests);
+
+        if !self.options.disable_blockprint_graffiti {
+            let graffiti = build_graffiti(self.options.graffiti, client_versions);
+            without_state_root_with_payload.set_graffiti(graffiti);
+        }
 
         self.process_beacon_block(without_state_root_with_payload)
             .map(|(beacon_block, block_rewards)| {
@@ -1637,7 +1655,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     async fn local_execution_payload_result(
         &self,
-    ) -> Result<Option<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
+    ) -> Result<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>> {
         let snapshot = self.producer_context.controller.snapshot();
 
         let mut payload_id = self
@@ -1721,7 +1739,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
-        let payload_root = payload.value.hash_tree_root();
+        let payload_root = payload.result.value.hash_tree_root();
 
         self.producer_context
             .payload_cache
@@ -1737,7 +1755,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     // payloads are only valid before the Merge.
     async fn local_execution_payload_option(
         &self,
-    ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
+    ) -> Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         if self.producer_context.fake_execution_payloads {
             let slot = self.beacon_state.slot();
 
@@ -1755,7 +1773,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 );
 
                 match execution_payload {
-                    Ok(payload) => return Some(WithBlobsAndMev::with_default(payload)),
+                    Ok(payload) => {
+                        return Some(WithClientVersions::none(WithBlobsAndMev::with_default(
+                            payload,
+                        )))
+                    }
                     Err(error) => panic!("failed to produce fake payload: {error:?}"),
                 };
             }

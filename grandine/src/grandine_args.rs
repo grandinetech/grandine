@@ -32,7 +32,8 @@ use eth2_libp2p::{
 use features::Feature;
 use fork_choice_control::{StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL};
 use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
-use grandine_version::{APPLICATION_NAME, APPLICATION_NAME_AND_VERSION, APPLICATION_VERSION};
+use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
+use helper_functions::misc;
 use http_api::HttpApiConfig;
 use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
@@ -110,8 +111,14 @@ pub struct GrandineArgs {
     #[clap(flatten)]
     validator_api_options: ValidatorApiOptions,
 
-    #[clap(long, value_parser = parse_graffiti, default_value = APPLICATION_NAME_AND_VERSION)]
+    /// Default block graffiti. Blockprint graffiti will be appended when sufficient space is available.
+    /// See `--disable-blockprint-graffiti` to disable this behavior.
+    #[clap(long, value_parser = misc::parse_graffiti)]
     graffiti: Vec<H256>,
+
+    /// Disable appending blockprint graffiti. If specified, no blockprint graffiti will be appended.
+    #[clap(long)]
+    disable_blockprint_graffiti: bool,
 
     /// List of optional runtime features to enable
     #[clap(long, value_delimiter = ',')]
@@ -897,6 +904,7 @@ impl GrandineArgs {
             validator_options,
             validator_api_options,
             graffiti,
+            disable_blockprint_graffiti,
             mut features,
             command,
             ..
@@ -1309,6 +1317,7 @@ impl GrandineArgs {
             validators,
             keystore_storage_password_file,
             graffiti,
+            disable_blockprint_graffiti,
             max_empty_slots,
             suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
             default_builder_boost_factor,
@@ -1363,8 +1372,6 @@ struct Difference {
 
 #[derive(Debug, Error)]
 enum Error {
-    #[error("graffiti must be no longer than {} bytes", H256::len_bytes())]
-    GraffitiTooLong,
     // `clap` cannot check this. `clap::builder::PossibleValue` does not have a `requires` method.
     #[error("--configuration-file must be specified when connecting to custom network")]
     MissingConfigurationFileForCustom,
@@ -1394,15 +1401,6 @@ enum Error {
         service1: &'static str,
         service2: &'static str,
     },
-}
-
-fn parse_graffiti(string: &str) -> Result<H256> {
-    ensure!(string.len() <= H256::len_bytes(), Error::GraffitiTooLong);
-
-    let mut graffiti = H256::zero();
-    graffiti[..string.len()].copy_from_slice(string.as_bytes());
-
-    Ok(graffiti)
 }
 
 fn verify_preset<T: DeserializeOwned + Serialize>(
@@ -1945,11 +1943,8 @@ mod tests {
 
     #[test]
     fn graffiti_option_too_long() {
-        try_config_from_args([
-            "--graffiti",
-            "**test-graffiti*******************************",
-        ])
-        .expect_err("parse_graffiti should fail");
+        try_config_from_args(["--graffiti", "**test-graffiti******************"])
+            .expect_err("parse_graffiti should fail");
     }
 
     #[test]

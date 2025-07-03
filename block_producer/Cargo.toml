@@ -19,7 +19,9 @@ factory = { workspace = true }
 features = { workspace = true }
 fork_choice_control = { workspace = true }
 futures = { workspace = true }
+grandine_version = { workspace = true }
 helper_functions = { workspace = true }
+hex-literal = { workspace = true, optional = true }
 itertools = { workspace = true }
 keymanager = { workspace = true }
 log = { workspace = true }
@@ -31,6 +33,7 @@ serde_utils = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
+test-case = { workspace = true, optional = true }
 tokio = { workspace = true }
 transition_functions = { workspace = true }
 try_from_iterator = { workspace = true }
@@ -40,3 +43,6 @@ types = { workspace = true }
 
 [dev-dependencies]
 factory = { workspace = true }
+
+[features]
+stub-grandine-version = ['grandine_version/stub-grandine-version', 'hex-literal', 'test-case']

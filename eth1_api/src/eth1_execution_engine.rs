@@ -20,7 +20,7 @@ use types::{
 };
 use web3::types::U64;
 
-use crate::eth1_api::Eth1Api;
+use crate::{eth1_api::Eth1Api, WithClientVersions};
 
 #[derive(Constructor)]
 pub struct Eth1ExecutionEngine<P: Preset> {
@@ -149,7 +149,7 @@ impl<P: Preset> Eth1ExecutionEngine<P> {
     pub async fn get_execution_payload(
         &self,
         payload_id: PayloadId,
-    ) -> Result<WithBlobsAndMev<ExecutionPayload<P>, P>> {
+    ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         self.eth1_api.get_payload::<P>(payload_id).await
     }
 

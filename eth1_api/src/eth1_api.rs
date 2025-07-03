@@ -42,7 +42,7 @@ use crate::{
     deposit_event::DepositEvent,
     endpoints::{Endpoint, Endpoints},
     eth1_block::Eth1Block,
-    Eth1ApiToMetrics, Eth1ConnectionData,
+    Eth1ApiToMetrics, Eth1ConnectionData, WithClientVersions,
 };
 
 const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
@@ -53,6 +53,7 @@ const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
 pub const ENGINE_FORKCHOICE_UPDATED_V1: &str = "engine_forkchoiceUpdatedV1";
 pub const ENGINE_FORKCHOICE_UPDATED_V2: &str = "engine_forkchoiceUpdatedV2";
 pub const ENGINE_FORKCHOICE_UPDATED_V3: &str = "engine_forkchoiceUpdatedV3";
+pub const ENGINE_GET_CLIENT_VERSION_V1: &str = "engine_getClientVersionV1";
 pub const ENGINE_GET_EL_BLOBS_V1: &str = "engine_getBlobsV1";
 pub const ENGINE_GET_PAYLOAD_V1: &str = "engine_getPayloadV1";
 pub const ENGINE_GET_PAYLOAD_V2: &str = "engine_getPayloadV2";
@@ -67,6 +68,7 @@ pub const CAPABILITIES: &[&str] = &[
     ENGINE_FORKCHOICE_UPDATED_V1,
     ENGINE_FORKCHOICE_UPDATED_V2,
     ENGINE_FORKCHOICE_UPDATED_V3,
+    ENGINE_GET_CLIENT_VERSION_V1,
     ENGINE_GET_EL_BLOBS_V1,
     ENGINE_GET_PAYLOAD_V1,
     ENGINE_GET_PAYLOAD_V2,
@@ -112,12 +114,14 @@ impl Eth1Api {
         Ok(self
             .request_with_fallback(|(api, headers)| Ok(api.block_number(headers)), None)
             .await?
+            .result
             .as_u64())
     }
 
     pub async fn get_block(&self, block_id: BlockId) -> Result<Option<Eth1Block>> {
         self.request_with_fallback(|(api, headers)| Ok(api.block(block_id, headers)), None)
             .await?
+            .result
             .map(Eth1Block::try_from)
             .transpose()
     }
@@ -151,7 +155,8 @@ impl Eth1Api {
 
         let logs = self
             .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
-            .await?;
+            .await?
+            .result;
 
         if let Some(log) = logs.first() {
             if let Some(block_number) = log.block_number {
@@ -175,6 +180,7 @@ impl Eth1Api {
             Some(ENGINE_GET_EL_BLOBS_V1),
         )
         .await
+        .map(WithClientVersions::result)
     }
 
     pub async fn get_blocks(
@@ -220,6 +226,7 @@ impl Eth1Api {
         for log in self
             .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
             .await?
+            .result
         {
             let block_number = match log.block_number {
                 Some(block_number) => block_number.as_u64(),
@@ -262,6 +269,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
+                .map(WithClientVersions::result)
             }
             (ExecutionPayload::Capella(payload), None) => {
                 let payload_v2 = ExecutionPayloadV2::from(payload);
@@ -273,6 +281,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
+                .map(WithClientVersions::result)
             }
             (
                 ExecutionPayload::Deneb(payload),
@@ -294,6 +303,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
+                .map(WithClientVersions::result)
             }
             (
                 ExecutionPayload::Deneb(payload),
@@ -320,6 +330,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
+                .map(WithClientVersions::result)
             }
             _ => bail!(Error::InvalidParameters),
         }
@@ -369,6 +380,7 @@ impl Eth1Api {
                     None,
                 )
                 .await?
+                .result
             }
             Phase::Capella => {
                 self.execute(
@@ -378,6 +390,7 @@ impl Eth1Api {
                     None,
                 )
                 .await?
+                .result
             }
             Phase::Deneb => {
                 self.execute(
@@ -387,6 +400,7 @@ impl Eth1Api {
                     None,
                 )
                 .await?
+                .result
             }
             Phase::Electra => {
                 self.execute(
@@ -396,6 +410,7 @@ impl Eth1Api {
                     None,
                 )
                 .await?
+                .result
             }
             _ => {
                 // This match arm will silently match any new phases.
@@ -438,7 +453,7 @@ impl Eth1Api {
     pub async fn get_payload<P: Preset>(
         &self,
         payload_id: PayloadId,
-    ) -> Result<WithBlobsAndMev<ExecutionPayload<P>, P>> {
+    ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         match payload_id {
             PayloadId::Bellatrix(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
@@ -450,7 +465,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
-                .map(Into::into)
+                .map(|with_client_info| with_client_info.map(Into::into))
             }
             PayloadId::Capella(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
@@ -462,7 +477,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
-                .map(Into::into)
+                .map(|with_client_info| with_client_info.map(Into::into))
             }
             PayloadId::Deneb(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
@@ -474,7 +489,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
-                .map(Into::into)
+                .map(|with_client_info| with_client_info.map(Into::into))
             }
             PayloadId::Electra(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
@@ -486,7 +501,7 @@ impl Eth1Api {
                     None,
                 )
                 .await
-                .map(Into::into)
+                .map(|with_client_info| with_client_info.map(Into::into))
             }
         }
     }
@@ -497,7 +512,7 @@ impl Eth1Api {
         params: Vec<Value>,
         timeout: Option<Duration>,
         capability: Option<&str>,
-    ) -> Result<T> {
+    ) -> Result<WithClientVersions<T>> {
         let _timer = self.metrics.as_ref().map(|metrics| {
             prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
         });
@@ -525,7 +540,7 @@ impl Eth1Api {
         &self,
         request_from_api: R,
         capability: Option<&str>,
-    ) -> Result<O>
+    ) -> Result<WithClientVersions<O>>
     where
         R: Fn((Eth<Http>, Option<HeaderMap>)) -> Result<CallFuture<O, F>> + Sync + Send,
         O: DeserializeOwned + Send,
@@ -540,7 +555,11 @@ impl Eth1Api {
             match query {
                 Ok(result) => {
                     self.on_ok_response(endpoint);
-                    return Ok(result);
+
+                    return Ok(WithClientVersions {
+                        client_versions: Some(endpoint.get_client_versions()),
+                        result,
+                    });
                 }
                 Err(error) => {
                     self.on_error_response(endpoint);
@@ -888,7 +907,7 @@ mod tests {
         ));
 
         let payload_id = PayloadId::Capella(H64(hex!("a5f7426cdca69a73")));
-        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
+        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?.result;
 
         assert_eq!(payload.value.phase(), Phase::Capella);
 
@@ -965,7 +984,7 @@ mod tests {
         ));
 
         let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
-        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
+        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?.result;
 
         assert_eq!(payload.value.phase(), Phase::Deneb);
         assert_eq!(
@@ -1049,7 +1068,7 @@ mod tests {
         ));
 
         let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
-        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?;
+        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?.result;
 
         assert_eq!(payload.value.phase(), Phase::Deneb);
         assert_eq!(

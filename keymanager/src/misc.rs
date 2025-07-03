@@ -1,7 +1,6 @@
 use anyhow::Error as AnyhowError;
 use serde::Serialize;
 use thiserror::Error;
-use types::phase0::primitives::H256;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -11,8 +10,6 @@ pub enum Error {
     CannotLoadPassword { error: AnyhowError },
     #[error("key already exists")]
     Duplicate,
-    #[error("graffiti must be no longer than {} bytes", H256::len_bytes())]
-    GraffitiTooLong,
     #[error("key not found")]
     NotFound,
     #[error("number of passwords does not match number of keystores")]

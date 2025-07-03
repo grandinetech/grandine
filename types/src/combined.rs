@@ -583,6 +583,29 @@ impl<P: Preset> SszHash for BeaconBlock<P> {
 }
 
 impl<P: Preset> BeaconBlock<P> {
+    pub const fn set_graffiti(&mut self, graffiti: H256) {
+        match self {
+            Self::Phase0(block) => {
+                block.body.graffiti = graffiti;
+            }
+            Self::Altair(block) => {
+                block.body.graffiti = graffiti;
+            }
+            Self::Bellatrix(block) => {
+                block.body.graffiti = graffiti;
+            }
+            Self::Capella(block) => {
+                block.body.graffiti = graffiti;
+            }
+            Self::Deneb(block) => {
+                block.body.graffiti = graffiti;
+            }
+            Self::Electra(block) => {
+                block.body.graffiti = graffiti;
+            }
+        }
+    }
+
     pub fn with_zero_signature(self) -> SignedBeaconBlock<P> {
         self.with_signature(SignatureBytes::zero())
     }

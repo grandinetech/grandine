@@ -1,17 +1,16 @@
 use std::{path::Path, str};
 
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use bls::PublicKeyBytes;
 use bytesize::ByteSize;
 use database::{Database, DatabaseMode};
 use derive_more::Display;
+use helper_functions::misc;
 use serde::{de::DeserializeOwned, Serialize};
 use types::{
     bellatrix::primitives::Gas,
     phase0::primitives::{ExecutionAddress, H256},
 };
-
-use crate::misc::Error;
 
 const DB_MAX_SIZE: ByteSize = ByteSize::gib(1);
 
@@ -108,7 +107,7 @@ impl ProposerConfigs {
     }
 
     pub fn set_graffiti(&self, pubkey: PublicKeyBytes, graffiti: &str) -> Result<()> {
-        self.db_put(GraffitiByPubkey(pubkey), &parse_graffiti(graffiti)?)
+        self.db_put(GraffitiByPubkey(pubkey), &misc::parse_graffiti(graffiti)?)
     }
 
     pub fn delete_graffiti(&self, pubkey: PublicKeyBytes) -> Result<()> {
@@ -134,15 +133,6 @@ impl ProposerConfigs {
     fn db_remove(&self, key: impl Display) -> Result<()> {
         self.database.delete(key.to_string())
     }
-}
-
-fn parse_graffiti(string: &str) -> Result<H256> {
-    ensure!(string.len() <= H256::len_bytes(), Error::GraffitiTooLong);
-
-    let mut graffiti = H256::zero();
-    graffiti[..string.len()].copy_from_slice(string.as_bytes());
-
-    Ok(graffiti)
 }
 
 #[derive(Display)]
@@ -182,7 +172,7 @@ mod tests {
     const PUBKEY: PublicKeyBytes = PublicKeyBytes::repeat_byte(1);
 
     fn build_proposer_configs(validator_dir: Option<&Path>) -> Result<ProposerConfigs> {
-        let graffiti_bytes = parse_graffiti(DEFAULT_GRAFFITI)?;
+        let graffiti_bytes = misc::parse_graffiti(DEFAULT_GRAFFITI)?;
 
         match validator_dir {
             Some(dir) => ProposerConfigs::new_persistent(

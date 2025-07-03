@@ -29,6 +29,8 @@ use futures::{
     stream::StreamExt as _,
 };
 use genesis::AnchorCheckpointProvider;
+use grandine_version::APPLICATION_NAME_WITH_VERSION_AND_COMMIT;
+use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use http_api_utils::EventChannels;
 use keymanager::KeyManager;
@@ -187,7 +189,7 @@ pub async fn run_after_genesis<P: Preset>(
         metrics.clone(),
     ));
 
-    eth1_api::spawn_exchange_capabilities_task(
+    eth1_api::spawn_exchange_capabilities_and_versions_task(
         eth1_api.clone_arc(),
         &dedicated_executor_low_priority,
     );
@@ -511,7 +513,13 @@ pub async fn run_after_genesis<P: Preset>(
         .graffiti
         .first()
         .copied()
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            if validator_config.disable_blockprint_graffiti {
+                H256::default()
+            } else {
+                misc::parse_graffiti(APPLICATION_NAME_WITH_VERSION_AND_COMMIT).unwrap_or_default()
+            }
+        });
 
     let keymanager = if in_memory {
         Arc::new(KeyManager::new_in_memory(
