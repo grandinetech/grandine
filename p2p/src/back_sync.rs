@@ -314,7 +314,7 @@ impl<P: Preset> Batch<P> {
             if block.message().slot() == GENESIS_SLOT {
                 // if it's a genesis block, return it as is.
                 // It will be validated against our own genesis_block during
-                // final checkpoint vaildation
+                // final checkpoint validation
                 verified_blocks.push(block.clone_arc());
             } else if let Some(parent) = blocks.peek() {
                 debug!("back-sync batch block: {} {:?}", message.slot(), actual);
