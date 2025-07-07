@@ -546,6 +546,7 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
     fn handle_block(
         &mut self,
         wait_group: W,
@@ -651,6 +652,10 @@ where
                                 });
                         }
                         BlockDataColumnAvailability::CompleteWithReconstruction => {
+                            if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                                self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                            }
+
                             if self
                                 .store
                                 .indices_of_missing_data_columns(&pending_block.block)
