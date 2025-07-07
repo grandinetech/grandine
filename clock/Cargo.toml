@@ -8,7 +8,6 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-arithmetic = { workspace = true }
 enum-iterator = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
@@ -21,6 +20,7 @@ tokio-stream = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
+arithmetic = { workspace = true }
 itertools = { workspace = true }
 nonzero_ext = { workspace = true }
 test-case = { workspace = true }
