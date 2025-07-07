@@ -14,6 +14,7 @@ use types::{
     combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::primitives::{Blob, KzgProof},
+    fulu::containers::DataColumnSidecar,
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -37,6 +38,7 @@ enum Step {
     Block {
         block: PathBuf,
         blobs: Option<PathBuf>,
+        columns: Option<Vec<PathBuf>>,
         proofs: Option<Vec<KzgProof>>,
         #[serde(default = "serde_aux::field_attributes::bool_true")]
         valid: bool,
@@ -184,6 +186,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
             Step::Block {
                 block,
                 blobs,
+                columns,
                 proofs,
                 valid,
             } => {
@@ -192,19 +195,36 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
 
                 let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
 
-                let blobs = blobs
-                    .map(|path| case.ssz_default::<BlobBundle<P>>(path))
-                    .into_iter()
-                    .flatten();
+                let mut data_column_sidecar_count = 0;
+                if block.phase().is_peerdas_activated() {
+                    if let Some(paths) = columns {
+                        let data_column_sidecars = paths
+                            .into_iter()
+                            .map(|path| case.ssz_default::<DataColumnSidecar<P>>(path));
 
-                let proofs = proofs.into_iter().flatten();
+                        for data_column_sidecar in data_column_sidecars {
+                            data_column_sidecar_count += 1;
+                            context.on_data_column_sidecar(data_column_sidecar);
+                        }
+                    }
+                } else {
+                    let blobs = blobs
+                        .map(|path| case.ssz_default::<BlobBundle<P>>(path))
+                        .into_iter()
+                        .flatten();
+                    let proofs = proofs.into_iter().flatten();
 
-                // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
-                //                      Consider mocking `retrieve_blobs_and_proofs`
-                //                      from `consensus-specs` using something like
-                //                      `TestExecutionEngine`.
-                let blob_sidecars = misc::construct_blob_sidecars(&block, blobs, proofs)
-                    .expect("blob sidecars should be constructed successfully");
+                    // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
+                    //                      Consider mocking `retrieve_blobs_and_proofs`
+                    //                      from `consensus-specs` using something like
+                    //                      `TestExecutionEngine`.
+                    let blob_sidecars = misc::construct_blob_sidecars(&block, blobs, proofs)
+                        .expect("blob sidecars should be constructed successfully");
+
+                    for blob_sidecar in blob_sidecars {
+                        context.on_blob_sidecar(blob_sidecar);
+                    }
+                }
 
                 let expected_blob_count = block
                     .message()
@@ -213,10 +233,6 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
                     .map(|contiguous_list| contiguous_list.len())
                     .unwrap_or_default();
-
-                for blob_sidecar in blob_sidecars {
-                    context.on_blob_sidecar(blob_sidecar);
-                }
 
                 let beacon_block_root = block.message().hash_tree_root();
 
@@ -233,7 +249,15 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 }
 
                 if !valid && expected_blob_count > 0 {
-                    context.on_block_with_missing_blobs(&block, expected_blob_count);
+                    // If half of data column sidecars are available, we can reconstruct the rest
+                    // and consider the block valid
+                    if block.phase().is_peerdas_activated()
+                        && data_column_sidecar_count * 2 >= config.number_of_columns()
+                    {
+                        context.on_block_with_reconstructing_data_columns(&block);
+                    } else {
+                        context.on_block_with_missing_blobs(&block, expected_blob_count);
+                    }
                 } else if valid {
                     context.on_valid_block(&block);
                 } else {

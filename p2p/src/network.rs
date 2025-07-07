@@ -538,10 +538,10 @@ impl<P: Preset> Network<P> {
         if let Some(new_fork_digest) = self.fork_context.fork_digest_at_epoch(epoch) {
             let current_fork_digest = self.fork_context.current_fork_digest();
             if current_fork_digest != *new_fork_digest {
-                if phase_by_slot != phase_by_state {
-                    info!("switching from {phase_by_state} to {phase_by_slot}");
-                } else {
+                if phase_by_slot == phase_by_state {
                     info!("updating fork digest from {current_fork_digest} to {new_fork_digest}");
+                } else {
+                    info!("switching from {phase_by_state} to {phase_by_slot}");
                 }
 
                 self.fork_context
