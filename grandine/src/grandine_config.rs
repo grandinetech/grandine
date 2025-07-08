@@ -21,7 +21,7 @@ use types::{
 use validator::ValidatorApiConfig;
 
 use crate::{
-    commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
+    commands::GrandineCommand, grandine_args::LogLevel, predefined_network::PredefinedNetwork, validators::Validators,
 };
 
 #[expect(
@@ -73,6 +73,7 @@ pub struct GrandineConfig {
     pub kzg_backend: KzgBackend,
     pub blacklisted_blocks: HashSet<H256>,
     pub report_validator_performance: bool,
+    pub log_level: LogLevel,
 }
 
 impl GrandineConfig {

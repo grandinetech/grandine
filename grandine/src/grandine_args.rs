@@ -80,6 +80,33 @@ use crate::{
     validators::Validators,
 };
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        Self::Info
+    }
+}
+
+impl From<LogLevel> for log::LevelFilter {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Error => log::LevelFilter::Error,
+            LogLevel::Warn => log::LevelFilter::Warn,
+            LogLevel::Info => log::LevelFilter::Info,
+            LogLevel::Debug => log::LevelFilter::Debug,
+            LogLevel::Trace => log::LevelFilter::Trace,
+        }
+    }
+}
+
 /// Grandine Team <info@grandine.io>
 /// High performance Ethereum consensus layer client
 #[derive(Parser)]
@@ -116,6 +143,10 @@ pub struct GrandineArgs {
     /// List of optional runtime features to enable
     #[clap(long, value_delimiter = ',')]
     features: Vec<Feature>,
+
+    /// Log level for runtime logging
+    #[clap(long, value_enum, default_value_t = LogLevel::default())]
+    log_level: LogLevel,
 
     #[clap(subcommand)]
     command: Option<GrandineCommand>,
@@ -898,6 +929,7 @@ impl GrandineArgs {
             validator_api_options,
             graffiti,
             mut features,
+            log_level,
             command,
             ..
         } = self;
@@ -1344,6 +1376,7 @@ impl GrandineArgs {
             kzg_backend,
             blacklisted_blocks: blacklisted_blocks.into_iter().collect(),
             report_validator_performance,
+            log_level,
         })
     }
 
