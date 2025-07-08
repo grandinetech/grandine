@@ -651,9 +651,10 @@ impl SyncManager {
                         }
                     }
                 }
-            } else if blob_serve_range_slot < max_slot {
+
+                // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
                 sync_batches.push(SyncBatch {
-                    target: SyncTarget::BlobSidecar,
+                    target: SyncTarget::Block,
                     direction: SyncDirection::Forward,
                     peer_id,
                     start_slot,
@@ -662,23 +663,36 @@ impl SyncManager {
                     retry_count: 0,
                     data_columns: None,
                 });
-            }
 
-            // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
-            sync_batches.push(SyncBatch {
-                target: SyncTarget::Block,
-                direction: SyncDirection::Forward,
-                peer_id,
-                start_slot,
-                count,
-                response_received: false,
-                retry_count: 0,
-                data_columns: None,
-            });
+                // TODO(peerdas-fulu): review this max requests cap
+                if sync_batches.len() >= peers_to_sync.len() / 2 {
+                    break;
+                }
+            } else {
+                if blob_serve_range_slot < max_slot {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::BlobSidecar,
+                        direction: SyncDirection::Forward,
+                        peer_id,
+                        start_slot,
+                        count,
+                        response_received: false,
+                        retry_count: 0,
+                        data_columns: None,
+                    });
+                }
 
-            // TODO(peerdas-fulu): review this max requests cap
-            if sync_batches.len() >= peers_to_sync.len() / 2 {
-                break;
+                // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
+                sync_batches.push(SyncBatch {
+                    target: SyncTarget::Block,
+                    direction: SyncDirection::Forward,
+                    peer_id,
+                    start_slot,
+                    count,
+                    response_received: false,
+                    retry_count: 0,
+                    data_columns: None,
+                });
             }
         }
 
