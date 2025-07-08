@@ -333,12 +333,12 @@ fn main() -> ExitCode {
 
 #[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
-    binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
-    binary_utils::initialize_rayon()?;
-
     let config = GrandineArgs::try_parse()?
         .try_into_config()
         .map_err(GrandineArgs::clap_error)?;
+
+    binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"), config.log_level.into())?;
+    binary_utils::initialize_rayon()?;
 
     info!("starting beacon node");
     config.report();
@@ -387,6 +387,7 @@ fn try_main() -> Result<()> {
         kzg_backend,
         blacklisted_blocks,
         report_validator_performance,
+        ..
     } = config;
 
     features.into_iter().for_each(Feature::enable);
