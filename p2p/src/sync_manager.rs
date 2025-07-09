@@ -16,7 +16,7 @@ use cached::{Cached as _, TimedSizedCache};
 use eth1_api::RealController;
 use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, NetworkGlobals, PeerId};
 use helper_functions::misc;
-use itertools::Itertools as _;
+use itertools::Itertools;
 use log::{debug, log, Level};
 use lru::LruCache;
 use prometheus_metrics::Metrics;
@@ -32,6 +32,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    nonstandard::ColumnIndicesByRoot,
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -101,6 +102,7 @@ pub struct SyncManager {
     network_globals: Arc<NetworkGlobals>,
     custodial_peers: HashMap<ColumnIndex, HashSet<PeerId>>,
     data_column_range_received: HashMap<Slot, HashSet<ColumnIndex>>,
+    data_columns_received: HashMap<Slot, HashMap<H256, HashSet<ColumnIndex>>>,
 }
 
 impl SyncManager {
@@ -122,6 +124,7 @@ impl SyncManager {
             network_globals,
             custodial_peers: HashMap::new(),
             data_column_range_received: HashMap::new(),
+            data_columns_received: HashMap::new(),
         }
     }
 
@@ -147,6 +150,7 @@ impl SyncManager {
 
     pub fn record_received_data_column_sidecar_response(
         &mut self,
+        slot: Slot,
         data_column_identifier: DataColumnIdentifier,
         peer_id: PeerId,
         app_request_id: AppRequestId,
@@ -156,6 +160,14 @@ impl SyncManager {
             &peer_id,
             app_request_id,
         );
+
+        if self.record_data_column_received_at_slot(slot, data_column_identifier) {
+            debug!("received data column {data_column_identifier:?} at slot {slot}");
+        } else {
+            debug!(
+                "data column {data_column_identifier:?} at slot {slot} has already been received"
+            );
+        }
 
         if let Some(start_slot) = self.data_column_requests.request_start_slot(app_request_id) {
             let received_response = self
@@ -172,11 +184,17 @@ impl SyncManager {
         }
     }
 
-    pub fn get_data_column_range_received(
-        &self,
-        start_slot: Slot,
-    ) -> Option<&HashSet<ColumnIndex>> {
-        self.data_column_range_received.get(&start_slot)
+    pub fn record_data_column_received_at_slot(
+        &mut self,
+        slot: Slot,
+        data_column_identifier: DataColumnIdentifier,
+    ) -> bool {
+        self.data_columns_received
+            .entry(slot)
+            .or_default()
+            .entry(data_column_identifier.block_root)
+            .or_default()
+            .insert(data_column_identifier.index)
     }
 
     pub fn request_direction(&mut self, app_request_id: AppRequestId) -> Option<SyncDirection> {
@@ -334,18 +352,14 @@ impl SyncManager {
                         }
 
                         if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
-                            let columns_to_request = if let Some(received_response) =
-                                self.get_data_column_range_received(start_slot)
-                            {
-                                self.network_globals
-                                    .sampling_columns()
-                                    .iter()
-                                    .filter(|index| !received_response.contains(index))
-                                    .copied()
-                                    .collect()
-                            } else {
-                                self.network_globals.sampling_columns()
-                            };
+                            let received_response = self.get_data_column_range_received(start_slot);
+                            let columns_to_request = self
+                                .network_globals
+                                .sampling_columns()
+                                .iter()
+                                .filter(|index| !received_response.contains(index))
+                                .copied()
+                                .collect_vec();
 
                             if !columns_to_request.is_empty() {
                                 self.log(
@@ -359,9 +373,8 @@ impl SyncManager {
                                 );
 
                                 match self.map_peer_custody_columns(
-                                    columns_to_request,
-                                    Some(&peers_to_sync),
-                                    None,
+                                    &columns_to_request,
+                                    &peers_to_sync,
                                     None,
                                 ) {
                                     Ok(peer_custody_columns_mapping) => {
@@ -522,9 +535,8 @@ impl SyncManager {
                     < self.last_sync_range.start.saturating_add(slots_per_request) - 1
                 && self
                     .get_data_column_range_received(self.last_sync_range.start)
-                    .is_some_and(|received| {
-                        received.len() < self.network_globals.sampling_columns_count()
-                    })
+                    .len()
+                    < self.network_globals.sampling_columns_count()
             {
                 // Keep requesting the last sync range for remaining data columns
                 self.log(
@@ -597,13 +609,13 @@ impl SyncManager {
 
             if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
                 if data_column_serve_range_slot < max_slot {
-                    let mut columns_to_request = self.network_globals.sampling_columns().clone();
-                    if let Some(received_response) = self.get_data_column_range_received(start_slot)
-                    {
-                        if !redownloads_increased {
-                            columns_to_request.retain(|index| !received_response.contains(index))
-                        }
-                    }
+                    let received_response = self.get_data_column_range_received(start_slot);
+                    let columns_to_request = self
+                        .network_globals
+                        .sampling_columns()
+                        .into_iter()
+                        .filter(|index| !received_response.contains(index))
+                        .collect_vec();
 
                     if !columns_to_request.is_empty() {
                         // TODO(peerdas-fulu): Distributes requested columns among the minimal set of peers,
@@ -618,9 +630,8 @@ impl SyncManager {
                             ),
                         );
                         match self.map_peer_custody_columns(
-                            columns_to_request,
-                            Some(&peers_to_sync),
-                            None,
+                            &columns_to_request,
+                            &peers_to_sync,
                             None,
                         ) {
                             Ok(peer_custody_columns_mapping) => {
@@ -739,6 +750,10 @@ impl SyncManager {
             .ready_to_request_by_root(data_column_identifier, peer_id)
     }
 
+    pub fn ready_to_batch_request_data_column_by_roots(&mut self) -> bool {
+        self.data_column_requests.request_by_root_count() == 0
+    }
+
     pub fn add_blob_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
         self.log(
             Level::Debug,
@@ -826,10 +841,6 @@ impl SyncManager {
         data_columns_by_root: DataColumnsByRootIdentifier,
         peer_id: PeerId,
     ) -> Option<DataColumnsByRootIdentifier> {
-        self.log(Level::Debug, format_args!(
-            "add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})",
-        ));
-
         let DataColumnsByRootIdentifier {
             block_root,
             columns,
@@ -1015,6 +1026,35 @@ impl SyncManager {
         local_head_slot <= self.last_sync_head
     }
 
+    pub fn get_missing_columns_by_root(&self) -> Vec<ColumnIndicesByRoot> {
+        self.data_columns_received
+            .values()
+            .flat_map(|columns_by_root| {
+                columns_by_root.iter().map(|(block_root, column_indices)| {
+                    let missing_indices = self
+                        .network_globals
+                        .sampling_columns()
+                        .iter()
+                        .filter(|index| !column_indices.contains(index))
+                        .copied()
+                        .collect();
+
+                    ColumnIndicesByRoot {
+                        block_root: *block_root,
+                        columns: missing_indices,
+                    }
+                })
+            })
+            .collect_vec()
+    }
+
+    pub fn get_data_column_range_received(&self, start_slot: Slot) -> Vec<ColumnIndex> {
+        self.data_column_range_received
+            .get(&start_slot)
+            .map(|indices| indices.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
     /// Log a message with peer count information.
     fn log(&self, level: Level, message: impl Display) {
         log!(
@@ -1146,8 +1186,7 @@ impl SyncManager {
     fn get_random_custodial_peer(
         &self,
         column_index: ColumnIndex,
-        request_from_peers: Option<&[PeerId]>,
-        preferred_peer: Option<PeerId>,
+        request_from_peers: &[PeerId],
         skip_peer: Option<PeerId>,
     ) -> Option<PeerId> {
         let mut custodial_peers = if let Some(peers) = self.custodial_peers.get(&column_index) {
@@ -1162,42 +1201,31 @@ impl SyncManager {
         }
 
         // Choose only within specified peers, e.g. non-busy peers to sync
-        if let Some(peers) = request_from_peers {
-            custodial_peers.retain(|peer| peers.contains(peer));
-        }
-
-        // Prioritize the most coverage peer if it custody the column
-        if let Some(peer) = preferred_peer {
-            if custodial_peers.contains(&peer) {
-                return preferred_peer;
-            }
-        }
-
-        custodial_peers.choose(&mut thread_rng()).copied()
+        custodial_peers
+            .into_iter()
+            .filter(|peer| request_from_peers.contains(peer))
+            .choose(&mut thread_rng())
     }
 
     pub fn map_peer_custody_columns(
         &self,
-        column_indices: HashSet<ColumnIndex>,
-        request_from_peers: Option<&[PeerId]>,
-        preferred_peer: Option<PeerId>,
+        column_indices: &[ColumnIndex],
+        request_from_peers: &[PeerId],
         skip_peer: Option<PeerId>,
     ) -> Result<HashMap<PeerId, Vec<ColumnIndex>>> {
         let mut peer_columns_mapping: HashMap<PeerId, Vec<ColumnIndex>> = HashMap::new();
 
         for column_index in column_indices {
-            let Some(custodial_peer) = self.get_random_custodial_peer(
-                column_index,
-                request_from_peers,
-                preferred_peer,
-                skip_peer,
-            ) else {
+            let Some(custodial_peer) =
+                self.get_random_custodial_peer(*column_index, request_from_peers, skip_peer)
+            else {
                 continue;
             };
 
-            let peer_custody_columns = peer_columns_mapping.entry(custodial_peer).or_default();
-
-            peer_custody_columns.push(column_index);
+            peer_columns_mapping
+                .entry(custodial_peer)
+                .or_default()
+                .push(*column_index);
         }
 
         (!peer_columns_mapping.is_empty())
@@ -1205,8 +1233,8 @@ impl SyncManager {
             .ok_or_else(|| MapPeerCustodyError::NoAvailablePeers.into())
     }
 
-    /// Get the most preferred peer which are available at the time of the request, and has the most custodial coverage among all
-    pub fn find_most_coverage_peer(&self, column_indices: &HashSet<ColumnIndex>) -> Option<PeerId> {
+    /// Get the most coverage peers which are available at the time of the request, and has the most custodial coverage among all
+    pub fn find_most_coverage_peers(&self, column_indices: &[ColumnIndex]) -> Vec<PeerId> {
         let mut coverage_count: HashMap<&PeerId, usize> = HashMap::new();
 
         let busy_peers = self.busy_peers();
@@ -1220,8 +1248,10 @@ impl SyncManager {
 
         coverage_count
             .into_iter()
-            .max_by_key(|&(_, count)| count)
+            .sorted_by_key(|a| core::cmp::Reverse(a.1))
+            .take(column_indices.len().saturating_div(10))
             .map(|(peer, _)| *peer)
+            .collect_vec()
     }
 
     pub fn expired_blob_range_batches(
@@ -1249,6 +1279,8 @@ impl SyncManager {
     }
 
     pub fn prune_old_data_column_range_received_response(&mut self) {
+        self.data_columns_received
+            .retain(|slot, _| *slot > self.last_sync_head);
         self.data_column_range_received
             .retain(|slot, _| *slot >= self.last_sync_head);
     }
