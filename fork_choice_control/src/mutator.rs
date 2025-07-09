@@ -677,18 +677,20 @@ where
                                 Ok(ValidationOutcome::Ignore(false)),
                             );
 
-                            let data_column_ids = missing_column_indices
-                                .into_iter()
-                                .map(|index| DataColumnIdentifier { block_root, index })
-                                .collect_vec();
+                            if self.store.is_forward_synced() {
+                                let data_column_ids = missing_column_indices
+                                    .into_iter()
+                                    .map(|index| DataColumnIdentifier { block_root, index })
+                                    .collect_vec();
 
-                            let peer_id = pending_block.origin.peer_id();
+                                let peer_id = pending_block.origin.peer_id();
 
-                            self.request_blobs_from_execution_engine(
-                                pending_block.block.clone_arc(),
-                                data_column_ids.into(),
-                                peer_id,
-                            );
+                                self.request_blobs_from_execution_engine(
+                                    pending_block.block.clone_arc(),
+                                    data_column_ids.into(),
+                                    peer_id,
+                                );
+                            }
 
                             self.delay_block_until_blobs(block_root, pending_block);
                         }
