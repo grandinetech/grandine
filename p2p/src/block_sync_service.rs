@@ -31,7 +31,16 @@ use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use types::{
-    config::Config, deneb::containers::BlobIdentifier, fulu::{containers::{DataColumnIdentifier, DataColumnsByRootIdentifier}, primitives::ColumnIndex}, nonstandard::ColumnIndicesByRoot, phase0::primitives::{Slot, H256}, preset::Preset, traits::SignedBeaconBlock as _
+    config::Config,
+    deneb::containers::BlobIdentifier,
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+        primitives::ColumnIndex,
+    },
+    nonstandard::ColumnIndicesByRoot,
+    phase0::primitives::{Slot, H256},
+    preset::Preset,
+    traits::SignedBeaconBlock as _,
 };
 use validator_statistics::ValidatorStatistics;
 
@@ -704,18 +713,14 @@ impl<P: Preset> BlockSyncService<P> {
                 SyncTarget::DataColumnSidecar => {
                     if let Some(ref data_columns) = batch.data_columns {
                         let mut request_id = self.request_id()?;
-                        let columns_to_request = if let Some(received_response) = self
+                        let received_response = self
                             .sync_manager
-                            .get_data_column_range_received(batch.start_slot)
-                        {
-                            data_columns
-                                .iter()
-                                .filter(|index| !received_response.contains(index))
-                                .copied()
-                                .collect::<HashSet<_>>()
-                        } else {
-                            data_columns.iter().copied().collect()
-                        };
+                            .get_data_column_range_received(batch.start_slot);
+                        let columns_to_request = data_columns
+                            .iter()
+                            .filter(|index| !received_response.contains(index))
+                            .copied()
+                            .collect_vec();
 
                         if !columns_to_request.is_empty() {
                             debug!(
@@ -723,12 +728,12 @@ impl<P: Preset> BlockSyncService<P> {
                                 columns_to_request.len(),
                                 columns_to_request.iter().join(", "),
                             );
+
                             let peers_to_request = self
                                 .sync_manager
                                 .find_most_coverage_peers(&columns_to_request);
-
                             match self.sync_manager.map_peer_custody_columns(
-                                columns_to_request,
+                                &columns_to_request,
                                 &peers_to_request,
                                 Some(peer_id),
                             ) {
@@ -828,11 +833,14 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         // Batch request data columns by root for missing columns if any
-        if self.sync_manager.ready_to_batch_request_data_column_by_roots() {
+        if self
+            .sync_manager
+            .ready_to_batch_request_data_column_by_roots()
+        {
             self.batch_request_missing_data_columns()?;
         }
 
-        // check if the bach request has been finished, then proceed with the new sync batch round 
+        // check if the bach request has been finished, then proceed with the new sync batch round
 
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();
@@ -1073,7 +1081,7 @@ impl<P: Preset> BlockSyncService<P> {
                         .sync_manager
                         .ready_to_request_data_column_by_root(&identifier, None)
             })
-            .collect::<HashSet<_>>();
+            .collect_vec();
 
         if missing_indices.is_empty() {
             debug!(
@@ -1084,11 +1092,10 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let peers_to_request = self.sync_manager.find_most_coverage_peers(&missing_indices);
-        match self.sync_manager.map_peer_custody_columns(
-            missing_indices,
-            &peers_to_request,
-            None,
-        ) {
+        match self
+            .sync_manager
+            .map_peer_custody_columns(&missing_indices, &peers_to_request, None)
+        {
             Ok(peer_custody_columns_mapping) => {
                 for (peer_id, column_indices) in peer_custody_columns_mapping {
                     let request_id = self.request_id()?;
@@ -1125,47 +1132,62 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn batch_request_missing_data_columns(&mut self) -> Result<()> {
-        let mut missing_column_indices = HashSet::new();
         let mut missing_column_by_indices: HashMap<ColumnIndex, HashSet<H256>> = HashMap::new();
-        for column_indices_by_root in self.sync_manager.get_missing_columns_by_root() {
-            let ColumnIndicesByRoot { block_root, columns } = column_indices_by_root;
-            missing_column_indices.extend(&columns);
+        for ColumnIndicesByRoot {
+            block_root,
+            columns,
+        } in self.sync_manager.get_missing_columns_by_root()
+        {
+            // let  = column_indices_by_root;
+            if self.controller.contains_block(block_root) {
+                continue;
+            }
 
-            for index in columns.into_iter()
-                .filter(|index| {
-                    let identifier = DataColumnIdentifier {
-                        block_root,
-                        index: *index,
-                    };
+            for index in columns.into_iter().filter(|index| {
+                let identifier = DataColumnIdentifier {
+                    block_root,
+                    index: *index,
+                };
 
-                    !self.received_data_column_sidecars.contains_key(&identifier)
-                        && !self.controller.contains_block(block_root)
-                        && self
-                            .sync_manager
-                            .ready_to_request_data_column_by_root(&identifier, None)
-                })
-            {
-                missing_column_by_indices.entry(index).or_default().insert(block_root);
+                !self.received_data_column_sidecars.contains_key(&identifier)
+                    && self
+                        .sync_manager
+                        .ready_to_request_data_column_by_root(&identifier, None)
+            }) {
+                missing_column_by_indices
+                    .entry(index)
+                    .or_default()
+                    .insert(block_root);
             }
         }
 
+        // Early return if no missing columns found
+        if missing_column_by_indices.is_empty() {
+            return Ok(());
+        }
+
         // Find the best peer coverage for these missing columns
+        let missing_column_indices = missing_column_by_indices.keys().copied().collect_vec();
         let peers_to_request = self
             .sync_manager
             .find_most_coverage_peers(&missing_column_indices);
         match self.sync_manager.map_peer_custody_columns(
-            missing_column_indices,
+            &missing_column_indices,
             &peers_to_request,
             None,
         ) {
             Ok(peer_custody_columns_mapping) => {
                 for (peer_id, column_indices) in peer_custody_columns_mapping {
                     let request_id = self.request_id()?;
-                    let mut column_indices_by_root: HashMap<H256, Vec<ColumnIndex>> = HashMap::new();
+                    let mut column_indices_by_root: HashMap<H256, Vec<ColumnIndex>> =
+                        HashMap::new();
                     for index in column_indices {
                         if let Some(block_roots) = missing_column_by_indices.get(&index) {
                             block_roots.iter().for_each(|block_root| {
-                                column_indices_by_root.entry(*block_root).or_default().push(index);
+                                column_indices_by_root
+                                    .entry(*block_root)
+                                    .or_default()
+                                    .push(index);
                             })
                         }
                     }
@@ -1175,8 +1197,9 @@ impl<P: Preset> BlockSyncService<P> {
                         .filter_map(|(block_root, column_indices)| {
                             let data_columns_by_root = DataColumnsByRootIdentifier {
                                 block_root,
-                                columns: ContiguousList::try_from(column_indices)
-                                    .expect("column indices must not be more than NUMBER_OF_COLUMNS")
+                                columns: ContiguousList::try_from(column_indices).expect(
+                                    "column indices must not be more than NUMBER_OF_COLUMNS",
+                                ),
                             };
 
                             self.sync_manager
@@ -1190,13 +1213,9 @@ impl<P: Preset> BlockSyncService<P> {
                             by_roots_request.len(),
                             by_roots_request.iter().map(|r| r.columns.len()).sum::<usize>()
                         );
-                        
-                        SyncToP2p::RequestDataColumnsByRoot(
-                            request_id,
-                            peer_id,
-                            by_roots_request,
-                        )
-                        .send(&self.sync_to_p2p_tx);
+
+                        SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, by_roots_request)
+                            .send(&self.sync_to_p2p_tx);
                     }
                 }
             }
@@ -1206,7 +1225,7 @@ impl<P: Preset> BlockSyncService<P> {
                 self.sync_manager.refresh_custodial_peers();
             }
         }
-        
+
         Ok(())
     }
 
