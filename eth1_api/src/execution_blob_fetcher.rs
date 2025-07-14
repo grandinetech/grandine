@@ -4,7 +4,10 @@ use anyhow::Result;
 use dashmap::DashMap;
 use derive_more::{derive::Constructor, IntoIterator};
 use eth2_libp2p::PeerId;
-use execution_engine::{BlobAndProofV1, BlobAndProofV2, EngineGetBlobsParams};
+use execution_engine::{
+    BlobAndProofV1, BlobAndProofV2, BlockOrDataColumnSidecar, EngineGetBlobsParams,
+    EngineGetBlobsV1Params, EngineGetBlobsV2Params,
+};
 use fork_choice_control::Wait;
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -45,16 +48,18 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
     pub async fn run(mut self) -> Result<()> {
         while let Some(message) = self.rx.next().await {
             match message {
-                Eth1ApiToBlobFetcher::GetBlobs {
-                    block,
-                    params,
-                    peer_id,
-                } => match params {
-                    EngineGetBlobsParams::Blobs(blob_identifiers) => {
-                        self.get_blobs_v1(block, blob_identifiers, peer_id).await
-                    }
-                    EngineGetBlobsParams::DataColumns(identifiers) => {
-                        self.get_blobs_v2(block, identifiers, peer_id).await
+                Eth1ApiToBlobFetcher::GetBlobs(params) => match params {
+                    EngineGetBlobsParams::V1(EngineGetBlobsV1Params {
+                        block,
+                        blob_identifiers,
+                        peer_id,
+                    }) => self.get_blobs_v1(block, blob_identifiers, peer_id).await,
+                    EngineGetBlobsParams::V2(EngineGetBlobsV2Params {
+                        block_or_sidecar,
+                        data_column_identifiers,
+                    }) => {
+                        self.get_blobs_v2(block_or_sidecar, data_column_identifiers)
+                            .await
                     }
                 },
                 Eth1ApiToBlobFetcher::Stop => break,
@@ -187,12 +192,12 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
     #[expect(clippy::too_many_lines)]
     async fn get_blobs_v2(
         &self,
-        block: Arc<SignedBeaconBlock<P>>,
+        block_or_sidecar: BlockOrDataColumnSidecar<P>,
         data_column_identifiers: Vec<DataColumnIdentifier>,
-        _peer_id: Option<PeerId>,
     ) {
-        let slot = block.message().slot();
-        let block_root = block.message().hash_tree_root();
+        let slot = block_or_sidecar.slot();
+        let block_root = block_or_sidecar.block_root();
+        let block_header = block_or_sidecar.signed_block_header().message;
 
         if self.controller.contains_block(block_root)
             || self.sidecars_construction_started.contains_key(&block_root)
@@ -201,8 +206,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
-        if let Some(body) = block.message().body().post_deneb() {
-            let block_header = block.to_header().message;
+        if let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() {
             let missing_columns_indices = data_column_identifiers
                 .iter()
                 .filter(|identifier| {
@@ -224,9 +228,8 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             if self.controller.is_forward_synced()
                 && !self.controller.store_config().disable_engine_getblobs
             {
-                let expected_blobs_count = body.blob_kzg_commitments().len();
-                let versioned_hashes = body
-                    .blob_kzg_commitments()
+                let expected_blobs_count = kzg_commitments.len();
+                let versioned_hashes = kzg_commitments
                     .iter()
                     .copied()
                     .map(misc::kzg_commitment_to_versioned_hash)
@@ -257,11 +260,19 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     self.controller.store_config().kzg_backend,
                                 ) {
                                     Ok(cells_and_kzg_proofs) => {
-                                        match eip_7594::construct_data_column_sidecars(
-                                            &block,
-                                            &cells_and_kzg_proofs,
-                                            self.controller.chain_config(),
-                                        ) {
+                                        let result = match block_or_sidecar {
+                                            BlockOrDataColumnSidecar::Block(block) => eip_7594::construct_data_column_sidecars(
+                                                &block,
+                                                &cells_and_kzg_proofs,
+                                                self.controller.chain_config(),
+                                            ),
+                                            BlockOrDataColumnSidecar::Sidecar(sidecar) => eip_7594::construct_data_column_sidecars_from_sidecar(
+                                                &sidecar,
+                                                &cells_and_kzg_proofs,
+                                                self.controller.chain_config(),
+                                            ),
+                                        };
+                                        match result {
                                             Ok(data_columns) => {
                                                 self.sidecars_construction_started
                                                     .insert(block_root, slot);

@@ -6,8 +6,8 @@ use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::GossipId;
 use execution_engine::{
-    EngineGetBlobsParams, ExecutionServiceMessage, MockExecutionEngine, PayloadStatusV1,
-    PayloadValidationStatus,
+    BlockOrDataColumnSidecar, EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params,
+    ExecutionServiceMessage, MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
@@ -311,26 +311,42 @@ impl<P: Preset> Context<P> {
         self.on_valid_block(block);
 
         let block_root = block.message().hash_tree_root();
-        let identifiers = (0..blob_count)
-            .map(|index| BlobIdentifier {
-                block_root,
-                index: index.try_into().expect("usize should fit to u64"),
-            })
-            .collect::<Vec<_>>();
 
         match self.next_execution_service_message() {
-            Some(ExecutionServiceMessage::GetBlobs {
-                block: block_with_missing_blobs,
-                params,
-                peer_id: _,
-            }) => {
-                // Only check when calling `engine_getBlobsV1` since V2 we need/request all blobs
-                // in the block
-                if let EngineGetBlobsParams::Blobs(blob_identifiers) = params {
-                    assert_eq!(blob_identifiers, identifiers);
+            Some(ExecutionServiceMessage::GetBlobs(params)) => match params {
+                EngineGetBlobsParams::V1(EngineGetBlobsV1Params {
+                    block: block_with_missing_blobs,
+                    blob_identifiers,
+                    peer_id: _,
+                }) => {
+                    let expected_identifiers = (0..blob_count)
+                        .map(|index| BlobIdentifier {
+                            block_root,
+                            index: index.try_into().expect("usize should fit to u64"),
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(blob_identifiers, expected_identifiers);
+                    assert_eq!(block_with_missing_blobs, *block);
                 }
-                assert_eq!(block_with_missing_blobs, *block);
-            }
+                EngineGetBlobsParams::V2(EngineGetBlobsV2Params {
+                    block_or_sidecar,
+                    data_column_identifiers,
+                }) => {
+                    assert!(data_column_identifiers
+                        .iter()
+                        .all(|id| id.block_root == block_root));
+                    assert!(!data_column_identifiers.is_empty());
+
+                    match block_or_sidecar {
+                        BlockOrDataColumnSidecar::Block(block_with_missing_blobs) => {
+                            assert_eq!(block_with_missing_blobs, *block)
+                        }
+                        BlockOrDataColumnSidecar::Sidecar(data_column_sidecar) => {
+                            assert_eq!(data_column_sidecar.signed_block_header, block.to_header())
+                        }
+                    }
+                }
+            },
             _ => panic!("ExecutionServiceMessage::GetBlobs expected"),
         }
     }

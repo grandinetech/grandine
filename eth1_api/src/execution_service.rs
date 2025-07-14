@@ -45,11 +45,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                         &self.dedicated_executor,
                     );
                 }
-                ExecutionServiceMessage::GetBlobs {
-                    block,
-                    params,
-                    peer_id,
-                } => {
+                ExecutionServiceMessage::GetBlobs(params) => {
                     // Fetch blobs from the EL in a separate task concurrently.
                     // Blob fetching from the EL should not delay the 'engine_forkchoiceUpdated'
                     // call, if all required blobs are received via gossip in the meantime.
@@ -57,12 +53,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     // The message to trigger blob fetching should not be sent directly from
                     // `Mutator` to `ExecutionBlobFetcher`, as fetching must occur only after
                     // the execution payload is validated with the `engine_newPayload` call.
-                    Eth1ApiToBlobFetcher::GetBlobs {
-                        block,
-                        params,
-                        peer_id,
-                    }
-                    .send(&self.blob_fetcher_tx);
+                    Eth1ApiToBlobFetcher::GetBlobs(params).send(&self.blob_fetcher_tx);
                 }
                 ExecutionServiceMessage::NotifyForkchoiceUpdated {
                     head_eth1_block_hash,
