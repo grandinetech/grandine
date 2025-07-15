@@ -97,7 +97,8 @@ use crate::{
     traits::{
         BeaconBlock as _, BeaconState as _, ExecutionPayload as ExecutionPayloadTrait,
         PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
-        PostElectraBeaconState, SignedBeaconBlock as _,
+        PostDenebBeaconBlockBody, PostElectraBeaconBlockBody, PostElectraBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 
@@ -774,6 +775,38 @@ impl<P: Preset> BeaconBlock<P> {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("block phase is pre-Bellatrix: {0}")]
+pub struct TryBlindedFromBlockError(Phase);
+
+impl<P: Preset> TryFrom<BeaconBlock<P>> for BlindedBeaconBlock<P> {
+    type Error = TryBlindedFromBlockError;
+
+    fn try_from(block: BeaconBlock<P>) -> Result<Self, Self::Error> {
+        let Some(body) = block.body().post_bellatrix() else {
+            return Err(TryBlindedFromBlockError(block.phase()));
+        };
+
+        let kzg_commitments = block
+            .body()
+            .post_deneb()
+            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+            .cloned();
+
+        let execution_requests = block
+            .body()
+            .post_electra()
+            .map(PostElectraBeaconBlockBody::execution_requests)
+            .cloned();
+
+        let payload_header = body.execution_payload().to_header();
+
+        Ok(block
+            .into_blinded(payload_header, kzg_commitments, execution_requests)
+            .expect("phases should match because payload header was taken from block"))
+    }
+}
+
 impl<P: Preset> From<BeaconBlock<P>> for SignedBeaconBlock<P> {
     fn from(beacon_block: BeaconBlock<P>) -> Self {
         match beacon_block {
@@ -870,6 +903,31 @@ impl<P: Preset> SszWrite for SignedBlindedBeaconBlock<P> {
             Self::Deneb(signed_blinded_block) => signed_blinded_block.write_variable(bytes),
             Self::Electra(signed_blinded_block) => signed_blinded_block.write_variable(bytes),
         }
+    }
+}
+
+impl<P: Preset> TryFrom<SignedBeaconBlock<P>> for SignedBlindedBeaconBlock<P> {
+    type Error = TryBlindedFromBlockError;
+
+    fn try_from(signed_block: SignedBeaconBlock<P>) -> Result<Self, Self::Error> {
+        let (beacon_block, signature) = signed_block.split();
+
+        let block = match beacon_block.try_into()? {
+            BlindedBeaconBlock::Bellatrix(message) => {
+                BellatrixSignedBlindedBeaconBlock { message, signature }.into()
+            }
+            BlindedBeaconBlock::Capella(message) => {
+                CapellaSignedBlindedBeaconBlock { message, signature }.into()
+            }
+            BlindedBeaconBlock::Deneb(message) => {
+                DenebSignedBlindedBeaconBlock { message, signature }.into()
+            }
+            BlindedBeaconBlock::Electra(message) => {
+                ElectraSignedBlindedBeaconBlock { message, signature }.into()
+            }
+        };
+
+        Ok(block)
     }
 }
 

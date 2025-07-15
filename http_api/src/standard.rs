@@ -1131,6 +1131,31 @@ pub async fn block_attestations_v2<P: Preset, W: Wait>(
         .pipe(Ok)
 }
 
+/// `GET /eth/v1/beacon/blinded_blocks/{block_id}`
+pub async fn blinded_block<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(block_id): EthPath<BlockId>,
+    headers: HeaderMap,
+) -> Result<EthResponse<SignedBlindedBeaconBlock<P>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: block,
+        status,
+        finalized,
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let signed_blinded_block: SignedBlindedBeaconBlock<P> = Arc::unwrap_or_clone(block)
+        .try_into()
+        .map_err(AnyhowError::new)?;
+
+    let version = signed_blinded_block.phase();
+
+    Ok(EthResponse::json_or_ssz(signed_blinded_block, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(version))
+}
+
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
 pub async fn blob_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,

@@ -28,11 +28,11 @@ use crate::{
     gui, middleware,
     misc::SyncedStatus,
     standard::{
-        beacon_events, beacon_heads, beacon_state, blob_sidecars, block, block_attestations,
-        block_attestations_v2, block_headers, block_id_headers, block_rewards, block_root,
-        config_spec, debug_fork_choice, deposit_contract, expected_withdrawals, fork_schedule,
-        genesis, get_state_validator_balances, get_state_validators, node_health, node_identity,
-        node_peer, node_peer_count, node_peers, node_syncing_status, node_version,
+        beacon_events, beacon_heads, beacon_state, blinded_block, blob_sidecars, block,
+        block_attestations, block_attestations_v2, block_headers, block_id_headers, block_rewards,
+        block_root, config_spec, debug_fork_choice, deposit_contract, expected_withdrawals,
+        fork_schedule, genesis, get_state_validator_balances, get_state_validators, node_health,
+        node_identity, node_peer, node_peer_count, node_peers, node_syncing_status, node_version,
         pool_attestations, pool_attestations_v2, pool_attester_slashings,
         pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_proposer_slashings,
         pool_voluntary_exits, post_state_validator_balances, post_state_validators,
@@ -433,6 +433,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         );
 
     Router::new()
+        .route(
+            "/eth/v1/beacon/blinded_blocks/{block_id}",
+            get(blinded_block),
+        )
         .route(
             "/eth/v1/beacon/blinded_blocks",
             post(publish_blinded_block).route_layer(axum::middleware::map_request_with_state(
