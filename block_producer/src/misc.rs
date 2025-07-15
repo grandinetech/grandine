@@ -12,7 +12,7 @@ use types::{
     nonstandard::Phase,
     phase0::primitives::{ExecutionAddress, ValidatorIndex, H256},
     preset::Preset,
-    traits::{BeaconBlock as _, PostDenebBeaconBlockBody, PostElectraBeaconBlockBody},
+    traits::BeaconBlock as _,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -83,31 +83,18 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
             return self;
         };
 
-        let Some(body) = block.body().post_bellatrix() else {
+        if block.body().post_bellatrix().is_none() {
             return Self::BeaconBlock(block);
-        };
+        }
 
         let execution_payload = block
             .clone()
             .execution_payload()
             .expect("post-Bellatrix blocks should have execution payload");
 
-        let kzg_commitments = block
-            .body()
-            .post_deneb()
-            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
-            .cloned();
-
-        let execution_requests = block
-            .body()
-            .post_electra()
-            .map(PostElectraBeaconBlockBody::execution_requests)
-            .cloned();
-
-        let payload_header = body.execution_payload().to_header();
         let blinded_block = block
-            .into_blinded(payload_header, kzg_commitments, execution_requests)
-            .expect("phases should match because payload header was taken from block");
+            .try_into()
+            .expect("post-Bellatrix block can be converted to a blinded block");
 
         Self::BlindedBeaconBlock {
             blinded_block,
