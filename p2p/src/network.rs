@@ -855,15 +855,13 @@ impl<P: Preset> Network<P> {
                 //                      > fork versioning at least
                 //                      > `EPOCHS_PER_RANDOM_SUBNET_SUBSCRIPTION` epochs in
                 //                      > advance of the fork.
-                if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                    ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
-                }
+                let topic = self.subnet_gossip_topic(subnet);
+                ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
             } else {
                 debug!("unsubscribing from attestation subnet {subnet_id}");
 
-                if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                    ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
-                }
+                let topic = self.subnet_gossip_topic(subnet);
+                ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
             }
         }
 
@@ -919,10 +917,9 @@ impl<P: Preset> Network<P> {
                     debug!("subscribing to sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
-                    if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                        ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
-                    }
+                    let topic = self.subnet_gossip_topic(subnet);
 
+                    ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, true)
                         .send(&self.network_to_service_tx);
                 }
@@ -933,10 +930,9 @@ impl<P: Preset> Network<P> {
                     debug!("unsubscribing from sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
-                    if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                        ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
-                    }
+                    let topic = self.subnet_gossip_topic(subnet);
 
+                    ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, false)
                         .send(&self.network_to_service_tx);
                 }
@@ -965,26 +961,20 @@ impl<P: Preset> Network<P> {
                         .into_iter()
                         .filter(|subnet_id| !current_sampling_subnets.contains(subnet_id))
                     {
-                        let subnet = Subnet::DataColumn(subnet_id);
-
                         debug!("subscribing to data column subnet {subnet_id}");
-                        if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                            ServiceInboundMessage::Subscribe(topic)
-                                .send(&self.network_to_service_tx);
-                        }
+                        let topic = self.subnet_gossip_topic(Subnet::DataColumn(subnet_id));
+
+                        ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
                     }
                 } else {
                     for subnet_id in current_sampling_subnets
                         .into_iter()
                         .filter(|subnet_id| !sampling_subnets.contains(subnet_id))
                     {
-                        let subnet = Subnet::DataColumn(subnet_id);
-
                         debug!("unsubscribing from data column subnet {subnet_id}");
-                        if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                            ServiceInboundMessage::Unsubscribe(topic)
-                                .send(&self.network_to_service_tx);
-                        }
+                        let topic = self.subnet_gossip_topic(Subnet::DataColumn(subnet_id));
+
+                        ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
                     }
                 }
 
@@ -2286,12 +2276,10 @@ impl<P: Preset> Network<P> {
             .send(&self.network_to_service_tx);
     }
 
-    fn subnet_gossip_topic(&self, subnet: Subnet) -> Option<GossipTopic> {
-        let current_phase = self.fork_context.current_fork();
+    fn subnet_gossip_topic(&self, subnet: Subnet) -> GossipTopic {
+        let digest = self.fork_context.current_fork_digest();
 
-        self.fork_context
-            .to_context_bytes(current_phase)
-            .map(|digest| GossipTopic::new(subnet.into(), GossipEncoding::default(), digest))
+        GossipTopic::new(subnet.into(), GossipEncoding::default(), digest)
     }
 
     fn update_peer_count(&self) {
