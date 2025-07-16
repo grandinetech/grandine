@@ -4,7 +4,7 @@ use anyhow::Result;
 use bls::{traits::PublicKey as _, PublicKey, PublicKeyBytes, COMPRESSED_SIZE, DECOMPRESSED_SIZE};
 use dashmap::{DashMap, DashSet};
 use database::{Database, PrefixableKey};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt;
 use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
@@ -35,8 +35,8 @@ impl PubkeyCache {
     // - Inserts any missing pubkeys from anchor state into the cache
     // - Persists unpersisted pubkeys to disk, making persist task on finalization faster
     pub fn load_and_persist_state_keys<P: Preset>(&self, state: &BeaconState<P>) -> Result<()> {
-        debug!(
-            "loading and persisting state keys at slot: {}",
+        info!(
+            "decompressing new validator keys for state at slot: {}",
             state.slot()
         );
 
@@ -53,9 +53,13 @@ impl PubkeyCache {
         if let Some(database) = self.database.as_ref() {
             let entries = batch.len();
             database.put_batch(batch)?;
-
             debug!("persisted {entries} validator pubkeys to pubkey cache db");
         }
+
+        info!(
+            "finished decompressing new validator keys for state at slot: {}",
+            state.slot()
+        );
 
         Ok(())
     }
