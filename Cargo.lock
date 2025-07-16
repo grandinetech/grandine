@@ -3955,6 +3955,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum",
+ "dashmap",
  "execution_engine",
  "features",
  "fork_choice_store",
@@ -3978,6 +3979,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tynm",
  "types",
 ]
 
