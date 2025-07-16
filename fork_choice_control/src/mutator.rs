@@ -420,6 +420,9 @@ where
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
+
+            self.event_channels
+                .prune_after_finalization(self.store.finalized_slot());
         }
 
         self.update_store_snapshot();
@@ -1727,6 +1730,9 @@ where
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
+
+            self.event_channels
+                .prune_after_finalization(self.store.finalized_slot());
         }
 
         // Call `Store::apply_attester_slashing` after `Store::archive_finalized` to reduce the
@@ -1933,7 +1939,7 @@ where
         let new_head = self.store.head().clone();
 
         self.event_channels
-            .send_chain_reorg_event(&self.store, old_head);
+            .send_chain_reorg_event(&self.store, &new_head, old_head);
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.beacon_reorgs_total.inc();
@@ -2965,6 +2971,7 @@ where
                 low_priority_tasks,
             );
 
+            self.event_channels.track_collection_metrics(metrics);
             self.pubkey_cache.track_collection_metrics(metrics);
             self.store.track_collection_metrics(metrics);
         }

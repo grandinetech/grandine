@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }
+dashmap = { workspace = true }
 execution_engine = { workspace = true }
 features = { workspace = true }
 fork_choice_store = { workspace = true }
@@ -28,6 +29,7 @@ thiserror = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
+tynm = { workspace = true }
 types = { workspace = true }
 tokio = { workspace = true }
 strum = { workspace = true }

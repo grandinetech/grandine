@@ -1,11 +1,15 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use axum::{response::sse::Event, Error};
+use dashmap::DashMap;
 use execution_engine::{
     PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, WithdrawalV1,
 };
 use fork_choice_store::{ChainLink, Storage, Store};
 use helper_functions::misc;
 use log::warn;
+use prometheus_metrics::Metrics;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
 use strum::{AsRefStr, EnumString};
@@ -56,6 +60,7 @@ impl Topic {
     }
 }
 
+#[expect(clippy::partial_pub_fields)]
 pub struct EventChannels {
     pub attestations: Sender<Event>,
     pub attester_slashings: Sender<Event>,
@@ -69,6 +74,8 @@ pub struct EventChannels {
     pub payload_attributes: Sender<Event>,
     pub proposer_slashings: Sender<Event>,
     pub voluntary_exits: Sender<Event>,
+    // See <https://github.com/grandinetech/grandine/issues/254> for rationale
+    optimistic_reorgs: DashMap<(H256, Slot), ChainReorgEvent>,
 }
 
 impl Default for EventChannels {
@@ -93,6 +100,7 @@ impl EventChannels {
             payload_attributes: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
             voluntary_exits: broadcast::channel(max_events).0,
+            optimistic_reorgs: DashMap::default(),
         }
     }
 
@@ -157,11 +165,21 @@ impl EventChannels {
     pub fn send_chain_reorg_event<P: Preset, S: Storage<P>>(
         &self,
         store: &Store<P, S>,
+        new_head: &ChainLink<P>,
         old_head: &ChainLink<P>,
     ) {
-        if let Err(error) = self.send_chain_reorg_event_internal(store, old_head) {
-            warn!("unable to send chain reorg event: {error}");
+        let chain_reorg_event = ChainReorgEvent::new(store, old_head);
+
+        if new_head.is_valid() {
+            if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
+                warn!("unable to send chain reorg event: {error}");
+            }
+
+            return;
         }
+
+        self.optimistic_reorgs
+            .insert((new_head.block_root, new_head.slot()), chain_reorg_event);
     }
 
     pub fn send_contribution_and_proof_event<P: Preset>(
@@ -197,6 +215,19 @@ impl EventChannels {
     ) {
         if let Err(error) = self.send_head_event_internal(head, calculate_dependent_roots) {
             warn!("unable to send head event: {error}");
+        }
+
+        if head.is_valid() {
+            if let Some((_, mut chain_reorg_event)) = self
+                .optimistic_reorgs
+                .remove(&(head.block_root, head.slot()))
+            {
+                chain_reorg_event.execution_optimistic = head.is_optimistic();
+
+                if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
+                    warn!("unable to send chain reorg event: {error}");
+                }
+            }
         }
     }
 
@@ -234,6 +265,22 @@ impl EventChannels {
         if let Err(error) = self.send_voluntary_exit_event_internal(voluntary_exit) {
             warn!("unable to send voluntary exit event: {error}");
         }
+    }
+
+    pub fn prune_after_finalization(&self, finalized_slot: Slot) {
+        self.optimistic_reorgs
+            .retain(|(_, slot), _| *slot > finalized_slot);
+    }
+
+    pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
+        let type_name = tynm::type_name::<Self>();
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "optimistic_reorgs",
+            self.optimistic_reorgs.len(),
+        );
     }
 
     fn send_attestation_event_internal<P: Preset>(
@@ -306,13 +353,8 @@ impl EventChannels {
         Ok(())
     }
 
-    fn send_chain_reorg_event_internal<P: Preset, S: Storage<P>>(
-        &self,
-        store: &Store<P, S>,
-        old_head: &ChainLink<P>,
-    ) -> Result<()> {
+    fn send_chain_reorg_event_internal(&self, chain_reorg_event: ChainReorgEvent) -> Result<()> {
         if self.chain_reorgs.receiver_count() > 0 {
-            let chain_reorg_event = ChainReorgEvent::new(store, old_head);
             let event = Topic::ChainReorg.build(chain_reorg_event)?;
             self.chain_reorgs.send(event)?;
         }
