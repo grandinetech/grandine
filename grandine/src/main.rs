@@ -389,6 +389,7 @@ fn try_main() -> Result<()> {
         blacklisted_blocks,
         report_validator_performance,
         withhold_data_columns_publishing,
+        backfill_custody_groups,
         disable_engine_getblobs,
     } = config;
 
@@ -427,6 +428,7 @@ fn try_main() -> Result<()> {
         default_gas_limit,
         keystore_storage_password_file,
         withhold_data_columns_publishing,
+        backfill_custody_groups,
     });
 
     let store_config = StoreConfig {
