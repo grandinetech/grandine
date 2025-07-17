@@ -762,7 +762,8 @@ impl Config {
         self.fork_slot::<P>(phase).into_option().is_some()
     }
 
-    fn phase_at_epoch(&self, epoch: Epoch) -> Phase {
+    #[must_use]
+    pub fn phase_at_epoch(&self, epoch: Epoch) -> Phase {
         self.fork_epochs()
             .take_while(|(_, fork_epoch)| *fork_epoch <= epoch)
             .map(|(phase, _)| phase)
