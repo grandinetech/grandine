@@ -44,7 +44,7 @@ use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
-use ssz::{ContiguousList, DynamicList, Ssz, SszHash as _};
+use ssz::{ContiguousList, DynamicList, Hc, Ssz, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
@@ -52,8 +52,11 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
-        containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
-        primitives::SubcommitteeIndex,
+        containers::{
+            SignedContributionAndProof, SyncCommittee, SyncCommitteeContribution,
+            SyncCommitteeMessage,
+        },
+        primitives::{SubcommitteeIndex, SyncCommitteePeriod},
     },
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
@@ -2095,44 +2098,49 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 //                      [Altair Honest Validator specification]: https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/altair/validator.md#sync-committee-subnet-stability
 /// `POST /eth/v1/validator/duties/sync/{epoch}`
 pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorSyncDutyResponse>>, Error> {
-    let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-
-    let WithStatus {
-        value: state,
-        status,
-        // `duties` responses are not supposed to contain a `finalized` field.
-        finalized: _,
-    } = state_id::state(
-        &StateId::Slot(start_slot),
-        &controller,
-        &anchor_checkpoint_provider,
-    )?;
-
-    let Some(state) = state.post_altair() else {
-        return Ok(EthResponse::json(vec![]).execution_optimistic(status.is_optimistic()));
-    };
+    if chain_config.phase_at_epoch(epoch) < Phase::Altair {
+        return Ok(EthResponse::json(vec![]).execution_optimistic(false));
+    }
 
     let requested_period = misc::sync_committee_period::<P>(epoch);
-    let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
-    let state_period = misc::sync_committee_period::<P>(state_epoch);
+    let head_state = controller.head_state();
 
-    let committee = if requested_period == state_period {
-        state.current_sync_committee()
-    } else if requested_period == state_period + 1 {
-        state.next_sync_committee()
+    let (
+        WithStatus {
+            value: state,
+            status,
+            // `duties` responses are not supposed to contain a `finalized` field.
+            finalized: _,
+        },
+        committee,
+    ) = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
+        (head_state, committee)
     } else {
-        return Err(Error::EpochNotInSyncCommitteePeriod);
+        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+
+        let state = state_id::state(
+            &StateId::Slot(start_slot),
+            &controller,
+            &anchor_checkpoint_provider,
+        )?;
+
+        if let Some(committee) = state_sync_committee(&state.value, requested_period) {
+            (state, committee)
+        } else {
+            return Err(Error::EpochNotInSyncCommitteePeriod);
+        }
     };
 
     let duties = validator_indices
         .into_iter()
         .map(|validator_index| {
-            let validator_pubkey = accessors::public_key(state, validator_index)?;
+            let validator_pubkey = accessors::public_key(&state, validator_index)?;
 
             let validator_sync_committee_indices = committee
                 .pubkeys
@@ -2155,6 +2163,23 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
         .collect::<Result<_>>()?;
 
     Ok(EthResponse::json(duties).execution_optimistic(status.is_optimistic()))
+}
+
+fn state_sync_committee<P: Preset>(
+    beacon_state: &BeaconState<P>,
+    requested_period: SyncCommitteePeriod,
+) -> Option<Arc<Hc<SyncCommittee<P>>>> {
+    let state = beacon_state.post_altair()?;
+    let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
+    let state_period = misc::sync_committee_period::<P>(state_epoch);
+
+    if requested_period == state_period {
+        return Some(state.current_sync_committee().clone_arc());
+    } else if requested_period == state_period + 1 {
+        return Some(state.next_sync_committee().clone_arc());
+    }
+
+    None
 }
 
 /// `GET /eth/v1/validator/aggregate_attestation`
