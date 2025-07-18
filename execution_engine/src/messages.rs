@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use either::Either;
-use eth2_libp2p::PeerId;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
+    combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::Phase,
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -16,11 +13,7 @@ use crate::{EngineGetBlobsParams, PayloadAttributes, PayloadId, PayloadStatusV1}
 
 pub enum ExecutionServiceMessage<P: Preset> {
     ExchangeCapabilities,
-    GetBlobs {
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    },
+    GetBlobs(EngineGetBlobsParams<P>),
     NotifyForkchoiceUpdated {
         head_eth1_block_hash: ExecutionBlockHash,
         safe_eth1_block_hash: ExecutionBlockHash,

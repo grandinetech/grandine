@@ -4,13 +4,17 @@ use core::{
 };
 use std::sync::Arc;
 
+use eth2_libp2p::PeerId;
 use ethereum_types::H64;
 use serde::{
     de::Visitor,
     ser::{Error as _, SerializeSeq as _},
     Deserialize, Deserializer, Serialize,
 };
-use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite as _};
+use ssz::{
+    ByteList, ByteVector, ContiguousList, ContiguousVector, SszHash as _, SszReadDefault,
+    SszWrite as _,
+};
 use typenum::Unsigned;
 use types::{
     bellatrix::{
@@ -21,7 +25,7 @@ use types::{
         containers::{ExecutionPayload as CapellaExecutionPayload, Withdrawal},
         primitives::WithdrawalIndex,
     },
-    combined::ExecutionPayload,
+    combined::{ExecutionPayload, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, ExecutionPayload as DenebExecutionPayload},
         primitives::{Blob, KzgCommitment, KzgProof, KzgProofs},
@@ -29,13 +33,17 @@ use types::{
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
-    fulu::containers::DataColumnIdentifier,
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::{Phase, WithBlobsAndMev},
-    phase0::primitives::{
-        ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, UnixSeconds,
-        ValidatorIndex, H256,
+    phase0::{
+        containers::SignedBeaconBlockHeader,
+        primitives::{
+            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, UnixSeconds,
+            ValidatorIndex, H256,
+        },
     },
     preset::Preset,
+    traits::{PostDenebBeaconBlockBody, SignedBeaconBlock as _},
 };
 
 const SUPPORTED_REQUEST_TYPES: &[&str; 3] = &[
@@ -992,20 +1000,87 @@ pub struct BlobAndProofV2<P: Preset> {
     pub proofs: ContiguousVector<KzgProof, P::CellsPerExtBlob>,
 }
 
-pub enum EngineGetBlobsParams {
-    Blobs(Vec<BlobIdentifier>),
-    DataColumns(Vec<DataColumnIdentifier>),
+pub enum EngineGetBlobsParams<P: Preset> {
+    V1(EngineGetBlobsV1Params<P>),
+    V2(EngineGetBlobsV2Params<P>),
 }
 
-impl From<Vec<BlobIdentifier>> for EngineGetBlobsParams {
-    fn from(params: Vec<BlobIdentifier>) -> Self {
-        Self::Blobs(params)
+pub struct EngineGetBlobsV1Params<P: Preset> {
+    pub block: Arc<SignedBeaconBlock<P>>,
+    pub blob_identifiers: Vec<BlobIdentifier>,
+    pub peer_id: Option<PeerId>,
+}
+
+impl<P: Preset> From<EngineGetBlobsV1Params<P>> for EngineGetBlobsParams<P> {
+    fn from(value: EngineGetBlobsV1Params<P>) -> Self {
+        Self::V1(value)
     }
 }
 
-impl From<Vec<DataColumnIdentifier>> for EngineGetBlobsParams {
-    fn from(params: Vec<DataColumnIdentifier>) -> Self {
-        Self::DataColumns(params)
+pub struct EngineGetBlobsV2Params<P: Preset> {
+    pub block_or_sidecar: BlockOrDataColumnSidecar<P>,
+    pub data_column_identifiers: Vec<DataColumnIdentifier>,
+}
+
+impl<P: Preset> From<EngineGetBlobsV2Params<P>> for EngineGetBlobsParams<P> {
+    fn from(value: EngineGetBlobsV2Params<P>) -> Self {
+        Self::V2(value)
+    }
+}
+
+pub enum BlockOrDataColumnSidecar<P: Preset> {
+    Block(Arc<SignedBeaconBlock<P>>),
+    Sidecar(Arc<DataColumnSidecar<P>>),
+}
+
+impl<P: Preset> BlockOrDataColumnSidecar<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Block(block) => block.message().slot(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.slot,
+        }
+    }
+
+    #[must_use]
+    pub fn block_root(&self) -> H256 {
+        match self {
+            Self::Block(block) => block.message().hash_tree_root(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
+        }
+    }
+
+    #[must_use]
+    pub fn signed_block_header(&self) -> SignedBeaconBlockHeader {
+        match self {
+            Self::Block(block) => block.to_header(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header,
+        }
+    }
+
+    pub fn kzg_commitments(
+        &self,
+    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
+        match self {
+            Self::Block(block) => block
+                .message()
+                .body()
+                .post_deneb()
+                .map(PostDenebBeaconBlockBody::blob_kzg_commitments),
+            Self::Sidecar(sidecar) => Some(&sidecar.kzg_commitments),
+        }
+    }
+}
+
+impl<P: Preset> From<Arc<SignedBeaconBlock<P>>> for BlockOrDataColumnSidecar<P> {
+    fn from(block: Arc<SignedBeaconBlock<P>>) -> Self {
+        Self::Block(block)
+    }
+}
+
+impl<P: Preset> From<Arc<DataColumnSidecar<P>>> for BlockOrDataColumnSidecar<P> {
+    fn from(sidecar: Arc<DataColumnSidecar<P>>) -> Self {
+        Self::Sidecar(sidecar)
     }
 }
 
