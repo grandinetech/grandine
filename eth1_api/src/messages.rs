@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
 use eth2_libp2p::PeerId;
 use execution_engine::EngineGetBlobsParams;
 use futures::channel::mpsc::UnboundedSender;
 use log::debug;
 use serde::Serialize;
 use types::{
-    combined::SignedBeaconBlock, deneb::containers::BlobIdentifier,
-    fulu::containers::DataColumnsByRootIdentifier, phase0::primitives::Slot, preset::Preset,
+    deneb::containers::BlobIdentifier, fulu::containers::DataColumnsByRootIdentifier,
+    phase0::primitives::Slot, preset::Preset,
 };
 
 pub struct Eth1Metrics {
@@ -34,11 +32,7 @@ impl Eth1ApiToMetrics {
 }
 
 pub enum Eth1ApiToBlobFetcher<P: Preset> {
-    GetBlobs {
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    },
+    GetBlobs(EngineGetBlobsParams<P>),
     Stop,
 }
 

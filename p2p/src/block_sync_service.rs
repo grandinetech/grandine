@@ -1071,6 +1071,11 @@ impl<P: Preset> BlockSyncService<P> {
             columns: indices,
         } = data_columns_by_root;
 
+        if self.controller.contains_block(block_root) {
+            debug!("Block {block_root:?} already imported into the fork choice");
+            return Ok(());
+        }
+
         let missing_indices = indices
             .into_iter()
             .filter(|index| {
@@ -1080,7 +1085,6 @@ impl<P: Preset> BlockSyncService<P> {
                 };
 
                 !self.received_data_column_sidecars.contains_key(&identifier)
-                    && !self.controller.contains_block(block_root)
                     && self
                         .sync_manager
                         .ready_to_request_data_column_by_root(&identifier, None)
