@@ -28,8 +28,11 @@ use anyhow::{anyhow, Error as AnyhowError, Result};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
 use drain_filter_polyfill::VecExt as _;
-use eth2_libp2p::{GossipId, PeerId};
-use execution_engine::{EngineGetBlobsParams, ExecutionEngine, PayloadStatusV1};
+use eth2_libp2p::GossipId;
+use execution_engine::{
+    EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionEngine,
+    PayloadStatusV1,
+};
 use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
@@ -697,18 +700,27 @@ where
                                 Ok(ValidationOutcome::Ignore(false)),
                             );
 
-                            if self.store.is_forward_synced() {
-                                let data_column_ids = missing_column_indices
+                            if self.store.is_forward_synced()
+                                && !self.store.has_requested_blobs_from_el(&block_root)
+                                && !self.store.is_sidecars_construction_started(&block_root)
+                            {
+                                self.store_mut().mark_requested_blobs_from_el(
+                                    block_root,
+                                    pending_block.block.message().slot(),
+                                );
+                                self.update_store_snapshot();
+                              
+                                let data_column_identifiers = missing_column_indices
                                     .into_iter()
                                     .map(|index| DataColumnIdentifier { block_root, index })
                                     .collect_vec();
 
-                                let peer_id = pending_block.origin.peer_id();
-
                                 self.request_blobs_from_execution_engine(
-                                    pending_block.block.clone_arc(),
-                                    data_column_ids.into(),
-                                    peer_id,
+                                    EngineGetBlobsV2Params {
+                                        block_or_sidecar: pending_block.block.clone_arc().into(),
+                                        data_column_identifiers,
+                                    }
+                                    .into(),
                                 );
                             }
 
@@ -759,7 +771,7 @@ where
                                 Ok(ValidationOutcome::Ignore(false)),
                             );
 
-                            let blob_ids = missing_blob_indices
+                            let blob_identifiers = missing_blob_indices
                                 .into_iter()
                                 .map(|index| BlobIdentifier { block_root, index })
                                 .collect_vec();
@@ -767,9 +779,12 @@ where
                             let peer_id = pending_block.origin.peer_id();
 
                             self.request_blobs_from_execution_engine(
-                                pending_block.block.clone_arc(),
-                                blob_ids.into(),
-                                peer_id,
+                                EngineGetBlobsV1Params {
+                                    block: pending_block.block.clone_arc(),
+                                    blob_identifiers,
+                                    peer_id,
+                                }
+                                .into(),
                             );
 
                             self.delay_block_until_blobs(block_root, pending_block);
@@ -1465,6 +1480,40 @@ where
                     data_column_sidecar.signed_block_header.message,
                     data_column_sidecar.index,
                 ) {
+                    let block_root = data_column_sidecar
+                        .signed_block_header
+                        .message
+                        .hash_tree_root();
+
+                    if self.store.is_forward_synced()
+                        && !matches!(
+                            origin,
+                            DataColumnSidecarOrigin::Own | DataColumnSidecarOrigin::ExecutionLayer
+                        )
+                        && !self.store.has_requested_blobs_from_el(&block_root)
+                        && !self.store.is_sidecars_construction_started(&block_root)
+                    {
+                        self.store_mut()
+                            .mark_requested_blobs_from_el(block_root, data_column_sidecar.slot());
+                        self.update_store_snapshot();
+
+                        let data_column_identifiers = self
+                            .store
+                            .sampling_columns()
+                            .iter()
+                            .map(|index| DataColumnIdentifier {
+                                block_root,
+                                index: *index,
+                            })
+                            .collect::<Vec<_>>();
+                        self.request_blobs_from_execution_engine(
+                            EngineGetBlobsV2Params {
+                                block_or_sidecar: data_column_sidecar.clone_arc().into(),
+                                data_column_identifiers,
+                            }
+                            .into(),
+                        )
+                    }
                     let (gossip_id, sender) = origin.split();
 
                     if let Some(gossip_id) = gossip_id {
@@ -2428,13 +2477,8 @@ where
         self.notify_forkchoice_updated(&new_head);
     }
 
-    fn request_blobs_from_execution_engine(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    ) {
-        self.execution_engine.get_blobs(block, params, peer_id);
+    fn request_blobs_from_execution_engine(&self, params: EngineGetBlobsParams<P>) {
+        self.execution_engine.get_blobs(params);
     }
 
     fn notify_forkchoice_updated(&self, new_head: &ChainLink<P>) {
