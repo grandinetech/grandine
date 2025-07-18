@@ -233,6 +233,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     sampling_columns: StdHashSet<ColumnIndex>,
     sidecars_construction_started: Arc<DashMap<H256, Slot>>,
     delayed_block_at_slot: HashMap<Slot, H256>,
+    requested_blobs_from_el: HashMap<H256, Slot>,
 }
 
 impl<P: Preset, S: Storage<P>> Store<P, S> {
@@ -320,6 +321,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             sampling_columns: StdHashSet::default(),
             sidecars_construction_started,
             delayed_block_at_slot: HashMap::default(),
+            requested_blobs_from_el: HashMap::default(),
         }
     }
 
@@ -2939,6 +2941,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|_, slot| finalized_slot <= *slot);
         self.delayed_block_at_slot
             .retain(|slot, _| finalized_slot <= *slot);
+        self.requested_blobs_from_el
+            .retain(|_, slot| finalized_slot <= *slot);
         // TODO(feature/eip-7594): NEED REVIEW!
         //
         // Data columns must be stored for much longer period than finalization.
@@ -3800,6 +3804,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn get_delayed_block_at_slot(&self, slot: Slot) -> Option<&H256> {
         self.delayed_block_at_slot.get(&slot)
+    }
+
+    pub fn has_requested_blobs_from_el(&self, block_root: &H256) -> bool {
+        self.requested_blobs_from_el.contains_key(block_root)
+    }
+
+    pub fn mark_requested_blobs_from_el(&mut self, block_root: H256, slot: Slot) {
+        self.requested_blobs_from_el.insert(block_root, slot);
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {

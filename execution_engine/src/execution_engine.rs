@@ -5,11 +5,10 @@ use std::{
 
 use anyhow::{ensure, Result};
 use either::Either;
-use eth2_libp2p::PeerId;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use thiserror::Error;
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
+    combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::{Phase, TimedPowBlock},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -29,12 +28,7 @@ pub trait ExecutionEngine<P: Preset> {
     fn exchange_capabilities(&self);
 
     /// [`engine_getBlobsV1`](https://github.com/ethereum/execution-apis/blob/9707339bc8222f6d43b3bf0a7a91623f7ce52213/src/engine/cancun.md#engine_getblobsv1)
-    fn get_blobs(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    );
+    fn get_blobs(&self, params: EngineGetBlobsParams<P>);
 
     /// [`notify_forkchoice_updated`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/fork-choice.md#notify_forkchoice_updated)
     fn notify_forkchoice_updated(
@@ -72,13 +66,8 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
         (*self).exchange_capabilities();
     }
 
-    fn get_blobs(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    ) {
-        (*self).get_blobs(block, params, peer_id)
+    fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
+        (*self).get_blobs(params)
     }
 
     fn notify_forkchoice_updated(
@@ -128,13 +117,8 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
         self.as_ref().exchange_capabilities()
     }
 
-    fn get_blobs(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    ) {
-        self.as_ref().get_blobs(block, params, peer_id)
+    fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
+        self.as_ref().get_blobs(params)
     }
 
     fn notify_forkchoice_updated(
@@ -189,15 +173,10 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
             .exchange_capabilities()
     }
 
-    fn get_blobs(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    ) {
+    fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
         self.lock()
             .expect("execution engine mutex is poisoned")
-            .get_blobs(block, params, peer_id)
+            .get_blobs(params)
     }
 
     fn notify_forkchoice_updated(
@@ -256,13 +235,7 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
 
     fn exchange_capabilities(&self) {}
 
-    fn get_blobs(
-        &self,
-        _block: Arc<SignedBeaconBlock<P>>,
-        _params: EngineGetBlobsParams,
-        _peer_id: Option<PeerId>,
-    ) {
-    }
+    fn get_blobs(&self, _params: EngineGetBlobsParams<P>) {}
 
     fn notify_forkchoice_updated(
         &self,
@@ -307,19 +280,9 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
 
     fn exchange_capabilities(&self) {}
 
-    fn get_blobs(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        params: EngineGetBlobsParams,
-        peer_id: Option<PeerId>,
-    ) {
+    fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
         if let Some(sender) = self.execution_service_tx.as_ref() {
-            ExecutionServiceMessage::GetBlobs {
-                block,
-                params,
-                peer_id,
-            }
-            .send(sender);
+            ExecutionServiceMessage::GetBlobs(params).send(sender);
         }
     }
 
