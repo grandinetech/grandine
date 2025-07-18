@@ -19,12 +19,15 @@ use typenum::Unsigned as _;
 use types::{
     combined::SignedBeaconBlock,
     config::Config,
-    deneb::primitives::{Blob, KzgProof},
+    deneb::primitives::{Blob, KzgCommitment, KzgProof},
     fulu::{
         containers::{DataColumnSidecar, MatrixEntry},
-        primitives::{CellsAndKzgProofs, ColumnIndex, CustodyIndex},
+        primitives::{BlobCommitmentsInclusionProof, CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
-    phase0::primitives::{Gwei, NodeId, SubnetId, ValidatorIndex},
+    phase0::{
+        containers::SignedBeaconBlockHeader,
+        primitives::{Gwei, NodeId, SubnetId, ValidatorIndex},
+    },
     preset::Preset,
     traits::{BeaconState, SignedBeaconBlock as _},
 };
@@ -274,54 +277,91 @@ pub fn recover_matrix<P: Preset>(
         .map(construct_full_matrix)
 }
 
+fn get_data_column_sidecars<P: Preset>(
+    signed_block_header: SignedBeaconBlockHeader,
+    kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof<P>,
+    cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
+    config: &Config,
+) -> Result<Vec<DataColumnSidecar<P>>> {
+    let blob_count = kzg_commitments.len();
+    ensure!(
+        cells_and_kzg_proofs.len() == blob_count,
+        Error::BlobCommitmentsLengthMismatch {
+            blob_count,
+            commitments_length: kzg_commitments.len(),
+        }
+    );
+
+    let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
+    for column_index in 0..config.number_of_columns() {
+        let column = ContiguousList::try_from_iter(
+            (0..blob_count)
+                .map(|row_index| cells_and_kzg_proofs[row_index].0[column_index].clone()),
+        )?;
+        let kzg_proofs = ContiguousList::try_from_iter(
+            (0..blob_count).map(|row_index| cells_and_kzg_proofs[row_index].1[column_index]),
+        )?;
+
+        sidecars.push(DataColumnSidecar {
+            index: ColumnIndex::try_from(column_index)?,
+            column,
+            kzg_commitments: kzg_commitments.clone(),
+            kzg_proofs,
+            signed_block_header,
+            kzg_commitments_inclusion_proof,
+        });
+    }
+
+    Ok(sidecars)
+}
+
 pub fn construct_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
     config: &Config,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let signed_block_header = signed_block.to_header();
+    let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() else {
+        return Ok(vec![]);
+    };
 
-    let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
-    if let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() {
-        let kzg_commitments = post_electra_beacon_block_body.blob_kzg_commitments();
-
-        if kzg_commitments.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let blob_count = cells_and_kzg_proofs.len();
-        ensure!(
-            kzg_commitments.len() == blob_count,
-            Error::BlobCommitmentsLengthMismatch {
-                blob_count,
-                commitments_length: kzg_commitments.len(),
-            }
-        );
-
-        let kzg_commitments_inclusion_proof =
-            misc::kzg_commitments_inclusion_proof(post_electra_beacon_block_body);
-
-        for column_index in 0..config.number_of_columns() {
-            let column = ContiguousList::try_from_iter(
-                (0..blob_count)
-                    .map(|row_index| cells_and_kzg_proofs[row_index].0[column_index].clone()),
-            )?;
-            let kzg_proofs = ContiguousList::try_from_iter(
-                (0..blob_count).map(|row_index| cells_and_kzg_proofs[row_index].1[column_index]),
-            )?;
-
-            sidecars.push(DataColumnSidecar {
-                index: ColumnIndex::try_from(column_index)?,
-                column,
-                kzg_commitments: kzg_commitments.clone(),
-                kzg_proofs,
-                signed_block_header,
-                kzg_commitments_inclusion_proof,
-            });
-        }
+    let kzg_commitments = post_electra_beacon_block_body.blob_kzg_commitments();
+    if kzg_commitments.is_empty() {
+        return Ok(vec![]);
     }
 
-    Ok(sidecars)
+    let kzg_commitments_inclusion_proof =
+        misc::kzg_commitments_inclusion_proof(post_electra_beacon_block_body);
+
+    get_data_column_sidecars(
+        signed_block_header,
+        kzg_commitments,
+        kzg_commitments_inclusion_proof,
+        cells_and_kzg_proofs,
+        config,
+    )
+}
+
+pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+    cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
+    config: &Config,
+) -> Result<Vec<DataColumnSidecar<P>>> {
+    let DataColumnSidecar {
+        kzg_commitments,
+        signed_block_header,
+        kzg_commitments_inclusion_proof,
+        ..
+    } = data_column_sidecar;
+
+    get_data_column_sidecars(
+        *signed_block_header,
+        kzg_commitments,
+        *kzg_commitments_inclusion_proof,
+        cells_and_kzg_proofs,
+        config,
+    )
 }
 
 pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(

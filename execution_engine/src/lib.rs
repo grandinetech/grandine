@@ -2,7 +2,8 @@ pub use crate::{
     execution_engine::{ExecutionEngine, MockExecutionEngine, NullExecutionEngine},
     messages::ExecutionServiceMessage,
     types::{
-        BlobAndProofV1, BlobAndProofV2, EngineGetBlobsParams, EngineGetPayloadV1Response,
+        BlobAndProofV1, BlobAndProofV2, BlockOrDataColumnSidecar, EngineGetBlobsParams,
+        EngineGetBlobsV1Params, EngineGetBlobsV2Params, EngineGetPayloadV1Response,
         EngineGetPayloadV2Response, EngineGetPayloadV3Response, EngineGetPayloadV4Response,
         EngineGetPayloadV5Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
         ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1,
