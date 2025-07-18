@@ -538,6 +538,7 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
+    #[expect(clippy::cognitive_complexity)]
     fn handle_block(
         &mut self,
         wait_group: W,
@@ -643,6 +644,10 @@ where
                                 });
                         }
                         BlockDataColumnAvailability::CompleteWithReconstruction => {
+                            if let Some(gossip_id) = pending_block.origin.gossip_id() {
+                                self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                            }
+
                             if self
                                 .store
                                 .indices_of_missing_data_columns(&pending_block.block)
@@ -680,11 +685,6 @@ where
                                 Ok(ValidationOutcome::Ignore(false)),
                             );
 
-                            let data_column_identifiers = missing_column_indices
-                                .into_iter()
-                                .map(|index| DataColumnIdentifier { block_root, index })
-                                .collect_vec();
-
                             if self.store.is_forward_synced()
                                 && !self.store.has_requested_blobs_from_el(&block_root)
                                 && !self.store.is_sidecars_construction_started(&block_root)
@@ -694,6 +694,11 @@ where
                                     pending_block.block.message().slot(),
                                 );
                                 self.update_store_snapshot();
+                              
+                                let data_column_identifiers = missing_column_indices
+                                    .into_iter()
+                                    .map(|index| DataColumnIdentifier { block_root, index })
+                                    .collect_vec();
 
                                 self.request_blobs_from_execution_engine(
                                     EngineGetBlobsV2Params {

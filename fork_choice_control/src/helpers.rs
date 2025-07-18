@@ -12,11 +12,13 @@ use execution_engine::{
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
+use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    fulu::containers::DataColumnSidecar,
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -83,6 +85,9 @@ impl<P: Preset> Context<P> {
 
         let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
 
+        let phase = anchor_block.phase();
+        let number_of_columns = config.number_of_columns;
+
         let (controller, mutator_handle) = TestController::with_p2p_tx(
             config,
             anchor_block,
@@ -90,6 +95,10 @@ impl<P: Preset> Context<P> {
             execution_engine.clone_arc(),
             p2p_tx,
         );
+
+        if phase.is_peerdas_activated() {
+            controller.on_store_sampling_columns((0..number_of_columns).collect());
+        }
 
         Self {
             controller: Some(controller),
@@ -279,6 +288,24 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message()
     }
 
+    pub fn on_data_column_sidecar(
+        &mut self,
+        data_column_sidecar: DataColumnSidecar<P>,
+    ) -> Option<P2pMessage<P>> {
+        let subnet_id =
+            misc::compute_subnet_for_data_column_sidecar(self.config(), data_column_sidecar.index);
+
+        self.controller().on_gossip_data_column_sidecar(
+            Arc::new(data_column_sidecar),
+            subnet_id,
+            GossipId::default(),
+            true,
+        );
+
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
     pub fn on_acceptable_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
         assert!(matches!(self.on_block(block), Some(P2pMessage::Accept(_))));
     }
@@ -348,6 +375,30 @@ impl<P: Preset> Context<P> {
                 }
             },
             _ => panic!("ExecutionServiceMessage::GetBlobs expected"),
+        }
+    }
+
+    pub fn on_block_with_reconstructing_data_columns(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
+        // If an optimistic beacon block is not accepted by the fork choice,
+        // then it will not be propagated in gossipsub before it is fully validated (e.g. block arrives before blob).
+        self.on_valid_block(block);
+
+        let block_root = block.message().hash_tree_root();
+
+        loop {
+            match self.next_p2p_message() {
+                Some(P2pMessage::PublishDataColumnSidecar(data_column_sidecar)) => {
+                    assert_eq!(
+                        data_column_sidecar
+                            .signed_block_header
+                            .message
+                            .hash_tree_root(),
+                        block_root
+                    );
+                }
+                Some(P2pMessage::Accept(_)) | None => break,
+                Some(other) => panic!("Unexpected P2P message: {other:?}"),
+            }
         }
     }
 

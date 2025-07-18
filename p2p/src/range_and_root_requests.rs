@@ -1,7 +1,7 @@
 use core::{hash::Hash, time::Duration};
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
-use cached::{Cached as _, SizedCache, TimedSizedCache};
+use cached::{Cached, SizedCache, TimedSizedCache};
 use eth2_libp2p::PeerId;
 use itertools::Itertools as _;
 use prometheus_metrics::Metrics;
@@ -146,6 +146,12 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
                     .is_some_and(|(_, time)| time.elapsed() < REQUEST_BY_RANGE_TIMEOUT)
             })
             .count()
+    }
+
+    pub fn request_by_root_count(&mut self) -> usize {
+        self.requests_by_root.flush();
+
+        self.requests_by_root.cache_size()
     }
 
     pub fn request_by_range_finished(
