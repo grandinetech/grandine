@@ -750,6 +750,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
+    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
         if slot_head.slot() == GENESIS_SLOT {
@@ -877,7 +878,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let beacon_block = match validator_blinded_block {
-            ValidatorBlindedBlock::BlindedBeaconBlock { blinded_block, execution_payload } => {
+            ValidatorBlindedBlock::BlindedBeaconBlock {
+                blinded_block,
+                execution_payload,
+            } => {
                 let Some(signature) = slot_head
                     .sign_beacon_block(
                         &self.signer,
@@ -926,7 +930,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         "received execution payload from the builder node: {execution_payload:?}"
                     );
 
-                    execution_payload 
+                    execution_payload
                 } else {
                     if let Err(error) = builder_api
                         .post_blinded_block_post_fulu(
