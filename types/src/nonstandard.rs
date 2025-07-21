@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use bit_field::BitField as _;
 use bls::Signature;
@@ -25,10 +25,7 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProofs},
     },
     electra::containers::ExecutionRequests,
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
     phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
@@ -534,12 +531,6 @@ impl<T: Clone> WithOrigin<T> {
             Origin::Genesis => Some(self.value.clone()),
         }
     }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct ColumnIndicesByRoot {
-    pub block_root: H256,
-    pub columns: HashSet<ColumnIndex>,
 }
 
 #[cfg(test)]

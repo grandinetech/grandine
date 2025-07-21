@@ -5,7 +5,6 @@ use cached::{Cached as _, SizedCache, TimedSizedCache};
 use eth2_libp2p::{service::api_types::AppRequestId, PeerId};
 use itertools::Itertools as _;
 use prometheus_metrics::Metrics;
-use types::phase0::primitives::Slot;
 
 use crate::{block_sync_service::SyncDirection, sync_manager::SyncBatch};
 
@@ -168,12 +167,6 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
 
     pub fn requests_by_range_keys(&self) -> Vec<AppRequestId> {
         self.requests_by_range.key_order().copied().collect()
-    }
-
-    pub fn request_start_slot(&mut self, app_request_id: AppRequestId) -> Option<Slot> {
-        self.requests_by_range
-            .cache_get(&app_request_id)
-            .map(|(batch, _)| batch.start_slot)
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
