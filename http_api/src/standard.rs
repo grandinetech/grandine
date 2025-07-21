@@ -2488,6 +2488,14 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         slot,
     } = query;
 
+    let phase_at_slot = controller.chain_config().phase_at_slot::<P>(slot);
+
+    let committee_index = if phase_at_slot < Phase::Electra {
+        committee_index
+    } else {
+        0
+    };
+
     let WithStatus {
         value: head,
         status,
