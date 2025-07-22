@@ -705,7 +705,7 @@ where
                                     pending_block.block.message().slot(),
                                 );
                                 self.update_store_snapshot();
-                              
+
                                 let data_column_identifiers = missing_column_indices
                                     .into_iter()
                                     .map(|index| DataColumnIdentifier { block_root, index })

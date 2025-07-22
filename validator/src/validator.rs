@@ -897,6 +897,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     "Builder API should be present as it was used to query ExecutionPayloadHeader",
                 );
 
+                if self.chain_config.is_peerdas_scheduled() {
+                    if let Err(error) = builder_api
+                        .post_blinded_block_post_fulu(
+                            &self.chain_config,
+                            self.controller.genesis_time(),
+                            &signed_blinded_block,
+                        )
+                        .await
+                    {
+                        warn!("failed to post blinded block to the builder node: {error:?}");
+                    }
+
+                    debug!("submitted blinded block to the builder node");
+
+                    return Ok(());
+                }
+
                 let WithBlobsAndMev {
                     value: execution_payload,
                     proofs,
