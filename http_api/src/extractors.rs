@@ -385,12 +385,8 @@ where
             return Ok(Self(data));
         }
 
-        if content_type == ContentType::json() {
-            let Json(data) = request.extract().await.map_err(Error::InvalidJsonBody)?;
+        let Json(data) = request.extract().await.map_err(Error::InvalidJsonBody)?;
 
-            return Ok(Self(data));
-        }
-
-        Err(Error::ContentTypeNotSupported)
+        Ok(Self(data))
     }
 }
