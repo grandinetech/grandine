@@ -6,7 +6,7 @@ use axum::{
 };
 use http_api_utils::ETH_CONSENSUS_VERSION;
 use mediatype::{MediaType, MediaTypeList};
-use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
+use mime::APPLICATION_OCTET_STREAM;
 use serde::Serialize;
 use ssz::SszWrite;
 use tap::Pipe as _;
@@ -243,14 +243,6 @@ impl<T> EthResponse<T, (), JsonOrSsz> {
                 if accept == APPLICATION_OCTET_STREAM.as_ref() {
                     return Ok(Self::new(data, JsonOrSsz::Ssz));
                 }
-
-                if accept == APPLICATION_JSON.as_ref() {
-                    return Ok(Self::new(data, JsonOrSsz::Json));
-                }
-            }
-
-            if !accepted_types.is_empty() {
-                return Err(Error::AcceptedMediaNotSupported);
             }
         }
 

@@ -20,8 +20,6 @@ use types::{deneb::primitives::BlobIndex, phase0::primitives::Slot};
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Accept header media type not supported")]
-    AcceptedMediaNotSupported,
     #[error("attestation cannot be found")]
     AttestationNotFound,
     #[error("block {block_root} not validated")]
@@ -32,8 +30,6 @@ pub enum Error {
     Canceled(#[from] Canceled),
     #[error("Content-Type header invalid")]
     ContentTypeHeaderInvalid(#[source] TypedHeaderRejection),
-    #[error("Content-Type header media type not supported")]
-    ContentTypeNotSupported,
     #[error(transparent)]
     InvalidRequestConsensusHeader(#[from] PhaseHeaderError),
     #[error(
@@ -188,7 +184,6 @@ impl IntoResponse for Error {
 impl Error {
     fn status_code(&self) -> StatusCode {
         match self {
-            Self::AcceptedMediaNotSupported => StatusCode::NOT_ACCEPTABLE,
             Self::InvalidJsonBody(json_rejection)
             | Self::InvalidValidatorIndices(json_rejection) => json_rejection.status(),
             Self::InvalidBytesBody(rejection) => rejection.status(),
@@ -246,7 +241,6 @@ impl Error {
             | Self::HeadFarBehind { .. }
             | Self::HeadIsOptimistic
             | Self::NodeIsSyncing => StatusCode::SERVICE_UNAVAILABLE,
-            Self::ContentTypeNotSupported => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         }
     }
 
