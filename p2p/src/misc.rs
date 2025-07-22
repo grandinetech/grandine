@@ -5,8 +5,6 @@ use serde_with::{As, DisplayFromStr};
 use strum::IntoStaticStr;
 use types::phase0::primitives::{CommitteeIndex, Epoch, Slot, SubnetId, ValidatorIndex};
 
-pub type RequestId = usize;
-
 #[derive(PartialEq, Eq)]
 pub enum RPCRequestType {
     Range,

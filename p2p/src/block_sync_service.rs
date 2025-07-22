@@ -10,7 +10,7 @@ use dashmap::DashMap;
 use data_dumper::DataDumper;
 use database::{Database, PrefixableKey as _};
 use eth1_api::RealController;
-use eth2_libp2p::{PeerAction, PeerId, ReportSource};
+use eth2_libp2p::{service::api_types::AppRequestId, PeerAction, PeerId, ReportSource};
 use fork_choice_control::{StorageMode, SyncMessage};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -40,7 +40,7 @@ use crate::{
         BackSync, BackSyncDataBySlot, Data as BackSyncData, Error as BackSyncError, SyncCheckpoint,
     },
     messages::{ArchiverToSync, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p},
-    misc::{PeerReportReason, RPCRequestType, RequestId},
+    misc::{PeerReportReason, RPCRequestType},
     sync_manager::{SyncBatch, SyncManager, SyncTarget},
 };
 
@@ -794,10 +794,10 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    fn request_id(&mut self) -> Result<RequestId> {
+    fn request_id(&mut self) -> Result<AppRequestId> {
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.checked_add(1).ok_or(Error)?;
-        Ok(request_id)
+        Ok(AppRequestId::Application(request_id))
     }
 
     fn set_back_synced(&mut self, is_back_synced: bool) {

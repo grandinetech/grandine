@@ -2,18 +2,18 @@ use core::{hash::Hash, time::Duration};
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use cached::{Cached as _, SizedCache, TimedSizedCache};
-use eth2_libp2p::PeerId;
+use eth2_libp2p::{service::api_types::AppRequestId, PeerId};
 use itertools::Itertools as _;
 use prometheus_metrics::Metrics;
 
-use crate::{block_sync_service::SyncDirection, misc::RequestId, sync_manager::SyncBatch};
+use crate::{block_sync_service::SyncDirection, sync_manager::SyncBatch};
 
 const MAX_ROOT_REQUESTS_PER_KEY: usize = 3;
 const REQUEST_BY_RANGE_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_BY_ROOT_TIMEOUT_IN_SECONDS: u64 = 5;
 
 pub struct RangeAndRootRequests<K> {
-    requests_by_range: SizedCache<RequestId, (SyncBatch, Instant)>,
+    requests_by_range: SizedCache<AppRequestId, (SyncBatch, Instant)>,
     requests_by_root: TimedSizedCache<K, HashSet<PeerId>>,
 }
 
@@ -48,8 +48,13 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             .map(|(sync_batch, _)| sync_batch.peer_id)
     }
 
-    pub fn record_received_response(&mut self, k: &K, peer_id: &PeerId, request_id: RequestId) {
-        if let Some((batch, _)) = self.requests_by_range.cache_get_mut(&request_id) {
+    pub fn record_received_response(
+        &mut self,
+        k: &K,
+        peer_id: &PeerId,
+        app_request_id: AppRequestId,
+    ) {
+        if let Some((batch, _)) = self.requests_by_range.cache_get_mut(&app_request_id) {
             batch.response_received = true;
             return;
         }
@@ -59,9 +64,9 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             .map(|requests| requests.remove(peer_id));
     }
 
-    pub fn add_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
         self.requests_by_range
-            .cache_set(request_id, (batch, Instant::now()));
+            .cache_set(app_request_id, (batch, Instant::now()));
     }
 
     pub fn add_request_by_root(&mut self, key: K, peer_id: PeerId) -> bool {
@@ -130,9 +135,9 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             .map(|(batch, _)| batch)
     }
 
-    pub fn request_direction(&mut self, request_id: RequestId) -> Option<SyncDirection> {
+    pub fn request_direction(&mut self, app_request_id: AppRequestId) -> Option<SyncDirection> {
         self.requests_by_range
-            .cache_get(&request_id)
+            .cache_get(&app_request_id)
             .map(|(batch, _)| batch.direction)
     }
 
@@ -149,12 +154,12 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
 
     pub fn request_by_range_finished(
         &mut self,
-        request_id: RequestId,
+        app_request_id: AppRequestId,
     ) -> Option<(SyncBatch, Instant)> {
-        self.requests_by_range.cache_remove(&request_id)
+        self.requests_by_range.cache_remove(&app_request_id)
     }
 
-    pub fn requests_by_range_keys(&self) -> Vec<RequestId> {
+    pub fn requests_by_range_keys(&self) -> Vec<AppRequestId> {
         self.requests_by_range.key_order().copied().collect()
     }
 

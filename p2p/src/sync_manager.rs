@@ -14,7 +14,7 @@ use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
 use eth1_api::RealController;
-use eth2_libp2p::{rpc::StatusMessage, PeerId};
+use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, PeerId};
 use helper_functions::misc;
 use itertools::Itertools as _;
 use log::{log, Level};
@@ -29,10 +29,7 @@ use types::{
     preset::Preset,
 };
 
-use crate::{
-    block_sync_service::SyncDirection, misc::RequestId,
-    range_and_root_requests::RangeAndRootRequests,
-};
+use crate::{block_sync_service::SyncDirection, range_and_root_requests::RangeAndRootRequests};
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct ChainId {
@@ -118,26 +115,26 @@ impl SyncManager {
         &mut self,
         blob_identifier: BlobIdentifier,
         peer_id: PeerId,
-        request_id: RequestId,
+        app_request_id: AppRequestId,
     ) {
         self.blob_requests
-            .record_received_response(&blob_identifier, &peer_id, request_id);
+            .record_received_response(&blob_identifier, &peer_id, app_request_id);
     }
 
     pub fn record_received_block_response(
         &mut self,
         block_root: H256,
         peer_id: PeerId,
-        request_id: RequestId,
+        app_request_id: AppRequestId,
     ) {
         self.block_requests
-            .record_received_response(&block_root, &peer_id, request_id);
+            .record_received_response(&block_root, &peer_id, app_request_id);
     }
 
-    pub fn request_direction(&mut self, request_id: RequestId) -> Option<SyncDirection> {
+    pub fn request_direction(&mut self, app_request_id: AppRequestId) -> Option<SyncDirection> {
         self.block_requests
-            .request_direction(request_id)
-            .or_else(|| self.blob_requests.request_direction(request_id))
+            .request_direction(app_request_id)
+            .or_else(|| self.blob_requests.request_direction(app_request_id))
     }
 
     pub fn add_peer(&mut self, peer_id: PeerId, status: StatusMessage) {
@@ -178,7 +175,7 @@ impl SyncManager {
 
     pub fn retry_batch(
         &mut self,
-        request_id: RequestId,
+        app_request_id: AppRequestId,
         batch: SyncBatch,
         use_black_list: bool,
     ) -> Option<PeerId> {
@@ -186,7 +183,9 @@ impl SyncManager {
 
         self.log(
             Level::Debug,
-            format_args!("retrying batch {batch:?}, new peer: {peer:?}, request_id: {request_id}"),
+            format_args!(
+                "retrying batch {batch:?}, new peer: {peer:?}, app_request_id: {app_request_id:?}"
+            ),
         );
 
         match peer {
@@ -202,8 +201,10 @@ impl SyncManager {
                 };
 
                 match batch.target {
-                    SyncTarget::BlobSidecar => self.add_blob_request_by_range(request_id, batch),
-                    SyncTarget::Block => self.add_block_request_by_range(request_id, batch),
+                    SyncTarget::BlobSidecar => {
+                        self.add_blob_request_by_range(app_request_id, batch)
+                    }
+                    SyncTarget::Block => self.add_block_request_by_range(app_request_id, batch),
                 }
             }
             None => {
@@ -483,19 +484,21 @@ impl SyncManager {
             .ready_to_request_by_root(&block_root, peer_id)
     }
 
-    pub fn add_blob_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_blob_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
         self.log(
             Level::Debug,
             format_args!(
-                "add blob request by range (request_id: {}, peer_id: {}, range: {:?}, retries: {})",
-                request_id,
+                "add blob request by range (app_request_id: {:?}, peer_id: {}, \
+                range: {:?}, retries: {})",
+                app_request_id,
                 batch.peer_id,
                 (batch.start_slot..(batch.start_slot + batch.count)),
                 batch.retry_count,
             ),
         );
 
-        self.blob_requests.add_request_by_range(request_id, batch)
+        self.blob_requests
+            .add_request_by_range(app_request_id, batch)
     }
 
     pub fn add_blobs_request_by_root(
@@ -513,19 +516,21 @@ impl SyncManager {
             .collect_vec()
     }
 
-    pub fn add_block_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_block_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
         self.log(
             Level::Debug,
             format_args!(
-                "add block request by range (request_id: {}, peer_id: {}, range: {:?}, retries: {})",
-                request_id,
+                "add block request by range (app_request_id: {:?}, peer_id: {}, \
+                range: {:?}, retries: {})",
+                app_request_id,
                 batch.peer_id,
                 (batch.start_slot..(batch.start_slot + batch.count)),
                 batch.retry_count,
             ),
         );
 
-        self.block_requests.add_request_by_range(request_id, batch)
+        self.block_requests
+            .add_request_by_range(app_request_id, batch)
     }
 
     pub fn add_block_request_by_root(&mut self, block_root: H256, peer_id: PeerId) -> bool {
@@ -558,15 +563,19 @@ impl SyncManager {
 
     pub fn blobs_by_range_request_finished(
         &mut self,
-        request_id: RequestId,
+        app_request_id: AppRequestId,
         request_direction: Option<SyncDirection>,
     ) {
         self.log(
             Level::Debug,
-            format_args!("request blob sidecars by range finished (request_id: {request_id})",),
+            format_args!(
+                "request blob sidecars by range finished \
+                (app_request_id: {app_request_id:?})",
+            ),
         );
 
-        if let Some((sync_batch, _)) = self.blob_requests.request_by_range_finished(request_id) {
+        if let Some((sync_batch, _)) = self.blob_requests.request_by_range_finished(app_request_id)
+        {
             self.log(
                 Level::Debug,
                 format_args!(
@@ -577,7 +586,7 @@ impl SyncManager {
             );
 
             if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
-                self.retry_batch(request_id, sync_batch, true);
+                self.retry_batch(app_request_id, sync_batch, true);
             }
         }
     }
@@ -586,15 +595,18 @@ impl SyncManager {
         &mut self,
         controller: &RealController<P>,
         peer_id: PeerId,
-        request_id: RequestId,
+        app_request_id: AppRequestId,
         request_direction: Option<SyncDirection>,
     ) {
         self.log(
             Level::Debug,
-            format_args!("request blocks by range finished (request_id: {request_id})"),
+            format_args!("request blocks by range finished (app_request_id: {app_request_id:?})"),
         );
 
-        if let Some((sync_batch, _)) = self.block_requests.request_by_range_finished(request_id) {
+        if let Some((sync_batch, _)) = self
+            .block_requests
+            .request_by_range_finished(app_request_id)
+        {
             self.log(
                 Level::Debug,
                 format_args!(
@@ -611,7 +623,7 @@ impl SyncManager {
                     self.add_peer_to_back_sync_black_list(peer_id);
                 }
 
-                self.retry_batch(request_id, sync_batch, true);
+                self.retry_batch(app_request_id, sync_batch, true);
             }
         }
     }
@@ -778,7 +790,7 @@ impl SyncManager {
 impl SyncManager {
     pub fn add_blobs_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.blob_requests.add_request_by_range(
-            1,
+            AppRequestId::Application(1),
             SyncBatch {
                 target: SyncTarget::BlobSidecar,
                 direction: SyncDirection::Back,
@@ -803,7 +815,7 @@ impl SyncManager {
 
     pub fn add_blocks_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.block_requests.add_request_by_range(
-            2,
+            AppRequestId::Application(2),
             SyncBatch {
                 target: SyncTarget::Block,
                 direction: SyncDirection::Back,
