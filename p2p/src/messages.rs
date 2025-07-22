@@ -3,10 +3,11 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
-    rpc::{GoodbyeReason, RequestId as IncomingRequestId, RequestType, StatusMessage},
+    rpc::{GoodbyeReason, InboundRequestId, RequestType, StatusMessage},
+    service::api_types::AppRequestId,
     types::{EnrForkId, GossipKind},
-    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PeerRequestId,
-    PubsubMessage, ReportSource, Response, Subnet, SubnetDiscovery,
+    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PubsubMessage,
+    ReportSource, Response, Subnet, SubnetDiscovery,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
@@ -27,7 +28,7 @@ use types::{
 use crate::{
     misc::{
         AttestationSubnetActions, BeaconCommitteeSubscription, PeerReportReason, RPCRequestType,
-        RequestId, SyncCommitteeSubnetAction, SyncCommitteeSubscription,
+        SyncCommitteeSubnetAction, SyncCommitteeSubscription,
     },
     network_api::{NodeIdentity, NodePeer, NodePeerCount, NodePeersQuery},
 };
@@ -39,10 +40,15 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
-    RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, RequestId, RPCRequestType),
-    RequestedBlock(Arc<SignedBeaconBlock<P>>, PeerId, RequestId, RPCRequestType),
-    BlobsByRangeRequestFinished(RequestId),
-    BlocksByRangeRequestFinished(PeerId, RequestId),
+    RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, AppRequestId, RPCRequestType),
+    RequestedBlock(
+        Arc<SignedBeaconBlock<P>>,
+        PeerId,
+        AppRequestId,
+        RPCRequestType,
+    ),
+    BlobsByRangeRequestFinished(AppRequestId),
+    BlocksByRangeRequestFinished(PeerId, AppRequestId),
     RequestFailed(PeerId),
     FinalizedCheckpoint(Checkpoint),
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
@@ -115,11 +121,11 @@ impl SyncToMetrics {
 
 pub enum SyncToP2p {
     ReportPeer(PeerId, PeerAction, ReportSource, PeerReportReason),
-    RequestBlobsByRange(RequestId, PeerId, Slot, u64),
-    RequestBlobsByRoot(RequestId, PeerId, Vec<BlobIdentifier>),
-    RequestBlocksByRange(RequestId, PeerId, Slot, u64),
-    RequestBlockByRoot(RequestId, PeerId, H256),
-    RequestPeerStatus(RequestId, PeerId),
+    RequestBlobsByRange(AppRequestId, PeerId, Slot, u64),
+    RequestBlobsByRoot(AppRequestId, PeerId, Vec<BlobIdentifier>),
+    RequestBlocksByRange(AppRequestId, PeerId, Slot, u64),
+    RequestBlockByRoot(AppRequestId, PeerId, H256),
+    RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,
 }
 
@@ -198,8 +204,8 @@ pub enum ServiceInboundMessage<P: Preset> {
     Publish(PubsubMessage<P>),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
-    SendRequest(PeerId, RequestId, RequestType<P>),
-    SendResponse(PeerId, PeerRequestId, IncomingRequestId, Box<Response<P>>),
+    SendRequest(PeerId, AppRequestId, RequestType<P>),
+    SendResponse(PeerId, InboundRequestId, Box<Response<P>>),
     Subscribe(GossipTopic),
     SubscribeKind(GossipKind),
     SubscribeNewForkTopics(Phase, ForkDigest),
@@ -220,7 +226,7 @@ impl<P: Preset> ServiceInboundMessage<P> {
 }
 
 pub enum ServiceOutboundMessage<P: Preset> {
-    NetworkEvent(NetworkEvent<RequestId, P>),
+    NetworkEvent(NetworkEvent<P>),
 }
 
 impl<P: Preset> ServiceOutboundMessage<P> {
