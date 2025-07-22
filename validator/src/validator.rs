@@ -875,7 +875,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let beacon_block = match validator_blinded_block {
-            ValidatorBlindedBlock::BlindedBeaconBlock { blinded_block, .. } => {
+            ValidatorBlindedBlock::BlindedBeaconBlock { blinded_block, execution_payload } => {
                 let Some(signature) = slot_head
                     .sign_beacon_block(
                         &self.signer,
@@ -889,36 +889,59 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     return Ok(());
                 };
 
+                let blinded_block_phase = blinded_block.phase();
                 let signed_blinded_block = blinded_block.with_signature(signature);
 
                 let builder_api = self.builder_api.as_ref().expect(
                     "Builder API should be present as it was used to query ExecutionPayloadHeader",
                 );
 
-                let WithBlobsAndMev {
-                    value: execution_payload,
-                    proofs,
-                    blobs,
-                    ..
-                } = match builder_api
-                    .post_blinded_block(
-                        &self.chain_config,
-                        self.controller.genesis_time(),
-                        &signed_blinded_block,
-                    )
-                    .await
-                {
-                    Ok(response) => response,
-                    Err(error) => {
+                let execution_payload = if blinded_block_phase < Phase::Fulu {
+                    let WithBlobsAndMev {
+                        value: execution_payload,
+                        proofs,
+                        blobs,
+                        ..
+                    } = match builder_api
+                        .post_blinded_block(
+                            &self.chain_config,
+                            self.controller.genesis_time(),
+                            &signed_blinded_block,
+                        )
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(error) => {
+                            warn!("failed to post blinded block to the builder node: {error:?}");
+                            return Ok(());
+                        }
+                    };
+
+                    block_proofs = proofs;
+                    block_blobs = blobs;
+
+                    debug!(
+                        "received execution payload from the builder node: {execution_payload:?}"
+                    );
+
+                    execution_payload 
+                } else {
+                    if let Err(error) = builder_api
+                        .post_blinded_block_post_fulu(
+                            &self.chain_config,
+                            self.controller.genesis_time(),
+                            &signed_blinded_block,
+                        )
+                        .await
+                    {
                         warn!("failed to post blinded block to the builder node: {error:?}");
                         return Ok(());
                     }
+
+                    debug!("submitted blinded block to the builder node");
+
+                    *execution_payload
                 };
-
-                block_proofs = proofs;
-                block_blobs = blobs;
-
-                debug!("received execution payload from the builder node: {execution_payload:?}");
 
                 let (message, signature) = signed_blinded_block.split();
 

@@ -379,6 +379,59 @@ impl Api {
         Ok(response)
     }
 
+    pub async fn post_blinded_block_post_fulu<P: Preset>(
+        &self,
+        chain_config: &ChainConfig,
+        genesis_time: UnixSeconds,
+        block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        let _timer = self
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.builder_post_blinded_block_times.start_timer());
+
+        let url = self.url("/eth/v2/builder/blinded_blocks")?;
+
+        let (next_interval, remaining_time) =
+            clock::next_interval_with_remaining_time(chain_config, genesis_time)?;
+
+        let use_json = self.config.builder_api_format == BuilderApiFormat::Json
+            || self
+                .supports_block_ssz
+                .load()
+                .is_some_and(|supported| !supported);
+
+        debug!(
+            "posting blinded block to {url} with timeout of {remaining_time:?} \
+             before next interval {next_interval:?}, use_json: {use_json}",
+        );
+
+        let block_root = block.message().hash_tree_root();
+        let slot = block.message().slot();
+
+        let request = self
+            .client
+            .post(url.into_url())
+            .timeout(remaining_time)
+            .header(ETH_CONSENSUS_VERSION, block.phase().as_ref());
+
+        let request = if use_json {
+            request.json(block)
+        } else {
+            request
+                .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(block.to_ssz()?)
+        };
+
+        let response = request.send().await?;
+        handle_error(response).await?;
+
+        info!("received execution payload from builder for block {block_root:?} at slot {slot}");
+
+        Ok(())
+    }
+
     async fn parse_response<T: DeserializeOwned + SszRead<Phase>>(
         &self,
         response: Response,
