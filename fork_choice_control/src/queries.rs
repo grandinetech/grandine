@@ -284,6 +284,13 @@ where
     }
 
     #[must_use]
+    pub fn is_last_slot_of_epoch(&self) -> bool {
+        let store = self.store_snapshot();
+
+        store.slot() == misc::compute_start_slot_at_epoch::<P>(store.current_epoch() + 1) - 1
+    }
+
+    #[must_use]
     pub fn state_by_chain_link(&self, chain_link: &ChainLink<P>) -> Arc<BeaconState<P>> {
         chain_link.state(&self.store_snapshot())
     }
@@ -312,14 +319,19 @@ where
 
         let store_epoch = store.current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let max_allowed_epoch = store_epoch + P::MIN_SEED_LOOKAHEAD;
 
-        ensure!(
-            requested_epoch <= store_epoch + P::MIN_SEED_LOOKAHEAD,
-            Error::EpochTooFarInTheFuture {
-                requested_epoch,
-                store_epoch,
-            },
-        );
+        // If it is the last slot of an epoch,
+        // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
+        if !(requested_epoch == max_allowed_epoch + 1 && self.is_last_slot_of_epoch()) {
+            ensure!(
+                requested_epoch <= max_allowed_epoch,
+                Error::EpochTooFarInTheFuture {
+                    requested_epoch,
+                    store_epoch,
+                },
+            );
+        }
 
         self.state_at_slot(slot)
     }
@@ -567,14 +579,19 @@ where
     ) -> Result<WithStatus<Arc<BeaconState<P>>>> {
         let store = self.store_snapshot();
         let store_epoch = store.current_epoch();
+        let max_allowed_epoch = store_epoch + P::MIN_SEED_LOOKAHEAD;
 
-        ensure!(
-            requested_epoch <= store_epoch + P::MIN_SEED_LOOKAHEAD,
-            Error::EpochTooFarInTheFuture {
-                requested_epoch,
-                store_epoch,
-            },
-        );
+        // If it is the last slot of an epoch,
+        // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
+        if !(requested_epoch == max_allowed_epoch + 1 && self.is_last_slot_of_epoch()) {
+            ensure!(
+                requested_epoch <= max_allowed_epoch,
+                Error::EpochTooFarInTheFuture {
+                    requested_epoch,
+                    store_epoch,
+                },
+            );
+        }
 
         let head = store.head();
         let requested_slot = misc::compute_start_slot_at_epoch::<P>(requested_epoch);
@@ -1022,4 +1039,55 @@ enum Error {
     },
     #[error("state not found in fork choice store: {block_root:?}")]
     StateNotFound { block_root: H256 },
+}
+
+#[cfg(test)]
+mod tests {
+    use types::{config::Config, preset::Minimal};
+
+    use crate::specialized::TestController;
+
+    use super::*;
+
+    #[test]
+    fn test_state_at_slot_cached_allowed_epoch_boundaries() {
+        let config = Arc::new(Config::minimal());
+        let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
+            .expect("should build beacon state")
+            .0;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+        let (controller, _mutator_handle) =
+            TestController::quiet(config, genesis_block, genesis_state);
+
+        controller
+            .state_at_slot_cached(0)
+            .expect("should get state at slot 0");
+
+        controller.on_slot(6);
+        controller.wait_for_tasks();
+
+        controller
+            .state_at_slot_cached(15)
+            .expect("should get state at slot 15");
+        assert!(controller.state_at_slot_cached(16).is_err());
+
+        controller.on_slot(7);
+        controller.wait_for_tasks();
+
+        controller
+            .state_at_slot_cached(16)
+            .expect("should get state at slot 16");
+        controller
+            .state_at_slot_cached(23)
+            .expect("should get state at slot 23");
+        assert!(controller.state_at_slot_cached(24).is_err());
+
+        controller.on_slot(8);
+        controller.wait_for_tasks();
+
+        controller
+            .state_at_slot_cached(23)
+            .expect("should get state at slot 23");
+        assert!(controller.state_at_slot_cached(24).is_err());
+    }
 }

@@ -186,7 +186,6 @@ impl<P: Preset> BenchController<P> {
 
 #[cfg(test)]
 impl<P: Preset> TestController<P> {
-    #[cfg(feature = "eth2-cache")]
     pub(crate) fn quiet(
         chain_config: Arc<ChainConfig>,
         anchor_block: Arc<SignedBeaconBlock<P>>,
