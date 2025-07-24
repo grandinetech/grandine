@@ -1757,6 +1757,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             block_root,
+            metrics: self.metrics.clone(),
         });
     }
 
@@ -1781,6 +1782,7 @@ where
             &pending.block,
             &cells_and_kzg_proofs,
             self.store.chain_config(),
+            self.metrics.as_ref(),
         )?;
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
@@ -1794,6 +1796,10 @@ where
             let data_column_sidecar = Arc::new(data_column_sidecar);
             if missing_indices.contains(&data_column_sidecar.index) {
                 self.accept_data_column_sidecar(wait_group, &data_column_sidecar);
+
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.reconstructed_columns.inc();
+                }
             }
 
             if self.store.is_forward_synced() {
