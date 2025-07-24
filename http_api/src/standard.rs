@@ -1251,6 +1251,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/blocks`
 pub async fn publish_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
 ) -> Result<StatusCode, Error> {
@@ -1271,6 +1272,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
             controller.chain_config(),
+            metrics.as_ref(),
         )?;
 
         publish_signed_block_with_data_column_sidecar(
@@ -1301,6 +1303,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
 pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSsz(signed_blinded_block): EthJsonOrSsz<Box<SignedBlindedBeaconBlock<P>>>,
 ) -> Result<StatusCode, Error> {
@@ -1341,6 +1344,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
             controller.chain_config(),
+            metrics.as_ref(),
         )?;
 
         publish_signed_block_with_data_column_sidecar(
@@ -1415,6 +1419,7 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
 /// `POST /eth/v2/beacon/blocks`
 pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
     EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
@@ -1436,6 +1441,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
             controller.chain_config(),
+            metrics.as_ref(),
         )?;
 
         publish_signed_block_v2_with_data_column_sidecar(
