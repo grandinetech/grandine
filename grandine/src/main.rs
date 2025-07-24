@@ -8,7 +8,7 @@ use std::{
 };
 
 use allocator as _;
-use anyhow::{bail, ensure, Context as _, Result};
+use anyhow::{bail, ensure, Result};
 use builder_api::BuilderConfig;
 use clap::{Error as ClapError, Parser as _};
 use database::{Database, DatabaseMode, RestartMessage};
@@ -310,14 +310,15 @@ enum Error {
     #[error("--eth1-rpc-urls must be specified when validators are present")]
     MissingEth1RpcUrlsWithValidators,
     #[error(
-        "{service} port ({port}) is already in use; \
+        "{service} port ({port}) is unavailable; \
          make sure no other instance of the application is running \
-         or specify a different port with {option}"
+         or specify a different port with {option} (error: {error:?})"
     )]
     PortInUse {
         port: u16,
         service: &'static str,
         option: &'static str,
+        error: anyhow::Error,
     },
 }
 
@@ -564,10 +565,11 @@ fn ensure_ports_not_in_use(
     metrics_server_config: Option<&MetricsServerConfig>,
     validator_api_config: Option<&ValidatorApiConfig>,
 ) -> Result<()> {
-    TcpListener::bind(http_address).context(Error::PortInUse {
+    TcpListener::bind(http_address).map_err(|error| Error::PortInUse {
         port: http_address.port(),
         service: "HTTP API",
         option: "--http-port",
+        error: error.into(),
     })?;
 
     if let Some(listen_addr) = network_config.listen_addrs().v4() {
@@ -578,25 +580,28 @@ fn ensure_ports_not_in_use(
             tcp_port,
         } = listen_addr.clone();
 
-        TcpListener::bind((addr, tcp_port)).context(Error::PortInUse {
+        TcpListener::bind((addr, tcp_port)).map_err(|error| Error::PortInUse {
             port: tcp_port,
             service: "libp2p",
             option: "--libp2p-port",
+            error: error.into(),
         })?;
 
         if !network_config.disable_discovery {
-            UdpSocket::bind((addr, disc_port)).context(Error::PortInUse {
+            UdpSocket::bind((addr, disc_port)).map_err(|error| Error::PortInUse {
                 port: disc_port,
                 service: "discv5",
                 option: "--discovery-port",
+                error: error.into(),
             })?;
         }
 
         if !network_config.disable_quic_support {
-            UdpSocket::bind((addr, quic_port)).context(Error::PortInUse {
+            UdpSocket::bind((addr, quic_port)).map_err(|error| Error::PortInUse {
                 port: quic_port,
                 service: "quic",
                 option: "--quic-port",
+                error: error.into(),
             })?;
         }
     }
@@ -609,25 +614,28 @@ fn ensure_ports_not_in_use(
             tcp_port,
         } = listen_addr.clone();
 
-        TcpListener::bind((addr, tcp_port)).context(Error::PortInUse {
+        TcpListener::bind((addr, tcp_port)).map_err(|error| Error::PortInUse {
             port: tcp_port,
             service: "libp2p",
-            option: "--libp2p-port-v6",
+            option: "--libp2p-port-ipv6",
+            error: error.into(),
         })?;
 
         if !network_config.disable_discovery {
-            UdpSocket::bind((addr, disc_port)).context(Error::PortInUse {
+            UdpSocket::bind((addr, disc_port)).map_err(|error| Error::PortInUse {
                 port: disc_port,
                 service: "discv5",
-                option: "--discovery-port-v6",
+                option: "--discovery-port-ipv6",
+                error: error.into(),
             })?;
         }
 
         if !network_config.disable_quic_support {
-            UdpSocket::bind((addr, quic_port)).context(Error::PortInUse {
+            UdpSocket::bind((addr, quic_port)).map_err(|error| Error::PortInUse {
                 port: quic_port,
                 service: "libp2p",
-                option: "--quic-port-v6",
+                option: "--quic-port-ipv6",
+                error: error.into(),
             })?;
         }
     }
@@ -637,18 +645,20 @@ fn ensure_ports_not_in_use(
     if let Some(config) = metrics_server_config {
         let metrics_port = config.metrics_port;
 
-        TcpListener::bind(SocketAddr::from(config)).context(Error::PortInUse {
+        TcpListener::bind(SocketAddr::from(config)).map_err(|error| Error::PortInUse {
             port: metrics_port,
             service: "Metrics",
             option: "--metrics-port",
+            error: error.into(),
         })?;
     }
 
     if let Some(config) = validator_api_config {
-        TcpListener::bind(config.address).context(Error::PortInUse {
+        TcpListener::bind(config.address).map_err(|error| Error::PortInUse {
             port: config.address.port(),
             service: "Validator",
             option: "--validator-api-port",
+            error: error.into(),
         })?;
     }
 
