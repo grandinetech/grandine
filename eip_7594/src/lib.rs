@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashSet},
+    sync::Arc,
+};
 
 use anyhow::{ensure, Result};
 use helper_functions::{misc, predicates::is_valid_merkle_branch};
@@ -8,6 +11,7 @@ use kzg_utils::{
     KzgBackend,
 };
 use num_traits::One as _;
+use prometheus_metrics::Metrics;
 use rayon::iter::{
     IndexedParallelIterator as _, IntoParallelIterator as _, IntoParallelRefIterator as _,
     ParallelIterator as _,
@@ -37,9 +41,6 @@ mod error;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(feature = "metrics")]
-use prometheus_metrics::METRICS;
 
 pub fn get_custody_groups(
     raw_node_id: [u8; 32],
@@ -195,9 +196,9 @@ pub fn verify_data_column_sidecar<P: Preset>(
 pub fn verify_kzg_proofs<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     backend: KzgBackend,
+    metrics: Option<&Arc<Metrics>>,
 ) -> Result<bool> {
-    #[cfg(feature = "metrics")]
-    let _timer = METRICS.get().map(|metrics| {
+    let _timer = metrics.as_ref().map(|metrics| {
         metrics
             .data_column_sidecar_kzg_verification_batch
             .start_timer()
@@ -218,9 +219,9 @@ pub fn verify_kzg_proofs<P: Preset>(
 
 pub fn verify_sidecar_inclusion_proof<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
+    metrics: Option<&Arc<Metrics>>,
 ) -> bool {
-    #[cfg(feature = "metrics")]
-    let _timer = METRICS.get().map(|metrics| {
+    let _timer = metrics.as_ref().map(|metrics| {
         metrics
             .data_column_sidecar_inclusion_proof_verification
             .start_timer()
@@ -255,11 +256,6 @@ pub fn recover_matrix<P: Preset>(
     blob_count: usize,
     backend: KzgBackend,
 ) -> Result<Vec<MatrixEntry<P>>> {
-    #[cfg(feature = "metrics")]
-    let _timer = METRICS
-        .get()
-        .map(|metrics| metrics.columns_reconstruction_time.start_timer());
-
     // TODO(peerdas-fulu): group once by row_index
     // let cells_indices_and_cells = partial_matrix
     //     .iter()
@@ -320,7 +316,12 @@ pub fn construct_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
     config: &Config,
+    metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
+    let _timer = metrics
+        .as_ref()
+        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
     let signed_block_header = signed_block.to_header();
     let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() else {
         return Ok(vec![]);
@@ -347,7 +348,12 @@ pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
     config: &Config,
+    metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
+    let _timer = metrics
+        .as_ref()
+        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
     let DataColumnSidecar {
         kzg_commitments,
         signed_block_header,

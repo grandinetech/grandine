@@ -430,6 +430,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             state,
             block_seen,
             &origin,
+            metrics.as_ref(),
         );
 
         if result.is_err() {
@@ -543,6 +544,7 @@ pub struct ReconstructDataColumnSidecarsTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub block_root: H256,
+    pub metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
@@ -553,7 +555,12 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
             mutator_tx,
             wait_group,
             block_root,
+            metrics,
         } = self;
+
+        let _columns_reconstruction_timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
         let Ok(available_columns) = (0..store_snapshot.chain_config().number_of_columns)
             .map(|index| {
