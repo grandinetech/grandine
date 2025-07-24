@@ -63,13 +63,15 @@ pub struct Metrics {
     pub data_column_sidecars_submitted_for_processing: IntCounter,
     pub verified_gossip_data_column_sidecar: IntCounter,
     pub data_column_sidecar_verification_times: Histogram,
-    pub reconstructed_columns: IntCounter, // TODO
+    pub reconstructed_columns: IntCounter,
     pub columns_reconstruction_time: Histogram,
     pub data_column_sidecar_computation: Histogram,
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
-    pub data_column_sidecar_kzg_verification_single: Histogram, // TODO?
     pub data_column_sidecar_kzg_verification_batch: Histogram,
-    pub beacon_custody_columns_count_total: IntCounter, // TODO
+    pub beacon_custody_columns_count_total: IntCounter,
+    pub engine_get_blobs_v2_requests_count: IntCounter,
+    pub engine_get_blobs_v2_responses_count: IntCounter,
+    pub engine_get_blobs_v2_request_time: Histogram,
 
     // Extra Network stats
     gossip_block_slot_start_delay_time: Histogram,
@@ -351,11 +353,6 @@ impl Metrics {
                 "Time taken to verify data column sidecar inclusion proof"
             ))?,
 
-            data_column_sidecar_kzg_verification_single: Histogram::with_opts(histogram_opts!(
-                "beacon_kzg_verification_data_column_single_seconds",
-                "Runtime of single data column kzg verification"
-            ))?,
-
             data_column_sidecar_kzg_verification_batch: Histogram::with_opts(histogram_opts!(
                 "beacon_kzg_verification_data_column_batch_seconds",
                 "Runtime of batched data column kzg verification"
@@ -365,6 +362,21 @@ impl Metrics {
                 "beacon_custody_columns_count_total",
                 "Total count of columns in custody within the data availability boundary"
             )?,
+
+            engine_get_blobs_v2_requests_count: IntCounter::new(
+                "beacon_engine_getBlobsV2_requests_total",
+                "Total number of engine_getBlobsV2 requests sent"
+            )?,
+
+            engine_get_blobs_v2_responses_count: IntCounter::new(
+                "beacon_engine_getBlobsV2_responses_total",
+                "Total number of engine_getBlobsV2 successful responses received"
+            )?,
+
+            engine_get_blobs_v2_request_time: Histogram::with_opts(histogram_opts!(
+                "beacon_engine_getBlobsV2_request_duration_seconds",
+                "Duration of engine_getBlobsV2 requests"
+            ))?,
 
             // Extra Network stats
             gossip_block_slot_start_delay_time: Histogram::with_opts(histogram_opts!(
@@ -887,12 +899,12 @@ impl Metrics {
                 .clone(),
         ))?;
         default_registry.register(Box::new(
-            self.data_column_sidecar_kzg_verification_single.clone(),
-        ))?;
-        default_registry.register(Box::new(
             self.data_column_sidecar_kzg_verification_batch.clone(),
         ))?;
         default_registry.register(Box::new(self.beacon_custody_columns_count_total.clone()))?;
+        default_registry.register(Box::new(self.engine_get_blobs_v2_requests_count.clone()))?;
+        default_registry.register(Box::new(self.engine_get_blobs_v2_responses_count.clone()))?;
+        default_registry.register(Box::new(self.engine_get_blobs_v2_request_time.clone()))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;

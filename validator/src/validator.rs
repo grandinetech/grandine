@@ -990,6 +990,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         &block,
                         &cells_and_kzg_proofs,
                         &self.chain_config,
+                        self.metrics.as_ref(),
                     )? {
                         let data_column_sidecar = Arc::new(data_column_sidecar);
 
