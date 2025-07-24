@@ -289,6 +289,7 @@ pub async fn run_after_genesis<P: Preset>(
         received_blob_sidecars.clone_arc(),
         received_data_column_sidecars.clone_arc(),
         sidecars_construction_started,
+        metrics.clone(),
         blob_fetcher_to_p2p_tx,
         execution_service_to_blob_fetcher_rx,
     );

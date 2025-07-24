@@ -2020,6 +2020,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         origin: &DataColumnSidecarOrigin,
         parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+        metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_header = data_column_sidecar.signed_block_header.message;
         let block_root = block_header.hash_tree_root();
@@ -2158,19 +2159,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if !origin.is_from_el() {
             // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
             ensure!(
-                verify_sidecar_inclusion_proof(&data_column_sidecar),
+                verify_sidecar_inclusion_proof(&data_column_sidecar, metrics),
                 Error::DataColumnSidecarInvalidInclusionProof {
                     data_column_sidecar
                 }
             );
 
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend).map_err(
-                |error| Error::DataColumnSidecarInvalidKzgProofs {
+            verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
+                .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
                     data_column_sidecar: data_column_sidecar.clone_arc(),
                     error,
-                },
-            )?;
+                })?;
         }
 
         if !origin.is_from_back_sync() {
@@ -2199,6 +2199,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state: Option<Arc<BeaconState<P>>>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
+        metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_header = data_column_sidecar.signed_block_header.message;
 
@@ -2214,6 +2215,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 origin,
                 parent_info,
                 || Some(state),
+                metrics,
             )
         } else {
             self.validate_data_column_sidecar_with_state(
@@ -2228,6 +2230,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         block_header.slot,
                     )
                 },
+                metrics,
             )
         }
     }
