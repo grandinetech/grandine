@@ -4,7 +4,7 @@ use ethereum_types::H256;
 
 use crate::{
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
 };
 
@@ -27,6 +27,12 @@ impl<T: SszHash> SszHash for &T {
 
     fn hash_tree_root(&self) -> H256 {
         (*self).hash_tree_root()
+    }
+}
+
+impl<T: SszUnify> SszUnify for &T {
+    fn unify(&mut self, _other: Self) -> bool {
+        todo!()
     }
 }
 
@@ -58,6 +64,12 @@ impl<T: SszHash> SszHash for Box<T> {
     }
 }
 
+impl<T: SszUnify> SszUnify for Box<T> {
+    fn unify(&mut self, _other: Self) -> bool {
+        todo!()
+    }
+}
+
 impl<T: SszSize> SszSize for Arc<T> {
     const SIZE: Size = T::SIZE;
 }
@@ -83,5 +95,11 @@ impl<T: SszHash> SszHash for Arc<T> {
 
     fn hash_tree_root(&self) -> H256 {
         self.as_ref().hash_tree_root()
+    }
+}
+
+impl<T: SszUnify> SszUnify for Arc<T> {
+    fn unify(&mut self, _other: Self) -> bool {
+        todo!()
     }
 }

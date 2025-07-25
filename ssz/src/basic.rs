@@ -5,7 +5,7 @@ use typenum::{U2, U32, U4, U8};
 use crate::{
     consts::Endianness,
     error::ReadError,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
 };
 
@@ -47,6 +47,12 @@ impl SszHash for bool {
     }
 }
 
+impl SszUnify for bool {
+    fn unify(&mut self, other: Self) -> bool {
+        *self == other
+    }
+}
+
 impl SszSize for u8 {
     const SIZE: Size = Size::Fixed {
         size: size_of::<Self>(),
@@ -75,6 +81,12 @@ impl SszHash for u8 {
         let mut hash = H256::zero();
         hash.as_mut()[0] = *self;
         hash
+    }
+}
+
+impl SszUnify for u8 {
+    fn unify(&mut self, other: Self) -> bool {
+        *self == other
     }
 }
 
@@ -113,6 +125,12 @@ impl SszHash for u16 {
     }
 }
 
+impl SszUnify for u16 {
+    fn unify(&mut self, other: Self) -> bool {
+        *self == other
+    }
+}
+
 impl SszSize for u32 {
     const SIZE: Size = Size::Fixed {
         size: size_of::<Self>(),
@@ -141,6 +159,12 @@ impl SszHash for u32 {
         let mut hash = H256::zero();
         self.write_fixed(hash.as_bytes_mut());
         hash
+    }
+}
+
+impl SszUnify for u32 {
+    fn unify(&mut self, other: Self) -> bool {
+        *self == other
     }
 }
 
@@ -177,6 +201,12 @@ impl SszHash for u64 {
     }
 }
 
+impl SszUnify for u64 {
+    fn unify(&mut self, other: Self) -> bool {
+        *self == other
+    }
+}
+
 impl SszSize for u128 {
     const SIZE: Size = Size::Fixed {
         size: size_of::<Self>(),
@@ -205,5 +235,11 @@ impl SszHash for u128 {
         let mut hash = H256::zero();
         self.write_fixed(hash.as_bytes_mut());
         hash
+    }
+}
+
+impl SszUnify for u128 {
+    fn unify(&mut self, other: Self) -> bool {
+        *self == other
     }
 }
