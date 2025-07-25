@@ -83,7 +83,7 @@ pub struct SignedElectraBlockWithBlobs<P: Preset> {
 
 #[derive(Serialize, Ssz)]
 #[serde(bound = "")]
-#[ssz(derive_read = false, derive_hash = false)]
+#[ssz(derive_hash = false, derive_read = false, derive_unify = false)]
 pub struct BlockWithBlobs<B: Serialize + SszWrite, P: Preset> {
     pub block: B,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,

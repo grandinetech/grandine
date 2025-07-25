@@ -7,12 +7,12 @@ use derive_more::From;
 use ethereum_types::H256;
 use generic_array::ArrayLength;
 use serde::{Deserialize, Deserializer, Serialize};
-use typenum::{NonZero, U1};
+use typenum::U1;
 
 use crate::{
     contiguous_vector::ContiguousVector,
     error::ReadError,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
     type_level::{ContiguousVectorElements, MerkleElements},
 };
@@ -58,13 +58,13 @@ impl<N: ContiguousVectorElements<u8>> SszSize for ByteVector<N> {
     const SIZE: Size = Size::Fixed { size: N::USIZE };
 }
 
-impl<C, N: ContiguousVectorElements<u8> + NonZero> SszRead<C> for ByteVector<N> {
+impl<C, N: ContiguousVectorElements<u8>> SszRead<C> for ByteVector<N> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         ContiguousVector::from_ssz_unchecked(context, bytes).map(Into::into)
     }
 }
 
-impl<N: ContiguousVectorElements<u8> + NonZero> SszWrite for ByteVector<N> {
+impl<N: ContiguousVectorElements<u8>> SszWrite for ByteVector<N> {
     fn write_fixed(&self, bytes: &mut [u8]) {
         self.bytes.write_fixed(bytes)
     }
@@ -75,6 +75,12 @@ impl<N: ContiguousVectorElements<u8> + MerkleElements<u8>> SszHash for ByteVecto
 
     fn hash_tree_root(&self) -> H256 {
         self.bytes.hash_tree_root()
+    }
+}
+
+impl<N: ContiguousVectorElements<u8>> SszUnify for ByteVector<N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
     }
 }
 

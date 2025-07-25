@@ -86,3 +86,13 @@ pub trait SszHash {
 
     fn hash_tree_root(&self) -> H256;
 }
+
+pub trait SszUnify {
+    /// Modifies `self` to share structure with `other`.
+    ///
+    /// Returns `true` if `self` and `other` are equal regardless of whether `self` was modified.
+    ///
+    /// Comparison and unification are conceptually separate but done by the same method to avoid
+    /// traversing data structures multiple times.
+    fn unify(&mut self, other: &Self) -> bool;
+}

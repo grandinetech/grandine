@@ -359,7 +359,7 @@ impl<P: Preset> Batch<P> {
 }
 
 #[derive(Clone, Copy, Debug, Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_unify = false)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Data {
     pub current: SyncCheckpoint,

@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use ethereum_types::H256;
+use std_ext::ArcExt as _;
 
 use crate::{
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
 };
 
@@ -27,6 +28,18 @@ impl<T: SszHash> SszHash for &T {
 
     fn hash_tree_root(&self) -> H256 {
         (*self).hash_tree_root()
+    }
+}
+
+impl<T: PartialEq> SszUnify for &T {
+    fn unify(&mut self, other: &Self) -> bool {
+        let equal = self == other;
+
+        if equal {
+            *self = other;
+        }
+
+        equal
     }
 }
 
@@ -58,6 +71,12 @@ impl<T: SszHash> SszHash for Box<T> {
     }
 }
 
+impl<T: SszUnify> SszUnify for Box<T> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self.as_mut().unify(other)
+    }
+}
+
 impl<T: SszSize> SszSize for Arc<T> {
     const SIZE: Size = T::SIZE;
 }
@@ -83,5 +102,17 @@ impl<T: SszHash> SszHash for Arc<T> {
 
     fn hash_tree_root(&self) -> H256 {
         self.as_ref().hash_tree_root()
+    }
+}
+
+impl<T: SszUnify + Clone> SszUnify for Arc<T> {
+    fn unify(&mut self, other: &Self) -> bool {
+        let equal = self.make_mut().unify(other);
+
+        if equal {
+            *self = other.clone_arc();
+        }
+
+        equal
     }
 }

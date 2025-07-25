@@ -12,7 +12,7 @@ use types::{
 
 #[derive(Debug, Deserialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-#[ssz(derive_write = false)]
+#[ssz(derive_unify = false, derive_write = false)]
 pub struct BuilderBid<P: Preset> {
     pub header: Box<ExecutionPayloadHeader<P>>,
     pub value: Wei,
@@ -21,7 +21,7 @@ pub struct BuilderBid<P: Preset> {
 
 #[derive(Debug, Deserialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-#[ssz(derive_write = false)]
+#[ssz(derive_unify = false, derive_write = false)]
 pub struct SignedBuilderBid<P: Preset> {
     pub message: BuilderBid<P>,
     pub signature: SignatureBytes,

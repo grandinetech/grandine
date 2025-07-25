@@ -15,7 +15,7 @@ use crate::{
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
     persistent_vector::PersistentVector,
-    porcelain::{SszHash, SszReadDefault, SszSize, SszWrite},
+    porcelain::{SszHash, SszReadDefault, SszSize, SszUnify, SszWrite},
     uint256::Uint256,
 };
 
@@ -359,33 +359,33 @@ where
 // > invalid.  This is a valid way of detecting `invalid` data too. E.g. a 0-length basic vector.
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_bool_0`
-assert_not_impl_any!(ContiguousVector<bool, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<bool, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<bool, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<bool, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint128_0`
-assert_not_impl_any!(ContiguousVector<StringyU128, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<StringyU128, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<StringyU128, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<StringyU128, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint16_0`
-assert_not_impl_any!(ContiguousVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint256_0`
-assert_not_impl_any!(ContiguousVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint32_0`
-assert_not_impl_any!(ContiguousVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint64_0`
-assert_not_impl_any!(ContiguousVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint8_0`
-assert_not_impl_any!(ContiguousVector<u8, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u8, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u8, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
+assert_not_impl_any!(PersistentVector<u8, U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);
 
 // `consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/bitvec_0`
 // This is already covered in `ssz::negative`, but there's no harm in having it here as well.
-assert_not_impl_any!(BitVector<U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(BitVector<U0>: SszSize, SszReadDefault, SszWrite, SszHash, SszUnify);

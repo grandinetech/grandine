@@ -12,7 +12,7 @@ use typenum::{Unsigned, U1};
 use crate::{
     error::{ReadError, WriteError},
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::MerkleElements,
@@ -126,6 +126,19 @@ impl<T: SszHash + SszWrite, N: MerkleElements<T>> SszHash for ContiguousList<T, 
             MerkleTree::<N::PackedMerkleTreeDepth>::merkleize_packed(self)
         };
         merkle_tree::mix_in_length(root, self.len())
+    }
+}
+
+impl<T: SszUnify, N> SszUnify for ContiguousList<T, N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        let mut equal = self.len() == other.len();
+
+        // Do not call `Iterator::all`. It short-circuits, preventing unification of later elements.
+        for (self_element, other_element) in self.iter_mut().zip(other.iter()) {
+            equal &= self_element.unify(other_element);
+        }
+
+        equal
     }
 }
 

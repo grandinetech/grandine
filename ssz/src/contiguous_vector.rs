@@ -19,7 +19,7 @@ use typenum::{Unsigned as _, U1};
 use crate::{
     error::{ReadError, WriteError},
     merkle_tree::MerkleTree,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::{ContiguousVectorElements, MerkleElements},
@@ -148,6 +148,19 @@ where
         } else {
             MerkleTree::<N::PackedMerkleTreeDepth>::merkleize_packed(self)
         }
+    }
+}
+
+impl<T: SszUnify, N: ContiguousVectorElements<T>> SszUnify for ContiguousVector<T, N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        let mut equal = true;
+
+        // Do not call `Iterator::all`. It short-circuits, preventing unification of later elements.
+        for (self_element, other_element) in self.iter_mut().zip(other.iter()) {
+            equal &= self_element.unify(other_element);
+        }
+
+        equal
     }
 }
 

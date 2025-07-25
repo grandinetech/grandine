@@ -28,7 +28,7 @@ use crate::{
     error::{IndexError, ReadError, WriteError},
     hc::Hc,
     iter::{ExactSize, UpTo3},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::{MerkleElements, MinimumBundleSize, PersistentVectorElements},
@@ -276,6 +276,12 @@ where
 
     fn hash_tree_root(&self) -> H256 {
         self.root.hash_tree_root()
+    }
+}
+
+impl<T, N: NonZero, B: BundleSize<T>> SszUnify for PersistentVector<T, N, B> {
+    fn unify(&mut self, _other: &Self) -> bool {
+        todo!()
     }
 }
 

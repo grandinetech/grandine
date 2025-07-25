@@ -13,7 +13,7 @@ use triomphe::Arc;
 
 use crate::{
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
 };
 
@@ -111,6 +111,18 @@ impl<T: SszHash> SszHash for Hc<T> {
         *self
             .cached_root
             .get_or_init(|| Box::new(self.value.hash_tree_root()))
+    }
+}
+
+impl<T: SszUnify> SszUnify for Hc<T> {
+    fn unify(&mut self, other: &Self) -> bool {
+        let equal = self.value.unify(other);
+
+        if !equal {
+            self.cached_root = OnceBox::new();
+        }
+
+        equal
     }
 }
 

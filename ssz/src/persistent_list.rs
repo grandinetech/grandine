@@ -33,7 +33,7 @@ use crate::{
     hc::Hc,
     iter::ExactSize,
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::{FitsInU64, MerkleElements, MinimumBundleSize},
@@ -269,6 +269,12 @@ where
         };
 
         merkle_tree::mix_in_length(root, self.length)
+    }
+}
+
+impl<T, N, B> SszUnify for PersistentList<T, N, B> {
+    fn unify(&mut self, _other: &Self) -> bool {
+        todo!()
     }
 }
 

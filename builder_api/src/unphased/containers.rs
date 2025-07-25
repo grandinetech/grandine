@@ -21,7 +21,7 @@ pub struct ValidatorRegistrationV1 {
 }
 
 #[derive(Debug, Deserialize, Serialize, Ssz)]
-#[ssz(derive_hash = false, derive_read = false)]
+#[ssz(derive_hash = false, derive_read = false, derive_unify = false)]
 pub struct SignedValidatorRegistrationV1 {
     pub message: ValidatorRegistrationV1,
     pub signature: SignatureBytes,

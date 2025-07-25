@@ -96,7 +96,7 @@ assert_eq_size!(RawDepositEvent, [EvmWord; 18]);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Ssz)]
 #[cfg_attr(test, derive(PartialEq, Eq, Default))]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_unify = false)]
 pub struct DepositEvent {
     pub data: DepositData,
     pub index: DepositIndex,

@@ -23,7 +23,7 @@ const MAX_DEPOSITS: DepositIndex = 1 << DepositContractTreeDepth::USIZE;
 //
 // [reference implementation in EIP-4881]: https://eips.ethereum.org/EIPS/eip-4881#reference-implementation
 #[derive(Clone, Copy, Default, Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_unify = false)]
 pub struct DepositTree {
     pub merkle_tree: MerkleTree<DepositContractTreeDepth>,
     pub deposit_count: DepositIndex,
