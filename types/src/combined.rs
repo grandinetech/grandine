@@ -5,7 +5,7 @@ use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
     BitVector, ContiguousList, Hc, Offset, ReadError, Size, SszHash, SszRead, SszReadDefault,
-    SszSize, SszWrite, WriteError, H256,
+    SszSize, SszUnify, SszWrite, WriteError, H256,
 };
 use static_assertions::{assert_not_impl_any, const_assert_eq};
 use thiserror::Error;
@@ -194,6 +194,33 @@ impl<P: Preset> SszHash for BeaconState<P> {
             Self::Capella(state) => state.hash_tree_root(),
             Self::Deneb(state) => state.hash_tree_root(),
             Self::Electra(state) => state.hash_tree_root(),
+        }
+    }
+}
+
+impl<P: Preset> SszUnify for BeaconState<P> {
+    fn unify(&mut self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Phase0(self_state), Self::Phase0(other_state)) => self_state.unify(other_state),
+            (Self::Altair(self_state), Self::Altair(other_state)) => self_state.unify(other_state),
+            (Self::Bellatrix(self_state), Self::Bellatrix(other_state)) => {
+                self_state.unify(other_state)
+            }
+            (Self::Capella(self_state), Self::Capella(other_state)) => {
+                self_state.unify(other_state)
+            }
+            (Self::Deneb(self_state), Self::Deneb(other_state)) => self_state.unify(other_state),
+            (Self::Electra(self_state), Self::Electra(other_state)) => {
+                self_state.unify(other_state)
+            }
+            _ => {
+                // This match arm will silently match any new phases.
+                // Cause a compilation error if a new phase is added.
+                const_assert_eq!(Phase::CARDINALITY, 6);
+
+                // TODO(feature/ssz-unify): Unify persistent collections in states from different phases.
+                false
+            }
         }
     }
 }

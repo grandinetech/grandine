@@ -21,7 +21,7 @@ use zeroize::Zeroizing;
 type ValidatorKeyCacheMap = ContiguousList<ValidatorKeyCacheRecord, U65536>;
 
 #[derive(Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_unify = false)]
 struct ValidatorKeyCacheRecord {
     uuid: u128,
     public_key: PublicKeyBytes,

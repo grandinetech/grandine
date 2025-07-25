@@ -17,7 +17,7 @@ pub trait EpochDeltas: Copy {
 
 #[cfg(test)]
 #[derive(Ssz)]
-#[ssz(derive_hash = false, derive_write = false)]
+#[ssz(derive_hash = false, derive_unify = false, derive_write = false)]
 pub struct TestDeltas {
     rewards: ContiguousList<Gwei, <Mainnet as Preset>::ValidatorRegistryLimit>,
     penalties: ContiguousList<Gwei, <Mainnet as Preset>::ValidatorRegistryLimit>,

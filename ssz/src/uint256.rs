@@ -22,7 +22,7 @@ use typenum::U1;
 use crate::{
     consts::Endianness,
     error::{ConversionError, ReadError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
 };
 
@@ -213,6 +213,13 @@ impl SszHash for Uint256 {
         let mut hash = H256::zero();
         self.write_fixed(hash.as_bytes_mut());
         hash
+    }
+}
+
+impl SszUnify for Uint256 {
+    #[inline]
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
     }
 }
 

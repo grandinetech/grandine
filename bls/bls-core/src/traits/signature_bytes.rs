@@ -1,5 +1,5 @@
 use core::{fmt::Debug, str::FromStr};
-use ssz::{SszHash, SszRead, SszSize, SszWrite};
+use ssz::{SszHash, SszRead, SszSize, SszUnify, SszWrite};
 use typenum::U96;
 
 pub type CompressedSize = U96;
@@ -20,6 +20,7 @@ pub trait SignatureBytes<C = ()>:
     + SszRead<C>
     + SszWrite
     + SszHash
+    + SszUnify
 {
     fn empty() -> Self;
     fn is_empty(self) -> bool;
@@ -60,6 +61,13 @@ macro_rules! impl_signature_bytes {
             #[inline]
             fn hash_tree_root(&self) -> ssz::H256 {
                 ssz::MerkleTree::<ssz::BytesToDepth<typenum::U96>>::merkleize_bytes(self)
+            }
+        }
+
+        impl $crate::ssz::SszUnify for $name {
+            #[inline]
+            fn unify(&mut self, other: &Self) -> bool {
+                self == other
             }
         }
 

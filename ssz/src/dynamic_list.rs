@@ -1,18 +1,18 @@
 use core::fmt::Debug;
 
 use derivative::Derivative;
-use derive_more::{AsRef, Deref};
+use derive_more::{AsRef, Deref, DerefMut};
 use serde::{Serialize, Serializer};
 
 use crate::{
     error::{ReadError, WriteError},
-    porcelain::{SszRead, SszSize, SszWrite},
+    porcelain::{SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     SszReadDefault,
 };
 
-#[derive(Deref, Derivative)]
+#[derive(Deref, DerefMut, Derivative)]
 #[derivative(
     Clone(bound = "T: Clone"),
     PartialEq(bound = "T: PartialEq"),
@@ -21,7 +21,6 @@ use crate::{
     Debug(bound = "T: Debug", transparent = "true")
 )]
 pub struct DynamicList<T> {
-    #[deref]
     elements: Box<[T]>,
 }
 
@@ -74,6 +73,12 @@ impl<T: SszReadDefault> SszRead<usize> for DynamicList<T> {
 impl<T: SszWrite> SszWrite for DynamicList<T> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         shared::write_list(bytes, self)
+    }
+}
+
+impl<T: SszUnify> SszUnify for DynamicList<T> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self.elements.unify(&other.elements)
     }
 }
 

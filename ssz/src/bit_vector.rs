@@ -19,7 +19,7 @@ use crate::{
     consts::BITS_PER_BYTE,
     error::ReadError,
     merkle_tree::MerkleTree,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
     type_level::{BitVectorBits, MerkleBits},
 };
@@ -135,6 +135,12 @@ impl<N: BitVectorBits + MerkleBits> SszHash for BitVector<N> {
 
     fn hash_tree_root(&self) -> H256 {
         MerkleTree::<N::MerkleTreeDepth>::merkleize_bytes(self.bytes)
+    }
+}
+
+impl<N: BitVectorBits + NonZero> SszUnify for BitVector<N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
     }
 }
 

@@ -1,6 +1,6 @@
 use core::{fmt::Debug, str::FromStr};
 use hex::FromHex;
-use ssz::{SszHash, SszRead, SszSize, SszWrite};
+use ssz::{SszHash, SszRead, SszSize, SszUnify, SszWrite};
 
 use super::PublicKey as PublicKeyTrait;
 
@@ -31,6 +31,7 @@ pub trait PublicKeyBytes<C = ()>:
     + SszRead<C>
     + SszWrite
     + SszHash
+    + SszUnify
 {
     type PublicKey: PublicKeyTrait;
 }
@@ -73,6 +74,13 @@ macro_rules! impl_public_key_bytes {
             #[inline]
             fn hash_tree_root(&self) -> ssz::H256 {
                 ssz::MerkleTree::<ssz::BytesToDepth<typenum::U48>>::merkleize_bytes(self)
+            }
+        }
+
+        impl $crate::ssz::SszUnify for $name {
+            #[inline]
+            fn unify(&mut self, other: &Self) -> bool {
+                self == other
             }
         }
 

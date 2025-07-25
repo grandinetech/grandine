@@ -42,6 +42,8 @@ pub struct SszType {
     #[darling(default = "default_to_true")]
     derive_size: bool,
     #[darling(default = "default_to_true")]
+    derive_unify: bool,
+    #[darling(default = "default_to_true")]
     derive_write: bool,
     // This is needed to make deriving work inside the `ssz` crate itself.
     #[darling(default)]
@@ -112,6 +114,16 @@ impl SszType {
             });
         }
 
+        if self.derive_unify {
+            let unify_fn_impl = self.unify_fn_impl(&ssz)?;
+
+            impls.append_all(quote! {
+                impl #impl_generics #ssz::SszUnify for #ident #ty_generics #where_clause {
+                    #unify_fn_impl
+                }
+            });
+        }
+
         Ok(impls)
     }
 
@@ -120,11 +132,12 @@ impl SszType {
             derive_hash,
             derive_read,
             derive_size,
+            derive_unify,
             derive_write,
             ..
         } = *self;
 
-        if !(derive_hash || derive_read || derive_size || derive_write) {
+        if !(derive_hash || derive_read || derive_size || derive_unify || derive_write) {
             return Err(Error::new(
                 Span::call_site(),
                 "at least one impl must be derived",
@@ -469,6 +482,31 @@ impl SszType {
         Ok(parse_quote! {
             fn hash_tree_root(&self) -> #ssz::H256 {
                 #root
+            }
+        })
+    }
+
+    fn unify_fn_impl(&self, ssz: &Path) -> Result<ImplItemFn, Error> {
+        if self.transparent {
+            let (member, _) = self.single_unskipped_field()?;
+
+            return Ok(parse_quote! {
+                #[inline]
+                fn unify(&mut self, other: &Self) -> bool {
+                    #ssz::SszUnify::unify(&mut self.#member, &other.#member)
+                }
+            });
+        }
+
+        let unify_exprs = self.unskipped_fields()?.map(|(member, _)| {
+            quote! { #ssz::SszUnify::unify(&mut self.#member, &other.#member) }
+        });
+
+        Ok(parse_quote! {
+            fn unify(&mut self, other: &Self) -> bool {
+                // Use the `&` operator instead of `&&`.
+                // The `&&` operator short-circuits, preventing unification of later fields.
+                #(#unify_exprs)&*
             }
         })
     }

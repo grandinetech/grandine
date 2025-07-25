@@ -56,6 +56,7 @@ use crate::{
 #[ssz(
     derive_read = false,
     derive_size = false,
+    derive_unify = false,
     derive_write = false,
     transparent
 )]

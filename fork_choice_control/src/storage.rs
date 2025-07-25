@@ -1002,7 +1002,11 @@ type StateStorage<'storage, P> = (
 #[derive(Ssz)]
 // A `bound_for_read` attribute like this must be added when deriving `SszRead` for any type that
 // contains a block or state. The name of the `C` type parameter is hardcoded in `ssz_derive`.
-#[ssz(bound_for_read = "BeaconState<P>: SszRead<C>", derive_hash = false)]
+#[ssz(
+    bound_for_read = "BeaconState<P>: SszRead<C>",
+    derive_hash = false,
+    derive_unify = false
+)]
 pub struct StateCheckpoint<P: Preset> {
     block_root: H256,
     head_slot: Slot,
@@ -1024,6 +1028,7 @@ impl<P: Preset> StateCheckpoint<P> {
 #[ssz(
     bound_for_read = "SignedBeaconBlock<P>: SszRead<C>",
     derive_hash = false,
+    derive_unify = false,
     transparent
 )]
 pub struct BlockCheckpoint<P: Preset> {

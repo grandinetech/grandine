@@ -33,7 +33,7 @@ use crate::{
     hc::Hc,
     iter::ExactSize,
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::{FitsInU64, MerkleElements, MinimumBundleSize},
@@ -269,6 +269,14 @@ where
         };
 
         merkle_tree::mix_in_length(root, self.length)
+    }
+}
+
+impl<T: SszUnify + Clone, N, B> SszUnify for PersistentList<T, N, B> {
+    fn unify(&mut self, other: &Self) -> bool {
+        // Use the `&` operator instead of `&&`.
+        // The `&&` operator short-circuits, preventing unification of later fields.
+        self.root.unify(&other.root) & self.length.unify(&other.length)
     }
 }
 
@@ -564,6 +572,45 @@ where
                     )
                 }
             }
+        }
+    }
+}
+
+impl<T: SszUnify + Clone, B> SszUnify for Node<T, B> {
+    fn unify(&mut self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Internal {
+                    left: self_left,
+                    right: self_right,
+                    left_height: self_left_height,
+                    right_height: self_right_height,
+                },
+                Self::Internal {
+                    left: other_left,
+                    right: other_right,
+                    left_height: other_left_height,
+                    right_height: other_right_height,
+                },
+            ) => {
+                // Use the `&` operator instead of `&&`.
+                // The `&&` operator short-circuits, preventing unification of later fields.
+                self_left.make_mut().unify(other_left)
+                    & self_right.make_mut().unify(other_right)
+                    & self_left_height.unify(other_left_height)
+                    & self_right_height.unify(other_right_height)
+            }
+            (
+                Self::Leaf {
+                    bundle: self_bundle,
+                    phantom: PhantomData,
+                },
+                Self::Leaf {
+                    bundle: other_bundle,
+                    phantom: PhantomData,
+                },
+            ) => self_bundle.unify(other_bundle),
+            _ => false,
         }
     }
 }

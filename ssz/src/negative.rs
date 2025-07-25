@@ -1,3 +1,5 @@
+// `SszUnify` is intentionally omitted from the assertions because its functionality is nonstandard.
+
 use core::{
     cell::{Cell, RefCell, UnsafeCell},
     num::{NonZeroIsize, NonZeroUsize},

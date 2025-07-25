@@ -28,7 +28,7 @@ enum Error {
 }
 
 #[derive(Default, Debug, Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_unify = false)]
 pub struct Eth1Block {
     pub hash: ExecutionBlockHash,
     pub parent_hash: ExecutionBlockHash,

@@ -28,7 +28,7 @@ use crate::{
     error::{IndexError, ReadError, WriteError},
     hc::Hc,
     iter::{ExactSize, UpTo3},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::{MerkleElements, MinimumBundleSize, PersistentVectorElements},
@@ -279,6 +279,12 @@ where
     }
 }
 
+impl<T: SszUnify + Clone, N: NonZero, B: BundleSize<T>> SszUnify for PersistentVector<T, N, B> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self.root.make_mut().unify(&other.root)
+    }
+}
+
 impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
     pub fn repeat_element(element: T) -> Self
     where
@@ -412,6 +418,20 @@ where
                 hashing::hash_256_256(left.hash_tree_root(), right.hash_tree_root())
             }
             Self::Leaf(bundle) => bundle.hash_tree_root(),
+        }
+    }
+}
+
+impl<T: SszUnify + Clone, B: BundleSize<T>> SszUnify for Node<T, B> {
+    fn unify(&mut self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Internal(self_left, self_right), Self::Internal(other_left, other_right)) => {
+                // Use the `&` operator instead of `&&`.
+                // The `&&` operator short-circuits, preventing unification of later fields.
+                self_left.make_mut().unify(other_left) & self_right.make_mut().unify(other_right)
+            }
+            (Self::Leaf(self_bundle), Self::Leaf(other_bundle)) => self_bundle.unify(other_bundle),
+            _ => false,
         }
     }
 }

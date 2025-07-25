@@ -19,7 +19,7 @@ pub use crate::{
     merkle_tree::{mix_in_length, MerkleTree, ProofWithLength},
     persistent_list::PersistentList,
     persistent_vector::PersistentVector,
-    porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszUnify, SszWrite},
     shared::{read_offset_unchecked, subslice, write_offset},
     size::Size,
     type_level::{
@@ -55,6 +55,7 @@ mod shared;
 mod size;
 mod type_level;
 mod uint256;
+mod unify;
 mod zero_default;
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ use typenum::{Unsigned, U1};
 use crate::{
     error::{ReadError, WriteError},
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::MerkleElements,
@@ -126,6 +126,12 @@ impl<T: SszHash + SszWrite, N: MerkleElements<T>> SszHash for ContiguousList<T, 
             MerkleTree::<N::PackedMerkleTreeDepth>::merkleize_packed(self)
         };
         merkle_tree::mix_in_length(root, self.len())
+    }
+}
+
+impl<T: SszUnify, N> SszUnify for ContiguousList<T, N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self.elements.unify(&other.elements)
     }
 }
 

@@ -19,7 +19,7 @@ use typenum::{Unsigned as _, U1};
 use crate::{
     error::{ReadError, WriteError},
     merkle_tree::MerkleTree,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     shared,
     size::Size,
     type_level::{ContiguousVectorElements, MerkleElements},
@@ -148,6 +148,12 @@ where
         } else {
             MerkleTree::<N::PackedMerkleTreeDepth>::merkleize_packed(self)
         }
+    }
+}
+
+impl<T: SszUnify, N: ContiguousVectorElements<T>> SszUnify for ContiguousVector<T, N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self.elements.unify(&other.elements)
     }
 }
 

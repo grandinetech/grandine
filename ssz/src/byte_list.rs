@@ -9,7 +9,7 @@ use typenum::{Unsigned, U1};
 use crate::{
     contiguous_list::ContiguousList,
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
     type_level::MerkleElements,
 };
@@ -72,5 +72,11 @@ impl<N: MerkleElements<u8>> SszHash for ByteList<N> {
 
     fn hash_tree_root(&self) -> H256 {
         self.bytes.hash_tree_root()
+    }
+}
+
+impl<N> SszUnify for ByteList<N> {
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
     }
 }

@@ -7,7 +7,7 @@ use typenum::{U1, U48};
 
 use crate::{
     error::ReadError,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszRead, SszSize, SszUnify, SszWrite},
     size::Size,
     BytesToDepth, MerkleTree,
 };
@@ -43,6 +43,13 @@ impl SszHash for H32 {
     }
 }
 
+impl SszUnify for H32 {
+    #[inline]
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
+    }
+}
+
 impl SszSize for H160 {
     const SIZE: Size = Size::Fixed {
         size: Self::len_bytes(),
@@ -71,6 +78,13 @@ impl SszHash for H160 {
         let mut hash = H256::zero();
         hash[..Self::len_bytes()].copy_from_slice(self.as_bytes());
         hash
+    }
+}
+
+impl SszUnify for H160 {
+    #[inline]
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
     }
 }
 
@@ -103,6 +117,13 @@ impl SszHash for H256 {
     }
 }
 
+impl SszUnify for H256 {
+    #[inline]
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
+    }
+}
+
 impl SszSize for H384 {
     const SIZE: Size = Size::Fixed {
         size: Self::len_bytes(),
@@ -129,5 +150,12 @@ impl SszHash for H384 {
     #[inline]
     fn hash_tree_root(&self) -> H256 {
         MerkleTree::<BytesToDepth<U48>>::merkleize_bytes(self)
+    }
+}
+
+impl SszUnify for H384 {
+    #[inline]
+    fn unify(&mut self, other: &Self) -> bool {
+        self == other
     }
 }
