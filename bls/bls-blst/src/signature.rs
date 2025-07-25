@@ -48,7 +48,6 @@ impl SignatureTrait for Signature {
     type SignatureBytes = SignatureBytes;
     type PublicKey = PublicKey;
 
-    #[must_use]
     fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool {
         let result = self.as_raw().verify(
             true,
@@ -70,7 +69,6 @@ impl SignatureTrait for Signature {
         self.0 = self_aggregate.to_signature();
     }
 
-    #[must_use]
     fn fast_aggregate_verify(
         &self,
         message: impl AsRef<[u8]>,
@@ -93,7 +91,6 @@ impl SignatureTrait for Signature {
         result == BLST_ERROR::BLST_SUCCESS
     }
 
-    #[must_use]
     fn multi_verify<'all>(
         messages: impl IntoIterator<Item = &'all [u8]>,
         signatures: impl IntoIterator<Item = &'all Self>,

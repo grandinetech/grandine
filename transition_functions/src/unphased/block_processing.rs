@@ -59,7 +59,6 @@ pub enum CombinedDeposit {
 }
 
 impl CombinedDeposit {
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     fn positions(&self) -> &[u64] {
         match self {
             Self::NewValidator { positions, .. } | Self::TopUp { positions, .. } => positions,

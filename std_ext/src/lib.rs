@@ -1,3 +1,7 @@
+#![expect(
+    clippy::return_self_not_must_use,
+    reason = "Conflicts with `#[must_use]` has no effect when applied to a provided trait method."
+)]
 use std::sync::Arc as StdArc;
 
 use easy_ext::ext;
@@ -40,7 +44,6 @@ impl<T: ?Sized> ArcExt<T> for TriompheArc<T> {
 
 #[ext(CopyExt)]
 pub impl<T: Copy> T {
-    #[must_use]
     fn copy(&self) -> Self {
         *self
     }
@@ -48,7 +51,6 @@ pub impl<T: Copy> T {
 
 #[ext(DefaultExt)]
 pub impl<T: PartialEq + Default> T {
-    #[must_use]
     fn is_default(&self) -> bool {
         *self == T::default()
     }

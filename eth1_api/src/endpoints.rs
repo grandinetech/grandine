@@ -70,12 +70,12 @@ impl Endpoints {
         Self { endpoints }
     }
 
-    pub fn el_offline(&self) -> bool {
-        self.endpoints.iter().all(|endpoint| !endpoint.is_online())
+    pub const fn is_empty(&self) -> bool {
+        self.endpoints.is_empty()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.endpoints.is_empty()
+    pub fn el_offline(&self) -> bool {
+        self.endpoints.iter().all(|endpoint| !endpoint.is_online())
     }
 
     pub fn endpoints_for_request(

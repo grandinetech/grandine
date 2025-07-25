@@ -82,7 +82,7 @@ impl ProcessingTimings {
 
 impl<P: Preset> Delayed<P> {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         let Self {
             blocks,
             payload_status,
@@ -110,7 +110,7 @@ pub struct WaitingForCheckpointState<P: Preset> {
 
 impl<P: Preset> WaitingForCheckpointState<P> {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         let Self {
             ticks,
             chain_links,

@@ -336,7 +336,6 @@ impl<P: Preset> BeaconState<P> {
         }
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     pub fn deposit_requests_start_index(&self) -> Option<DepositIndex> {
         match self {
             Self::Phase0(_)

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arithmetic::{NonZeroExt as _, U64Ext as _};
+use arithmetic::NonZeroExt as _;
 use helper_functions::{
     accessors::{get_current_epoch, get_next_epoch, get_validator_activation_churn_limit},
     misc::{compute_activation_exit_epoch, vec_of_default},
@@ -217,7 +217,7 @@ fn process_historical_summaries_update<P: Preset>(state: &mut BeaconState<P>) ->
     let next_epoch = get_next_epoch(state);
 
     // > Set historical block root accumulator.
-    if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero()) {
+    if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero().into()) {
         let historical_summary = HistoricalSummary {
             block_summary_root: state.block_roots().hash_tree_root(),
             state_summary_root: state.state_roots().hash_tree_root(),

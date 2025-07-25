@@ -118,7 +118,7 @@ impl GrandineConfig {
         }
 
         info!("storage mode: {:?}", storage_config.storage_mode);
-        info!("data directory: {data_dir:?}");
+        info!("data directory: {}", data_dir.display());
 
         self.storage_config.print_db_sizes();
 

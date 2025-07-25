@@ -249,10 +249,9 @@ impl Snapshot {
         }
     }
 
-    #[expect(clippy::needless_lifetimes, reason = "false positive")]
-    pub async fn sign_without_slashing_protection<'block, P: Preset>(
+    pub async fn sign_without_slashing_protection<P: Preset>(
         &self,
-        message: SigningMessage<'block, P>,
+        message: SigningMessage<'_, P>,
         signing_root: H256,
         fork_info: Option<ForkInfo<P>>,
         public_key: PublicKeyBytes,

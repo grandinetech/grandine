@@ -309,14 +309,17 @@ where
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
             // Other validations may be performed in parallel, but they take very little time.
-            let result = self.block_processor.validate_block(
-                &self.store,
-                &block,
-                origin.state_root_policy(),
-                origin.data_availability_policy(),
-                &self.execution_engine,
-                NullVerifier,
-            );
+            let result = self
+                .block_processor
+                .validate_block(
+                    &self.store,
+                    &block,
+                    origin.state_root_policy(),
+                    origin.data_availability_policy(),
+                    &self.execution_engine,
+                    NullVerifier,
+                )
+                .into();
 
             let block_root = block.message().hash_tree_root();
 
@@ -498,12 +501,12 @@ where
     fn handle_block(
         &mut self,
         wait_group: W,
-        result: Result<BlockAction<P>>,
+        result: Box<Result<BlockAction<P>>>,
         origin: BlockOrigin,
         processing_timings: ProcessingTimings,
         block_root: H256,
     ) -> Result<()> {
-        match result {
+        match *result {
             Ok(BlockAction::Accept(chain_link, attester_slashing_results)) => {
                 let block_root = chain_link.block_root;
                 let parent_root = chain_link.block.message().parent_root();

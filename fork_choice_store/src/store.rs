@@ -303,7 +303,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn chain_config(&self) -> &ChainConfig {
         &self.chain_config
@@ -1391,7 +1390,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
             Err(source) => {
                 return Err(AttestationValidationError::Other {
-                    attestation,
+                    attestation: Box::new(attestation),
                     source,
                 })
             }
@@ -1425,7 +1424,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if attestation.item.count_aggregation_bits() != 1 {
                 return Err(
                     AttestationValidationError::SingularAttestationHasMultipleAggregationBitsSet {
-                        attestation,
+                        attestation: Box::new(attestation),
                     },
                 );
             }
@@ -1484,7 +1483,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     Ok(subnet) => subnet,
                     Err(source) => {
                         return Err(AttestationValidationError::Other {
-                            attestation,
+                            attestation: Box::new(attestation),
                             source,
                         })
                     }
@@ -1494,7 +1493,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if actual != expected {
                 return Err(
                     AttestationValidationError::SingularAttestationOnIncorrectSubnet {
-                        attestation,
+                        attestation: Box::new(attestation),
                         expected,
                         actual,
                     },
@@ -1511,7 +1510,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             Err(source) => {
                 return Err(AttestationValidationError::Other {
                     source,
-                    attestation,
+                    attestation: Box::new(attestation),
                 })
             }
         };
@@ -2053,7 +2052,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
                 finalized_checkpoint_updated,
-                old_head,
+                old_head: Box::new(old_head),
             }
         } else {
             ApplyTickChanges::SlotUpdated {
@@ -2182,7 +2181,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyBlockChanges::Reorganized {
                 finalized_checkpoint_updated,
-                old_head,
+                old_head: Box::new(old_head),
             }
         } else if old_head.block_root == self.head().block_root {
             ApplyBlockChanges::AlternateChainExtended {

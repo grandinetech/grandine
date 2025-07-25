@@ -139,7 +139,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
 
         MutatorMessage::Block {
             wait_group,
-            result,
+            result: result.into(),
             origin,
             processing_timings,
             block_root,

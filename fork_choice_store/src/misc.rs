@@ -324,7 +324,6 @@ impl<P: Preset, I> AttestationItem<P, I> {
         self.data().slot
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn data(&self) -> AttestationData {
         self.item.data()
@@ -639,7 +638,7 @@ pub enum ApplyBlockChanges<P: Preset> {
     },
     Reorganized {
         finalized_checkpoint_updated: bool,
-        old_head: ChainLink<P>,
+        old_head: Box<ChainLink<P>>,
     },
     AlternateChainExtended {
         finalized_checkpoint_updated: bool,
@@ -671,7 +670,7 @@ pub enum ApplyTickChanges<P: Preset> {
     },
     Reorganized {
         finalized_checkpoint_updated: bool,
-        old_head: ChainLink<P>,
+        old_head: Box<ChainLink<P>>,
     },
 }
 
@@ -807,16 +806,18 @@ pub enum AttestationValidationError<P: Preset, I> {
          (attestation: {attestation:?}, expected: {expected}, actual: {actual})"
     )]
     SingularAttestationOnIncorrectSubnet {
-        attestation: AttestationItem<P, I>,
+        attestation: Box<AttestationItem<P, I>>,
         expected: SubnetId,
         actual: SubnetId,
     },
     #[error("singular attestation has multiple aggregation bits set: {attestation:?}")]
-    SingularAttestationHasMultipleAggregationBitsSet { attestation: AttestationItem<P, I> },
+    SingularAttestationHasMultipleAggregationBitsSet {
+        attestation: Box<AttestationItem<P, I>>,
+    },
     #[error("singular attestation validation error: {attestation:?} {source:}")]
     Other {
         source: AnyhowError,
-        attestation: AttestationItem<P, I>,
+        attestation: Box<AttestationItem<P, I>>,
     },
 }
 
@@ -826,7 +827,7 @@ impl<P: Preset, I> AttestationValidationError<P, I> {
         match self {
             Self::SingularAttestationOnIncorrectSubnet { attestation, .. }
             | Self::SingularAttestationHasMultipleAggregationBitsSet { attestation }
-            | Self::Other { attestation, .. } => attestation,
+            | Self::Other { attestation, .. } => *attestation,
         }
     }
 }

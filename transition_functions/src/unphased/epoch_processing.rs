@@ -144,7 +144,7 @@ pub fn process_eth1_data_reset<P: Preset>(state: &mut impl BeaconState<P>) {
     let next_epoch = get_next_epoch(state);
 
     // > Reset eth1 data votes
-    if next_epoch.is_multiple_of(P::EpochsPerEth1VotingPeriod::non_zero()) {
+    if next_epoch.is_multiple_of(P::EpochsPerEth1VotingPeriod::non_zero().into()) {
         *state.eth1_data_votes_mut() = PersistentList::default();
     }
 }
@@ -198,7 +198,7 @@ pub fn process_historical_roots_update<P: Preset>(state: &mut impl BeaconState<P
     let next_epoch = get_next_epoch(state);
 
     // > Set historical root accumulator
-    if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero()) {
+    if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero().into()) {
         let historical_batch = HistoricalBatch::<P> {
             block_roots: state.block_roots().clone(),
             state_roots: state.state_roots().clone(),

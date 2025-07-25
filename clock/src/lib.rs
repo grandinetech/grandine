@@ -367,7 +367,6 @@ const fn slot_duration(config: &Config) -> Duration {
 mod tests {
     use core::{num::NonZeroU64, ops::Add as _};
 
-    use arithmetic::UsizeExt as _;
     use futures::future::FutureExt as _;
     use itertools::Itertools as _;
     use nonzero_ext::nonzero;
@@ -380,7 +379,7 @@ mod tests {
 
     #[test]
     fn tick_count_is_a_multiple_of_interval_count() {
-        assert!(TickKind::CARDINALITY.is_multiple_of(INTERVALS_PER_SLOT));
+        assert!(TickKind::CARDINALITY.is_multiple_of(INTERVALS_PER_SLOT.into()));
     }
 
     #[tokio::test(start_paused = true)]

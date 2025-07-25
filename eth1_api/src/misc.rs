@@ -37,10 +37,6 @@ pub enum ClientCode {
 }
 
 impl ClientCode {
-    #[expect(
-        clippy::missing_const_for_fn,
-        reason = "cannot perform non-const deref coercion on `std::string::String` in constant functions"
-    )]
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {

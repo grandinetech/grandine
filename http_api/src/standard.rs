@@ -1946,9 +1946,11 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
 
     EthResponse::json(NodeSyncingResponse {
         head_slot,
-        sync_distance: is_synced
-            .then_some(0)
-            .unwrap_or_else(|| controller.slot() - head_slot),
+        sync_distance: if is_synced {
+            0
+        } else {
+            controller.slot() - head_slot
+        },
         is_syncing: !(is_synced && is_back_synced),
         is_optimistic: snapshot.is_optimistic(),
         el_offline,
@@ -3274,10 +3276,7 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
 
     match blob_sidecar_results {
         Ok(results) => {
-            if results
-                .iter()
-                .any(|outcome| *outcome == ValidationOutcome::Ignore(false))
-            {
+            if results.contains(&ValidationOutcome::Ignore(false)) {
                 return Err(Error::UnableToPublishBlock);
             }
         }

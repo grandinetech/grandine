@@ -113,14 +113,14 @@ pub struct ImportReport {
 
 impl ImportReport {
     #[must_use]
-    pub fn imported_records(&self) -> usize {
+    pub const fn imported_records(&self) -> usize {
         self.validators.succeeded.len()
             + self.blocks.succeeded.len()
             + self.attestations.succeeded.len()
     }
 
     #[must_use]
-    pub fn failed_records(&self) -> usize {
+    pub const fn failed_records(&self) -> usize {
         self.validators.failed.len() + self.blocks.failed.len() + self.attestations.failed.len()
     }
 }
@@ -308,7 +308,10 @@ impl SlashingProtector {
 
         let interchange_file_path = interchange_file_path.as_ref();
 
-        info!("saving validator information to interchange file: {interchange_file_path:?}");
+        info!(
+            "saving validator information to interchange file: {}",
+            interchange_file_path.display()
+        );
 
         let file = File::create(interchange_file_path)?;
         serde_json::to_writer(file, &interchange)?;
@@ -962,7 +965,9 @@ fn move_interchange_backup_files_to_validator_dir(
                     fs_err::remove_file(&beacon_backup_path)?;
 
                     info!(
-                        "moved interchange backup file from {beacon_backup_path:?} to {validator_backup_path:?}"
+                        "moved interchange backup file from {} to {}",
+                        beacon_backup_path.display(),
+                        validator_backup_path.display(),
                     );
                 }
             }
@@ -989,7 +994,11 @@ fn move_slashing_protection_db_to_validator_dir(
         fs_err::copy(&beacon_db_path, &validator_db_path)?;
         fs_err::remove_file(&beacon_db_path)?;
 
-        info!("moved {DB_PATH} from {beacon_db_path:?} to {validator_db_path:?}");
+        info!(
+            "moved {DB_PATH} from {} to {}",
+            beacon_db_path.display(),
+            validator_db_path.display()
+        );
     }
 
     Ok(())
