@@ -9,7 +9,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
-arithmetic = { workspace = true }
 cached = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }

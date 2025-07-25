@@ -252,7 +252,6 @@ impl Error {
         }
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     fn failures(&self) -> &[IndexedError] {
         match self {
             Self::InvalidAggregatesAndProofs(failures)

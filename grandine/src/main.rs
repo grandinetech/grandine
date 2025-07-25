@@ -728,7 +728,7 @@ fn handle_command<P: Preset>(
                 anchor_checkpoint_provider,
             )?;
 
-            info!("state and blocks exported to {output_dir:?}");
+            info!("state and blocks exported to {}", output_dir.display());
         }
         GrandineCommand::Replay {
             from,
@@ -804,7 +804,7 @@ fn handle_command<P: Preset>(
                         }
                     }
 
-                    info!("interchange file exported to {file_path:?}");
+                    info!("interchange file exported to {}", file_path.display());
                 }
             }
         }

@@ -806,8 +806,8 @@ enum TokenFilePath {
 impl Debug for TokenFilePath {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            Self::Default(path) => write!(f, "{path:?}"),
-            Self::User(path) => write!(f, "User specified token file: {path:?}"),
+            Self::Default(path) => write!(f, "{}", path.display()),
+            Self::User(path) => write!(f, "User specified token file: {}", path.display()),
         }
     }
 }

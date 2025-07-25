@@ -857,25 +857,21 @@ impl<P: Preset> Snapshot<'_, P> {
             .try_state_at_slot(&self.pubkey_cache, &self.store_snapshot, root, slot)
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn is_back_synced(&self) -> bool {
         self.store_snapshot.is_back_synced()
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn finalized_epoch(&self) -> Epoch {
         self.store_snapshot.finalized_epoch()
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn finalized_slot(&self) -> Slot {
         self.store_snapshot.finalized_slot()
     }
 
-    #[expect(clippy::missing_const_for_fn, reason = "false positive")]
     #[must_use]
     pub fn finalized_root(&self) -> H256 {
         self.store_snapshot.finalized_root()

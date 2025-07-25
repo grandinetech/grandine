@@ -43,7 +43,6 @@ impl SignatureTrait for Signature {
     type SignatureBytes = SignatureBytes;
     type PublicKey = PublicKey;
 
-    #[must_use]
     fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool {
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             [message.as_ref()],
@@ -61,7 +60,6 @@ impl SignatureTrait for Signature {
         self.0 = self.as_raw().add(other.as_raw());
     }
 
-    #[must_use]
     fn fast_aggregate_verify(
         &self,
         message: impl AsRef<[u8]>,
@@ -83,7 +81,6 @@ impl SignatureTrait for Signature {
         pairing(&agg_pk.into(), &h.into()) == pairing(&G1Affine::generator(), &self.as_raw().into())
     }
 
-    #[must_use]
     fn multi_verify<'all>(
         messages: impl IntoIterator<Item = &'all [u8]>,
         signatures: impl IntoIterator<Item = &'all Self>,

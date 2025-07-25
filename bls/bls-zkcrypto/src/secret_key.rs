@@ -51,7 +51,6 @@ impl SecretKeyTrait<SIZE> for SecretKey {
     type Signature = Signature;
 
     #[inline]
-    #[must_use]
     fn to_bytes(&self) -> SecretKeyBytes {
         let mut bytes = self.as_raw().to_bytes();
         bytes.reverse();
@@ -60,14 +59,12 @@ impl SecretKeyTrait<SIZE> for SecretKey {
     }
 
     #[inline]
-    #[must_use]
     fn to_public_key(&self) -> PublicKey {
         let point = G1Projective::generator() * self.as_raw();
         PublicKey::from(point)
     }
 
     #[inline]
-    #[must_use]
     fn sign(&self, message: impl AsRef<[u8]>) -> Signature {
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             [message.as_ref()],

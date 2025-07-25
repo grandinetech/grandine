@@ -2,7 +2,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{bail, Error as AnyhowError, Result};
-use arithmetic::U64Ext as _;
 use database::Database;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
@@ -102,7 +101,7 @@ impl<P: Preset> Storage<P> {
 
             let state_epoch = Self::epoch_at_slot(slot);
             let append_state = misc::is_epoch_start::<P>(slot)
-                && state_epoch.is_multiple_of(self.archival_epoch_interval);
+                && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
 
             if let Some(block) = previous_block.as_ref() {
                 if append_state {

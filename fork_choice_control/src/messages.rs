@@ -76,7 +76,7 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     Block {
         wait_group: W,
-        result: Result<BlockAction<P>>,
+        result: Box<Result<BlockAction<P>>>,
         origin: BlockOrigin,
         processing_timings: ProcessingTimings,
         block_root: H256,

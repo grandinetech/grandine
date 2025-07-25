@@ -57,7 +57,7 @@ pub struct InterchangeAttestation {
 
 impl InterchangeData {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.signed_attestations.is_empty() && self.signed_blocks.is_empty()
     }
 }

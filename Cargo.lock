@@ -1454,7 +1454,6 @@ name = "clock"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "arithmetic",
  "enum-iterator",
  "futures",
  "helper_functions",
@@ -2954,7 +2953,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arithmetic",
  "bytesize",
  "cached",
  "clock",

@@ -179,7 +179,7 @@ pub fn is_aggregator<P: Preset>(
         .try_into()
         .unwrap_or(NonZeroU64::MIN);
 
-    Ok(dividend.is_multiple_of(modulo))
+    Ok(dividend.is_multiple_of(modulo.into()))
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/altair/validator.md#aggregation-selection>
@@ -197,7 +197,7 @@ pub fn is_sync_committee_aggregator<P: Preset>(signature: SignatureBytes) -> boo
         .try_into()
         .unwrap_or(NonZeroU64::MIN);
 
-    dividend.is_multiple_of(modulo)
+    dividend.is_multiple_of(modulo.into())
 }
 
 /// [`is_valid_merkle_branch`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.5/specs/phase0/beacon-chain.md#is_valid_merkle_branch)

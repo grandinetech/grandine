@@ -38,7 +38,6 @@ impl SecretKeyTrait<SIZE> for SecretKey {
     type Signature = Signature;
 
     #[inline]
-    #[must_use]
     fn to_bytes(&self) -> SecretKeyBytes {
         SecretKeyBytes {
             bytes: self.as_raw().to_bytes(),

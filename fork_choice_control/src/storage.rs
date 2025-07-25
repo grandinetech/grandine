@@ -2,7 +2,6 @@ use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{bail, ensure, Context as _, Error as AnyhowError, Result};
-use arithmetic::U64Ext as _;
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
@@ -324,7 +323,7 @@ impl<P: Preset> Storage<P> {
                 if !archival_state_appended && !self.prune_storage_enabled() {
                     let state_epoch = Self::epoch_at_slot(state_slot);
                     let append_state = misc::is_epoch_start::<P>(state_slot)
-                        && state_epoch.is_multiple_of(self.archival_epoch_interval);
+                        && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
 
                     if append_state {
                         info!("saving state in slot {state_slot}");
