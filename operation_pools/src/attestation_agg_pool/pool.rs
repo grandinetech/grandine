@@ -258,9 +258,11 @@ impl<P: Preset> Pool<P> {
         let attestations_with_slot = self.best_proposable_attestations.lock().await;
         let (attestations, prepared_for_slot) = &*attestations_with_slot;
 
-        (slot == *prepared_for_slot)
-            .then(|| attestations.clone())
-            .unwrap_or_default()
+        if slot == *prepared_for_slot {
+            attestations.clone()
+        } else {
+            ContiguousList::default()
+        }
     }
 
     pub async fn clear_best_proposable_attestations(&self) {

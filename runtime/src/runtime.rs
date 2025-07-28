@@ -75,6 +75,7 @@ pub struct RuntimeConfig {
     pub validator_enabled: bool,
 }
 
+#[expect(clippy::cognitive_complexity)]
 #[expect(clippy::too_many_arguments)]
 #[expect(clippy::too_many_lines)]
 pub async fn run_after_genesis<P: Preset>(

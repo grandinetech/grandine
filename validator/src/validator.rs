@@ -241,6 +241,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
+    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) {
         loop {
@@ -509,6 +510,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         message.send(&self.p2p_tx);
     }
 
+    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
         if let Some(metrics) = self.metrics.as_ref() {
