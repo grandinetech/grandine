@@ -310,9 +310,14 @@ pub fn singular_attestation<P: Preset>(
                 .position(|index| index == validator_index)
             {
                 let pre_electra = state_in_epoch.phase() < Phase::Electra;
-                let index = pre_electra.then_some(committee_index).unwrap_or_default();
                 let beacon_block_root = accessors::latest_block_root(&state_in_epoch);
                 let root = accessors::epoch_boundary_block_root(&state_in_epoch, beacon_block_root);
+
+                let index = if pre_electra {
+                    committee_index
+                } else {
+                    Default::default()
+                };
 
                 let data = AttestationData {
                     slot,
