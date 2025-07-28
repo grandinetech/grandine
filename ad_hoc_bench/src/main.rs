@@ -402,7 +402,7 @@ fn run<P: Preset>(
                 .prefix("ad_hoc_bench_db_")
                 .rand_bytes(10)
                 .tempdir()?
-                .into_path())
+                .keep())
         })?;
 
     info!("database dir: {}", database_dir.as_path().display());

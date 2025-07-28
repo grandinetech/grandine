@@ -284,7 +284,7 @@ private_intra_doc_links = 'allow'
 
 [workspace.dependencies]
 aes = { version = '0.8', features = ['zeroize'] }
-alloy-rlp = '0.3.9'
+alloy-rlp = '0.3'
 anyhow = { version = '1', features = ['backtrace'] }
 arc-swap = '1'
 assert-json-diff = '2'
@@ -304,24 +304,24 @@ build-time = '0.1'
 byteorder = '1'
 bytes = '1'
 bytesize = { version = '2', features = ['serde'] }
-cached = '0.53'
+cached = '0.56'
 chrono = '0.4'
 clap = { version = '4', features = ['derive'] }
 const-hex = '1.14'
 const_format = '0.2'
-constant_time_eq = '0.3'
+constant_time_eq = '0.4'
 conv = '0.3'
-criterion = '0.5'
+criterion = '0.7'
 crossbeam-skiplist = '0.1'
 crossbeam-utils = '0.8'
 ctr = { version = '0.9', features = ['zeroize'] }
-darling = '0.20'
+darling = '0.21'
 dashmap = '6.1'
 dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.4'
 derivative = '2'
 derive_more = { version = '1', features = ["full"] }
-dirs = '5'
+dirs = '6'
 discv5 = { version = '0.9', features = ['libp2p'] }
 drain_filter_polyfill = '0.1'
 duplicate = '2'
@@ -341,14 +341,14 @@ futures = '0.3'
 futures-ticker = '0.0.3'
 futures-timer = '3'
 generic-array = { version = '0.14', features = ['serde'] }
-getrandom = '0.2'
+getrandom = '0.3'
 git-version = '0.3'
 glob = '0.3'
 good_lp = { version = '1', default-features = false, features = ['highs'] }
 hash_hasher = '2'
-hashlink = '0.9'
+hashlink = '0.10'
 hex = { version = '0.4', features = ['serde'] }
-hex-literal = '0.4'
+hex-literal = '1'
 hmac = '0.12'
 http = '1'
 http-body-util = '0.1'
@@ -359,20 +359,20 @@ igd-next = '0.15'
 # Possible optimization: fork `im` and make it use `triomphe`.
 # It's easy to do, but the amount of memory it saves is negligible.
 im = '15'
-impl-serde = '0.4'
+impl-serde = '0.5'
 integer-sqrt = '0.1'
 instant = '0.1'
 itertools = '0.14'
 jwt-simple = { version = '0.12', default-features = false, features = ['pure-rust'] }
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 lazy_static = '1'
-libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '44ab192899a898e2499ef20870629bb7a765f2a2' }
+libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '6f8e7258f4733279080e4bd8345ce50538a40d6e' }
 libp2p = { version = '0.55', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
 libp2p-mplex = '0.43'
 local-ip-address = '0.6'
 log = '0.4'
-lru = '0.12'
-mediatype = '0.19'
+lru = '0.16'
+mediatype = '0.20'
 memoffset = '0.9'
 mime = '0.3'
 nonzero_ext = '0.3'
@@ -416,7 +416,7 @@ semver = '1'
 serde = { version = '1', features = ['derive', 'rc'] }
 serde-aux = '4'
 serde_json = { version = '1', features = ['preserve_order'] }
-serde_qs = { version = '0.14', features = ['axum'] }
+serde_qs = { version = '0.15', features = ['axum'] }
 serde_repr = '0.1'
 serde_with = '3'
 # TODO: replace serde_yaml with alternative, since it is deprecated:
@@ -432,15 +432,15 @@ slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 static_assertions = '1'
-strum = { version = '0.26', features = ['derive'] }
+strum = { version = '0.27', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
-sysinfo = '0.34'
+sysinfo = '0.36'
 tap = '1'
 tempfile = '3'
 test-case = '3'
 test-generator = '0.3'
 testing_logger = '0.1'
-thiserror = '1'
+thiserror = '2'
 tikv-jemalloc-ctl = { version = '0.6', features = ['stats'] }
 tikv-jemallocator = { version = '0.6', features = ['stats', 'background_threads_runtime_support'] }
 tiny-keccak = '2'
@@ -452,7 +452,7 @@ tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
 triomphe = '0.1'
-tynm = '0.1'
+tynm = '0.2'
 typenum = '1'
 unicode-normalization = '0.1'
 unsigned-varint = { version = '= 0.8', features = ['codec'] }
