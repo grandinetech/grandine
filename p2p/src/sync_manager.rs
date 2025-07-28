@@ -55,7 +55,7 @@ const EPOCHS_PER_REQUEST: u64 = if cfg!(test) {
 };
 const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
-const PEER_UPDATE_COOLDOWN_IN_SECONDS: u64 = 12;
+const PEER_UPDATE_COOLDOWN: Duration = Duration::from_secs(12);
 const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -99,10 +99,7 @@ impl SyncManager {
             last_sync_range: 0..0,
             last_sync_head: 0,
             sequential_redownloads: 0,
-            status_updates_cache: TimedSizedCache::with_size_and_lifespan(
-                5,
-                PEER_UPDATE_COOLDOWN_IN_SECONDS,
-            ),
+            status_updates_cache: TimedSizedCache::with_size_and_lifespan(5, PEER_UPDATE_COOLDOWN),
             not_enough_peers_message_shown_at: None,
             sync_from_finalized: false,
             back_sync_black_list: LruCache::new(

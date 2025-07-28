@@ -310,7 +310,7 @@ mod tests {
             .rand_bytes(10)
             .tempdir()?;
 
-        let proposer_configs = build_proposer_configs(Some(&tempdir.into_path()))?;
+        let proposer_configs = build_proposer_configs(Some(&tempdir.keep()))?;
 
         proposer_configs.set_gas_limit(PUBKEY, 12345)?;
 

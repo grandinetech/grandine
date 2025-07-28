@@ -10,7 +10,7 @@ use crate::{block_sync_service::SyncDirection, sync_manager::SyncBatch};
 
 const MAX_ROOT_REQUESTS_PER_KEY: usize = 3;
 const REQUEST_BY_RANGE_TIMEOUT: Duration = Duration::from_secs(15);
-const REQUEST_BY_ROOT_TIMEOUT_IN_SECONDS: u64 = 5;
+const REQUEST_BY_ROOT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct RangeAndRootRequests<K> {
     requests_by_range: SizedCache<AppRequestId, (SyncBatch, Instant)>,
@@ -23,7 +23,7 @@ impl<K: Hash + Eq + Clone> Default for RangeAndRootRequests<K> {
             requests_by_range: SizedCache::with_size(1000),
             requests_by_root: TimedSizedCache::with_size_and_lifespan(
                 1000,
-                REQUEST_BY_ROOT_TIMEOUT_IN_SECONDS,
+                REQUEST_BY_ROOT_TIMEOUT,
             ),
         }
     }

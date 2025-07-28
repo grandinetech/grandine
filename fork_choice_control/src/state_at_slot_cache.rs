@@ -19,7 +19,7 @@ use tap::Pipe as _;
 use thiserror::Error;
 use types::{combined::BeaconState, phase0::primitives::Slot, preset::Preset};
 
-const CACHE_EXPIRATION_IN_SECONDS: u64 = 3600;
+const CACHE_EXPIRATION: Duration = Duration::from_secs(3600);
 const CACHE_LOCK_TIMEOUT: Duration = Duration::from_secs(1000);
 const CACHE_SIZE: usize = 5;
 
@@ -42,17 +42,12 @@ pub struct StateAtSlotCache<P: Preset> {
 impl<P: Preset> StateAtSlotCache<P> {
     #[must_use]
     pub fn build() -> Self {
-        Self::new(CACHE_LOCK_TIMEOUT, CACHE_SIZE, CACHE_EXPIRATION_IN_SECONDS)
+        Self::new(CACHE_LOCK_TIMEOUT, CACHE_SIZE, CACHE_EXPIRATION)
     }
 
     #[must_use]
-    pub fn new(
-        try_lock_timeout: Duration,
-        cache_size: usize,
-        cache_expiration_in_seconds: u64,
-    ) -> Self {
-        let cache =
-            TimedSizedCache::with_size_and_lifespan(cache_size, cache_expiration_in_seconds);
+    pub fn new(try_lock_timeout: Duration, cache_size: usize, cache_expiration: Duration) -> Self {
+        let cache = TimedSizedCache::with_size_and_lifespan(cache_size, cache_expiration);
 
         Self {
             cache: Mutex::new(cache),
@@ -141,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_state_at_slot_cache_get_or_try_init() -> Result<()> {
-        let cache = StateAtSlotCache::new(Duration::from_secs(1), 1, 1);
+        let cache = StateAtSlotCache::new(Duration::from_secs(1), 1, Duration::from_secs(1));
 
         assert_eq!(cache.get(1)?, None);
 
@@ -178,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_state_at_slot_cache_lock_timeout_error() {
-        let cache = StateAtSlotCache::new(Duration::from_millis(1), 1, 1);
+        let cache = StateAtSlotCache::new(Duration::from_millis(1), 1, Duration::from_secs(1));
 
         // Lock the cache to simulate contention
         let guard = cache.cache.lock();
