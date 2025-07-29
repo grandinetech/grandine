@@ -59,6 +59,11 @@ pub enum BuilderApiError {
         header_root: H256,
         payload_root: H256,
     },
+    #[error("received unexpected status code: {received}, expected: {expected}")]
+    UnexpectedStatusCode {
+        expected: StatusCode,
+        received: StatusCode,
+    },
     #[error("received response with unsupported content-type: {content_type:?}")]
     UnsupportedContentType { content_type: Option<HeaderValue> },
     #[error(
@@ -425,11 +430,20 @@ impl Api {
         };
 
         let response = request.send().await?;
-        handle_error(response).await?;
+        let response = handle_error(response).await?;
 
-        info!("received execution payload from builder for block {block_root:?} at slot {slot}");
+        if response.status() == StatusCode::ACCEPTED {
+            info!(
+                "received successful response from builder for block {block_root:?} at slot {slot}"
+            );
 
-        Ok(())
+            return Ok(());
+        }
+
+        bail!(BuilderApiError::UnexpectedStatusCode {
+            expected: StatusCode::ACCEPTED,
+            received: response.status()
+        })
     }
 
     async fn parse_response<T: DeserializeOwned + SszRead<Phase>>(
