@@ -1116,7 +1116,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     pub async fn produce_blinded_block(
         &self,
-        block_without_state_root: BeaconBlock<P>,
+        mut block_without_state_root: BeaconBlock<P>,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
     ) -> Result<Option<(BlindedBeaconBlock<P>, Option<BlockRewards>, Uint256)>> {
         let Some(header_handle) = execution_payload_header_handle else {
@@ -1128,6 +1128,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let blob_kzg_commitments = response.blob_kzg_commitments().cloned();
                 let execution_requests = response.execution_requests().cloned();
                 let builder_mev = response.mev();
+
+                if !self.options.disable_blockprint_graffiti {
+                    let graffiti = build_graffiti(self.options.graffiti, None);
+                    block_without_state_root.set_graffiti(graffiti);
+                }
 
                 self.blinded_block_from_beacon_block(
                     block_without_state_root,
