@@ -839,13 +839,13 @@ impl<P: Preset> Storage<P> {
         self.get(StateCheckpoint::<P>::KEY)
     }
 
-    fn contains_key(&self, key: impl Display) -> Result<bool> {
+    fn contains_key(&self, key: impl core::fmt::Display) -> Result<bool> {
         let key_string = key.to_string();
 
         self.database.contains_key(key_string)
     }
 
-    fn get<V: SszRead<Config>>(&self, key: impl Display) -> Result<Option<V>> {
+    fn get<V: SszRead<Config>>(&self, key: impl core::fmt::Display) -> Result<Option<V>> {
         let key_string = key.to_string();
 
         if let Some(value_bytes) = self.database.get(key_string)? {
@@ -1139,11 +1139,14 @@ pub enum Error {
     IncorrectPrefix { bytes: Vec<u8> },
 }
 
-pub fn save(database: &Database, key: impl Display, value: impl SszWrite) -> Result<()> {
+pub fn save(database: &Database, key: impl core::fmt::Display, value: impl SszWrite) -> Result<()> {
     database.put(serialize_key(key), serialize_value(value)?)
 }
 
-pub fn get<V: SszReadDefault>(database: &Database, key: impl Display) -> Result<Option<V>> {
+pub fn get<V: SszReadDefault>(
+    database: &Database,
+    key: impl core::fmt::Display,
+) -> Result<Option<V>> {
     database
         .get(serialize_key(key))?
         .map(V::from_ssz_default)
@@ -1151,7 +1154,7 @@ pub fn get<V: SszReadDefault>(database: &Database, key: impl Display) -> Result<
         .map_err(Into::into)
 }
 
-fn serialize_key(key: impl Display) -> String {
+fn serialize_key(key: impl core::fmt::Display) -> String {
     key.to_string()
 }
 
@@ -1159,7 +1162,7 @@ fn serialize_value(value: impl SszWrite) -> Result<Vec<u8>> {
     value.to_ssz().map_err(Into::into)
 }
 
-pub fn serialize(key: impl Display, value: impl SszWrite) -> Result<(String, Vec<u8>)> {
+pub fn serialize(key: impl core::fmt::Display, value: impl SszWrite) -> Result<(String, Vec<u8>)> {
     Ok((serialize_key(key), serialize_value(value)?))
 }
 

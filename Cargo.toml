@@ -320,7 +320,7 @@ dashmap = '6.1'
 dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.4'
 derivative = '2'
-derive_more = { version = '1', features = ["full"] }
+derive_more = { version = '2', features = ["full"] }
 dirs = '6'
 discv5 = { version = '0.9', features = ['libp2p'] }
 drain_filter_polyfill = '0.1'

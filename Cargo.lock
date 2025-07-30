@@ -1069,7 +1069,7 @@ dependencies = [
  "bls-core",
  "blst",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "fixed-hash",
  "hex",
  "impl-serde 0.5.0",
@@ -1108,7 +1108,7 @@ dependencies = [
  "bls-core",
  "bls12_381 0.8.0 (git+https://github.com/zkcrypto/bls12_381.git)",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "ff",
  "fixed-hash",
  "hex",
@@ -1203,7 +1203,7 @@ dependencies = [
  "arc-swap",
  "bls",
  "clock",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "enum-iterator",
  "helper_functions",
  "hex-literal",
@@ -1419,9 +1419,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.41"
+version = "4.5.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be92d32e80243a54711e5d7ce823c35c41c9d929dc4ab58e1276f625841aadf9"
+checksum = "ed87a9d530bb41a67537289bafcac159cb3ee28460e0a4571123d2a778a6a882"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1429,9 +1429,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.41"
+version = "4.5.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "707eab41e9622f9139419d573eca0900137718000c517d47da73045f54331c3d"
+checksum = "64f4f3f3c77c94aff3c7e9aac9a2ca1974a5adf392a8bb751e827d6d127ab966"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1599,15 +1599,6 @@ name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
-
-[[package]]
-name = "convert_case"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
-dependencies = [
- "unicode-segmentation",
-]
 
 [[package]]
 name = "convert_case"
@@ -2083,33 +2074,11 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
-dependencies = [
- "derive_more-impl 1.0.0",
-]
-
-[[package]]
-name = "derive_more"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
 dependencies = [
- "derive_more-impl 2.0.1",
-]
-
-[[package]]
-name = "derive_more-impl"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
-dependencies = [
- "convert_case 0.6.0",
- "proc-macro2 1.0.95",
- "quote 1.0.40",
- "syn 2.0.104",
- "unicode-xid 0.2.6",
+ "derive_more-impl",
 ]
 
 [[package]]
@@ -2356,7 +2325,7 @@ dependencies = [
  "anyhow",
  "bls",
  "ctr",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "hex",
  "hex-literal",
  "hmac",
@@ -2641,7 +2610,7 @@ dependencies = [
  "bls",
  "dashmap",
  "dedicated_executor",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "either",
  "enum-iterator",
  "eth2_libp2p",
@@ -2992,7 +2961,7 @@ dependencies = [
  "crossbeam-utils",
  "database",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "drain_filter_polyfill",
  "duplicate",
  "eth2_cache_utils",
@@ -3044,7 +3013,7 @@ dependencies = [
  "clock",
  "crossbeam-skiplist",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "eth2_libp2p",
  "execution_engine",
  "features",
@@ -3432,7 +3401,7 @@ dependencies = [
  "database",
  "deposit_tree",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "directories",
  "dirs",
  "doppelganger_protection",
@@ -3636,7 +3605,7 @@ dependencies = [
  "arithmetic",
  "bit_field",
  "bls",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "duplicate",
  "enum-map",
  "enumset",
@@ -4615,7 +4584,7 @@ dependencies = [
  "bls",
  "bytesize",
  "database",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "eip_2335",
  "fs-err",
  "futures",
@@ -5248,7 +5217,7 @@ dependencies = [
 name = "logging"
 version = "0.0.0"
 dependencies = [
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
 ]
 
 [[package]]
@@ -5350,7 +5319,7 @@ dependencies = [
  "bls",
  "build-time",
  "chrono",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "directories",
  "eth1_api",
  "futures",
@@ -5973,7 +5942,7 @@ dependencies = [
  "data_dumper",
  "database",
  "dedicated_executor",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "enum-iterator",
  "eth1_api",
  "eth2_libp2p",
@@ -7341,9 +7310,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.29"
+version = "0.23.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2491382039b29b9b11ff08b76ff6c97cf287671dbb74f0be44bda389fffe9bd1"
+checksum = "c0ebcbd2f03de0fc1122ad9bb24b127a5a6cd51d72604a3f3c50ac459762b6cc"
 dependencies = [
  "once_cell",
  "ring",
@@ -7824,7 +7793,7 @@ dependencies = [
  "arc-swap",
  "bls",
  "builder_api",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "doppelganger_protection",
  "futures",
  "helper_functions",
@@ -7883,7 +7852,7 @@ dependencies = [
  "bls",
  "database",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "eth1_api",
  "features",
  "futures",
@@ -8002,7 +7971,7 @@ dependencies = [
  "anyhow",
  "assert-json-diff",
  "bstr",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "fs-err",
  "futures",
  "glob",
@@ -8071,7 +8040,7 @@ dependencies = [
 name = "spec_test_utils"
 version = "0.0.0"
 dependencies = [
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "fs-err",
  "glob",
  "pathdiff",
@@ -8107,7 +8076,7 @@ dependencies = [
  "bitvec",
  "byteorder",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "duplicate",
  "easy-ext",
  "ethereum-types",
@@ -8855,7 +8824,7 @@ dependencies = [
  "arithmetic",
  "bit_field",
  "bls",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "duplicate",
  "enum-iterator",
  "execution_engine",
@@ -8925,7 +8894,7 @@ dependencies = [
  "bit_field",
  "bls",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "duplicate",
  "enum-iterator",
  "enum-map",
@@ -9118,7 +9087,7 @@ dependencies = [
  "clock",
  "constant_time_eq 0.4.2",
  "derivative",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "directories",
  "doppelganger_protection",
  "eth1_api",

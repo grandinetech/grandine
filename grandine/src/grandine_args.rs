@@ -1357,7 +1357,7 @@ impl GrandineArgs {
     }
 
     #[must_use]
-    pub fn clap_error(message: impl Display) -> ClapError {
+    pub fn clap_error(message: impl core::fmt::Display) -> ClapError {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
 }
