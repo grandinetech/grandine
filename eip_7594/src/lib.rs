@@ -138,28 +138,6 @@ pub fn compute_subnets_for_node(
     Ok(subnets)
 }
 
-pub fn compute_custody_subnets_and_columns_for_node(
-    raw_node_id: [u8; 32],
-    custody_group_count: u64,
-    config: &Config,
-) -> Result<(HashSet<SubnetId>, HashSet<ColumnIndex>)> {
-    let custody_groups = get_custody_groups(raw_node_id, custody_group_count, config)?;
-
-    let mut custody_subnets = HashSet::new();
-    for custody_index in &custody_groups {
-        let subnets = compute_subnets_from_custody_group(*custody_index, config)?;
-        custody_subnets.extend(subnets);
-    }
-
-    let mut custody_columns = HashSet::new();
-    for custody_index in &custody_groups {
-        let columns = compute_columns_for_custody_group(*custody_index, config)?;
-        custody_columns.extend(columns);
-    }
-
-    Ok((custody_subnets, custody_columns))
-}
-
 /// Verify if the data column sidecar is valid.
 pub fn verify_data_column_sidecar<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
