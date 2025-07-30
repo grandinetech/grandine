@@ -8,7 +8,7 @@ use std::{
 use anyhow::{bail, Result};
 use data_dumper::DataDumper;
 use dedicated_executor::DedicatedExecutor;
-use eip_7594::compute_custody_subnets_and_columns_for_node;
+use eip_7594::{compute_columns_for_custody_group, get_custody_groups};
 use enum_iterator::Sequence as _;
 use eth1_api::{BlobFetcherToP2p, RealController};
 use eth2_libp2p::{
@@ -56,7 +56,7 @@ use types::{
     },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
-        consts::GENESIS_EPOCH,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, NodeId, Slot, SubnetId, H256},
     },
@@ -168,6 +168,10 @@ impl<P: Preset> Network<P> {
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
 
+        // TODO: get custody value from metadata
+        let custody_group_count =
+            chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
+
         let context = Context {
             chain_config: chain_config.clone_arc(),
             config: network_config.clone_arc(),
@@ -181,6 +185,7 @@ impl<P: Preset> Network<P> {
             chain_config.clone_arc(),
             executor,
             context,
+            custody_group_count,
             &logger,
         ))
         .await?;
@@ -494,14 +499,11 @@ impl<P: Preset> Network<P> {
 
                 message = self.channels.subnet_service_to_p2p_rx.select_next_some() => {
                     match message {
-                        SubnetServiceToP2p::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
-                            self.attempt_to_update_custody_group_count(custody_group_count);
-                        }
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
                         }
-                        SubnetServiceToP2p::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
-                            self.update_custody_requirements(advertise_epoch, custody_group_count);
+                        SubnetServiceToP2p::UpdateDataColumnSubnets(custody_group_count) => {
+                            self.update_data_column_subnets(custody_group_count);
                         }
                         SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
                             self.update_earliest_available_slot(slot);
@@ -528,38 +530,31 @@ impl<P: Preset> Network<P> {
 
         let chain_config = self.controller.chain_config();
         let phase_by_slot = chain_config.phase_at_slot::<P>(slot);
-        let phase_by_state = self.fork_context.current_fork();
+        let phase_by_state = self.fork_context.current_fork_name();
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-        self.fork_context.update_current_fork(phase_by_slot);
+        let fork_digest_by_epoch = self.fork_context.context_bytes(epoch);
+        let fork_digest_by_state = self.fork_context.current_fork_digest();
 
-        if let Some(new_fork_digest) = self.fork_context.fork_digest_at_epoch(epoch) {
-            let current_fork_digest = self.fork_context.current_fork_digest();
-            if current_fork_digest != *new_fork_digest {
-                if phase_by_slot == phase_by_state {
-                    info!("updating fork digest from {current_fork_digest} to {new_fork_digest}");
-                } else {
-                    info!("switching from {phase_by_state} to {phase_by_slot}");
-                }
-
-                self.fork_context
-                    .update_current_fork_digest(*new_fork_digest);
-                let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
-
-                ServiceInboundMessage::UpdateFork(new_enr_fork_id)
-                    .send(&self.network_to_service_tx);
+        if fork_digest_by_state != fork_digest_by_epoch {
+            if phase_by_slot == phase_by_state {
+                info!("updating fork digest from {fork_digest_by_state} to {fork_digest_by_epoch}");
+            } else {
+                info!("switching from {phase_by_state} to {phase_by_slot}");
             }
+            self.fork_context.update_current_fork();
+
+            let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
+
+            ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
-        // Update `nfd` and `next_fork_epoch` field in `eth2` in ENR.
+        // Update `nfd` field in `eth2` in ENR.
         if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
-            let (_, next_fork_digest) = self.fork_context.next_fork(epoch);
+            let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
 
-            if self.fork_context.next_fork_digest() != next_fork_digest
-                || self.last_nfd_update_epoch.is_none()
+            if fork_digest_by_state != fork_digest_by_epoch || self.last_nfd_update_epoch.is_none()
             {
-                self.fork_context.update_next_fork_digest(next_fork_digest);
-
                 ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
                     .send(&self.network_to_service_tx);
             }
@@ -568,14 +563,14 @@ impl<P: Preset> Network<P> {
         }
 
         // Subscribe to the topics of the next phase.
-        if let Some((fork_epoch, fork_digest)) = self.fork_context.next_fork_at_slot::<P>(slot) {
-            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(*fork_epoch);
-            let next_phase = chain_config.phase_at_slot::<P>(next_phase_slot);
+        if let Some((next_phase, next_fork_digest, next_fork_epoch)) = self.fork_context.next_fork()
+        {
+            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(next_fork_epoch);
 
             if slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_phase_slot {
-                info!("subscribing to new topics for {next_phase} with digest {fork_digest}");
+                info!("subscribing to new topics for {next_phase} with digest {next_fork_digest}");
 
-                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, *fork_digest)
+                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, next_fork_digest)
                     .send(&self.network_to_service_tx);
             }
         }
@@ -620,8 +615,9 @@ impl<P: Preset> Network<P> {
             // > If no future fork is planned,
             // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
             next_fork_epoch = fork_context
-                .next_fork(misc::compute_epoch_at_slot::<P>(slot))
-                .0;
+                .next_fork()
+                .map(|(_, _, fork_epoch)| fork_epoch)
+                .unwrap_or(FAR_FUTURE_EPOCH);
         }
 
         EnrForkId {
@@ -940,57 +936,27 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn attempt_to_update_custody_group_count(&self, custody_group_count: u64) {
-        // Attempt to update `cgc` in ENR and Metadata to `custody_group_count` as scheduled
-        ServiceInboundMessage::AttemptToUpdateCustodyGroupCount(custody_group_count)
+    fn update_data_column_subnets(&self, custody_group_count: u64) {
+        ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count)
             .send(&self.network_to_service_tx);
-    }
 
-    fn update_custody_requirements(&self, advertise_epoch: Epoch, custody_group_count: u64) {
         let node_id = self.network_globals.local_enr().node_id().raw();
         let config = self.controller.chain_config();
-        let sampling_size = config.sampling_size(custody_group_count);
+        let sampling_size = config.sampling_size_custody_groups(custody_group_count);
+        let custody_groups = get_custody_groups(node_id, sampling_size, config)
+            .expect("should compute node custody groups");
 
-        match compute_custody_subnets_and_columns_for_node(node_id, sampling_size, config) {
-            Ok((sampling_subnets, sampling_columns)) => {
-                // Subscribe to more data column subnets if custody increased, otherwise unsubscribe
-                // existing subnets
-                let current_sampling_subnets = self.network_globals.sampling_subnets();
-                if sampling_subnets.len() > current_sampling_subnets.len() {
-                    for subnet_id in sampling_subnets
-                        .into_iter()
-                        .filter(|subnet_id| !current_sampling_subnets.contains(subnet_id))
-                    {
-                        debug!("subscribing to data column subnet {subnet_id}");
-                        let topic = self.subnet_gossip_topic(Subnet::DataColumn(subnet_id));
-
-                        ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
-                    }
-                } else {
-                    for subnet_id in current_sampling_subnets
-                        .into_iter()
-                        .filter(|subnet_id| !sampling_subnets.contains(subnet_id))
-                    {
-                        debug!("unsubscribing from data column subnet {subnet_id}");
-                        let topic = self.subnet_gossip_topic(Subnet::DataColumn(subnet_id));
-
-                        ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
-                    }
-                }
-
-                ServiceInboundMessage::UpdateCustodyRequirements(
-                    advertise_epoch,
-                    custody_group_count,
-                )
-                .send(&self.network_to_service_tx);
-
-                // Lastly, update `sampling_columns` in fork choice store
-                self.controller.on_store_sampling_columns(sampling_columns);
-            }
-            Err(error) => {
-                error!("Failed to update custody requirements (error: {error:?})");
-            }
+        let mut sampling_columns = HashSet::new();
+        for custody_index in &custody_groups {
+            let columns = compute_columns_for_custody_group(*custody_index, config)
+                .expect("should compute custody columns for node");
+            sampling_columns.extend(columns);
         }
+
+        // TODO(peerdas-fulu): use `sampling_columns` from `network_globals` in
+        // `fork_choice_store`.
+        // Lastly, update `sampling_columns` in fork choice store
+        self.controller.on_store_sampling_columns(sampling_columns);
     }
 
     const fn update_earliest_available_slot(&mut self, slot: Slot) {
@@ -2221,7 +2187,7 @@ impl<P: Preset> Network<P> {
             .cloned()
             .collect::<HashSet<_>>();
 
-        let current_phase = self.fork_context.current_fork();
+        let current_phase = self.fork_context.current_fork_name();
         let core_topics = core_topics_to_subscribe(
             self.controller.chain_config(),
             current_phase,
@@ -2335,9 +2301,6 @@ fn run_network_service<P: Preset>(
 
                 message = network_to_service_rx.select_next_some() => {
                     match message {
-                        ServiceInboundMessage::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
-                            service.attempt_to_update_custody_group_count(custody_group_count);
-                        }
                         ServiceInboundMessage::DiscoverSubnetPeers(subnet_discoveries) => {
                             service.discover_subnet_peers(subnet_discoveries);
                         }
@@ -2380,8 +2343,9 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest) => {
                             service.unsubscribe_from_fork_topics_except(fork_digest);
                         }
-                        ServiceInboundMessage::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
-                            service.update_custody_requirements(advertise_epoch, custody_group_count);
+                        ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count) => {
+                            service.subscribe_new_data_column_subnets(custody_group_count);
+                            service.update_enr_cgc(custody_group_count);
                         }
                         ServiceInboundMessage::UpdateEnrSubnet(subnet, advertise) => {
                             service.update_enr_subnet(subnet, advertise);
@@ -2399,7 +2363,7 @@ fn run_network_service<P: Preset>(
                             }
                         }
                         ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest) => {
-                            service.update_next_fork_digest(next_fork_digest);
+                            service.update_nfd(next_fork_digest);
                         }
                         ServiceInboundMessage::Stop => break,
                     }
