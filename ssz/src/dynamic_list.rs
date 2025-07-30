@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 
 use derivative::Derivative;
-use derive_more::{AsRef, Deref};
+use derive_more::Deref;
 use serde::{Serialize, Serializer};
 
 use crate::{

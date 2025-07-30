@@ -114,7 +114,7 @@ impl ProposerConfigs {
         self.db_remove(GraffitiByPubkey(pubkey))
     }
 
-    fn db_get<V: DeserializeOwned>(&self, key: impl Display) -> Result<Option<V>> {
+    fn db_get<V: DeserializeOwned>(&self, key: impl core::fmt::Display) -> Result<Option<V>> {
         let key_string = key.to_string();
 
         if let Some(value_bytes) = self.database.get(key_string)? {
@@ -125,12 +125,12 @@ impl ProposerConfigs {
         Ok(None)
     }
 
-    fn db_put(&self, key: impl Display, value: &impl Serialize) -> Result<()> {
+    fn db_put(&self, key: impl core::fmt::Display, value: &impl Serialize) -> Result<()> {
         self.database
             .put(key.to_string(), serde_json::to_string(value)?)
     }
 
-    fn db_remove(&self, key: impl Display) -> Result<()> {
+    fn db_remove(&self, key: impl core::fmt::Display) -> Result<()> {
         self.database.delete(key.to_string())
     }
 }

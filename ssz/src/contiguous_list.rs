@@ -3,7 +3,7 @@
 use core::{fmt::Debug, hash::Hash, marker::PhantomData};
 
 use derivative::Derivative;
-use derive_more::{AsRef, Deref, DerefMut};
+use derive_more::{Deref, DerefMut};
 use ethereum_types::H256;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use try_from_iterator::TryFromIterator;

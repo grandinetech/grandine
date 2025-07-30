@@ -1,5 +1,4 @@
 use bls12_381::G2Affine;
-use derive_more::AsRef;
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;
 use typenum::Unsigned as _;
