@@ -2574,10 +2574,11 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 /// `POST /eth/v1/validator/beacon_committee_subscriptions`
 pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     State(subnet_service_tx): State<UnboundedSender<ToSubnetService>>,
     EthJson(subscriptions): EthJson<Vec<BeaconCommitteeSubscription>>,
 ) -> Result<(), Error> {
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let current_state = controller.preprocessed_state_at_current_slot()?;
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     subscriptions.iter().try_for_each(|subscription| {
@@ -2588,7 +2589,21 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
         } = *subscription;
 
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
-        let relative_epoch = accessors::relative_epoch(&state, epoch)?;
+
+        let (state, relative_epoch) = match accessors::relative_epoch(&current_state, epoch) {
+            Ok(relative_epoch) => (current_state.clone_arc(), relative_epoch),
+            Err(_) => {
+                let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+                let state_with_status = state_id::state(
+                    &StateId::Slot(start_slot),
+                    &controller,
+                    &anchor_checkpoint_provider,
+                )?;
+
+                (state_with_status.value, RelativeEpoch::Current)
+            }
+        };
+
         let computed = accessors::get_committee_count_per_slot(&state, relative_epoch);
         let requested = committees_at_slot;
 
