@@ -173,8 +173,7 @@ impl<P: Preset> Network<P> {
             .sampling_columns_count()
             .try_into()
             .expect("sampling size should be able to fit into u64");
-        let custody_group_count = sampling_count
-            .saturating_div(chain_config.columns_per_group());
+        let custody_group_count = sampling_count.saturating_div(chain_config.columns_per_group());
 
         let context = Context {
             chain_config: chain_config.clone_arc(),
@@ -952,7 +951,7 @@ impl<P: Preset> Network<P> {
 
         let node_id = self.network_globals.local_enr().node_id().raw();
         let config = self.controller.chain_config();
-        let sampling_size = config.sampling_size(custody_group_count);
+        let sampling_size = config.sampling_size_custody_groups(custody_group_count);
         let custody_groups = get_custody_groups(node_id, sampling_size, config)
             .expect("should compute node custody groups");
 
@@ -963,6 +962,8 @@ impl<P: Preset> Network<P> {
             sampling_columns.extend(columns);
         }
 
+        // TODO(peerdas-fulu): use `sampling_columns` from `network_globals` in
+        // `fork_choice_store`.
         // Lastly, update `sampling_columns` in fork choice store
         self.controller.on_store_sampling_columns(sampling_columns);
     }
