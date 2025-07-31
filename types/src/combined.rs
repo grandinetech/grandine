@@ -922,7 +922,7 @@ impl<P: Preset> From<SignedBeaconBlock<P>> for BeaconBlock<P> {
     }
 }
 
-#[derive(Clone, Debug, From, Deserialize, Serialize)]
+#[derive(Clone, Debug, From, Serialize)]
 #[serde(bound = "", untagged)]
 #[cfg_attr(test, derive(VariantCount))]
 pub enum SignedBlindedBeaconBlock<P: Preset> {

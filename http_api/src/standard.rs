@@ -99,7 +99,11 @@ use crate::{
     error::{Error, IndexedError},
     extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
     full_config::FullConfig,
-    misc::{APIBlock, BroadcastValidation, SignedAPIBlock, SingleApiAttestation, SyncedStatus},
+    misc::{
+        APIBlock, BroadcastValidation, SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
+        SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
+        SingleApiAttestation, SingleApiAttestationListPhaseDeserializer, SyncedStatus,
+    },
     response::{EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
@@ -1253,7 +1257,10 @@ pub async fn publish_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
+    EthJsonOrSsz(signed_api_block, _): EthJsonOrSsz<
+        Box<SignedAPIBlock<P>>,
+        SignedAPIBlockPhaseDeserializer<P>,
+    >,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
@@ -1268,6 +1275,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
             proofs.as_ref(),
             controller.store_config().kzg_backend,
         )?;
+
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
@@ -1305,7 +1313,10 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJsonOrSsz(signed_blinded_block): EthJsonOrSsz<Box<SignedBlindedBeaconBlock<P>>>,
+    EthJsonOrSsz(signed_blinded_block, _): EthJsonOrSsz<
+        Box<SignedBlindedBeaconBlock<P>>,
+        SignedBlindedBeaconPhaseDeserializer<P>,
+    >,
 ) -> Result<StatusCode, Error> {
     let execution_payload = block_producer
         .publish_signed_blinded_block(&signed_blinded_block)
@@ -1377,7 +1388,10 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
-    EthJsonOrSsz(signed_blinded_block): EthJsonOrSsz<Box<SignedBlindedBeaconBlock<P>>>,
+    EthJsonOrSsz(signed_blinded_block, _): EthJsonOrSsz<
+        Box<SignedBlindedBeaconBlock<P>>,
+        SignedBlindedBeaconPhaseDeserializer<P>,
+    >,
 ) -> Result<StatusCode, Error> {
     let execution_payload = block_producer
         .publish_signed_blinded_block(&signed_blinded_block)
@@ -1422,7 +1436,10 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
-    EthJsonOrSsz(signed_api_block): EthJsonOrSsz<Box<SignedAPIBlock<P>>>,
+    EthJsonOrSsz(signed_api_block, _): EthJsonOrSsz<
+        Box<SignedAPIBlock<P>>,
+        SignedAPIBlockPhaseDeserializer<P>,
+    >,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
@@ -1787,8 +1804,9 @@ pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJsonOrSsz(attestations): EthJsonOrSsz<
+    EthJsonOrSsz(attestations, _): EthJsonOrSsz<
         ContiguousList<SingleApiAttestation<P>, P::MaxAttestersPerSlot>,
+        SingleApiAttestationListPhaseDeserializer<P>,
     >,
 ) -> Result<(), Error> {
     submit_attestations_to_pool(
@@ -2910,8 +2928,9 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 pub async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJsonOrSsz(aggregate_and_proofs): EthJsonOrSsz<
+    EthJsonOrSsz(aggregate_and_proofs, _): EthJsonOrSsz<
         ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>,
+        SignedAggregateAndProofListFromPhaseDeserializer<P>,
     >,
 ) -> Result<(), Error> {
     let (successes, failures): (Vec<_>, Vec<_>) = aggregate_and_proofs
