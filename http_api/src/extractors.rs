@@ -5,6 +5,7 @@
 //!
 //! [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
 
+use core::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
@@ -20,7 +21,10 @@ use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
 use http_api_utils::{BlockId, StateId};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{
+    de::{DeserializeOwned, DeserializeSeed},
+    Deserialize,
+};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::SszRead;
@@ -356,13 +360,14 @@ impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<SignedValidatorRegistrationV1
     }
 }
 
-pub struct EthJsonOrSsz<T>(pub T);
+pub struct EthJsonOrSsz<T, D>(pub T, pub PhantomData<D>);
 
-impl<S, T> FromRequest<S, Body> for EthJsonOrSsz<T>
+impl<S, T, D> FromRequest<S, Body> for EthJsonOrSsz<T, D>
 where
     Arc<Config>: FromRef<S>,
     S: Send + Sync,
-    T: SszRead<Phase> + DeserializeOwned + 'static,
+    T: SszRead<Phase> + 'static,
+    D: for<'de> DeserializeSeed<'de, Value = T> + From<Phase>,
 {
     type Rejection = Error;
 
@@ -372,21 +377,28 @@ where
             .await
             .map_err(Error::ContentTypeHeaderInvalid)?;
 
-        if content_type == ContentType::octet_stream() {
-            let phase = http_api_utils::extract_phase_from_headers(request.headers())
-                .map_err(Error::InvalidRequestConsensusHeader)?;
+        let phase = http_api_utils::extract_phase_from_headers(request.headers())
+            .map_err(Error::InvalidRequestConsensusHeader)?;
 
+        if content_type == ContentType::octet_stream() {
             let bytes = Bytes::from_request(request, state)
                 .await
                 .map_err(Error::InvalidBytesBody)?;
 
             let data = T::from_ssz(&phase, bytes).map_err(Error::InvalidSszBody)?;
 
-            return Ok(Self(data));
+            return Ok(Self(data, PhantomData));
         }
 
-        let Json(data) = request.extract().await.map_err(Error::InvalidJsonBody)?;
 
-        Ok(Self(data))
+        let Json(data): Json<Value> =
+            request.extract().await.map_err(Error::InvalidJsonBody)?;
+
+        let deserializer_from_phase: D = phase.into();
+        let data = deserializer_from_phase
+            .deserialize(data)
+            .map_err(Error::InvalidJsonValue)?;
+
+        Ok(Self(data, PhantomData))
     }
 }
