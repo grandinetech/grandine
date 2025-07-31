@@ -3867,6 +3867,7 @@ dependencies = [
  "database",
  "dedicated_executor",
  "deposit_tree",
+ "derive_more 2.0.1",
  "eip_7594",
  "enum-iterator",
  "eth1",
