@@ -3804,10 +3804,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.sampling_columns = sampling_columns;
     }
 
-    pub fn has_sampling_columns_stored(&self) -> bool {
-        !self.sampling_columns.is_empty()
-    }
-
     pub fn sampling_columns_count(&self) -> usize {
         self.sampling_columns.len()
     }
