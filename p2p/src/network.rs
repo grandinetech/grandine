@@ -57,7 +57,7 @@ use types::{
     },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
-        consts::GENESIS_EPOCH,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, NodeId, Slot, SubnetId, H256},
     },
@@ -533,38 +533,22 @@ impl<P: Preset> Network<P> {
 
         let chain_config = self.controller.chain_config();
         let phase_by_slot = chain_config.phase_at_slot::<P>(slot);
-        let phase_by_state = self.fork_context.current_fork();
+        let phase_by_state = self.fork_context.current_fork_name();
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-        self.fork_context.update_current_fork(phase_by_slot);
+        let fork_digest_by_epoch = self.fork_context.context_bytes(epoch);
+        let fork_digest_by_state = self.fork_context.current_fork_digest();
 
-        if let Some(new_fork_digest) = self.fork_context.fork_digest_at_epoch(epoch) {
-            let current_fork_digest = self.fork_context.current_fork_digest();
-            if current_fork_digest != *new_fork_digest {
-                if phase_by_slot == phase_by_state {
-                    info!("updating fork digest from {current_fork_digest} to {new_fork_digest}");
-                } else {
-                    info!("switching from {phase_by_state} to {phase_by_slot}");
-                }
-
-                self.fork_context
-                    .update_current_fork_digest(*new_fork_digest);
-                let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
-
-                ServiceInboundMessage::UpdateFork(new_enr_fork_id)
-                    .send(&self.network_to_service_tx);
-            }
-        }
-
-        // Update `nfd` and `next_fork_epoch` field in `eth2` in ENR.
+        // NOTE: this MUST be check before `fork_context.update_current_fork` called.
+        // Update `nfd` field in `eth2` in ENR.
         if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
-            let (_, next_fork_digest) = self.fork_context.next_fork(epoch);
+            let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
 
-            if self.fork_context.next_fork_digest() != next_fork_digest
-                || self.last_nfd_update_epoch.is_none()
-            {
-                self.fork_context.update_next_fork_digest(next_fork_digest);
-
+            // At the fork epoch, context bytes will be changed to the fork digest, while
+            // `next_fork_digest` method return the fork digest at that fork epoch since we have
+            // not call the `update_current_fork` method yet, so both values should be match at the
+            // fork epoch.
+            if next_fork_digest == fork_digest_by_epoch || self.last_nfd_update_epoch.is_none() {
                 ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
                     .send(&self.network_to_service_tx);
             }
@@ -572,15 +556,28 @@ impl<P: Preset> Network<P> {
             self.last_nfd_update_epoch = Some(epoch);
         }
 
+        if fork_digest_by_state != fork_digest_by_epoch {
+            if phase_by_slot == phase_by_state {
+                info!("updating fork digest from {fork_digest_by_state} to {fork_digest_by_epoch}");
+            } else {
+                info!("switching from {phase_by_state} to {phase_by_slot}");
+            }
+            self.fork_context.update_current_fork();
+
+            let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
+
+            ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
+        }
+
         // Subscribe to the topics of the next phase.
-        if let Some((fork_epoch, fork_digest)) = self.fork_context.next_fork_at_slot::<P>(slot) {
-            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(*fork_epoch);
-            let next_phase = chain_config.phase_at_slot::<P>(next_phase_slot);
+        if let Some((next_phase, next_fork_digest, next_fork_epoch)) = self.fork_context.next_fork()
+        {
+            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(next_fork_epoch);
 
             if slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_phase_slot {
-                info!("subscribing to new topics for {next_phase} with digest {fork_digest}");
+                info!("subscribing to new topics for {next_phase} with digest {next_fork_digest}");
 
-                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, *fork_digest)
+                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, next_fork_digest)
                     .send(&self.network_to_service_tx);
             }
         }
@@ -625,8 +622,9 @@ impl<P: Preset> Network<P> {
             // > If no future fork is planned,
             // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
             next_fork_epoch = fork_context
-                .next_fork(misc::compute_epoch_at_slot::<P>(slot))
-                .0;
+                .next_fork()
+                .map(|(_, _, fork_epoch)| fork_epoch)
+                .unwrap_or(FAR_FUTURE_EPOCH);
         }
 
         EnrForkId {
@@ -2206,7 +2204,7 @@ impl<P: Preset> Network<P> {
             .cloned()
             .collect::<HashSet<_>>();
 
-        let current_phase = self.fork_context.current_fork();
+        let current_phase = self.fork_context.current_fork_name();
         let core_topics = core_topics_to_subscribe(
             self.controller.chain_config(),
             current_phase,
@@ -2388,7 +2386,7 @@ fn run_network_service<P: Preset>(
                             }
                         }
                         ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest) => {
-                            service.update_next_fork_digest(next_fork_digest);
+                            service.update_nfd(next_fork_digest);
                         }
                         ServiceInboundMessage::Stop => break,
                     }
