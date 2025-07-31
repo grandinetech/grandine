@@ -91,6 +91,8 @@ pub enum Error {
     InvalidEpoch(#[source] AnyhowError),
     #[error("invalid JSON body")]
     InvalidJsonBody(#[source] JsonRejection),
+    #[error("invalid JSON body")]
+    InvalidJsonValue(#[source] serde_json::Error),
     #[error("invalid peer ID")]
     InvalidPeerId(#[source] AnyhowError),
     #[error(
@@ -220,6 +222,7 @@ impl Error {
             | Self::InvalidRequestConsensusHeader(_)
             | Self::InvalidContributionAndProofs(_)
             | Self::InvalidEpoch(_)
+            | Self::InvalidJsonValue(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidProposerSlashing(_)
