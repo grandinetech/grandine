@@ -6,6 +6,22 @@ use env_logger::{Builder, Env, Target, WriteStyle};
 use log::LevelFilter;
 use logging::PEER_LOG_METRICS;
 use rayon::ThreadPoolBuilder;
+use tracing_subscriber::EnvFilter;
+
+
+pub fn initialize_tracing_logger() -> Result<()> {
+
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .compact()
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
+        .init();
+
+    Ok(())
+}
 
 pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<()> {
     let mut builder = Builder::new();

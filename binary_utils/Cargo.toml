@@ -14,3 +14,4 @@ log = { workspace = true }
 logging = { workspace = true }
 panics = { workspace = true }
 rayon = { workspace = true }
+tracing-subscriber = {workspace = true }

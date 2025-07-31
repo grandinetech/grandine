@@ -864,6 +864,7 @@ dependencies = [
  "logging",
  "panics",
  "rayon",
+ "tracing-subscriber",
 ]
 
 [[package]]

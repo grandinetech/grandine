@@ -350,7 +350,9 @@ fn main() -> ExitCode {
 
 #[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
-    binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
+    binary_utils::initialize_tracing_logger()?;
+    info!("Tracing started!");
+//    binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
     binary_utils::initialize_rayon()?;
 
     let config = GrandineArgs::try_parse()?
