@@ -905,12 +905,18 @@ impl Config {
         }
     }
 
+    /// Return the number of custody group to sample per slot.
     #[must_use]
-    pub fn sampling_size(&self, custody_group_count: u64) -> u64 {
-        core::cmp::max(
-            custody_group_count.saturating_mul(self.columns_per_group()),
-            self.samples_per_slot,
-        )
+    pub fn sampling_size_custody_groups(&self, custody_group_count: u64) -> u64 {
+        core::cmp::max(custody_group_count, self.samples_per_slot)
+    }
+
+    /// Return the number of data column sidecar to download per slot.
+    #[must_use]
+    pub fn sampling_column_count(&self, custody_group_count: u64) -> u64 {
+        let sampling_size = self.sampling_size_custody_groups(custody_group_count);
+
+        sampling_size.saturating_mul(self.columns_per_group())
     }
 
     #[must_use]

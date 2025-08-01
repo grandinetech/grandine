@@ -81,9 +81,6 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
 
     fn handle_other_message(&mut self, message: ToSubnetService) {
         match message {
-            ToSubnetService::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
-                self.attempt_to_update_custody_group_count(custody_group_count);
-            }
             ToSubnetService::SetRegisteredValidators(pubkeys, prepared_proposer_indices) => {
                 self.set_registered_validators(pubkeys, prepared_proposer_indices);
             }
@@ -99,8 +96,8 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
                     debug!("failed to send response because the receiver was dropped");
                 }
             }
-            ToSubnetService::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
-                self.update_custody_requirements(advertise_epoch, custody_group_count);
+            ToSubnetService::UpdateDataColumnSubnets(custody_group_count) => {
+                self.update_data_column_subnets(custody_group_count);
             }
             ToSubnetService::UpdateEarliestAvailableSlot(slot) => {
                 self.update_earliest_available_slot(slot);
@@ -185,14 +182,8 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
         }
     }
 
-    fn attempt_to_update_custody_group_count(&self, custody_group_count: u64) {
-        SubnetServiceToP2p::AttemptToUpdateCustodyGroupCount(custody_group_count)
-            .send(&self.p2p_tx);
-    }
-
-    fn update_custody_requirements(&self, advertise_epoch: Epoch, custody_group_count: u64) {
-        SubnetServiceToP2p::UpdateCustodyRequirements(advertise_epoch, custody_group_count)
-            .send(&self.p2p_tx);
+    fn update_data_column_subnets(&self, custody_group_count: u64) {
+        SubnetServiceToP2p::UpdateDataColumnSubnets(custody_group_count).send(&self.p2p_tx);
     }
 
     fn update_earliest_available_slot(&self, slot: Slot) {
