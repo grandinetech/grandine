@@ -167,11 +167,13 @@ impl<P: Preset> Network<P> {
         let logger = Logger::root(StdLog.fuse(), o!());
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
-        let sampling_count: u64 = controller
-            .sampling_columns_count()
-            .try_into()
-            .expect("sampling size should be able to fit into u64");
-        let custody_group_count = sampling_count.saturating_div(chain_config.columns_per_group());
+
+        // TODO: get custody value from metadata
+        let custody_group_count = if network_config.subscribe_all_data_column_subnets {
+            chain_config.number_of_custody_groups
+        } else {
+            chain_config.custody_requirement
+        };
 
         let context = Context {
             chain_config: chain_config.clone_arc(),
@@ -537,23 +539,6 @@ impl<P: Preset> Network<P> {
         let fork_digest_by_epoch = self.fork_context.context_bytes(epoch);
         let fork_digest_by_state = self.fork_context.current_fork_digest();
 
-        // NOTE: this MUST be check before `fork_context.update_current_fork` called.
-        // Update `nfd` field in `eth2` in ENR.
-        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
-            let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
-
-            // At the fork epoch, context bytes will be changed to the fork digest, while
-            // `next_fork_digest` method return the fork digest at that fork epoch since we have
-            // not call the `update_current_fork` method yet, so both values should be match at the
-            // fork epoch.
-            if next_fork_digest == fork_digest_by_epoch || self.last_nfd_update_epoch.is_none() {
-                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
-                    .send(&self.network_to_service_tx);
-            }
-
-            self.last_nfd_update_epoch = Some(epoch);
-        }
-
         if fork_digest_by_state != fork_digest_by_epoch {
             if phase_by_slot == phase_by_state {
                 info!("updating fork digest from {fork_digest_by_state} to {fork_digest_by_epoch}");
@@ -565,6 +550,19 @@ impl<P: Preset> Network<P> {
             let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
             ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
+        }
+
+        // Update `nfd` field in `eth2` in ENR.
+        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
+            let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
+
+            if fork_digest_by_state != fork_digest_by_epoch || self.last_nfd_update_epoch.is_none()
+            {
+                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
+                    .send(&self.network_to_service_tx);
+            }
+
+            self.last_nfd_update_epoch = Some(epoch);
         }
 
         // Subscribe to the topics of the next phase.
