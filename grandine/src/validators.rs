@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use anyhow::{bail, Error, Result};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
-use log::{info, warn};
+use tracing::{info, warn};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::KeyOrigin;
 use std_ext::ArcExt;

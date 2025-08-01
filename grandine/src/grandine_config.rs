@@ -7,7 +7,7 @@ use features::Feature;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
-use log::info;
+use tracing::info;
 use p2p::NetworkConfig;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;

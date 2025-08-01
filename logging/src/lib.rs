@@ -34,35 +34,27 @@ impl PeerLogMetrics {
 #[macro_export]
 macro_rules! info_with_peers {
     ($($arg:tt)*) => {
-        ::log::info!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
+        ::tracing::info!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
     };
 }
 
 #[macro_export]
 macro_rules! debug_with_peers {
     ($($arg:tt)*) => {
-        ::log::debug!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
+        ::tracing::debug!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
     };
 }
 
 #[macro_export]
 macro_rules! warn_with_peers {
     ($($arg:tt)*) => {
-        ::log::warn!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
+        ::tracing::warn!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
     };
 }
 
 #[macro_export]
 macro_rules! error_with_peers {
     ($($arg:tt)*) => {
-        ::log::error!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
+        ::tracing::error!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
     };
 }
-
-// macro for tracing
-// #[macro_export]
-// macro_rules! info_with_peers {
-//     ($($arg:tt)*) => {
-//         ::tracing::info!(peers = %$crate::PEER_LOG_METRICS, $($arg)*);
-//     };
-// }

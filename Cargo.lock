@@ -17,11 +17,11 @@ dependencies = [
  "fork_choice_store",
  "futures",
  "itertools 0.14.0",
- "log",
  "pubkey_cache",
  "rand 0.8.5",
  "tempfile",
  "tikv-jemalloc-ctl",
+ "tracing",
  "types",
 ]
 
@@ -3399,7 +3399,6 @@ dependencies = [
  "itertools 0.14.0",
  "keymanager",
  "kzg_utils",
- "log",
  "logging",
  "metrics",
  "p2p",
@@ -3426,6 +3425,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tower-http",
+ "tracing",
  "types",
  "validator",
  "validator_key_cache",

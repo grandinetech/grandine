@@ -7,7 +7,7 @@ use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot, SlotBlobId,
     SlotByStateRoot, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
-use log::{info, warn};
+use tracing::{info, warn};
 use runtime::StorageConfig;
 use types::preset::Preset;
 

@@ -3,10 +3,8 @@ use rayon::ThreadPoolBuilder;
 use tracing_subscriber::{EnvFilter, fmt, filter::LevelFilter};
 
 pub fn initialize_tracing_logger(module_path: &str) -> Result<()> {
-
     let base_filter = EnvFilter::try_from_env("GRANDINE_LOG")
         .or_else(|_| EnvFilter::try_from_default_env());
-
     
     let filter = match base_filter {
         Ok(filter) => filter,
@@ -56,7 +54,7 @@ pub fn initialize_tracing_logger(module_path: &str) -> Result<()> {
 
     fmt()
         .with_env_filter(filter)
-        //.compact()
+        .compact()
         .with_thread_ids(true)
         .with_target(true)
         .with_file(false)

@@ -4,7 +4,7 @@ use std::{io::ErrorKind, path::Path, sync::Arc};
 use anyhow::{bail, Context as _, Result};
 use deposit_tree::DepositTree;
 use genesis::AnchorCheckpointProvider;
-use log::info;
+use tracing::info;
 use p2p::{Enr, NetworkConfig};
 use reqwest::Client;
 use ssz::SszRead as _;

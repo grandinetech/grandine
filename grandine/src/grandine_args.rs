@@ -38,7 +38,7 @@ use http_api::HttpApiConfig;
 use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
 use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
-use log::{info, warn};
+use tracing::{info, warn};
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
