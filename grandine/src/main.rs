@@ -22,7 +22,7 @@ use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use http_api::HttpApiConfig;
 use log::{error, info, warn};
-use logging::PEER_LOG_METRICS;
+use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers, PEER_LOG_METRICS};
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use pubkey_cache::PubkeyCache;
@@ -351,9 +351,13 @@ fn main() -> ExitCode {
 #[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
     binary_utils::initialize_tracing_logger(module_path!())?;
-    info!("Tracing started!");
-//    binary_utils::initialize_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
     binary_utils::initialize_rayon()?;
+    
+    info!("Tracing started!");
+    info_with_peers!("test info with peers");
+    debug_with_peers!("test debug with peers");
+    warn_with_peers!("test warn with peers");
+    error_with_peers!("test error with peers");
 
     let config = GrandineArgs::try_parse()?
         .try_into_config()
