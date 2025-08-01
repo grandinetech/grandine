@@ -6,18 +6,21 @@ use env_logger::{Builder, Env, Target, WriteStyle};
 use log::LevelFilter;
 use logging::PEER_LOG_METRICS;
 use rayon::ThreadPoolBuilder;
-use tracing_subscriber::EnvFilter;
-
+use tracing_subscriber::{EnvFilter, fmt};
 
 pub fn initialize_tracing_logger() -> Result<()> {
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+    let filter = EnvFilter::try_from_env("GRANDINE_LOG")
+        .or_else(|_| EnvFilter::try_from_default_env())
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    fmt()
+        .with_env_filter(filter)
         .compact()
         .with_file(true)
         .with_line_number(true)
         .with_thread_ids(true)
-        .with_target(false)
+        .with_target(true)
         .init();
 
     Ok(())
