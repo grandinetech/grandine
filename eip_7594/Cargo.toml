@@ -19,13 +19,10 @@ thiserror = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
-prometheus_metrics = { workspace = true, optional = true }
+prometheus_metrics = { workspace = true }
 
 [dev-dependencies]
 duplicate = { workspace = true }
 serde = { workspace = true }
 spec_test_utils = { workspace = true }
 test-generator = { workspace = true }
-
-[features]
-metrics = ['prometheus_metrics']

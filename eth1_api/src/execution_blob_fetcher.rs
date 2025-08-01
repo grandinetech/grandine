@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use dashmap::DashMap;
-use derive_more::{derive::Constructor, IntoIterator};
+use derive_more::IntoIterator;
 use eth2_libp2p::PeerId;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, BlockOrDataColumnSidecar, EngineGetBlobsParams,
@@ -15,6 +15,7 @@ use futures::{
 };
 use helper_functions::misc;
 use log::{debug, warn};
+use prometheus_metrics::Metrics;
 use ssz::{ContiguousList, H256};
 use types::{
     combined::SignedBeaconBlock,
@@ -33,18 +34,41 @@ use crate::{
     ApiController, Eth1Api,
 };
 
-#[derive(Constructor)]
 pub struct ExecutionBlobFetcher<P: Preset, W: Wait> {
     api: Arc<Eth1Api>,
     controller: ApiController<P, W>,
     received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
     sidecars_construction_started: Arc<DashMap<H256, Slot>>,
+    metrics: Option<Arc<Metrics>>,
     p2p_tx: UnboundedSender<BlobFetcherToP2p>,
     rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
 }
 
 impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
+    #[expect(clippy::too_many_arguments)]
+    pub const fn new(
+        api: Arc<Eth1Api>,
+        controller: ApiController<P, W>,
+        received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
+        received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+        sidecars_construction_started: Arc<DashMap<H256, Slot>>,
+        metrics: Option<Arc<Metrics>>,
+        p2p_tx: UnboundedSender<BlobFetcherToP2p>,
+        rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
+    ) -> Self {
+        Self {
+            api,
+            controller,
+            received_blob_sidecars,
+            received_data_column_sidecars,
+            sidecars_construction_started,
+            metrics,
+            p2p_tx,
+            rx,
+        }
+    }
+
     pub async fn run(mut self) -> Result<()> {
         while let Some(message) = self.rx.next().await {
             match message {
@@ -228,6 +252,15 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             if self.controller.is_forward_synced()
                 && !self.controller.store_config().disable_engine_getblobs
             {
+                let _request_timer = self
+                    .metrics
+                    .as_ref()
+                    .map(|metrics| metrics.engine_get_blobs_v2_request_time.start_timer());
+
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.engine_get_blobs_v2_requests_count.inc();
+                }
+
                 let expected_blobs_count = kzg_commitments.len();
                 let versioned_hashes = kzg_commitments
                     .iter()
@@ -240,6 +273,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                     Ok(blobs_and_proofs_opt) => {
                         if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
                             if blobs_and_proofs.len() == expected_blobs_count {
+                                if let Some(metrics) = self.metrics.as_ref() {
+                                    metrics.engine_get_blobs_v2_responses_count.inc();
+                                }
+
                                 let (received_blobs, received_proofs): (Vec<_>, Vec<_>) =
                                     blobs_and_proofs
                                         .into_iter()
@@ -265,11 +302,13 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                                 &block,
                                                 &cells_and_kzg_proofs,
                                                 self.controller.chain_config(),
+                                                self.metrics.as_ref(),
                                             ),
                                             BlockOrDataColumnSidecar::Sidecar(sidecar) => eip_7594::construct_data_column_sidecars_from_sidecar(
                                                 &sidecar,
                                                 &cells_and_kzg_proofs,
                                                 self.controller.chain_config(),
+                                                self.metrics.as_ref(),
                                             ),
                                         };
                                         match result {
