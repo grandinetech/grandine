@@ -1,98 +1,150 @@
-use std::io::Write as _;
+//use std::io::Write as _;
 
 use anyhow::Result;
-use chrono::{Local, SecondsFormat};
-use env_logger::{Builder, Env, Target, WriteStyle};
-use log::LevelFilter;
-use logging::PEER_LOG_METRICS;
+//use chrono::{Local, SecondsFormat};
+//use env_logger::{Builder, Env, Target, WriteStyle};
+//use log::LevelFilter;
+//use logging::PEER_LOG_METRICS;
 use rayon::ThreadPoolBuilder;
 use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::filter::LevelFilter;
+use log as _;
+use logging as _;
+use env_logger as _;
+use chrono as _;
 
-pub fn initialize_tracing_logger() -> Result<()> {
 
-    let filter = EnvFilter::try_from_env("GRANDINE_LOG")
-        .or_else(|_| EnvFilter::try_from_default_env())
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+pub fn initialize_tracing_logger(module_path: &str) -> Result<()> {
+
+    let base_filter = EnvFilter::try_from_env("GRANDINE_LOG")
+        .or_else(|_| EnvFilter::try_from_default_env());
+
+    
+    let filter = match base_filter {
+        Ok(filter) => filter,
+        Err(_) => {
+            let filter = EnvFilter::default()
+            .add_directive(LevelFilter::OFF.into())
+            .add_directive("attestation_verifier=info".parse()?)
+            .add_directive("block_producer=info".parse()?)
+            .add_directive("builder_api=info".parse()?)
+            .add_directive("data_dumper=info".parse()?)
+            .add_directive("database=info".parse()?)
+            .add_directive("dedicated_executor=info".parse()?)
+            .add_directive("doppelganger_protection=info".parse()?)
+            .add_directive("eth1=info".parse()?)
+            .add_directive("eth1_api=info".parse()?)
+            .add_directive("eth2_libp2p=info".parse()?)
+            .add_directive("execution_engine=info".parse()?)
+            .add_directive("features=info".parse()?)
+            .add_directive("fork_choice_control=info".parse()?)
+            .add_directive("fork_choice_store=info".parse()?)
+            .add_directive("genesis=info".parse()?)
+            .add_directive("http_api=info".parse()?)
+            .add_directive("http_api_utils=info".parse()?)
+            .add_directive("keymanager=info".parse()?)
+            .add_directive("liveness_tracker=info".parse()?)
+            .add_directive("metrics=info".parse()?)
+            .add_directive("operation_pools=info".parse()?)
+            .add_directive("p2p=info".parse()?)
+            .add_directive("prometheus_metrics=info".parse()?)
+            .add_directive("pubkey_cache=info".parse()?)
+            .add_directive("runtime=info".parse()?)
+            .add_directive("signer=info".parse()?)
+            .add_directive("slasher=info".parse()?)
+            .add_directive("slashing_protection=info".parse()?)
+            .add_directive("state_cache=info".parse()?)
+            .add_directive("storage=info".parse()?)
+            .add_directive("validator=info".parse()?)
+            .add_directive("validator_key_cache=info".parse()?)
+            .add_directive("validator_statistics=info".parse()?)
+            .add_directive("web3=info".parse()?)
+            .add_directive(format!("{}=info", module_path).parse()?)
+            .add_directive(format!("{}=info", module_path!()).parse()?);
+            
+            filter
+        }
+    };
 
     fmt()
         .with_env_filter(filter)
         .compact()
-        .with_file(true)
-        .with_line_number(true)
         .with_thread_ids(true)
         .with_target(true)
+        .with_file(false)
+        .with_line_number(false)
         .init();
 
     Ok(())
 }
 
-pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<()> {
-    let mut builder = Builder::new();
+// pub fn initialize_logger(module_path: &str, always_write_style: bool) -> Result<()> {
+//     let mut builder = Builder::new();
 
-    builder
-        .filter_level(LevelFilter::Off)
-        .filter_module("attestation_verifier", LevelFilter::Info)
-        .filter_module("block_producer", LevelFilter::Info)
-        .filter_module("builder_api", LevelFilter::Info)
-        .filter_module("data_dumper", LevelFilter::Info)
-        .filter_module("database", LevelFilter::Info)
-        .filter_module("dedicated_executor", LevelFilter::Info)
-        .filter_module("doppelganger_protection", LevelFilter::Info)
-        .filter_module("eth1", LevelFilter::Info)
-        .filter_module("eth1_api", LevelFilter::Info)
-        .filter_module("eth2_libp2p", LevelFilter::Info)
-        .filter_module("execution_engine", LevelFilter::Info)
-        .filter_module("features", LevelFilter::Info)
-        .filter_module("fork_choice_control", LevelFilter::Info)
-        .filter_module("fork_choice_store", LevelFilter::Info)
-        .filter_module("genesis", LevelFilter::Info)
-        .filter_module("http_api", LevelFilter::Info)
-        .filter_module("http_api_utils", LevelFilter::Info)
-        .filter_module("keymanager", LevelFilter::Info)
-        .filter_module("liveness_tracker", LevelFilter::Info)
-        .filter_module("metrics", LevelFilter::Info)
-        .filter_module("operation_pools", LevelFilter::Info)
-        .filter_module("p2p", LevelFilter::Info)
-        .filter_module("prometheus_metrics", LevelFilter::Info)
-        .filter_module("pubkey_cache", LevelFilter::Info)
-        .filter_module("runtime", LevelFilter::Info)
-        .filter_module("signer", LevelFilter::Info)
-        .filter_module("slasher", LevelFilter::Info)
-        .filter_module("slashing_protection", LevelFilter::Info)
-        .filter_module("state_cache", LevelFilter::Info)
-        .filter_module("storage", LevelFilter::Info)
-        .filter_module("validator", LevelFilter::Info)
-        .filter_module("validator_key_cache", LevelFilter::Info)
-        .filter_module("validator_statistics", LevelFilter::Info)
-        .filter_module("web3", LevelFilter::Info)
-        .filter_module(module_path!(), LevelFilter::Info)
-        .filter_module(module_path, LevelFilter::Info)
-        .format(|formatter, record| {
-            writeln!(
-                formatter,
-                "[{}] [{}] [{}] [{PEER_LOG_METRICS}] {}",
-                // This allocates a `String` only to write it to `formatter`, but that has a
-                // negligible effect on performance. `DateTime::format_with_items` with the same
-                // format is slower. Manual formatting with `core::fmt` is faster, however.
-                Local::now().to_rfc3339_opts(SecondsFormat::Millis, false),
-                //formatter.default_level_style(record.level()),
-                record.level(),
-                record.target(),
-                record.args(),
-            )
-        })
-        .target(Target::Stdout);
+//     builder
+//         .filter_level(LevelFilter::Off)
+//         .filter_module("attestation_verifier", LevelFilter::Info)
+//         .filter_module("block_producer", LevelFilter::Info)
+//         .filter_module("builder_api", LevelFilter::Info)
+//         .filter_module("data_dumper", LevelFilter::Info)
+//         .filter_module("database", LevelFilter::Info)
+//         .filter_module("dedicated_executor", LevelFilter::Info)
+//         .filter_module("doppelganger_protection", LevelFilter::Info)
+//         .filter_module("eth1", LevelFilter::Info)
+//         .filter_module("eth1_api", LevelFilter::Info)
+//         .filter_module("eth2_libp2p", LevelFilter::Info)
+//         .filter_module("execution_engine", LevelFilter::Info)
+//         .filter_module("features", LevelFilter::Info)
+//         .filter_module("fork_choice_control", LevelFilter::Info)
+//         .filter_module("fork_choice_store", LevelFilter::Info)
+//         .filter_module("genesis", LevelFilter::Info)
+//         .filter_module("http_api", LevelFilter::Info)
+//         .filter_module("http_api_utils", LevelFilter::Info)
+//         .filter_module("keymanager", LevelFilter::Info)
+//         .filter_module("liveness_tracker", LevelFilter::Info)
+//         .filter_module("metrics", LevelFilter::Info)
+//         .filter_module("operation_pools", LevelFilter::Info)
+//         .filter_module("p2p", LevelFilter::Info)
+//         .filter_module("prometheus_metrics", LevelFilter::Info)
+//         .filter_module("pubkey_cache", LevelFilter::Info)
+//         .filter_module("runtime", LevelFilter::Info)
+//         .filter_module("signer", LevelFilter::Info)
+//         .filter_module("slasher", LevelFilter::Info)
+//         .filter_module("slashing_protection", LevelFilter::Info)
+//         .filter_module("state_cache", LevelFilter::Info)
+//         .filter_module("storage", LevelFilter::Info)
+//         .filter_module("validator", LevelFilter::Info)
+//         .filter_module("validator_key_cache", LevelFilter::Info)
+//         .filter_module("validator_statistics", LevelFilter::Info)
+//         .filter_module("web3", LevelFilter::Info)
+//         .filter_module(module_path!(), LevelFilter::Info)
+//         .filter_module(module_path, LevelFilter::Info)
+//         .format(|formatter, record| {
+//             writeln!(
+//                 formatter,
+//                 "[{}] [{}] [{}] [{PEER_LOG_METRICS}] {}",
+//                 // This allocates a `String` only to write it to `formatter`, but that has a
+//                 // negligible effect on performance. `DateTime::format_with_items` with the same
+//                 // format is slower. Manual formatting with `core::fmt` is faster, however.
+//                 Local::now().to_rfc3339_opts(SecondsFormat::Millis, false),
+//                 //formatter.default_level_style(record.level()),
+//                 record.level(),
+//                 record.target(),
+//                 record.args(),
+//             )
+//         })
+//         .target(Target::Stdout);
 
-    if always_write_style {
-        builder.write_style(WriteStyle::Always);
-    }
+//     if always_write_style {
+//         builder.write_style(WriteStyle::Always);
+//     }
 
-    let env = Env::new()
-        .filter("GRANDINE_LOG")
-        .write_style("GRANDINE_LOG_STYLE");
+//     let env = Env::new()
+//         .filter("GRANDINE_LOG")
+//         .write_style("GRANDINE_LOG_STYLE");
 
-    builder.parse_env(env).try_init().map_err(Into::into)
-}
+//     builder.parse_env(env).try_init().map_err(Into::into)
+// }
 
 pub fn initialize_rayon() -> Result<()> {
     ThreadPoolBuilder::new()
