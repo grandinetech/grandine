@@ -363,7 +363,7 @@ itertools = '0.14'
 jwt-simple = { version = '0.12', default-features = false, features = ['pure-rust'] }
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 lazy_static = '1'
-libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '6f8e7258f4733279080e4bd8345ce50538a40d6e' }
+libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'd8451e54e7267f9f1634118d6d279b2216f7e2bb' }
 libp2p = { git = 'https://github.com/libp2p/rust-libp2p.git', default-features = false, features = ['metrics', 'dns', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp', 'gossipsub'] }
 libp2p-identity = { version = '0.2.13', features = ['peerid'] }
 libp2p-mplex = { git = 'https://github.com/libp2p/rust-libp2p.git' }
