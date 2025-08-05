@@ -420,7 +420,11 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAPIBlockPhaseDeserializer<P>
     }
 }
 
-#[derive(From)]
+// Deserialize does not correctly deserialize between Electra and Fulu versions
+// because contents of the blocks are identical. Implemented for legacy reasons.
+// Mainly `eth/v1/beacon/blocks`
+#[derive(From, Deserialize)]
+#[serde(bound = "", untagged)]
 pub enum SignedAPIBlock<P: Preset> {
     Phase0(Phase0SignedBeaconBlock<P>),
     Altair(AltairSignedBeaconBlock<P>),
