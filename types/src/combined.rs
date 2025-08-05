@@ -68,6 +68,7 @@ use crate::{
         containers::{
             AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
             AttesterSlashing as ElectraAttesterSlashing, BeaconBlock as ElectraBeaconBlock,
+            BeaconBlockBody as ElectraBeaconBlockBody,
             BlindedBeaconBlock as ElectraBlindedBeaconBlock, ExecutionRequests,
             LightClientBootstrap as ElectraLightClientBootstrap,
             LightClientFinalityUpdate as ElectraLightClientFinalityUpdate,
@@ -81,7 +82,8 @@ use crate::{
     fulu::{
         beacon_state::BeaconState as FuluBeaconState,
         containers::{
-            BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
+            BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody,
+            BlindedBeaconBlock as FuluBlindedBeaconBlock,
             LightClientBootstrap as FuluLightClientBootstrap,
             LightClientFinalityUpdate as FuluLightClientFinalityUpdate,
             LightClientOptimisticUpdate as FuluLightClientOptimisticUpdate,
@@ -468,6 +470,64 @@ impl<P: Preset> SszHash for SignedBeaconBlock<P> {
 }
 
 impl<P: Preset> SignedBeaconBlock<P> {
+    // TODO: remove this once `/eth/v1/beacon/blocks` is removed or
+    //`types::combined::SignedBeaconBlock` no longer contains identical variants
+    #[must_use]
+    pub fn upgrade(self) -> Self {
+        match self {
+            Self::Electra(ElectraSignedBeaconBlock {
+                message:
+                    ElectraBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body:
+                            ElectraBeaconBlockBody {
+                                randao_reveal,
+                                eth1_data,
+                                graffiti,
+                                proposer_slashings,
+                                attester_slashings,
+                                attestations,
+                                deposits,
+                                voluntary_exits,
+                                sync_aggregate,
+                                execution_payload,
+                                bls_to_execution_changes,
+                                blob_kzg_commitments,
+                                execution_requests,
+                            },
+                    },
+                signature,
+            }) => Self::Fulu(FuluSignedBeaconBlock {
+                message: FuluBeaconBlock {
+                    slot,
+                    proposer_index,
+                    parent_root,
+                    state_root,
+                    body: FuluBeaconBlockBody {
+                        randao_reveal,
+                        eth1_data,
+                        graffiti,
+                        proposer_slashings,
+                        attester_slashings,
+                        attestations,
+                        deposits,
+                        voluntary_exits,
+                        sync_aggregate,
+                        execution_payload,
+                        bls_to_execution_changes,
+                        blob_kzg_commitments,
+                        execution_requests,
+                    },
+                },
+                signature,
+            }),
+            _ => self,
+        }
+    }
+
     pub fn split(self) -> (BeaconBlock<P>, SignatureBytes) {
         match self {
             Self::Phase0(block) => {
@@ -864,7 +924,10 @@ impl<P: Preset> From<SignedBeaconBlock<P>> for BeaconBlock<P> {
     }
 }
 
-#[derive(Clone, Debug, From, Serialize)]
+// Deserialize does not correctly deserialize between Electra and Fulu versions
+// because contents of the blocks are identical. Implemented for legacy reasons.
+// Mainly `eth/v1/beacon/blinded_blocks`
+#[derive(Clone, Debug, From, Deserialize, Serialize)]
 #[serde(bound = "", untagged)]
 #[cfg_attr(test, derive(VariantCount))]
 pub enum SignedBlindedBeaconBlock<P: Preset> {

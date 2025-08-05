@@ -95,7 +95,7 @@ use validator::{ApiToValidator, ValidatorConfig};
 use crate::{
     block_id,
     error::{Error, IndexedError},
-    extractors::{EthJson, EthJsonOrSsz, EthPath, EthQuery},
+    extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{
         APIBlock, BroadcastValidation, SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
@@ -1229,7 +1229,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 pub async fn publish_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJsonOrSsz(signed_api_block, _): EthJsonOrSsz<
+    EthJsonOrSszWithOptionalPhase(signed_api_block, _): EthJsonOrSszWithOptionalPhase<
         Box<SignedAPIBlock<P>>,
         SignedAPIBlockPhaseDeserializer<P>,
     >,
@@ -1253,6 +1253,11 @@ pub async fn publish_block<P: Preset, W: Wait>(
             &cells_and_kzg_proofs,
             controller.chain_config(),
         )?;
+
+        // this is a temporary measure until `/eth/v1/beacon/blocks` is removed as it is no longer
+        // possible to deserialize `SignedApiBlock` without phase header correctly as the contents
+        // are identical between Electra and Fulu
+        let signed_beacon_block = signed_beacon_block.upgrade();
 
         publish_signed_block_with_data_column_sidecar(
             Arc::new(signed_beacon_block),
@@ -1283,7 +1288,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
-    EthJsonOrSsz(signed_blinded_block, _): EthJsonOrSsz<
+    EthJsonOrSszWithOptionalPhase(signed_blinded_block, _): EthJsonOrSszWithOptionalPhase<
         Box<SignedBlindedBeaconBlock<P>>,
         SignedBlindedBeaconPhaseDeserializer<P>,
     >,
