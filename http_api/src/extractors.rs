@@ -405,3 +405,60 @@ where
         Err(Error::ContentTypeNotSupported)
     }
 }
+
+pub struct EthJsonOrSszWithOptionalPhase<T, D>(pub T, pub PhantomData<D>);
+
+impl<S, T, D> FromRequest<S, Body> for EthJsonOrSszWithOptionalPhase<T, D>
+where
+    Arc<Config>: FromRef<S>,
+    S: Send + Sync,
+    T: SszRead<Phase> + DeserializeOwned + 'static,
+    D: for<'de> DeserializeSeed<'de, Value = T> + From<Phase>,
+{
+    type Rejection = Error;
+
+    async fn from_request(mut request: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        let TypedHeader(content_type) = request
+            .extract_parts::<TypedHeader<ContentType>>()
+            .await
+            .map_err(Error::ContentTypeHeaderInvalid)?;
+
+        if content_type == ContentType::octet_stream() {
+            let phase = http_api_utils::extract_phase_from_headers(request.headers())
+                .map_err(Error::InvalidRequestConsensusHeader)?;
+
+            let bytes = Bytes::from_request(request, state)
+                .await
+                .map_err(Error::InvalidBytesBody)?;
+
+            let data = T::from_ssz(&phase, bytes).map_err(Error::InvalidSszBody)?;
+
+            return Ok(Self(data, PhantomData));
+        }
+
+        if content_type == ContentType::json() {
+            let phase = http_api_utils::try_extract_phase_from_headers(request.headers())?;
+
+            let data = match phase {
+                Some(phase) => {
+                    let Json(data): Json<Value> =
+                        request.extract().await.map_err(Error::InvalidJsonBody)?;
+
+                    let deserializer_from_phase: D = phase.into();
+
+                    deserializer_from_phase
+                        .deserialize(data)
+                        .map_err(Error::InvalidJsonValue)?
+                }
+                None => {
+                    let Json(data) = request.extract().await.map_err(Error::InvalidJsonBody)?;
+                    data
+                }
+            };
+
+            return Ok(Self(data, PhantomData));
+        }
+
+        Err(Error::ContentTypeNotSupported)
+    }
+}
