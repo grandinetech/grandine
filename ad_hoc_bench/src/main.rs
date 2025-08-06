@@ -278,7 +278,7 @@ impl From<Blocks> for BlockParameters {
 }
 
 fn main() -> Result<()> {
-    binary_utils::initialize_tracing_logger(module_path!())?;
+    binary_utils::initialize_tracing_logger(module_path!(), false)?;
     binary_utils::initialize_rayon()?;
     #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;

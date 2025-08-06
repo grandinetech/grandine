@@ -351,7 +351,7 @@ fn main() -> ExitCode {
 
 #[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
-    binary_utils::initialize_tracing_logger(module_path!())?;
+    binary_utils::initialize_tracing_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
     binary_utils::initialize_rayon()?;
     
     info!("Tracing started!");

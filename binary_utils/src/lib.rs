@@ -1,8 +1,9 @@
 use anyhow::Result;
 use rayon::ThreadPoolBuilder;
 use tracing_subscriber::{EnvFilter, fmt, filter::LevelFilter};
+use std::io::{self, IsTerminal};
 
-pub fn initialize_tracing_logger(module_path: &str) -> Result<()> {
+pub fn initialize_tracing_logger(module_path: &str, always_write_style: bool) -> Result<()> {
     let base_filter = EnvFilter::try_from_env("GRANDINE_LOG")
         .or_else(|_| EnvFilter::try_from_default_env());
     
@@ -52,6 +53,8 @@ pub fn initialize_tracing_logger(module_path: &str) -> Result<()> {
         }
     };
 
+    let enable_ansi = always_write_style || io::stdout().is_terminal();
+
     fmt()
         .with_env_filter(filter)
         .compact()
@@ -59,6 +62,7 @@ pub fn initialize_tracing_logger(module_path: &str) -> Result<()> {
         .with_target(true)
         .with_file(false)
         .with_line_number(true)
+        .with_ansi(enable_ansi)
         .init();
 
     Ok(())
