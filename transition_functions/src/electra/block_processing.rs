@@ -1075,15 +1075,20 @@ fn validate_voluntary_exit_with_verifier<P: Preset>(
     Ok(())
 }
 
+// @audit withdrawal-request: New Electra feature for validator-initiated withdrawals
+// ↳ Allows validators to request partial or full withdrawals via execution layer
 pub fn process_withdrawal_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     withdrawal_request: WithdrawalRequest,
 ) -> Result<()> {
     let amount = withdrawal_request.amount;
+    // @audit full-exit-detection: FULL_EXIT_REQUEST_AMOUNT signals complete validator exit
     let is_full_exit_request = amount == FULL_EXIT_REQUEST_AMOUNT;
 
     // > If partial withdrawal queue is full, only full exits are processed
+    // @audit queue-limit: Prevents DoS by limiting partial withdrawal queue size
+    // ↳ Full exits bypass this limit as they're more critical
     if state.pending_partial_withdrawals().len_usize() == P::PendingPartialWithdrawalsLimit::USIZE
         && !is_full_exit_request
     {
@@ -1091,6 +1096,8 @@ pub fn process_withdrawal_request<P: Preset>(
     }
 
     // > Verify pubkey exists
+    // @audit-ok silent-failure: Returns Ok() for non-existent pubkeys by design
+    // ↳ Prevents execution layer from learning about validator set composition
     let request_pubkey = withdrawal_request.validator_pubkey;
     let Some(validator_index) = index_of_public_key(state, &request_pubkey) else {
         return Ok(());
@@ -1099,6 +1106,8 @@ pub fn process_withdrawal_request<P: Preset>(
     let validator = state.validators().get(validator_index)?;
 
     // > Verify withdrawal credentials
+    // @audit credential-verification: Ensures request comes from correct withdrawal address
+    // ↳ Prevents unauthorized withdrawal requests
     let has_correct_credential = has_execution_withdrawal_credential(validator);
     let source_address = validator
         .withdrawal_credentials
@@ -1113,16 +1122,20 @@ pub fn process_withdrawal_request<P: Preset>(
     }
 
     // > Verify the validator is active
+    // @audit active-validator-check: Only active validators can request withdrawals
     if !is_active_validator(validator, get_current_epoch(state)) {
         return Ok(());
     }
 
     // > Verify exit has not been initiated
+    // @audit exit-status-check: Prevents duplicate exit requests
     if validator.exit_epoch != FAR_FUTURE_EPOCH {
         return Ok(());
     }
 
     // > Verify the validator has been active long enough
+    // @audit activation-delay: Enforces minimum active period before withdrawal
+    // ↳ Prevents immediate withdrawal after activation
     if get_current_epoch(state) < validator.activation_epoch + config.shard_committee_period {
         return Ok(());
     }
@@ -1131,6 +1144,7 @@ pub fn process_withdrawal_request<P: Preset>(
 
     if is_full_exit_request {
         // > Only exit validator if it has no pending withdrawals in the queue
+        // @audit pending-withdrawal-check: Prevents exit if partial withdrawals pending
         if pending_balance_to_withdraw == 0 {
             initiate_validator_exit(config, state, validator_index)?;
         }
@@ -1138,15 +1152,19 @@ pub fn process_withdrawal_request<P: Preset>(
         return Ok(());
     }
 
+    // @audit balance-requirements: Complex balance checks for partial withdrawals
     let has_sufficient_effective_balance = validator.effective_balance >= P::MIN_ACTIVATION_BALANCE;
     let has_excess_balance =
         validator_balance > P::MIN_ACTIVATION_BALANCE + pending_balance_to_withdraw;
 
     // > Only allow partial withdrawals with compounding withdrawal credentials
+    // @audit compounding-only: Partial withdrawals restricted to compounding validators
+    // ↳ Regular validators must fully exit to withdraw
     if has_compounding_withdrawal_credential(validator)
         && has_sufficient_effective_balance
         && has_excess_balance
     {
+        // @audit withdrawal-amount: Caps withdrawal to maintain MIN_ACTIVATION_BALANCE
         let to_withdraw =
             amount.min(validator_balance - P::MIN_ACTIVATION_BALANCE - pending_balance_to_withdraw);
         let exit_queue_epoch = compute_exit_epoch_and_update_churn(config, state, to_withdraw);

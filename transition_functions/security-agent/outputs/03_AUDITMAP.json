@@ -1,0 +1,121 @@
+{
+  "audit_items": [
+    {
+      "id": "TF001",
+      "file": "src/combined.rs",
+      "line": 52,
+      "snippet": "pub fn untrusted_state_transition<P: Preset>(",
+      "risk_category": "Input Validation",
+      "description": "Entry point for untrusted network blocks - main attack surface. Processes blocks from potentially malicious peers without prior validation",
+      "status": "ok"
+    },
+    {
+      "id": "TF002",
+      "file": "src/combined.rs",
+      "line": 616,
+      "snippet": "skip_randao_verification: bool",
+      "risk_category": "Crypto Bypass",
+      "description": "skip_randao_verification parameter allows bypassing RANDAO verification. Should only be used in specific testing/sync scenarios, not for gossip validation",
+      "status": "Vuln"
+    },
+    {
+      "id": "TF003",
+      "file": "src/combined.rs",
+      "line": 629,
+      "snippet": "if skip_randao_verification",
+      "risk_category": "Security Control",
+      "description": "SkipRandaoVerification should only be used during sync, not gossip. Conditional RANDAO verification based on skip flag",
+      "status": "Vuln"
+    },
+    {
+      "id": "TF004",
+      "file": "src/unphased/block_processing.rs",
+      "line": 73,
+      "snippet": "pub fn process_block_header_for_gossip<P: Preset>(",
+      "risk_category": "DoS Prevention",
+      "description": "Critical entry point for gossip block validation. Must reject invalid blocks quickly to prevent resource exhaustion",
+      "status": "ok"
+    },
+    {
+      "id": "TF005",
+      "file": "src/unphased/block_processing.rs",
+      "line": 85,
+      "snippet": "block.slot() == state.slot()",
+      "risk_category": "Slot Validation",
+      "description": "Prevents processing blocks for wrong slots. Blocks must be processed in the exact slot they target",
+      "status": "ok"
+    },
+    {
+      "id": "TF006",
+      "file": "src/unphased/block_processing.rs",
+      "line": 96,
+      "snippet": "block.slot() > state.latest_block_header().slot",
+      "risk_category": "Replay Protection",
+      "description": "Prevents processing old or duplicate blocks. Critical for preventing replay attacks and ensuring forward progress",
+      "status": "ok"
+    },
+    {
+      "id": "TF007",
+      "file": "src/unphased/block_processing.rs",
+      "line": 107,
+      "snippet": "get_beacon_proposer_index(config, state)?",
+      "risk_category": "Access Control",
+      "description": "Ensures only the correct proposer can create blocks for this slot. Prevents unauthorized block production",
+      "status": "ok"
+    },
+    {
+      "id": "TF008",
+      "file": "src/unphased/block_processing.rs",
+      "line": 155,
+      "snippet": "proposer.slashed",
+      "risk_category": "Slashing Check",
+      "description": "Critical validation preventing slashed validators from proposing. Ensures protocol security",
+      "status": "ok"
+    },
+    {
+      "id": "TF009",
+      "file": "src/unphased/block_processing.rs",
+      "line": 180,
+      "snippet": "if skip_randao_verification.is_false()",
+      "risk_category": "Conditional Verification",
+      "description": "RANDAO verification can be skipped during sync. Potential security risk if misused",
+      "status": "Vuln"
+    },
+    {
+      "id": "TF010",
+      "file": "src/unphased/block_processing.rs",
+      "line": 262,
+      "snippet": "signed_header_1.message.slot != signed_header_2.message.slot",
+      "risk_category": "Slashing Validation",
+      "description": "Both headers must be for the same slot to prove double-signing. Critical for preventing equivocation",
+      "status": "ok"
+    },
+    {
+      "id": "TF011",
+      "file": "src/unphased/block_processing.rs",
+      "line": 431,
+      "snippet": "attestation.data.slot + P::min_attestation_inclusion_delay()",
+      "risk_category": "Integer Overflow",
+      "description": "Addition could theoretically overflow but slot values are bounded by protocol",
+      "status": "ok"
+    },
+    {
+      "id": "TF012",
+      "file": "src/unphased/block_processing.rs",
+      "line": 535,
+      "snippet": "verify_deposit_merkle_branch<P>(",
+      "risk_category": "Merkle Validation",
+      "description": "Critical validation of deposit inclusion proof. Prevents fake deposit insertion",
+      "status": "ok"
+    }
+  ],
+  "summary": {
+    "rounds": 1,
+    "total_audit_flags": 12,
+    "high_risk_hotspots": [
+      "src/combined.rs:process_untrusted_block (RANDAO bypass)",
+      "src/unphased/block_processing.rs:process_randao (conditional verification)"
+    ],
+    "next_focus": "Deep-dive into cryptographic signature verification functions and slashing operations"
+  }
+}

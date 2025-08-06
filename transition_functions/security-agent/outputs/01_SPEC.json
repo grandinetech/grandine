@@ -1,0 +1,214 @@
+{
+  "metadata": {
+    "source_directory": "transition_functions/",
+    "spec_generated_at": "2025-01-05T00:00:00Z",
+    "latest_tag_or_commit": "351b02a",
+    "latest_release_date": "2025-01-05",
+    "schema_version": "1.0.0"
+  },
+  "architecture": {
+    "overview": "The transition_functions module implements Ethereum consensus state transitions across all protocol phases (Phase0, Altair, Bellatrix, Capella, Deneb, Electra). It provides parallel and optimized implementations of block processing, epoch processing, and state transitions with built-in verification and slashing protection mechanisms.",
+    "components": [
+      {
+        "name": "StateTransition",
+        "type": "library",
+        "description": "Core state transition logic that processes slots, verifies signatures, and applies block transitions with configurable state root policies",
+        "technology": ["Rust"],
+        "depends_on": ["BlockProcessing", "SlotProcessing", "EpochProcessing", "Verifier"]
+      },
+      {
+        "name": "BlockProcessing",
+        "type": "library",
+        "description": "Processes beacon blocks including header validation, RANDAO, eth1 data, operations (attestations, deposits, exits, slashings), and execution payloads",
+        "technology": ["Rust"],
+        "depends_on": ["Verifier", "PubkeyCache", "ExecutionEngine"]
+      },
+      {
+        "name": "EpochProcessing",
+        "type": "library",
+        "description": "Handles epoch transitions including justification, finalization, rewards, penalties, registry updates, and slashing resets",
+        "technology": ["Rust"],
+        "depends_on": ["EpochIntermediates", "ValidatorSummary"]
+      },
+      {
+        "name": "SlotProcessing",
+        "type": "library",
+        "description": "Advances beacon state through slots, updating block roots, state roots, and historical summaries",
+        "technology": ["Rust"],
+        "depends_on": ["BeaconState"]
+      },
+      {
+        "name": "EpochIntermediates",
+        "type": "library",
+        "description": "Calculates validator performance statistics, participation metrics, and epoch deltas for rewards and penalties",
+        "technology": ["Rust"],
+        "depends_on": ["ValidatorSummary", "Statistics"]
+      },
+      {
+        "name": "Verifier",
+        "type": "library",
+        "description": "Cryptographic signature verification with options for multi-threaded, single-threaded, or null verification",
+        "technology": ["Rust", "BLS"],
+        "depends_on": ["PubkeyCache"]
+      }
+    ],
+    "data_flow_diagram": "flowchart TD\n    A[Signed Beacon Block] --> B[State Transition]\n    B --> C[Process Slots]\n    B --> D[Verify Signatures]\n    B --> E[Process Block]\n    E --> F[Block Header]\n    E --> G[RANDAO]\n    E --> H[Eth1 Data]\n    E --> I[Operations]\n    I --> J[Proposer Slashings]\n    I --> K[Attester Slashings]\n    I --> L[Attestations]\n    I --> M[Deposits]\n    I --> N[Voluntary Exits]\n    I --> O[Withdrawals]\n    E --> P[Execution Payload]\n    B --> Q[Verify State Root]\n    R[Epoch Boundary] --> S[Epoch Processing]\n    S --> T[Justification & Finalization]\n    S --> U[Rewards & Penalties]\n    S --> V[Registry Updates]\n    S --> W[Slashing Processing]"
+  },
+  "user_flows": [
+    {
+      "id": 1,
+      "title": "Block producer creates and submits new block",
+      "actors": ["Validator", "BeaconNode", "ExecutionEngine"],
+      "preconditions": ["Validator is active and assigned slot proposer", "Node is synchronized"],
+      "steps": [
+        "1. Validator requests block production for assigned slot",
+        "2. Node aggregates pending operations (attestations, exits, slashings)",
+        "3. Node requests execution payload from execution engine",
+        "4. Node constructs beacon block with all components",
+        "5. Validator signs block with domain-specific signature",
+        "6. Node validates block through state transition",
+        "7. Block is gossiped to network if valid"
+      ],
+      "postconditions": ["Block added to chain", "State updated", "Attestations processed"]
+    },
+    {
+      "id": 2,
+      "title": "Process incoming block from network",
+      "actors": ["BeaconNode", "StateTransition", "ForkChoice"],
+      "preconditions": ["Node is synchronized", "Block parent exists"],
+      "steps": [
+        "1. Receive SignedBeaconBlock from gossip",
+        "2. Validate block slot is not from future",
+        "3. Process slots up to block slot if needed",
+        "4. Verify block proposer signature",
+        "5. Apply block operations in order",
+        "6. Verify state root matches block",
+        "7. Update fork choice with new block"
+      ],
+      "postconditions": ["State transitioned", "Fork choice updated"]
+    },
+    {
+      "id": 3,
+      "title": "Epoch transition processing",
+      "actors": ["BeaconNode", "EpochProcessing"],
+      "preconditions": ["Slot is first slot of new epoch"],
+      "steps": [
+        "1. Calculate validator statistics and participation",
+        "2. Process justification and finalization",
+        "3. Calculate and apply rewards and penalties",
+        "4. Update validator registry (activations/exits)",
+        "5. Process slashings and apply penalties",
+        "6. Reset epoch-specific data structures",
+        "7. Update historical roots if needed"
+      ],
+      "postconditions": ["Epoch transitioned", "Validators updated", "Finality progressed"]
+    },
+    {
+      "id": 4,
+      "title": "Validator submits voluntary exit",
+      "actors": ["Validator", "BeaconNode"],
+      "preconditions": ["Validator is active", "Current epoch >= validator activation + shard committee period"],
+      "steps": [
+        "1. Validator creates VoluntaryExit message",
+        "2. Validator signs exit with domain separator",
+        "3. Exit submitted to beacon node",
+        "4. Node validates exit conditions",
+        "5. Exit included in next proposed block",
+        "6. Exit processed during block transition",
+        "7. Validator marked for exit at future epoch"
+      ],
+      "postconditions": ["Validator queued for exit", "Exit epoch set"]
+    },
+    {
+      "id": 5,
+      "title": "Slashing detection and processing",
+      "actors": ["Slasher", "BeaconNode", "Whistleblower"],
+      "preconditions": ["Slashable offense detected"],
+      "steps": [
+        "1. Slasher detects double vote or surround vote",
+        "2. Slasher creates AttesterSlashing proof",
+        "3. Whistleblower submits slashing to network",
+        "4. Block producer includes slashing in block",
+        "5. Slashing validated during block processing",
+        "6. Offending validators marked as slashed",
+        "7. Slashing penalties applied at epoch boundary"
+      ],
+      "postconditions": ["Validators slashed", "Penalties applied", "Whistleblower rewarded"]
+    }
+  ],
+  "api_surface": {
+    "rest_endpoints": [],
+    "cli_commands": [],
+    "smart_contract_interfaces": []
+  },
+  "changelog": {
+    "latest_version": "v1.1.2",
+    "since_previous": [
+      {"commit": "351b02a", "date": "2025-01-05", "summary": "HTTP API: state relative epoch fix"},
+      {"commit": "b3bcf36", "date": "2025-01-04", "summary": "Upgrade derive_more to 2.0.1"},
+      {"commit": "c60c273", "date": "2025-01-03", "summary": "Update crates"},
+      {"commit": "2d6262e", "date": "2025-01-02", "summary": "Update rust version to 1.88.0"},
+      {"commit": "ed15762", "date": "2025-01-01", "summary": "Update rust version to 1.87.0"},
+      {"commit": "d226572", "date": "2024-12-30", "summary": "Bumped Grandine version to 1.1.2"}
+    ],
+    "breaking_changes": []
+  },
+  "security_requirements": [
+    {
+      "id": "SR-001",
+      "description": "State transitions must be deterministic and produce identical results across all nodes for consensus",
+      "risk_category": "integrity",
+      "related_components": ["StateTransition", "BlockProcessing", "EpochProcessing"],
+      "references": ["Ethereum Consensus Specs"]
+    },
+    {
+      "id": "SR-002",
+      "description": "All cryptographic signatures must be verified before state modifications to prevent unauthorized changes",
+      "risk_category": "authentication",
+      "related_components": ["Verifier", "BlockProcessing", "StateTransition"],
+      "references": ["BLS12-381", "EIP-2333"]
+    },
+    {
+      "id": "SR-003",
+      "description": "Slashing conditions must be detected and enforced to maintain protocol security and prevent equivocation",
+      "risk_category": "integrity",
+      "related_components": ["BlockProcessing", "EpochProcessing"],
+      "references": ["Ethereum Slashing Conditions"]
+    },
+    {
+      "id": "SR-004",
+      "description": "State root verification must match computed root to ensure state integrity across transitions",
+      "risk_category": "integrity",
+      "related_components": ["StateTransition", "StateRootPolicy"],
+      "references": ["SSZ Merkleization"]
+    },
+    {
+      "id": "SR-005",
+      "description": "Epoch processing must correctly calculate rewards and penalties to maintain economic security",
+      "risk_category": "integrity",
+      "related_components": ["EpochProcessing", "EpochIntermediates"],
+      "references": ["Ethereum Economics"]
+    },
+    {
+      "id": "SR-006",
+      "description": "Fork choice integration must be consistent to prevent consensus splits and ensure finality",
+      "risk_category": "availability",
+      "related_components": ["StateTransition", "ForkChoice"],
+      "references": ["LMD-GHOST", "Casper FFG"]
+    },
+    {
+      "id": "SR-007",
+      "description": "Withdrawal processing must validate credentials and amounts to prevent unauthorized fund extraction",
+      "risk_category": "integrity",
+      "related_components": ["BlockProcessing", "Withdrawals"],
+      "references": ["EIP-4895", "Capella Fork"]
+    },
+    {
+      "id": "SR-008",
+      "description": "Attestation processing must validate inclusion windows and prevent double voting",
+      "risk_category": "integrity",
+      "related_components": ["BlockProcessing", "AttestationVerifier"],
+      "references": ["Attestation Validity"]
+    }
+  ]
+}

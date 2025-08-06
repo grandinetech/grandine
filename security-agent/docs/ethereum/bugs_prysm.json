@@ -1,0 +1,112 @@
+[
+  {
+    "攻撃タイトル": "Electra epoch processing で effective balance を誤更新 (v6.0.4)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/blob/develop/CHANGELOG.md#L134",
+    "攻撃手順": [
+      "1. Electra 以降のチェーンで、攻撃者は複数の大口バリデータ(>32 ETH)を用意して通常稼働する。",
+      "2. エポック境界で大量の入出金を行い actual balance を激しく変動させる。",
+      "3. Prysm ≤6.0.3 は validator 構造体を unsafe ポインタコピーしており、effective balance が旧値のまま残存。",
+      "4. 他実装と total_active_balance が食い違い、報酬計算・fork‑choice がズレて最終化が停止、Prysm 系ノードは長時間 leak に陥る。"
+    ],
+    "チェックポイント": "core/state/epoch_processing.go の `updateEffectiveBalance()` で構造体を値コピーし、Electra 係数 (>32 ETH 上限撤廃) に対し hysteresis ルールが正しく適用されているかをユニットテストする。"
+  },
+  {
+    "攻撃タイトル": "Slashing DB をネスト配置すると履歴エクスポート失敗 (v6.0.4)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/blob/develop/CHANGELOG.md#L1",
+    "攻撃手順": [
+      "1. 攻撃者は被害者ノードの `validator.db` を `data/direct/` などサブディレクトリに置くよう指示（誤ドキュメント等）。",
+      "2. 被害者が `prysmctl slashing-protection-history export` を実行するとパス解決バグで空データが生成される。",
+      "3. 以降、誤って空 DB を他ノードへインポート → 二重提案・重複投票が発生し slash される。",
+      "4. 攻撃者はバリデータ損害を誘発し経済的利益を得る可能性がある。"
+    ],
+    "チェックポイント": "validator/db/export.go で `filepath.Abs()` と `os.MkdirAll()` を使い絶対パスへ正規化後、存在確認する。単体テストでネストディレクトリ配置を再現し非空エクスポートを検証。"
+  },
+  {
+    "攻撃タイトル": "Beacon API `/eth/v1/beacon/states/{state_id}/committees` 不正スロット処理 (v6.0.4)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/blob/develop/CHANGELOG.md#L7",
+    "攻撃手順": [
+      "1. 攻撃者は UI や bot に不正 slot 値を送信させ、大量リクエストで 500 異常応答を生じさせる。",
+      "2. v6.0.3 までの Prysm は 400 を返さずパニックログを出力し、HTTP ハンドラがバックオフする。",
+      "3. 高頻度で繰り返すと Beacon API サービスが再起動ループに陥り DoS。"
+    ],
+    "チェックポイント": "beacon/api/server.go の committees ハンドラで `slot / spec.SLOTS_PER_EPOCH` 整合性を検査し 400 を即時返す。Fuzz リクエストで境界値テストを行う。"
+  },
+  {
+    "攻撃タイトル": "Pending consolidations エンドポイント handler ミス (v6.0.3)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/pull/15290",
+    "攻撃手順": [
+      "1. 攻撃者は `/eth/v1/beacon/pool/pending_consolidations` をポーリングし続ける。",
+      "2. v6.0.2 以前は nil ポインタを返し JSON マーシャリングで panic、HTTP 接続が Reset される。",
+      "3. 同時コネクションを多数張るとコンテナが CrashLoop し、監視が落ちる。"
+    ],
+    "チェックポイント": "beacon/api/consolidations.go で slice が空の場合でも空配列 `[]` を返すこと、nil チェックのユニットテストを追加。"
+  },
+  {
+    "攻撃タイトル": "Attester slashing pool API が nil を返却 (v6.0.3)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/pull/15291",
+    "攻撃手順": [
+      "1. 攻撃者は REST で slashings を監視する監査ツールに nil 応答を送り続け、JSON デシリアライズエラーを発生させる。",
+      "2. 監査ツールがクラッシュするとブロック提案者の過失スラッシング検出が機能せず、不正 attest を故意に提出しやすくなる。"
+    ],
+    "チェックポイント": "beacon/api/slashings.go で空 slice を返す・OpenAPI スキーマを `type: array` で固定し `null` を許容しないことを確認。"
+  },
+  {
+    "攻撃タイトル": "Validator participation / active_set_changes API の state_id 誤処理 (v6.0.3)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/pull/15245",
+    "攻撃手順": [
+      "1. 攻撃者は `state_id` に過去ブロックルートを与えて統計を偽装取得し、ステーキングダッシュボードを誤誘導。",
+      "2. v6.0.2 以前は引数を無視して HEAD を返していたため、監視者は古いチェーンでも健康と誤認。",
+      "3. これを利用し fork したチェーン上でバリデータをだまし取るフィッシングが可能。"
+    ],
+    "チェックポイント": "router/validators.go で `state_id` がブロックルート/slot/keyword かバリデートし、`ResolveStateID()` が 404 を返すテストを追加。"
+  },
+  {
+    "攻撃タイトル": "Pending partial withdrawals JSON フィールド名誤り (v6.0.2)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/pull/15254",
+    "攻撃手順": [
+      "1. 攻撃者はエクスプローラの出金集計を信頼するユーザを狙い、フィールド名相違で誤値を表示させる。",
+      "2. ユーザが誤残高をもとに手数料計算し損失を被る。チェーンデータ自体は正しいものの UX 影響大。"
+    ],
+    "チェックポイント": "beacon/api/types/withdrawals.go の JSON タグが spec と一致 (`pending_partial_withdrawals`) しているか Schema テストで検証。"
+  },
+  {
+    "攻撃タイトル": "gocognit propose‑block REST パス誤ハンドラ (v6.0.2)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/pull/15147",
+    "攻撃手順": [
+      "1. 攻撃者は REST 版ビルダーネットワークを利用するバリデータに対し、誤ったパス `/eth/v2/beacon/blocks/proper/` を投げ込む。",
+      "2. v6.0.1 以前の Prysm は 404 でなく 500 を返し、HTTP Keep‑Alive が切断されブロック提案が遅延。",
+      "3. スロットぎりぎりで DoS を誘発し提案機会を失わせる。"
+    ],
+    "チェックポイント": "mux ルーティングで propose‑block v2 path を正規化し、`http.StatusNotFound` を返すユニットテストを追加。"
+  },
+  {
+    "攻撃タイトル": "`payload_attributes` SSE イベントストリームの underflow バグ (v6.0.1)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/blob/develop/CHANGELOG.md#L16",
+    "攻撃手順": [
+      "1. MEV‑Boost 中継が `payload_attributes` ストリームで大量イベントを送信。",
+      "2. Prysm ≤6.0.0 が ring‑buffer underflow を起こし、以降イベントが黒穴化 → ビルダーからの bid を無視する。",
+      "3. 攻撃者は被害者バリデータの MEV 収益を減少させつつ自分のブロックを優先できる。"
+    ],
+    "チェックポイント": "eventstream/payload_attributes.go でチャネルサイズ以上の publish を検出し back‑pressure を掛ける。Fuzz で >1k/s イベントを送信しパニックが無いか検証。"
+  },
+  {
+    "攻撃タイトル": "Leaking edge case で balance underflow → negative rewards (v6.0.1)",
+    "対象クライアント": "Prysm",
+    "URL": "https://github.com/prysmaticlabs/prysm/pull/15191",
+    "攻撃手順": [
+      "1. 長期最終化停止 (leak) 環境を作り、一部バリデータの balance が急減するようペナルティを誘導。",
+      "2. Prysm ≤6.0.0 は `uint64` underflow を起こし 2^64‑X の巨大値を加算、正規化前に state root を計算。",
+      "3. 他実装とブロックハッシュが不一致となり Prysm 系ノードが孤立チェーンを作成、経済的損失。"
+    ],
+    "チェックポイント": "processRewards.go の balance 更新に `safeMath.SubClamp()` を用い underflow テストを CI に追加する。"
+  }
+]

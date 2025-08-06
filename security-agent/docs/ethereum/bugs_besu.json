@@ -1,0 +1,74 @@
+[
+  {
+    "攻撃タイトル": "Potential consensus bug in ALTBN128 precompiles (CVE‑2025‑30147)",
+    "対象クライアント": "Hyperledger Besu",
+    "URL": "https://nvd.nist.gov/vuln/detail/CVE-2025-30147",
+    "攻撃手順": [
+      "1. 攻撃者は ALTBN128_ADD / MUL / PAIRING precompile に入力する EC 点 P を細工する（正しいサブグループに属するが曲線上には乗らない）。",
+      "2. 細工した入力を用いたトランザクションを生成し、Besu ノードがブロック提案者になるタイミングでブロックに含める。",
+      "3. Besu (24.7.1–25.2.2) は curve‑check 不足のため計算結果を受理するが、他実装はエラー扱いしブロックを拒否する。",
+      "4. ネットワークは Besu 系とその他クライアント系でチェーンスプリットし、最悪の場合 Besu 同士のプライベートネットが無効状態を永続化する。"
+    ],
+    "チェックポイント": "besu‑native の bn254 実装（`libbn254_*`）で `point.IsOnCurve()` を明示的に呼び出し、サブグループチェックだけに依存していないか確認する。CL/EL の統合テストで off‑curve but in‑subgroup 点を入力し、各ノードのハッシュ一致を検証する。"
+  },
+  {
+    "攻撃タイトル": "Gas allocation error in CALL / DELEGATECALL (CVE‑2022‑36025)",
+    "対象クライアント": "Hyperledger Besu",
+    "URL": "https://www.miggo.io/vulnerability-database/cve/CVE-2022-36025",
+    "攻撃手順": [
+      "1. 攻撃者がガス境界値（≈2^31 付近）の CALL/DELEGATECALL を含むスマートコントラクトをデプロイ。",
+      "2. 特 crafted トランザクションを送信して内部 CALL を実行させると、32bit→64bit 変換ミスで負値ガスが正数として扱われる。",
+      "3. Besu は過剰ガスで実行を継続し state root を更新、他クライアントはリバートや Out‑of‑Gas となる。",
+      "4. Besu 提案ブロックは他実装に拒否され、コンセンサス不整合が発生。"
+    ],
+    "チェックポイント": "`EVM#calculateAvailableGas()` と CALL 系 opcode 実装で 64bit 安全演算を用い、`remainingGas < 0` のガードがあるかユニットテストする。負値またはオーバーフロー時に例外を返すことを確認。"
+  },
+  {
+    "攻撃タイトル": "Slow transaction verification DoS (EL‑2022‑11)",
+    "対象クライアント": "Hyperledger Besu",
+    "URL": "https://notes.ethereum.org/zSE44ueJS9-_G7lOzPalEQ",
+    "攻撃手順": [
+      "1. 攻撃者が高コスト opcode（EXP、SHA3 with large data など）を含むトランザクションを生成し、高 gwei 手数料でスパム送信。",
+      "2. Besu の署名・intrinsic gas 検証後、EVM プリチェックが O(n^2) 的に実行され CPU を専有。",
+      "3. トランザクションプール処理が飽和し、新規ブロックの検証も遅延してピアから切断される。",
+      "4. ネットワーク全体は進行するが、標的 Besu ノードは再同期を余儀なくされ DoS 状態となる。"
+    ],
+    "チェックポイント": "`TransactionValidator` と `TransactionPool` のループが入力サイズ比例でないか（線形以内か）をレビューし、`maxInitCodeSize` 等の入力サイズ制限が有効かを fuzz テストで確認する。"
+  },
+  {
+    "攻撃タイトル": "Exception during block import → chain split (EL‑2022‑14)",
+    "対象クライアント": "Hyperledger Besu",
+    "URL": "https://notes.ethereum.org/d6BISTgxSV-_xIeBuGrV9A",
+    "攻撃手順": [
+      "1. 攻撃者が異常 RLP エンコードのトランザクションを含むブロックを作成し、Besu ノードが提案者になるのを待つ。",
+      "2. Besu は BlockImporter で未捕捉の `IllegalArgumentException` をスローしブロックを drop、提案者は同一ブロックを再送し続ける。",
+      "3. 他実装は正常に受理するため、Besu 系ノードのみ tip が停滞しチェーンが分岐。",
+      "4. 長期的に Besu ノードは fork choice で自チェーンを優先し続け、ネットワーク不安定化。"
+    ],
+    "チェックポイント": "`BlockImporter.processBlock()`・`AbstractBlockProcessor` 周辺で unchecked 例外を catch してエラーコード化しているか確認。RLP decoding の `BytesValues.toShort()` などで境界チェックが入っているかを単体テストする。"
+  },
+  {
+    "攻撃タイトル": "Slow input (16 s) DoS via crafted calldata (EL‑2022‑15)",
+    "対象クライアント": "Hyperledger Besu",
+    "URL": "https://notes.ethereum.org/N9akOoR-Rn2Ad4P6S032Bg",
+    "攻撃手順": [
+      "1. 攻撃者が 32 KB 超の圧縮難読化 calldata を送信し、EVM 内でループ展開されるよう設計。",
+      "2. Besu の gas 計測は正しいが、JVM JIT の最適化欠如で 16 s 以上実行時間が発生。",
+      "3. 1 ブロック最大 30M gas 以内で複数該当 tx を含めると Slot 4 s 以内に検証が終わらず、Besu proposer が attestations を取りこぼす。",
+      "4. 連続スパムで peer から “slow to respond” とみなされ切断 → DoS。"
+    ],
+    "チェックポイント": "`EVM#execute()` のホットパスで in‑memory copy/expansion が O(n) で済むかプロファイルし、`--engine-threads` >1 でもスレッド starvation が起きないか micro‑benchmark を導入する。"
+  },
+  {
+    "攻撃タイトル": "Very slow block execution (EL‑2022‑17)",
+    "対象クライアント": "Hyperledger Besu",
+    "URL": "https://gist.github.com/holiman/213cc1a59971279bc984e2957c089af2",
+    "攻撃手順": [
+      "1. 攻撃者が SELFDESTRUCT ループ＋大量メモリ確保を行う 200 kB コントラクトをデプロイ。",
+      "2. 大量の CALL を 1 ブロックに詰め込み、ガス上限 30M を使い切るトランザクションを生成。",
+      "3. Besu は Bonsai trie 更新中に GC 圧迫と大きな write‑set で 30 s 以上かかり、Slot 内検証タイムアウト。",
+      "4. CL 側は EL タイムアウトで `ENGINE_UNAVAILABLE` を返され、提案ブロックが空になり MEV 機会を喪失。"
+    ],
+    "チェックポイント": "`WorldStateUpdater.commit()` 内の Bonsai diff flush が O(number of updates)` になっていないか確認し、大きな write‑set でも 4 s 以内に完了するベンチを CI に追加する。"
+  }
+]

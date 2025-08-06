@@ -138,6 +138,10 @@ pub fn process_justification_and_finalization(
     );
 }
 
+// @audit slashing-penalties: Calculates and applies economic penalties for slashed validators
+// ↳ Critical for protocol security enforcement through economic disincentives
+// @audit overflow-protection: Complex arithmetic operations require overflow protection
+// ↳ Multiple multiplications and divisions could overflow with extreme values
 fn process_slashings<P: Preset, S: SlashingPenalties>(
     state: &mut BeaconState<P>,
     total_active_balance: Gwei,
@@ -147,6 +151,9 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
 
     // Calculating this lazily saves 30-40 μs in typical networks.
     let adjusted_total_slashing_balance = LazyCell::new(|| {
+        // @audit slashing-balance-calculation: Sum of all recent slashing penalties
+        // ↳ Uses proportional multiplier to scale penalties based on attack severity
+        // @audit-ok overflow-risk: min(total_active_balance) caps result preventing overflow
         state
             .slashings
             .into_iter()
@@ -158,6 +165,7 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
     let mut summaries = (0..).zip(summaries);
     let mut slashing_penalties = S::default();
 
+    // @audit balance-updates: Iterates through all validator balances to apply slashing penalties
     state.balances.update(|balance| {
         let (validator_index, summary) = summaries
             .next()
@@ -174,15 +182,21 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
             return;
         }
 
+        // @audit timing-check: Ensures penalty applies at correct epoch (middle of withdrawal period)
+        // ↳ EpochsPerSlashingsVector / 2 delay provides correlation penalty timing
         if current_epoch + P::EpochsPerSlashingsVector::U64 / 2 != withdrawable_epoch {
             return;
         }
 
-        // > Factored out from penalty numerator to avoid uint64 overflow
+        // @audit penalty-calculation: Complex penalty formula to prevent overflow
+        // ↳ Factored out increment to avoid uint64 overflow in numerator calculation
+        // @audit overflow-mitigation: Division by increment before multiplication prevents overflow
         let increment = P::EFFECTIVE_BALANCE_INCREMENT;
         let penalty_numerator = effective_balance / increment * *adjusted_total_slashing_balance;
         let penalty = penalty_numerator / total_active_balance * increment.get();
 
+        // @audit balance-decrease: Applies calculated penalty to validator balance
+        // ↳ decrease_balance should handle underflow protection
         decrease_balance(balance, penalty);
 
         slashing_penalties.add(validator_index, penalty);

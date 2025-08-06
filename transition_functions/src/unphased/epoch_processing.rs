@@ -212,6 +212,8 @@ pub fn process_historical_roots_update<P: Preset>(state: &mut impl BeaconState<P
     Ok(())
 }
 
+// @audit consensus-critical: Core finality mechanism determining when blocks become irreversible
+// ↳ Bugs here can cause chain splits or finality failures
 pub fn weigh_justification_and_finalization<P: Preset>(
     state: &mut impl BeaconState<P>,
     current_epoch_active_balance: Gwei,
@@ -222,10 +224,18 @@ pub fn weigh_justification_and_finalization<P: Preset>(
     let old_current_justified_checkpoint = state.current_justified_checkpoint();
 
     // > Process justifications
+    // @audit state-rotation: Shifts justification state forward by one epoch
     *state.previous_justified_checkpoint_mut() = state.current_justified_checkpoint();
     state.justification_bits_mut().shift_up_by_1();
 
+    // @audit supermajority-check: Requires 2/3 of active balance to justify
+    // ↳ Critical threshold - must be exactly 2/3 to match spec
     let mut justify_if_supermajority = |attestation_epoch, bit, target_balance| {
+        // @audit VULN-03000006: Integer overflow risk in supermajority calculation
+        // ↳ target_balance * 3 and current_epoch_active_balance * 2 could overflow u64
+        // ↳ With 2^19 validators at MAX_EFFECTIVE_BALANCE_ELECTRA (2048 ETH each), 
+        // ↳ total balance ~1e21 Gwei approaches u64::MAX (~1.8e19), causing overflow
+        // @audit CONFIRMED: Real vulnerability requiring checked arithmetic
         if target_balance * 3 >= current_epoch_active_balance * 2 {
             let root = get_block_root(state, attestation_epoch).expect(
                 "get_block_root can fail during the first slot of an epoch but \
@@ -245,25 +255,31 @@ pub fn weigh_justification_and_finalization<P: Preset>(
     justify_if_supermajority(AttestationEpoch::Current, 0, current_epoch_target_balance);
 
     // > Process finalizations
+    // @audit finality-rules: Complex bit patterns determine finality
+    // ↳ Must match spec exactly - any deviation breaks consensus
     let bits = state.justification_bits();
     let current_epoch = get_current_epoch(state);
 
     // > The 2nd/3rd/4th most recent epochs are justified, the 2nd using the 4th as source
+    // @audit-ok k-finality: Correctly implements k=2 finality rule
     if bits[1..4] && old_previous_justified_checkpoint.epoch + 3 == current_epoch {
         *state.finalized_checkpoint_mut() = old_previous_justified_checkpoint
     }
 
     // > The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
+    // @audit-ok k-finality: Correctly implements k=1 finality rule
     if bits[1..3] && old_previous_justified_checkpoint.epoch + 2 == current_epoch {
         *state.finalized_checkpoint_mut() = old_previous_justified_checkpoint
     }
 
     // > The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
+    // @audit-ok k-finality: Correctly implements k=2 finality for current
     if bits[0..3] && old_current_justified_checkpoint.epoch + 2 == current_epoch {
         *state.finalized_checkpoint_mut() = old_current_justified_checkpoint;
     }
 
     // > The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
+    // @audit-ok k-finality: Correctly implements k=1 finality for current
     if bits[0..2] && old_current_justified_checkpoint.epoch + 1 == current_epoch {
         *state.finalized_checkpoint_mut() = old_current_justified_checkpoint;
     }

@@ -412,6 +412,8 @@ fn validate_bls_to_execution_change_with_verifier<P: Preset>(
 }
 
 /// [`process_withdrawals`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#new-process_withdrawals)
+// @audit withdrawal-processing: Critical function handling ETH withdrawals from validators
+// ↳ Must validate withdrawal list matches expected and update balances correctly
 pub fn process_withdrawals<P: Preset>(
     state: &mut impl PostCapellaBeaconState<P>,
     execution_payload: &impl PostCapellaExecutionPayload<P>,
@@ -419,15 +421,20 @@ pub fn process_withdrawals<P: Preset>(
 where
     P::MaxWithdrawalsPerPayload: NonZero,
 {
+    // @audit withdrawal-validation: Computes expected withdrawals based on state
+    // ↳ Must match execution payload withdrawals exactly to prevent unauthorized withdrawals
     let expected_withdrawals = get_expected_withdrawals(state)?;
     let computed = expected_withdrawals.len();
     let in_block = execution_payload.withdrawals().len();
 
+    // @audit count-validation: Ensures withdrawal count matches expected
     ensure!(
         computed == in_block,
         Error::<P>::WithdrawalCountMismatch { computed, in_block },
     );
 
+    // @audit withdrawal-verification: Validates each withdrawal matches expected
+    // ↳ Critical check preventing manipulation of withdrawal amounts or recipients
     for (computed, in_block) in izip!(
         expected_withdrawals.iter().copied(),
         execution_payload.withdrawals().iter().copied(),
@@ -443,15 +450,20 @@ where
             ..
         } = computed;
 
+        // @audit balance-update: Decreases validator balance by withdrawal amount
+        // ↳ Must ensure balance doesn't go negative (handled by decrease_balance)
         decrease_balance(balance(state, validator_index)?, amount);
     }
 
     // > Update the next withdrawal index if this block contained withdrawals
+    // @audit-ok state-tracking: Correctly updates withdrawal index for next block
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
         *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
     }
 
     // > Update the next validator index to start the next withdrawal sweep
+    // @audit sweep-logic: Complex logic for determining next validator to check
+    // ↳ Must ensure all validators get fair withdrawal opportunities
     if expected_withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
         // > Next sweep starts after the latest withdrawal's validator index
         let next_validator_index = expected_withdrawals
@@ -467,6 +479,8 @@ where
         *state.next_withdrawal_validator_index_mut() = next_validator_index;
     } else {
         // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
+        // @audit-ok integer-overflow: Addition bounded by MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP
+        // ↳ Mitigated by modulo operation, but worth monitoring
         let next_index =
             state.next_withdrawal_validator_index() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP;
 
@@ -479,27 +493,35 @@ where
 }
 
 /// [`get_expected_withdrawals`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#new-get_expected_withdrawals)
+// @audit withdrawal-computation: Computes expected withdrawals for the current block
+// ↳ Critical for ensuring only authorized withdrawals are processed
 pub fn get_expected_withdrawals<P: Preset>(
     state: &(impl PostCapellaBeaconState<P> + ?Sized),
 ) -> Result<Vec<Withdrawal>> {
     let epoch = get_current_epoch(state);
     let total_validators = state.validators().len_u64();
+    // @audit sweep-limit: Limits withdrawal sweep to prevent DoS
     let bound = total_validators.min(P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP);
 
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut validator_index = state.next_withdrawal_validator_index();
     let mut withdrawals = vec![];
 
+    // @audit withdrawal-sweep: Iterates through validators in circular fashion
+    // ↳ Ensures fair withdrawal opportunities for all validators
     for _ in 0..bound {
         let balance = state.balances().get(validator_index).copied()?;
         let validator = state.validators().get(validator_index)?;
 
+        // @audit withdrawal-credentials: Extracts execution address from withdrawal credentials
+        // ↳ Only ETH1 credentials (0x01 prefix) can withdraw
         let address = validator
             .withdrawal_credentials
             .as_bytes()
             .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
             .pipe(ExecutionAddress::from_slice);
 
+        // @audit full-withdrawal: Withdraws entire balance for exited validators
         if is_fully_withdrawable_validator(validator, balance, epoch) {
             withdrawals.push(Withdrawal {
                 index: withdrawal_index,
@@ -508,14 +530,17 @@ pub fn get_expected_withdrawals<P: Preset>(
                 amount: balance,
             });
 
+            // @audit index-overflow: Checks for withdrawal index overflow
             withdrawal_index = withdrawal_index
                 .checked_add(1)
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
         } else if is_partially_withdrawable_validator::<P>(validator, balance) {
+            // @audit partial-withdrawal: Only withdraws excess balance above MAX_EFFECTIVE_BALANCE
             withdrawals.push(Withdrawal {
                 index: withdrawal_index,
                 validator_index,
                 address,
+                // @audit-ok safe-subtraction: Guaranteed by is_partially_withdrawable_validator check
                 amount: balance.checked_sub(P::MAX_EFFECTIVE_BALANCE).expect(
                     "is_partially_withdrawable_validator should only \
                      return true if the validator has excess balance",
@@ -527,14 +552,17 @@ pub fn get_expected_withdrawals<P: Preset>(
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
         }
 
+        // @audit withdrawal-limit: Enforces maximum withdrawals per block
         if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
             break;
         }
 
+        // @audit circular-sweep: Wraps around to validator 0 after reaching end
         validator_index = validator_index
             .checked_add(1)
             .ok_or(Error::<P>::ValidatorIndexOverflow)?
             .checked_rem(total_validators)
+            // @audit-ok division-by-zero: Loop condition ensures total_validators > 0
             .expect("total_validators being 0 should prevent the loop from being executed");
     }
 

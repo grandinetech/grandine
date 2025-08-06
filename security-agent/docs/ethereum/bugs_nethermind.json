@@ -1,0 +1,62 @@
+[
+  {
+    "攻撃タイトル": "SMOD Opcode 符号付き剰余演算の境界ケース処理ミス (EL‑2022‑10)",
+    "対象クライアント": "Nethermind",
+    "URL": "https://github.com/ethereum/public-disclosures/blob/master/disclosures/EL-2023-05-03.md#L1",
+    "攻撃手順": [
+      "1. 攻撃者は EVM コントラクト内で `int256.min` (−2^255) をオペランドに `SMOD` を実行するトランザクションを作成する。",
+      "2. Nethermind 1.17.x–1.18.x 系は 2 回符号反転を行う実装バグにより、結果が他実装と符号違いになる。",
+      "3. 改ざん値を含むトランザクションをブロックに入れると、Nethermind ノードは異なる state root を生成し、コンセンサスが分岐する。",
+      "4. 同期中ノードは Net‑invalid チェーンを延ばし続け、ネットワークがチェーンスプリットする可能性がある。"
+    ],
+    "チェックポイント": "EVM 実装 (`Smod.cs`) で `int256.min` を単体テストし、絶対値オーバーフロー/二重反転が発生しないか確認する。`BigInteger.Abs()` 後に再度符号反転していないかを静的解析する。"
+  },
+  {
+    "攻撃タイトル": "ModExp プリコンパイル Out‑of‑Memory によるコンセンサス破壊 (EL‑2022‑13)",
+    "対象クライアント": "Nethermind",
+    "URL": "https://iosiro.com/blog/nethermind-modexp-out-of-memory-consensus-issue",
+    "攻撃手順": [
+      "1. 攻撃者は `expLength = 0xffffffff` 等、巨大な Exponent 長を指定しつつ `baseLength = modulusLength = 0` のペイロードを生成する。",
+      "2. 他クライアントは早期リターン (modulus==0) で成功扱いだが、Nethermind はメモリ確保→ `OutOfMemory` 例外→ `success=false` を返す実装順序になっていた。",
+      "3. 同一トランザクションを含むブロックで Nethermind だけが異なるリザルトを計算し、ブロックハッシュが食い違う。",
+      "4. ブロック提案者が Nethermind の場合にチェーンスプリット、そうでなくとも Net ノードはフォークチェーンを追従してペナルティを被る。"
+    ],
+    "チェックポイント": "`ModExpPrecompile.Run()` で入力長さに応じたメモリ確保を行う前に 0‑modulus などの早期 return 条件を評価しているかを確認し、`Array.MaxLength` を超える確保が例外で捕捉されるかユニットテストを追加する。"
+  },
+  {
+    "攻撃タイトル": "Slow‑input (6 s) DoS ― 巨大 calldata 展開による検証遅延 (EL‑2022‑16)",
+    "対象クライアント": "Nethermind",
+    "URL": "https://github.com/ethereum/public-disclosures/blob/master/disclosures/EL-2023-05-03.md#L1",
+    "攻撃手順": [
+      "1. 攻撃者が 32 KB 強の難読化 calldata を用い、EVM ループで線形展開させるコントラクトを作成する。",
+      "2. 30 M gas 上限内で当該 tx を複数含むブロックを生成すると、Nethermind の `InitCodeParser` が 6 秒超かかり Slot (≈12 s) を圧迫。",
+      "3. 検証遅延により Execution -> Consensus レスポンスがタイムアウトし、Beacon ノードは提案ブロックを拒否／空ブロック化、DoS 状態となる。",
+      "4. 継続的スパムで対象ノードはピアから切断され再同期が必要になる。"
+    ],
+    "チェックポイント": "`TransactionValidator.Validate()` と `Evm.BytecodeAnalyzer` のループが O(n) を超えないかプロファイルし、calldata 長／ループ回数上限 (`EvmLimits`) が設定されているかを確認する。"
+  },
+  {
+    "攻撃タイトル": "Revert メッセージ長オーバーフローで無効ブロック生成 (Jan 2024 Hotfix)",
+    "対象クライアント": "Nethermind",
+    "URL": "https://hackmd.io/@nethermindclient/ByW9sX_R6",
+    "攻撃手順": [
+      "1. 攻撃者は巨大 `revert()` データを返すトランザクションを送信する。",
+      "2. Nethermind 1.23–1.25 系は Revert デコーダで `OverflowException` が発生し内部的に tx を失敗扱いするが、他実装は正常に処理する。",
+      "3. 提案ブロック中の当該 tx のガス消費差異によりブロックハッシュが分岐し、Nethermind ノードはチェーンから外れる。",
+      "4. バリデータは attest を全喪失しペナルティ。攻撃者はネットワーク停止を伴わずに特定実装のみ孤立させられる。"
+    ],
+    "チェックポイント": "`RevertDecoder.Decode()` で revert データ長を `uint32`→`uint64` へ拡張し、境界チェック後に処理する。`try/catch OverflowException` が不要になるよう fuzz で長さ境界を検証する。"
+  },
+  {
+    "攻撃タイトル": "BLS プリコンパイル最適化ミスによる Devnet 5 フォーク (2025‑01‑30)",
+    "対象クライアント": "Nethermind",
+    "URL": "https://etherworld.co/2025/01/30/highlights-of-ethereums-all-core-devs-meeting-acde-204/",
+    "攻撃手順": [
+      "1. Pectra Devnet 5 で BLS12‑381 VERIFY プリコンパイルを高速化するパッチが有効化される。",
+      "2. 攻撃者が境界ケースの無効シグネチャを含むブロックを送信すると、Nethermind は誤って検証成功として処理しブロックを承認する。",
+      "3. 他実装は失敗としてブロックを拒否するため、Nethermind ノードのみフォークチェーンを構築し最終化が停止。",
+      "4. 問題はテスト網で発見され数時間でロールバックされたが、メインネット導入ならチェーンスプリットにつながる脆弱性であった。"
+    ],
+    "チェックポイント": "`BlsPrecompile.Verify()` のパフォーマンス最適化パスで、フォールバック検証と同一のペアリングチェックを実行しているか確認。Hive / EOF テストで偽シグネチャケースが pass しないか CI に追加する。"
+  }
+]

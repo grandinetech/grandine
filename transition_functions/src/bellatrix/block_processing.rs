@@ -152,6 +152,8 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
+// @audit execution-layer: Critical bridge between consensus and execution layers
+// ↳ Validates execution payload consistency and forwards to execution engine
 fn process_execution_payload<P: Preset>(
     config: &Config,
     state: &mut BeaconState<P>,
@@ -162,6 +164,8 @@ fn process_execution_payload<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify consistency of the parent hash with respect to the previous execution payload header
+    // @audit chain-consistency: Ensures execution payload builds on correct parent
+    // ↳ Prevents execution layer forks and maintains EL/CL consistency
     if is_merge_transition_complete(state) {
         let in_state = state.latest_execution_payload_header.block_hash;
         let in_block = payload.parent_hash;
@@ -176,6 +180,8 @@ fn process_execution_payload<P: Preset>(
     let in_block = payload.prev_randao;
 
     // > Verify prev_randao
+    // @audit randomness-validation: Ensures execution layer uses correct randomness
+    // ↳ Critical for preventing manipulation of EVM PREVRANDAO opcode
     ensure!(
         in_state == in_block,
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
@@ -184,14 +190,19 @@ fn process_execution_payload<P: Preset>(
     process_execution_payload_for_gossip(config, state, body)?;
 
     // > Verify the execution payload is valid
+    // @audit execution-validation: Delegates to execution engine for full validation
+    // ↳ ExecutionEngine must validate transactions, state root, gas limits etc.
     execution_engine.notify_new_payload(block_root, payload.clone().into(), None, None)?;
 
     // > Cache execution payload header
+    // @audit state-mutation: Updates latest execution payload header
     state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
 
     Ok(())
 }
 
+// @audit execution-gossip-validation: Lightweight execution payload validation for gossip
+// ↳ Only validates timestamp - full validation happens in process_execution_payload
 fn process_execution_payload_for_gossip<P: Preset>(
     config: &Config,
     state: &BeaconState<P>,
@@ -200,9 +211,12 @@ fn process_execution_payload_for_gossip<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify timestamp
+    // @audit timestamp-validation: Ensures execution payload timestamp matches slot time
+    // ↳ Prevents execution payloads with incorrect timestamps from propagating
     let computed = compute_timestamp_at_slot(config, state, state.slot);
     let in_block = payload.timestamp;
 
+    // @audit-ok timestamp-check: Simple equality check sufficient for gossip validation
     ensure!(
         computed == in_block,
         Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },

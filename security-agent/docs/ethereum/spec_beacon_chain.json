@@ -1,0 +1,616 @@
+{
+  "Bellatrix": {
+    "Block Processing": [
+      {
+        "spec_item": "process_execution_payload",
+        "description": "Function to validate and apply the ExecutionPayload in block processing",
+        "summary": "Verifies the execution payload’s parent hash matches the previous payload header, checks prev_randao and timestamp, then calls the execution engine to validate the payload. On success, updates state.latest_execution_payload_header with the payload’s values.",
+        "spec_reference": "bellatrix/beacon-chain.md (lines 804-839)",
+        "prysm_implementation": "In Prysm, this is handled by ProcessPayload in beacon-chain/core/blocks/payload.go (calls ValidatePayloadWhenMergeCompletes, ValidatePayload, sets latest_execution_payload_header):contentReference[oaicite:2]{index=2}.",
+        "lighthouse_implementation": "Lighthouse validates execution payload via state_processing::per_block_processing (partially_verify_execution_payload and execution_layer.notify_new_payload, updating state after engine validation):contentReference[oaicite:3]{index=3}:contentReference[oaicite:4]{index=4}.",
+        "audit_checkpoints": [
+          "Ensure payload.parent_hash equals state.latest_execution_payload_header.block_hash when merge complete.",
+          "Check payload.prev_randao matches get_randao_mix for current epoch, and payload.timestamp equals compute_time_at_slot for state.slot.",
+          "Verify execution_engine returns VALID for the payload (via notify_new_payload or equivalent).",
+          "Confirm state.latest_execution_payload_header is correctly updated to reflect the new payload after processing.",
+          "Verify error handling for invalid payloads (should reject block if execution payload invalid)."
+        ]
+      }
+    ],
+    "Epoch Processing": [
+      {
+        "spec_item": "process_slashings",
+        "description": "Function to apply slashings at epoch boundary",
+        "summary": "Uses PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX to scale total slashing balance before computing penalties for slashed validators. Each slashed validator whose withdrawable_epoch is half the SLASHINGS vector length in the future gets penalized by a fraction of adjusted_total_slashing_balance.",
+        "spec_reference": "bellatrix/beacon-chain.md (modified process_slashings logic)",
+        "prysm_implementation": "Prysm’s epoch transition logic incorporates the Bellatrix slashing multiplier (3) when calculating slashing penalties in state.",
+        "lighthouse_implementation": "Lighthouse applies slashing penalties with PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX=3 in per_epoch_processing for Bellatrix.",
+        "audit_checkpoints": [
+          "Verify PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX (3) is used instead of prior multiplier:contentReference[oaicite:7]{index=7}.",
+          "Ensure adjusted_total_slashing_balance is capped by total active balance.",
+          "Check that each eligible slashed validator is penalized with the correct scaled amount.",
+          "Verify no overflow occurs in penalty computation (increment and division as per spec)."
+        ]
+      },
+      {
+        "spec_item": "get_inactivity_penalty_deltas",
+        "description": "Function to calculate inactivity leak penalties during finality issues",
+        "summary": "Updated in Bellatrix to use INACTIVITY_PENALTY_QUOTIENT_BELLATRIX for computing penalties:contentReference[oaicite:11]{index=11}, ensuring consistency with Bellatrix fork parameters. It returns reward/penalty deltas accounting for validators failing to vote during an inactivity leak.",
+        "spec_reference": "bellatrix/beacon-chain.md (modified get_inactivity_penalty_deltas uses INACTIVITY_PENALTY_QUOTIENT_BELLATRIX)",
+        "prysm_implementation": "Prysm uses a fork-specific constant INACTIVITY_PENALTY_QUOTIENT_BELLATRIX in its inactivity penalty calculations post-Merge.",
+        "lighthouse_implementation": "Lighthouse’s state_processing uses INACTIVITY_PENALTY_QUOTIENT_BELLATRIX when computing inactivity penalties for Bellatrix-era epochs.",
+        "audit_checkpoints": [
+          "Ensure the Bellatrix-specific inactivity penalty quotient is used in penalty calculations:contentReference[oaicite:12]{index=12}.",
+          "Verify that only validators not participating during an inactivity leak get penalized.",
+          "Confirm the penalty calculation matches spec (proportional to effective balance and time since finality)."
+        ]
+      }
+    ],
+    "Sync Committee": [
+      {
+        "spec_item": "Sync committees in Bellatrix",
+        "description": "No changes in Bellatrix to sync committee logic introduced in Altair",
+        "summary": "Bellatrix did not modify the sync committee definitions or duties. The sync committee selection and rewards remain as in Altair; Bellatrix focused on execution payload integration, leaving sync committees unaffected.",
+        "spec_reference": "Bellatrix spec – no sync committee changes (same as Altair)",
+        "prysm_implementation": "Prysm’s sync committee processing is unchanged for Bellatrix (continues to use Altair logic).",
+        "lighthouse_implementation": "Lighthouse continues using Altair sync committee implementation during Bellatrix with no modifications needed.",
+        "audit_checkpoints": [
+          "No new sync committee-related checks introduced in Bellatrix.",
+          "Ensure that sync committee rewards and participant selection continue to function as per Altair specification."
+        ]
+      }
+    ],
+    "Execution Engine Integration": [
+      {
+        "spec_item": "notify_new_payload",
+        "description": "Engine API call to submit new execution payload",
+        "summary": "Introduced in Bellatrix as part of the ExecutionEngine interface: it sends the ExecutionPayload to the execution client. The consensus node calls notify_new_payload to have the execution client execute/verify the payload, and returns a status (VALID, INVALID, SYNCING):contentReference[oaicite:13]{index=13}:contentReference[oaicite:14]{index=14}.",
+        "spec_reference": "bellatrix/beacon-chain.md (Engine API function notify_new_payload)",
+        "prysm_implementation": "Implemented in Prysm by calling engine.NewPayload through the ExecutionEngine client interface when processing blocks.",
+        "lighthouse_implementation": "Implemented in Lighthouse’s execution_layer interface; see beacon_node/beacon_chain/src/execution_payload.rs `notify_new_payload` which wraps the Engine API call:contentReference[oaicite:15]{index=15}:contentReference[oaicite:16]{index=16}.",
+        "audit_checkpoints": [
+          "Verify the consensus client calls notify_new_payload for each new block’s execution payload.",
+          "Check that the execution client’s response is handled correctly (optimistic if SYNCING/ACCEPTED, finalize block only if VALID).",
+          "Ensure INVALID payload status leads to rejection of the block in fork choice."
+        ]
+      },
+      {
+        "spec_item": "verify_and_notify_new_payload",
+        "description": "Consensus function wrapping notify_new_payload with extra checks",
+        "summary": "Bellatrix specifies verify_and_notify_new_payload to first verify the block hash (ensure execution_payload.block_hash matches expected chain), then call notify_new_payload to validate the execution payload. It returns a boolean indicating if the payload is valid and notified.",
+        "spec_reference": "bellatrix/beacon-chain.md (verify_and_notify_new_payload definition)",
+        "prysm_implementation": "Prysm combines block hash verification and engine notify call in its block import flow; an invalid block hash triggers rejection before calling the engine.",
+        "lighthouse_implementation": "Lighthouse performs a block hash consistency check (parent_beacon_block_root vs payload.parent_hash) then calls notify_new_payload, similar to the spec’s verify_and_notify function.",
+        "audit_checkpoints": [
+          "Check that the block’s execution_payload.block_hash is consistent with the beacon chain block’s parent root before notifying the EL.",
+          "Ensure the client only marks a block valid if notify_new_payload returns VALID.",
+          "Confirm any failure in engine verification (invalid payload) causes the consensus client to drop the block."
+        ]
+      },
+      {
+        "spec_item": "is_valid_block_hash",
+        "description": "Engine API helper to check block hash consistency",
+        "summary": "Bellatrix introduces is_valid_block_hash to ensure the execution payload’s block_hash aligns with the beacon chain context (e.g., matches expected terminal block hash during The Merge). It’s used during the transition to validate that the payload is from the correct execution branch:contentReference[oaicite:17]{index=17}:contentReference[oaicite:18]{index=18}.",
+        "spec_reference": "bellatrix/beacon-chain.md (is_valid_block_hash function)",
+        "prysm_implementation": "Prysm implicitly checks block hashes during the transition and via its execution payload verification (e.g., ValidatePayloadWhenMergeCompletes):contentReference[oaicite:19]{index=19}:contentReference[oaicite:20]{index=20}.",
+        "lighthouse_implementation": "Lighthouse includes block hash consistency checks (e.g., comparing payload.parent_hash with latest_execution_payload_header) as part of execution_payload verification:contentReference[oaicite:21]{index=21}:contentReference[oaicite:22]{index=22}.",
+        "audit_checkpoints": [
+          "Validate that the execution payload’s block hash is consistent with expected chain data, especially at the merge transition.",
+          "Ensure implementations properly use this check during the Merge transition block to avoid accepting blocks with mismatched execution payloads."
+        ]
+      }
+    ]
+  },
+  "Capella": {
+    "Block Processing": [
+      {
+        "spec_item": "get_expected_withdrawals",
+        "description": "New function to determine which validator withdrawals to include in a block",
+        "summary": "Scans the validator registry to collect up to MAX_WITHDRAWALS_PER_PAYLOAD eligible withdrawals (full or partial) for the block. It starts from state.next_withdrawal_validator_index and forms a list of Withdrawal objects (with index, validator_index, address, amount) for validators either fully or partially withdrawable. Updates next_withdrawal_index and next_withdrawal_validator_index for the next sweep.",
+        "spec_reference": "capella/beacon-chain.md (new get_expected_withdrawals function)",
+        "prysm_implementation": "Prysm implements withdrawal selection in electra/withdrawals.go, ensuring no more than 16 withdrawals (MAX_WITHDRAWALS_PER_PAYLOAD) are picked per block (mirroring get_expected_withdrawals logic).",
+        "lighthouse_implementation": "Lighthouse uses get_expected_withdrawals in state_processing to generate the withdrawals list for Capella blocks.",
+        "audit_checkpoints": [
+          "Ensure at most MAX_WITHDRAWALS_PER_PAYLOAD (16) withdrawals are selected per block:contentReference[oaicite:26]{index=26}.",
+          "Check that validator scanning continues from the last saved index (next_withdrawal_validator_index) to distribute withdrawals across blocks:contentReference[oaicite:27]{index=27}.",
+          "Verify correctness of conditions: include fully withdrawable validators (exited with balance > 0) and partially withdrawable ones (balance above MAX_EFFECTIVE_BALANCE with 0x01 credential).",
+          "Confirm state.next_withdrawal_index and next_withdrawal_validator_index are updated for the next block’s sweep position."
+        ]
+      },
+      {
+        "spec_item": "process_withdrawals",
+        "description": "New function to process the withdrawals selected for a block",
+        "summary": "Removes the amounts of each Withdrawal from the beacon state balances and appends the Withdrawal data to the ExecutionPayload (so the execution layer will credit those to validators’ ETH1 addresses). It ensures the withdrawals list in the block equals the expected list computed and updates state’s next_withdrawal index fields after processing.",
+        "spec_reference": "capella/beacon-chain.md (new process_withdrawals function)",
+        "prysm_implementation": "In Prysm’s ProcessWithdrawals (electra/withdrawals.go), it deducts balances from validator accounts and interfaces with the execution payload builder to insert withdrawal operations, aligning with spec.",
+        "lighthouse_implementation": "Lighthouse applies withdrawals in per_block_processing: after get_expected_withdrawals, it calls process_withdrawals to subtract balances and include the Withdrawal entries in the block’s execution payload structure.",
+        "audit_checkpoints": [
+          "Ensure that for each Withdrawal, the validator’s balance is reduced by the specified amount and cannot go negative.",
+          "Check that the sum of withdrawn amounts matches the sum removed from state balances for consistency.",
+          "Verify the Withdrawals included in the ExecutionPayload of the block match those computed by get_expected_withdrawals (no divergence between proposal and execution):contentReference[oaicite:31]{index=31}:contentReference[oaicite:32]{index=32}.",
+          "Confirm next_withdrawal_index in state is incremented by the number of processed withdrawals and next_withdrawal_validator_index updated to the next validator to check."
+        ]
+      },
+      {
+        "spec_item": "process_execution_payload (Capella)",
+        "description": "Execution payload processing updated for Capella withdrawals",
+        "summary": "The existing process_execution_payload function is extended to handle the new withdrawals field in ExecutionPayload. In Capella, after verifying timestamp, prev_randao, etc., the consensus layer must ensure the execution payload contains the expected withdrawals list and that the execution engine applied them correctly. The engine’s NewPayload method now includes the withdrawals array, which the CL passes along:contentReference[oaicite:34]{index=34}.",
+        "spec_reference": "capella/beacon-chain.md (modified process_execution_payload for Capella)",
+        "prysm_implementation": "Prysm’s ProcessPayload (payload.go) calls ProcessWithdrawals before executing the payload validation:contentReference[oaicite:36]{index=36}, ensuring withdrawals are processed prior to engine verification. The execution engine connection (Engine API v1.1) handles payloads with withdrawals.",
+        "lighthouse_implementation": "Lighthouse uses get_expected_withdrawals and process_withdrawals prior to calling the execution layer (partially_verify_execution_payload & notify_new_payload) so that the ExecutionPayload with withdrawals is verified as a whole.",
+        "audit_checkpoints": [
+          "Verify that the ExecutionPayload being sent to the EL includes the withdrawals and that CL compares them against its expected list for consistency.",
+          "Ensure the execution engine’s validation (NewPayload) accounts for withdrawals (Engine API version updated for Capella).",
+          "Check that any discrepancy between expected withdrawals and execution payload withdrawals causes block rejection."
+        ]
+      },
+      {
+        "spec_item": "process_operations (Capella)",
+        "description": "Block operations processing updated to include new op type",
+        "summary": "Capella adds a new operation type (BLSToExecutionChange). process_operations is updated to incorporate processing of SignedBLSToExecutionChange objects in blocks (up to MAX_BLS_TO_EXECUTION_CHANGES per block):contentReference[oaicite:37]{index=37}. The BeaconBlockBody now contains a bls_to_execution_changes list, and this function triggers process_bls_to_execution_change for each, in addition to existing operations (attestations, deposits, etc.).",
+        "spec_reference": "capella/beacon-chain.md (modified process_operations to handle BLSToExecutionChange)",
+        "prysm_implementation": "Prysm’s block processing loop is extended to handle BLS to execution change operations from the block body (see electra/deposits.go or a similar file handling credential changes).",
+        "lighthouse_implementation": "Lighthouse includes BLSToExecutionChange in its process_operations (consensus/state_processing) to update validator withdrawal credentials from 0x00 to 0x01 as specified by each operation.",
+        "audit_checkpoints": [
+          "Confirm the client limits the number of BLSToExecutionChange ops per block to MAX_BLS_TO_EXECUTION_CHANGES (16):contentReference[oaicite:38]{index=38}.",
+          "Verify that for each BLSToExecutionChange, if the validator’s current withdrawal credential has the 0x00 prefix and the provided signature is valid, the credential is updated to a 0x01 (Eth1 address) prefix with the given address.",
+          "Ensure improper or duplicate BLSToExecutionChange operations (e.g., wrong credentials or already executed changes) are handled correctly (block invalid if conditions not met)."
+        ]
+      },
+      {
+        "spec_item": "process_bls_to_execution_change",
+        "description": "Function to process a BLSToExecutionChange operation",
+        "summary": "For each SignedBLSToExecutionChange in the block, verifies the BLS signature (from validator’s BLS key) on the request to change withdrawal credentials to an ETH1 address (0x01 prefix). If valid, updates the validator’s withdrawal_credentials in state to the new execution address (with 0x01 prefix). This allows the validator’s future withdrawals to go to the provided address.",
+        "spec_reference": "capella/beacon-chain.md (new process_bls_to_execution_change function)",
+        "prysm_implementation": "Prysm implements this in electra/deposits.go: verifying the BLSToExecutionChange signature via BLS library and updating the in-memory state for the validator’s credentials.",
+        "lighthouse_implementation": "Lighthouse’s process_operations calls into a process_bls_to_execution_change that checks signature using the validator’s pubkey and modifies the withdrawal_credentials field for that validator in its BeaconState representation.",
+        "audit_checkpoints": [
+          "Verify the BLS signature in each BLSToExecutionChange is checked against the validator’s pubkey and the domain (DOMAIN_BLS_TO_EXECUTION_CHANGE):contentReference[oaicite:40]{index=40}.",
+          "Ensure that the withdrawal_credentials being changed currently have the 0x00 prefix (BLS withdrawal) and not already an 0x01 prefix (ETH1 address).",
+          "Check that the new withdrawal_credentials is formed correctly: 0x01 prefix plus the provided 20-byte ETH1 address.",
+          "Make sure the operation is only processed if the validator has not already executed such a change (i.e., each validator at most once)."
+        ]
+      }
+    ],
+    "Epoch Processing": [
+      {
+        "spec_item": "HistoricalSummary & finality updates",
+        "description": "Introduction of HistoricalSummary in state and replacing historical roots",
+        "summary": "Capella replaces the historical_roots and historical_balances vectors with a combined HistoricalSummary. At each finalized epoch, the state appends a HistoricalSummary containing {block_root, state_root} of that epoch’s final state to state.historical_summaries. This optimizes light client sync. process_epoch is updated to construct and append this summary, and drop the oldest if needed (to cap history length).",
+        "spec_reference": "capella/beacon-chain.md (HistoricalSummary container and epoch processing changes)",
+        "prysm_implementation": "Prysm’s epoch processing (electra/registry_updates.go) creates HistoricalSummary from finalized checkpoint state and appends it to an array, removing old entries when exceeding HISTORICAL_SUMMARIES_LENGTH.",
+        "lighthouse_implementation": "Lighthouse’s single_pass epoch processing uses the new HistoricalSummary type to record finality checkpoints each epoch, instead of separate arrays for roots and balances.",
+        "audit_checkpoints": [
+          "Ensure that when an epoch is finalized, the block_root and state_root of the checkpoint are combined into a HistoricalSummary and stored.",
+          "Verify the length of historical_summaries does not exceed the limit (oldest entries pruned when necessary).",
+          "Check that this change is correctly handled in light client sync (older clients might use historical_roots – those should be deprecated in favor of historical_summaries)."
+        ]
+      }
+    ],
+    "Sync Committee": [
+      {
+        "spec_item": "Sync committees in Capella",
+        "description": "No changes to sync committee functionality in Capella",
+        "summary": "Capella did not introduce modifications to sync committees. The composition and role of sync committees remain as defined in Altair; Capella’s changes centered on validator withdrawals and BLS credential changes.",
+        "spec_reference": "Capella spec – no sync committee changes",
+        "prysm_implementation": "No changes in Prysm; sync committee scheduling and aggregation continue as per Altair/ Bellatrix logic.",
+        "lighthouse_implementation": "No changes in Lighthouse for sync committees in Capella; existing Altair implementation continues to apply.",
+        "audit_checkpoints": [
+          "No new sync committee parameters or logic in Capella upgrade.",
+          "Validate that sync committee duties and proofs were unaffected by the Capella fork."
+        ]
+      }
+    ],
+    "Execution Engine Integration": [
+      {
+        "spec_item": "ExecutionPayload (withdrawals)",
+        "description": "Modified ExecutionPayload structure to include withdrawals",
+        "summary": "Capella extended the ExecutionPayload to carry a list of withdrawals (up to 16). This means the Engine API NewPayload method now requires a withdrawals field, and execution clients include a corresponding \"withdrawals\" section in execution blocks. Consensus nodes must ensure the withdrawals in the payload match those computed from state:contentReference[oaicite:42]{index=42}.",
+        "spec_reference": "capella/beacon-chain.md (ExecutionPayload modified to include withdrawals)",
+        "prysm_implementation": "Prysm’s execution engine interface (engine/v1 package) moved to Engine API v1.1, which accepts withdrawals in the NewPayload request (see prysm/proto/engine/v1/capella.proto definitions).",
+        "lighthouse_implementation": "Lighthouse uses the Ethereum Execution Layer (EE) API v1.1 for Capella; it populates the ExecutionPayload struct’s withdrawals when calling engine.new_payload.",
+        "audit_checkpoints": [
+          "Ensure that consensus client populates the withdrawals field in the Engine API call from the state’s computed withdrawals list.",
+          "Check that the execution client correctly credits the specified addresses with the withdrawn amounts upon processing the payload.",
+          "Verify that if the execution client returns an invalid status for a NewPayload (e.g., withdrawals don’t match the state execution), the consensus client rejects the block."
+        ]
+      },
+      {
+        "spec_item": "DOMAIN_BLS_TO_EXECUTION_CHANGE",
+        "description": "New signature domain for BLS->Execution credential change",
+        "summary": "Defines a new DomainType (0x0A000000 in Capella) for signing BLSToExecutionChange messages:contentReference[oaicite:44]{index=44}. Validators use this domain when creating a BLS to Execution Change so that signatures are distinct from other operations. Both consensus clients and validators must use the correct domain to validate these signatures.",
+        "spec_reference": "capella/beacon-chain.md (DOMAIN_BLS_TO_EXECUTION_CHANGE constant)",
+        "prysm_implementation": "Included in Prysm’s crypto domain definitions and used when verifying BLSToExecutionChange signatures (e.g., in electra/validator.go or similar).",
+        "lighthouse_implementation": "Lighthouse includes DOMAIN_BLS_TO_EXECUTION_CHANGE in its types and uses it in BLS signature verification for the credential change operations.",
+        "audit_checkpoints": [
+          "Verify the domain used in BLSToExecutionChange signature verification matches 0x0A... as specified:contentReference[oaicite:45]{index=45}.",
+          "Ensure the signing process for offline keys (validator client) also uses this domain, otherwise signatures will not verify on chain."
+        ]
+      }
+    ]
+  },
+  "Deneb": {
+    "Block Processing": [
+      {
+        "spec_item": "process_attestation (Deneb)",
+        "description": "Attestation processing adjusted for extended inclusion window",
+        "summary": "EIP-7045 extended the max attestation inclusion slots, so process_attestation was modified to credit \"timely target\" rewards even for attestations included in a slightly later slot. The function get_attestation_participation_flag_indices was updated accordingly to mark target participation for attestations included within the new limit. This means validators can still get rewards for target even if included later than the previous 1-slot delay requirement.",
+        "spec_reference": "deneb/beacon-chain.md (modified process_attestation, EIP-7045)",
+        "prysm_implementation": "Prysm’s attestation validation logic was updated to reflect the new inclusion range (e.g., in validate_beacon_attestation.go, allowing later inclusion without marking as late).",
+        "lighthouse_implementation": "Lighthouse adjusted get_attestation_participation_flag_indices in state_processing for Deneb so that the timely target flag is set according to the extended window. Attestation inclusion checks now align with EIP-7045’s rules.",
+        "audit_checkpoints": [
+          "Ensure the attestation inclusion delay threshold for full reward (timely head/target) is updated (likely increased from 1 slot to a new value per EIP-7045).",
+          "Check that get_attestation_participation_flag_indices gives target participation credit for attestations included within the new maximum delay.",
+          "Verify that implementations do not erroneously penalize or ignore attestations that are now valid under the extended inclusion period."
+        ]
+      },
+      {
+        "spec_item": "process_execution_payload (Deneb)",
+        "description": "Execution payload processing updated for blob transactions",
+        "summary": "With EIP-4844, ExecutionPayload includes new fields blob_gas_used and excess_blob_gas. process_execution_payload now also ensures that the blob KZG commitments provided in the block (BeaconBlockBody.blob_kzg_commitments) correspond to the blob transactions in the execution payload. A new helper is_valid_versioned_hashes is called to verify the blob commitments are valid and under the limit. The ExecutionEngine’s verify_and_notify_new_payload was updated to check these commitments before accepting the block.",
+        "spec_reference": "deneb/beacon-chain.md (modified process_execution_payload for EIP-4844)",
+        "prysm_implementation": "Prysm integrates blob verification by ensuring the engine (likely via Engine API v2) checks blob transaction validity. The consensus side uses KZG library to validate commitments if needed (perhaps via a call in electra/transition.go or similar).",
+        "lighthouse_implementation": "Lighthouse calls is_valid_versioned_hashes in its execution_payload verification flow (execution_payload.rs) to validate the KZG commitments for blobs. It also checks that blob_gas_used and excess_blob_gas are within expected ranges.",
+        "audit_checkpoints": [
+          "Verify that for each blob KZG commitment in the block body, the execution payload contains a corresponding blob transaction (VersionedHash) and the consensus client checks their validity.",
+          "Ensure MAX_BLOBS_PER_BLOCK (6 in Deneb) is not exceeded by counting commitments:contentReference[oaicite:56]{index=56}.",
+          "Check that blob_gas_used and excess_blob_gas in the payload are correctly verified or at least propagated to state (they should be outputs of execution engine computation).",
+          "Confirm that an invalid blob commitment (e.g., does not match blob in execution payload or KZG proof fails) results in block rejection."
+        ]
+      },
+      {
+        "spec_item": "process_voluntary_exit (Deneb)",
+        "description": "Voluntary exit processing adjusted by EIP-7044",
+        "summary": "EIP-7044 (Perpetually valid voluntary exits) removed the check that an exit must be processed within a certain time of signing. In Deneb, process_voluntary_exit no longer requires the exit to be within a 2^14 epoch range of the current epoch (the condition was dropped). This means signed exit messages do not expire. The rest of the exit processing (ensuring validator not slashed, etc.) remains the same.",
+        "spec_reference": "deneb/beacon-chain.md (modified process_voluntary_exit, EIP-7044)",
+        "prysm_implementation": "Prysm removed the expiration check on voluntary exit signatures in its processing (likely in electra/validator.go or similar). Exits are valid indefinitely as long as other conditions hold.",
+        "lighthouse_implementation": "Lighthouse’s process_voluntary_exit function in state_processing was updated to drop any epoch limit on exit message validity, per EIP-7044.",
+        "audit_checkpoints": [
+          "Ensure that the implementation no longer rejects voluntary exit messages based on age (signed_epoch vs current_epoch) as of Deneb.",
+          "Verify all other voluntary exit conditions are still enforced (active validator, not slashed, exit is not prior initiated, etc.).",
+          "Check that a very old voluntary exit (signed far in the past) is still processed correctly now that it's allowed."
+        ]
+      }
+    ],
+    "Epoch Processing": [
+      {
+        "spec_item": "process_registry_updates (Deneb)",
+        "description": "Validator activation churn limited by EIP-7514",
+        "summary": "EIP-7514 introduced MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT = 8. process_registry_updates was modified to use get_validator_activation_churn_limit (new function) to cap the number of validators activated or exiting per epoch. get_validator_activation_churn_limit returns min(MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT (8), the previous churn limit based on active validator count). This effectively slows down validator activation rate by capping at 8 even for very large active sets.",
+        "spec_reference": "deneb/beacon-chain.md (EIP-7514 changes in process_registry_updates)",
+        "prysm_implementation": "Prysm’s epoch processing (electra/churn.go) uses a hard limit of 8 activations per epoch by invoking getValidatorActivationChurnLimit and restricting validator activation queue processing accordingly.",
+        "lighthouse_implementation": "Lighthouse implements EIP-7514 in its single_pass epoch processing: it calls get_validator_activation_churn_limit and limits the number of validators moved from pending to active each epoch to that cap (unless natural churn formula is lower).",
+        "audit_checkpoints": [
+          "Check that MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT is set to 8 and used in computing churn limit.",
+          "Verify that no more than 8 new validators are activated in any single epoch, even if the validator set size would allow higher churn by the older formula.",
+          "Ensure exiting validators (activation_exit_churn_limit) similarly respect the cap if implemented symmetrically (the spec primarily caps activations)."
+        ]
+      }
+    ],
+    "Sync Committee": [
+      {
+        "spec_item": "Sync committees in Deneb",
+        "description": "No direct changes to sync committee logic in Deneb",
+        "summary": "Deneb did not change sync committee composition or duties. Sync committee updates occur every 256 epochs as before, and no new sync committee rules were introduced in this upgrade.",
+        "spec_reference": "Deneb spec – no sync committee modifications",
+        "prysm_implementation": "No changes required in Prysm for sync committees during Deneb; Altair/previous logic continues.",
+        "lighthouse_implementation": "Lighthouse sync committee handling remains unchanged in Deneb (aside from any minor config constant updates if any, which there were none).",
+        "audit_checkpoints": [
+          "Confirm that sync committees are formed and rotated exactly as prior to Deneb with no new parameters.",
+          "No new edge cases for sync committee messages or aggregation introduced in this fork."
+        ]
+      }
+    ],
+    "Execution Engine Integration": [
+      {
+        "spec_item": "NewPayloadRequest (Deneb)",
+        "description": "Modified Engine API payload request to include parent beacon block root",
+        "summary": "EIP-4788 adds the parent_beacon_block_root to the ExecutionPayload context. The NewPayloadRequest structure was modified to carry parent_beacon_block_root (the hash of the beacon block’s parent). This allows the Execution Engine to verify the linkage between execution blocks and beacon blocks (for trustless verification of beacon roots in the EVM). verify_and_notify_new_payload now passes this root to is_valid_block_hash for verification.",
+        "spec_reference": "deneb/beacon-chain.md (NewPayloadRequest modified for EIP-4788)",
+        "prysm_implementation": "Prysm’s engine API (proto/engine/v1/electra.go) includes parent_beacon_block_root in NewPayload calls from Deneb onwards, and the execution client uses it to verify block hash ancestry.",
+        "lighthouse_implementation": "Lighthouse populates NewPayloadRequest.parent_beacon_block_root and uses it in execution_layer.notify_new_payload; any block hash mismatch triggers invalid status.",
+        "audit_checkpoints": [
+          "Ensure the consensus client retrieves the parent beacon block root and includes it in the Engine API NewPayload call.",
+          "Check that the execution client implements EIP-4788: storing the beacon block root and exposing it via an opcode (though that’s beyond CL scope, CL just needs to pass it).",
+          "Verify that if the execution payload’s reported beacon block root does not match the actual parent root, the block is rejected (is_valid_block_hash should fail)."
+        ]
+      },
+      {
+        "spec_item": "is_valid_versioned_hashes",
+        "description": "New helper to validate blob versioned hashes (EIP-4844)",
+        "summary": "Introduced to verify that the versioned hashes (KZG commitments) in the NewPayloadRequest are valid and do not exceed limits. It checks the list of blob KZG commitments against MAX_BLOB_COMMITMENTS_PER_BLOCK (4096) and ensures all commitments correspond to blob transactions in the payload. This function returns false if any commitment is invalid or extraneous, preventing the payload from being accepted.",
+        "spec_reference": "deneb/beacon-chain.md (is_valid_versioned_hashes function, EIP-4844)",
+        "prysm_implementation": "Likely in Prysm’s implementation, the execution engine plugin (or consensus) will validate commitments count and format. Prysm may rely on the execution engine to do heavy KZG validation, but ensures the count doesn’t exceed limits before acceptance.",
+        "lighthouse_implementation": "Lighthouse calls is_valid_versioned_hashes during block import to ensure no more than 4096 commitments and that each blob commitment is expected. It will reject blocks if this check fails (e.g., missing or too many blobs).",
+        "audit_checkpoints": [
+          "Ensure the number of blob commitments does not exceed MAX_BLOB_COMMITMENTS_PER_BLOCK = 4096 (a safeguard, though MAX_BLOBS_PER_BLOCK=6 normally limits actual count).",
+          "Verify that each commitment in the block corresponds to a blob transaction in the execution payload’s transactions list (no extra or missing commitments).",
+          "Check how the client handles KZG validity: if the execution engine reports a blob as invalid (commitment mismatch), the consensus should treat the payload as invalid."
+        ]
+      },
+      {
+        "spec_item": "notify_new_payload (Deneb)",
+        "description": "Engine API notify_new_payload updated for blobs and beacon root",
+        "summary": "The notify_new_payload call in Deneb (Engine API v1.2) now passes along blob commitments (via execution payload fields) and the parent beacon block root. Consensus clients still call notify_new_payload asynchronously to get a PayloadStatus. The logic was updated to handle new invalid reasons: e.g., blob-related errors (PayloadStatus could return Invalid with validation_error for blobs). The consensus spec advises not to downscore peers for invalid payloads due to optimistic execution (blobs).",
+        "spec_reference": "deneb/beacon-chain.md (notify_new_payload modifications, EIP-4844/4788)",
+        "prysm_implementation": "Prysm uses the updated Engine API, calling NewPayload including withdrawals (from Capella), blob commitments (Deneb), and parent beacon root (Deneb). It processes the returned status and handles optimistic sync accordingly (no disconnect for blob invalid if optimistic) per spec guidelines.",
+        "lighthouse_implementation": "Lighthouse’s execution_layer.notify_new_payload handles Deneb by constructing a NewPayload RPC with all new fields. It interprets PayloadStatus, treating blob invalidity as an invalid block. Logging and peer handling were updated to align with not penalizing optimistic mismatches.",
+        "audit_checkpoints": [
+          "Confirm that consensus client includes blob data in the payload it sends via notify_new_payload.",
+          "Verify that an \"Invalid\" PayloadStatus with a specific latest_valid_hash is handled by triggering a fork-choice update (as pre-Deneb) while a blob-related invalid without latest_valid still leads to block rejection without invalidating peers.",
+          "Ensure backwards compatibility: a Deneb block with blobs is not sent to an execution engine that only supports pre-Deneb (engine version negotiation should prevent this)."
+        ]
+      }
+    ]
+  },
+  "Electra": {
+    "Block Processing": [
+      {
+        "spec_item": "get_expected_withdrawals (Electra)",
+        "description": "Withdrawal selection adjusted for compounding validators",
+        "summary": "In Electra, get_expected_withdrawals is modified to account for compounding (0x02 prefix) withdrawal credentials. Compounding validators do not produce withdrawals (their excess stays staked), so get_expected_withdrawals skips validators with 0x02 credentials. It still selects up to MAX_WITHDRAWALS_PER_PAYLOAD (16) from 0x01 credential validators. Partial withdrawals now only occur for non-compounding validators exceeding MAX_EFFECTIVE_BALANCE_ELECTRA (2048 ETH) if any remain from Capella era:contentReference[oaicite:74]{index=74}.",
+        "spec_reference": "electra/beacon-chain.md (Modified get_expected_withdrawals)",
+        "prysm_implementation": "Prysm’s electra/withdrawals.go checks validator withdrawal credential type: it will not create Withdrawal objects for compounding (0x02) validators, effectively pausing automatic withdrawals for those.",
+        "lighthouse_implementation": "Lighthouse’s get_expected_withdrawals (Electra version) filters out compounding validators using has_compounding_withdrawal_credential predicate and only processes those eligible for external withdrawals (0x01).",
+        "audit_checkpoints": [
+          "Ensure validators with compounding credentials (prefix 0x02) are excluded from the withdrawal list.",
+          "Verify that MAX_WITHDRAWALS_PER_PAYLOAD is still enforced (should remain 16) for remaining eligible withdrawals.",
+          "Check that partially withdrawable validators (with 0x01 cred and balance > 32 ETH) are still handled, but compounding ones are not forced to withdraw excess."
+        ]
+      },
+      {
+        "spec_item": "process_withdrawals (Electra)",
+        "description": "Withdrawal processing updated for new credential types",
+        "summary": "Electra’s process_withdrawals validates that each withdrawal in the block corresponds to a validator with a 0x01 (external) credential, as 0x02 compounding validators should not have withdrawals. It subtracts the balance for each withdrawal as before. Additionally, if any validator’s withdrawal brings them to exactly 32 ETH and they have 0x00 (old BLS) credential, those cases are now rare since most should have switched to 0x01 by Capella or to 0x02 by compounding.",
+        "spec_reference": "electra/beacon-chain.md (Modified process_withdrawals)",
+        "prysm_implementation": "In Prysm, ProcessWithdrawals (electra/withdrawals.go) will assert that the withdrawals being processed are only for validators with external addresses. Any inconsistency (like a compounding validator in the list) would be flagged as a consensus error.",
+        "lighthouse_implementation": "Lighthouse’s process_withdrawals ensures no compounding validator withdrawals are applied. It likely checks credential type or simply relies on get_expected_withdrawals filtering, then processes as usual.",
+        "audit_checkpoints": [
+          "Double-check that a compounding validator’s balance is never reduced via a Withdrawal operation (their excess should be handled differently, e.g., via consolidation).",
+          "Ensure consistency that state.next_withdrawal_validator_index skips over compounding validators permanently unless they switch back to 0x01.",
+          "Verify that process_withdrawals in implementations still correctly updates next_withdrawal_index/validator_index for the next search."
+        ]
+      },
+      {
+        "spec_item": "get_execution_requests_list",
+        "description": "New helper to aggregate execution-layer triggered requests from block",
+        "summary": "Collects all ExecutionLayer-triggered operations (DepositRequest, WithdrawalRequest, ConsolidationRequest) present in the BeaconBlockBody into a single ExecutionRequests object. This list is then used to apply these operations either during block processing or at epoch transition. It essentially enumerates what actions the EL has requested (new validators deposits, validator exits or credential switches) in the block.",
+        "spec_reference": "electra/beacon-chain.md (new get_execution_requests_list)",
+        "prysm_implementation": "Prysm likely assembles execution requests via its electra/transition.go or similar, reading the deposits, withdrawals, consolidations lists from the block and handling them accordingly.",
+        "lighthouse_implementation": "Lighthouse defines an ExecutionRequests type (consensus/types/src/execution_requests.rs) which stores these lists:contentReference[oaicite:79]{index=79}. get_execution_requests_list compiles them and the processing functions then iterate appropriately.",
+        "audit_checkpoints": [
+          "Verify that all three types of execution-layer requests in the block (deposit, withdrawal, consolidation) are captured.",
+          "Ensure no request is missed or double-counted when constructing the unified list.",
+          "Check that empty lists are handled (no action if a particular request type isn't present)."
+        ]
+      },
+      {
+        "spec_item": "process_execution_payload (Electra)",
+        "description": "Execution payload processing updated for latest engine API",
+        "summary": "Electra’s execution payload processing remains similar to Deneb’s, but now the Engine API deals with potential new transaction types (like deposit or withdrawal triggers might be delivered via system transactions, or builder hints). The consensus still calls verify_and_notify_new_payload with parent beacon root and checks block hash. The main addition is ensuring any ExecutionPayload fields align with new limits (e.g., MAX_BLOBS_PER_BLOCK_ELECTRA increased to 9 per EIP-7691), which is enforced at the EL level but known to CL.",
+        "spec_reference": "electra/beacon-chain.md (process_execution_payload adjustments)",
+        "prysm_implementation": "Prysm’s ProcessPayload for Electra would incorporate any updated engine interactions, but largely reuse Deneb logic as blob count increase (to 9) doesn’t change CL processing except passing along the new cap to EL (Prysm uses updated config constants).",
+        "lighthouse_implementation": "Lighthouse updated the constants (MAX_BLOBS_PER_BLOCK_ELECTRA = 9) in its types and ensures any checks (like blob commitments count) use the new value. Otherwise, execution payload verification logic stays consistent with Deneb plus reading any new fields if introduced.",
+        "audit_checkpoints": [
+          "Ensure that the increased blob limit (9 blobs) is recognized in any relevant checks (though CL typically trusts EL to enforce blob limits).",
+          "Verify that Engine API version for Electra is being used (if any changes) so that new fields or logic are correctly handled.",
+          "Check backward compatibility: a block with 9 blobs should be rejected by a Deneb-era node, but Electra nodes accept up to 9. The CL should coordinate this via fork version."
+        ]
+      },
+      {
+        "spec_item": "process_operations (Electra)",
+        "description": "Block operations processing extended for EL-triggered requests",
+        "summary": "Electra’s process_operations is significantly extended. In addition to the usual operations (attestations, etc.), it now processes new lists: DepositRequests, WithdrawalRequests, and ConsolidationRequests. For each deposit request, it calls process_deposit_request (adding a validator or increasing balance); for each withdrawal request, process_withdrawal_request (initiating a validator exit or force withdrawal); and for each consolidation request, process_consolidation_request (converting a validator to compounding):contentReference[oaicite:84]{index=84}. It also handles modified attestation and deposit processing per EIP-7549 and 6110, as well as voluntary exits.",
+        "spec_reference": "electra/beacon-chain.md (modified process_operations to handle new requests)",
+        "prysm_implementation": "Prysm’s electra/process_operations (split across files like deposits.go, consolidations.go, etc.) loops through each new request list from the block, invoking the corresponding handler (add validator, trigger exit, switch to compounding) in the state.",
+        "lighthouse_implementation": "Lighthouse’s consensus/state_processing per_block_processing (process_operations.rs) is updated to call process_deposit_request, process_withdrawal_request, process_consolidation_request for each item in those new lists:contentReference[oaicite:85]{index=85}. The implementation closely follows spec line-by-line for these new operations.",
+        "audit_checkpoints": [
+          "Confirm that the client processes each type of ExecutionPayload-triggered operation in the correct order (likely deposits then withdrawals then consolidations, or as defined).",
+          "Ensure that any invalid request (e.g., malformed or violating conditions such as a consolidation for an already compounding validator) causes block rejection.",
+          "Check that processing these requests doesn't interfere with existing operations processing (they are integrated seamlessly after deposits, etc.)."
+        ]
+      },
+      {
+        "spec_item": "process_attestation (Electra)",
+        "description": "Attestation processing updated for multiple committees (EIP-7549)",
+        "summary": "EIP-7549 restructured Attestations by moving committee index outside. In Electra, each attestation is essentially a SingleAttestation or carries a committee_bits field. process_attestation now must verify that the attester is in the committee indicated by the new committee_bits (ensuring exactly one committee index bit is set):contentReference[oaicite:87]{index=87}. It also uses the modified attesting_indices calculation which now accounts for possibly combined committees. This ensures attestation validity under the new format.",
+        "spec_reference": "electra/beacon-chain.md (EIP-7549 changes to attestation processing)",
+        "prysm_implementation": "Prysm handles both old and new attestation formats around the fork. In electra/attestation.go, it interprets SingleAttestation data (with committee index) and performs the same checks. The validation ensures the aggregation bits correspond to the correct committee of validators.",
+        "lighthouse_implementation": "Lighthouse converts SingleAttestation to the legacy Attestation internally for processing, as noted in the auditor guide:contentReference[oaicite:89]{index=89}, then verifies as usual. Additional checks ensure exactly one committee_bits is set:contentReference[oaicite:90]{index=90}.",
+        "audit_checkpoints": [
+          "Verify that exactly one committee_bits is set in each attestation (meaning an attestation is only for one committee).",
+          "Ensure that the implementation correctly identifies the intended committee index from the SingleAttestation or committee_bits and uses the right subnet for aggregation verification.",
+          "Check backward compatibility handling: attestations right at the fork boundary might be received in either format; clients need to handle both without mis-validation."
+        ]
+      },
+      {
+        "spec_item": "get_validator_from_deposit / add_validator_to_registry",
+        "description": "Deposit processing adapted for on-chain deposit requests (EIP-6110)",
+        "summary": "Electra changes how new validators are added. Instead of only via the deposit contract, EIP-6110 allows deposits to be supplied on-chain. The functions get_validator_from_deposit and add_validator_to_registry are modified to handle DepositRequest operations (which come from the execution layer) as well as normal deposits. They ensure that a DepositRequest’s pubkey isn’t already registered, create a new Validator object with status pending, and set its effective balance (capped to MAX_EFFECTIVE_BALANCE_ELECTRA):contentReference[oaicite:93]{index=93}. They also use an updated MAX_EFFECTIVE_BALANCE (2048 ETH) for compounding validators if applicable.",
+        "spec_reference": "electra/beacon-chain.md (modified deposit processing functions, EIP-6110 & 7251)",
+        "prysm_implementation": "Prysm’s electra/deposits.go distinguishes between deposits from the deposit contract vs. DepositRequests from EL. It likely reuses a common function to create validators, but triggers it from both deposit log processing and new block operations.",
+        "lighthouse_implementation": "Lighthouse has unified deposit processing. In Electra, process_deposit_request uses essentially the same logic as a deposit from Phase0, but takes data from the ExecutionRequests. It calls add_validator_to_registry for new validator creation or tops up if pubkey exists (though typically deposit requests are for new validators).",
+        "audit_checkpoints": [
+          "Ensure deposit requests from the EL (ExecutionPayload.deposits list) are processed in the same epoch as received (or as defined), not queued indefinitely.",
+          "Verify new validators created via deposit requests are initialized properly (pubkey, withdrawal cred, effective balance = min(deposit amount, MAX_EFFECTIVE_BALANCE_ELECTRA)) and added to state.validators and state.balances.",
+          "Check that if a deposit request comes for an already exited validator’s pubkey, it is either rejected or treated as a separate entity depending on spec (likely rejected to avoid duplicate pubkey registration)."
+        ]
+      },
+      {
+        "spec_item": "is_valid_deposit_signature",
+        "description": "New function to validate deposit request signatures",
+        "summary": "Introduced to verify that an ExecutionLayer-triggered deposit (DepositRequest) is authorized. In EIP-6110, deposit requests might include a signature from the depositor or some proof. This function likely checks the signature if required (though deposit contract deposits were implicitly trusted via contract, on-chain requests may require CL validation). If the spec defines a signature for deposit requests, this function uses the deposit domain to verify it.",
+        "spec_reference": "electra/beacon-chain.md (new is_valid_deposit_signature)",
+        "prysm_implementation": "Prysm would implement this in its deposit processing logic, but if on-chain deposits are simply accepted without a signature (because EL enforces it via a contract call), this function might trivially return true or do minimal checks.",
+        "lighthouse_implementation": "Likely implemented in state_processing if needed. Possibly not heavily used if deposits are assumed valid coming from EL. But present for completeness or future features.",
+        "audit_checkpoints": [
+          "If deposit requests include a signature, ensure it’s verified against the expected public key (if not, clarify why function exists).",
+          "Confirm that invalid signatures on deposit requests (if required by spec) would cause the deposit to be ignored or block rejected.",
+          "If not used in current spec, note it as a placeholder for potential future deposit authentication."
+        ]
+      },
+      {
+        "spec_item": "process_deposit (Electra)",
+        "description": "Existing deposit operation adjusted for large balance & credential types",
+        "summary": "Although new deposits come via deposit requests in Electra, the process_deposit (for deposit logs from the deposit contract, still possible for old entries) is modified to consider MAX_EFFECTIVE_BALANCE_ELECTRA (2048 ETH). It ensures even if multiple deposits for one validator sum above 32 ETH, their effective balance won’t exceed 2048 ETH for compounding ones. Also, if a deposit log comes for a validator who switched to compounding, it likely just increases balance without immediate withdrawal logic.",
+        "spec_reference": "electra/beacon-chain.md (modified process_deposit)",
+        "prysm_implementation": "Prysm’s legacy deposit handling in electra/deposits.go will cap effective balance at new 2048 ETH if applicable and otherwise continue to top up balances as normal.",
+        "lighthouse_implementation": "Lighthouse in Electra adjusts deposit processing to use MAX_EFFECTIVE_BALANCE_ELECTRA in place of previous 32 ETH cap for relevant validators (compounding ones presumably). It still processes deposit queues until empty but now that deposit contract is mostly drained, this is mainly for completeness.",
+        "audit_checkpoints": [
+          "Check that effective balance capping uses the correct value (2048 ETH for compounding validators vs 32 ETH for non-compounding perhaps):contentReference[oaicite:95]{index=95}.",
+          "Ensure that if a deposit arrives that pushes a validator’s balance over 32 ETH, and that validator is still non-compounding (0x01 cred), the excess will go to withdrawal as before Capella (for backward compatibility until they maybe switch). If compounding, they keep it staked up to 2048.",
+          "Make sure process_deposit logic doesn’t conflict with process_deposit_request; one handles contract deposits, the other handles new EL-triggered deposits."
+        ]
+      },
+      {
+        "spec_item": "process_withdrawal_request",
+        "description": "New function to handle execution-layer triggered validator withdrawals",
+        "summary": "Implements EIP-7002: allows the execution layer (via a WithdrawalRequest in the block) to initiate a validator’s exit or force withdrawal. This function checks if the validator is eligible to be withdrawn (e.g., not already in exit process or slashed, etc.), then queues the validator for exit by setting exit_epoch (or withdrawable_epoch appropriately). If FULL_EXIT_REQUEST_AMOUNT (0) is specified, it likely triggers a full exit of the validator (balance will be withdrawn gradually as with normal exits).",
+        "spec_reference": "electra/beacon-chain.md (new process_withdrawal_request, EIP-7002)",
+        "prysm_implementation": "In Prysm, process_withdrawal_request would be found in electra/consolidations.go or similar. It likely calls initiate_validator_exit for the targeted validator immediately as directed by the request.",
+        "lighthouse_implementation": "Lighthouse’s process_withdrawal_request uses existing exit routines: if a withdrawal request is present, it marks the validator as exiting (similar to if they had submitted a voluntary exit) but coming from the EL context. The Honest Validator guide for Electra covers how these requests are validated.",
+        "audit_checkpoints": [
+          "Ensure that an Execution-layer triggered withdrawal cannot be applied to a validator who is already exiting or exited (the request should be ignored or cause block to be invalid).",
+          "Verify that the request properly sets the validator’s exit and withdrawable epochs consistent with slashings or queue (likely uses same churn limit gating as voluntary exits, possibly via new churn accounting).",
+          "Check that FULL_EXIT_REQUEST (if used to signal exit) is interpreted correctly (in code, amount 0 meaning exit vs a partial withdrawal request which might be handled differently)."
+        ]
+      },
+      {
+        "spec_item": "process_deposit_request",
+        "description": "New function to handle execution-layer deposit requests",
+        "summary": "Implements the consensus-side processing of EIP-6110 deposit requests included in blocks. For each DepositRequest, this function either creates a new validator (if the pubkey is not seen before) or tops up an existing validator’s balance (if the pubkey was already queued but needed more funds). It uses get_validator_from_deposit (modified for Electra) and add_validator_to_registry internally, and respects MAX_PENDING_DEPOSITS_PER_EPOCH to avoid too many activations at once.",
+        "spec_reference": "electra/beacon-chain.md (new process_deposit_request, EIP-6110)",
+        "prysm_implementation": "Likely located in electra/deposit_requests.go in Prysm. It iterates through block.body.deposits list, calls the same routines as the deposit contract processing to add or update validators.",
+        "lighthouse_implementation": "Lighthouse’s process_deposit_request will mirror process_deposit for new validators, but coming from block data. It ensures not to exceed churn limits (excess requests may remain pending until future epochs via state.deposit_requests_start_index perhaps).",
+        "audit_checkpoints": [
+          "Ensure a deposit request that would activate a validator is subject to the churn limit per epoch. If more deposit requests exist than can be activated, they should be queued (MAX_PENDING_DEPOSITS_PER_EPOCH = 16).",
+          "Verify the correctness of the deposit data (pubkey, creds, amount) and that an invalid deposit request (bad signature or duplicate pubkey) causes a rejection.",
+          "Confirm that deposit requests update any pointer (like deposit_requests_start_index in state) for next epoch processing if not all can be activated immediately."
+        ]
+      },
+      {
+        "spec_item": "is_valid_switch_to_compounding_request",
+        "description": "New predicate to validate consolidation (compounding) requests",
+        "summary": "This helper checks that a ConsolidationRequest (switching a validator to compounding mode) is valid. It likely verifies the validator in question has 0x01 credentials (external) currently and is in a state where it can switch (perhaps not slashed, not marked to exit). It may also require that the validator’s balance is at maximum (32 ETH) to switch to compounding (or maybe any balance can switch). Only if these conditions hold will process_consolidation_request be allowed to proceed.",
+        "spec_reference": "electra/beacon-chain.md (new is_valid_switch_to_compounding_request)",
+        "prysm_implementation": "Implemented in Prysm (electra/consolidations.go) to check state for each consolidation request: ensuring proper credentials and status before switching.",
+        "lighthouse_implementation": "Lighthouse uses this predicate inside process_consolidation_request to guard the operation. It checks withdrawal_credentials prefix and that the validator isn't already compounding or exiting.",
+        "audit_checkpoints": [
+          "Verify that a consolidation request is only accepted for a validator with an 0x01 withdrawal credential who is active.",
+          "Ensure a validator that is already compounding (0x02) or already exited cannot be targeted by a consolidation request (should be ignored/invalid).",
+          "Check if any balance conditions apply (e.g., require full 32 ETH stake to consolidate); if yes, those must be enforced."
+        ]
+      },
+      {
+        "spec_item": "process_consolidation_request",
+        "description": "New function to process execution-layer consolidation (compounding) requests",
+        "summary": "If an execution layer ConsolidationRequest is included, this function converts a regular validator into a compounding validator. It switches the validator’s withdrawal_credentials from 0x01 (external) to 0x02 (compounding prefix). It may also queue any \"excess balance\" (balance above 32 ETH) for consolidation (meaning it will remain in the validator’s effective balance up to the new max 2048 ETH rather than be routinely withdrawn). The validator’s status remains active, but now any future rewards won’t be automatically withdrawn.",
+        "spec_reference": "electra/beacon-chain.md (new process_consolidation_request, EIP-7251)",
+        "prysm_implementation": "In Prysm’s electra/consolidations.go, upon a valid request, it calls something akin to switch_to_compounding_validator (state mutator) to flip the credential prefix to 0x02 and adjust any internal counters for churn (since this might count as an activation change).",
+        "lighthouse_implementation": "Lighthouse implements this by updating the validator record’s withdrawal_credentials to compounding and possibly updating the activation exit churn accounting via compute_consolidation_epoch_and_update_churn if needed.",
+        "audit_checkpoints": [
+          "Ensure that upon processing a consolidation, the validator’s withdrawal_credentials exactly switch to the 0x02 prefix + previous 20-byte address (the address might become irrelevant after switching, as funds won’t be sent out).",
+          "Check that the effective balance of the validator can now increase beyond 32 ETH (up to 2048 ETH) through accumulated rewards; implementations should allow effective_balance to rise and not clamp it at 32 for compounding validators:contentReference[oaicite:101]{index=101}.",
+          "Verify churn accounting: switching to compounding might be counted as an activation (since now more stake is effectively active?). The spec introduces get_consolidation_churn_limit, etc., so ensure those are respected in epoch processing."
+        ]
+      }
+    ],
+    "Epoch Processing": [
+      {
+        "spec_item": "process_epoch (Electra)",
+        "description": "Epoch transition updated to handle pending deposits and consolidations",
+        "summary": "Electra’s process_epoch (or single-pass equivalent) now calls new routines for processing pending deposits and consolidations. At each epoch, up to MAX_PENDING_DEPOSITS_PER_EPOCH (16) queued deposits from ExecutionRequests are processed (validators activated) via process_pending_deposits, and similarly a certain number of consolidation operations may be applied via process_pending_consolidations. This ensures not all deposits or consolidations happen in one block if above churn limits; instead they are spread across epochs.",
+        "spec_reference": "electra/beacon-chain.md (modified process_epoch calling new functions)",
+        "prysm_implementation": "Prysm’s electra/registry_updates.go or effective_balance_updates.go implements this by iterating through any queued deposits (state.pending_deposits) each epoch and activating up to the limit, doing similarly for consolidation if needed.",
+        "lighthouse_implementation": "Lighthouse integrates these in its single_pass epoch processing: after regular registry updates, it processes pending deposits (activating validators in queue using get_balance_churn_limit etc.) and pending consolidations in priority.",
+        "audit_checkpoints": [
+          "Check that no more than MAX_PENDING_DEPOSITS_PER_EPOCH (16) deposit requests are processed in one epoch (others remain queued).",
+          "Ensure pending consolidations are likewise limited (likely by the same churn constraints or a separate MAX_CONSOLIDATIONS_PER_EPOCH if defined).",
+          "Verify that the activation of queued validators and switching of validators to compounding is done after handling exits and balance updates in the epoch to maintain consistency."
+        ]
+      },
+      {
+        "spec_item": "process_registry_updates (Electra)",
+        "description": "Registry updates extended for compounding churn limits",
+        "summary": "Electra extends registry updates to handle multiple churn types. In addition to limiting activations (still capped at 8 per EIP-7514 if still in effect), it must consider that consolidations (which increase effective stake) might count against a churn allowance. The functions get_activation_exit_churn_limit and get_consolidation_churn_limit are introduced to compute how many validators can exit or consolidate in an epoch. process_registry_updates uses these to restrict how many validators can be marked exiting and how many can switch to compounding per epoch, ensuring the total change in active validator count is controlled.",
+        "spec_reference": "electra/beacon-chain.md (modified process_registry_updates, compounding logic)",
+        "prysm_implementation": "Prysm uses electra/churn.go updated with separate counters for activation vs consolidation. It will only allow a consolidation request to finalize if under the consolidation churn limit (perhaps one per epoch by default).",
+        "lighthouse_implementation": "Lighthouse’s epoch processing calls compute_exit_epoch_and_update_churn or compute_consolidation_epoch_and_update_churn when scheduling exits or consolidations:contentReference[oaicite:105]{index=105}. This ensures, for example, that if some validators exited, fewer can consolidate in the same epoch if a combined churn budget is considered.",
+        "audit_checkpoints": [
+          "Verify that the sum of activations + consolidations in an epoch does not exceed what the churn limit would allow if they both affect active validator count (assuming consolidation might not count as a new validator but increases stake).",
+          "Check that get_activation_exit_churn_limit and get_consolidation_churn_limit are correctly implemented (possibly identical to get_validator_activation_churn_limit for activations, and a fraction for consolidations if needed).",
+          "Ensure that if multiple consolidation requests exist, only up to the allowed number are marked to take effect each epoch, deferring the rest."
+        ]
+      },
+      {
+        "spec_item": "process_slashings (Electra)",
+        "description": "Slashing processing with higher effective balances",
+        "summary": "With EIP-7251 raising potential effective balances, process_slashings in Electra is tweaked to handle larger balances (up to 2048 ETH). The formula remains the same but implementations must ensure no overflow when summing slashings. Additionally, if a compounding validator is slashed, their penalty could be larger in absolute terms, but the mechanism (using slashings vector and multiplier) remains unchanged from Bellatrix/Capella.",
+        "spec_reference": "electra/beacon-chain.md (process_slashings unchanged logic, but higher limits)",
+        "prysm_implementation": "Prysm didn’t need functional changes beyond using updated constants if any (PROPORTIONAL_SLASHING_MULTIPLIER remains 3 unless changed in Electra). It ensures 64-bit math can handle sums of slashings if validator balances are higher.",
+        "lighthouse_implementation": "Lighthouse similarly continues to use the slashing logic as is, trusting that u64 can cover up to 2048e9 Gwei * multiplier * N slashings (should be fine). No spec change beyond verifying new max effective balance in context.",
+        "audit_checkpoints": [
+          "Confirm that the PROPORTIONAL_SLASHING_MULTIPLIER_ELECTRA (if defined) is used; if none, it likely stays same as Bellatrix’s (3).",
+          "Check that internal types (uint64 for balances) are still sufficient for higher effective balances and sums (no overflow in adjusted_total_slashing_balance calculation).",
+          "No new slashing logic except scale, so ensure penalty calculation still reduces slashed validator to zero over the vector period even if they had >32 ETH effective."
+        ]
+      }
+    ],
+    "Sync Committee": [
+      {
+        "spec_item": "get_next_sync_committee_indices (Electra)",
+        "description": "Sync committee rotation adjusted for post-consolidation state",
+        "summary": "This function was slightly modified in Electra, likely to account for changes in how validators are considered \"active\" after consolidation. It still selects the next sync committee one epoch before the period ends, and no fundamental changes to the algorithm were made (512 members selected randomly from active validators). Any minor adjustments ensure compounding vs non-compounding validators are treated uniformly in random selection. There were no fundamental changes to the selection logic, just implementation alignment with new data structures.",
+        "spec_reference": "electra/beacon-chain.md (modified get_next_sync_committee_indices)",
+        "prysm_implementation": "Likely unchanged logic in Prysm: uses the same shuffling and selection routine. The modification might be internal (like using updated list of active validators if the structure changed).",
+        "lighthouse_implementation": "Lighthouse updated get_next_sync_committee_indices to match spec but effectively it remains similar. Possibly just a refactor due to new type definitions (SingleAttestation affecting how committees are indexed).",
+        "audit_checkpoints": [
+          "Ensure the sync committee selection still uses the active validator list correctly (compounding validators are active and should be eligible like others).",
+          "No validator should be accidentally excluded or double-counted due to having a larger balance or different withdrawal cred prefix.",
+          "Confirm the output count (512 indices) and randomness are unaffected by changes in Electra."
+        ]
+      }
+    ],
+    "Execution Engine Integration": [
+      {
+        "spec_item": "is_valid_block_hash (Electra)",
+        "description": "Engine API block hash check adjusted (builder enhancements)",
+        "summary": "Electra may refine is_valid_block_hash due to Proposer-Builder Separation (PBS) changes. The function still ensures the execution payload’s block_hash matches expected beacon chain context (including parent beacon root, as in Deneb). Implementations might integrate builder-specific validations (e.g., checking builder-provided payload header), but the spec function logic remains largely unchanged from Deneb.",
+        "spec_reference": "electra/beacon-chain.md (is_valid_block_hash remains, no major changes documented)",
+        "prysm_implementation": "Prysm’s builder integration may perform extra verification on payload/header consistency elsewhere. is_valid_block_hash in Electra context is likely unchanged from Deneb aside from handling scenarios where a builder provides an empty payload (still must match expected hash).",
+        "lighthouse_implementation": "Lighthouse continues to use is_valid_block_hash as in Deneb; any builder-specific logic (like verifying a builder signature on the payload) is handled outside this function. So minimal/no change in code for this function.",
+        "audit_checkpoints": [
+          "Ensure any builder-introduced fields (if any in ExecutionPayload Header) do not break the block hash verification logic.",
+          "The block hash check should still reliably catch mis-matched payloads.",
+          "No new parameters; focus remains on verifying parent_beacon_block_root vs execution chain pointer (inherited from Deneb)."
+        ]
+      },
+      {
+        "spec_item": "notify_new_payload (Electra)",
+        "description": "Engine API usage extended for new request types",
+        "summary": "In Electra, notify_new_payload needs to handle blocks that include ExecutionRequests (deposits/exits). The consensus client calls the Engine API with the execution payload as usual; those requests are processed on the CL side, not by the EL, so the EL will largely ignore them (they're not part of the execution payload). Thus, notify_new_payload’s flow is similar to Deneb. Consensus clients coordinate with builders so that builder-produced blocks incorporate expected deposit/withdrawal requests correctly, but there’s no fundamental change in the notify_new_payload logic itself.",
+        "spec_reference": "electra/beacon-chain.md (notify_new_payload unchanged in logic)",
+        "prysm_implementation": "No significant changes in Prysm’s implementation: it still sends NewPayload RPC and processes the PayloadStatus. ExecutionRequests don't alter this call since they’re not in the payload sent to EL.",
+        "lighthouse_implementation": "Lighthouse continues to call notify_new_payload asynchronously and then apply the new requests in its state transition separately. The Engine API call remains focused on the ExecutionPayload portion (transactions, blobs, etc.).",
+        "audit_checkpoints": [
+          "Confirm that ExecutionRequests (deposit/withdrawal/consolidation) are not sent to EL (they are handled entirely in CL).",
+          "Verify that any failure in execution payload (e.g., invalid transactions or blob) is still handled properly and independent of the new CL-only ops.",
+          "Check builder integration: a builder constructing a block must include the correct deposit/withdrawal requests per user triggers; the CL should verify those after notify_new_payload returns Valid."
+        ]
+      },
+      {
+        "spec_item": "verify_and_notify_new_payload (Electra)",
+        "description": "Wrapper function remains, integrating new checks from Deneb",
+        "summary": "The verify_and_notify_new_payload in Electra inherits changes from Deneb (parent root and blob verifications) but otherwise remains the same. Since ExecutionRequests are outside the execution payload, verify_and_notify_new_payload still just checks block hash via is_valid_block_hash and then calls notify_new_payload. No additional checks were needed for the new request types at this stage (those are handled in process_operations).",
+        "spec_reference": "electra/beacon-chain.md (verify_and_notify_new_payload carries Deneb logic)",
+        "prysm_implementation": "Prysm uses the same flow as Deneb: validate block hash vs parent root, call engine.NewPayload, interpret the result. The presence of deposit/exit requests does not affect this.",
+        "lighthouse_implementation": "Lighthouse’s verification of new payload remains unchanged from Deneb version; blob commitments and parent root are checked then engine notify. Extra ops are processed after this engine call succeeds.",
+        "audit_checkpoints": [
+          "Ensure no new preconditions were added in verify_and_notify; implementations should still do Deneb’s checks but nothing beyond for Electra.",
+          "Check that the code still correctly returns False if either block hash or engine payload validity fails, True otherwise.",
+          "No interactions between ExecutionRequests and verify_and_notify; they are separate concerns."
+        ]
+      }
+    ]
+  }
+}

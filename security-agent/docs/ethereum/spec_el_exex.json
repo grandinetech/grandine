@@ -1,0 +1,172 @@
+{
+  "system_architecture": {
+    "core_modules": [
+      {
+        "name": "P2P Network (DevP2P)",
+        "description": "Ethereum peer-to-peer networking stack (DevP2P v5) with RLPx encrypted connections and message protocols for block, transaction, and state data exchange",
+        "responsibility": "Discover and maintain peer connections (Discovery v5), propagate transactions and blocks, and facilitate data syncing via protocols (e.g. ETH, Snap for state) across the network"
+      },
+      {
+        "name": "Consensus Interface (Engine API)",
+        "description": "Beacon Chain consensus integration via the Engine JSON-RPC API (authenticating with JWT) to allow a Consensus Layer (CL) client to drive block execution and fork choice in the Execution Layer (EL)",
+        "responsibility": "Receive PoS consensus commands (e.g., new block payloads, fork choice updates), execute blocks as instructed by the CL, validate blocks (transactions, state root) and report results back to the consensus client. Ensures CL and EL remain in sync on head, safe, and finalized blocks"
+      },
+      {
+        "name": "Execution Core & EVM",
+        "description": "Core block execution engine including EVM execution (using revm library) and state transition logic",
+        "responsibility": "Apply transactions to the state, execute EVM bytecode, maintain and update the state trie, manage blockchain forks and reorganizations. Provides results such as receipts and updated state root for each executed block"
+      },
+      {
+        "name": "Transaction Pool (TxPool)",
+        "description": "In-memory pool for pending transactions, implementing Ethereum mempool rules and pricing",
+        "responsibility": "Validate incoming transactions (correct nonce, signature, gas limits, etc.), store them in priority by gas price, enforce replacement rules (e.g. required price bump for same-nonce tx), and provide transactions to block building when creating new blocks. Propagates received transactions to peers while filtering spam or invalid txs"
+      },
+      {
+        "name": "JSON-RPC API",
+        "description": "Standard JSON-RPC endpoints for external applications to interact with the node (eth_*, net_*, web3_*, txpool_*, debug_ namespaces)",
+        "responsibility": "Expose blockchain data (account state, blocks, transactions), allow sending transactions (e.g. eth_sendRawTransaction), support filters/subscriptions, and provide debugging/tracing endpoints. Also includes the Engine API methods on a secure port for CL → EL communication"
+      },
+      {
+        "name": "Database",
+        "description": "Persistent storage for chain data, state trie, and indices. Pluggable backend (LevelDB, Pebble, RocksDB, etc.) optimized via staged sync",
+        "responsibility": "Store and retrieve blocks, receipts, transaction history, account/state data, and chain metadata. Support efficient queries and writes during sync and execution. Ensure data integrity and support prune/snapshot operations"
+      },
+      {
+        "name": "Execution Extensions (ExEx)",
+        "description": "Framework for node-internal extensions that run post-execution hooks to derive custom off-chain state in real-time:contentReference[oaicite:0]{index=0}. ExEx modules subscribe to block execution events via a reorg-aware stream (ExExNotification) that includes committed blocks and their transactions, receipts, and state changes:contentReference[oaicite:1]{index=1}",
+        "responsibility": "Orchestrate user-defined tasks that react to new blocks and reorgs, enabling in-process indexers, rollup derivations, MEV bots, etc. The ExEx Manager routes block commit and reorg events to installed ExEx tasks and executes them asynchronously within the node's task executor, ensuring minimal latency and consistent state derivation"
+      }
+    ],
+    "external_dependencies": [
+      {
+        "name": "Bootnodes",
+        "description": "Known bootstrap peer addresses (ENRs) the node contacts on startup to discover peers on the Ethereum network"
+      },
+      {
+        "name": "External Signer",
+        "description": "Optional external transaction signer (e.g., a Web3 keystore or hardware wallet via RPC like Ethereum Signing API) for cases where the node does not manage private keys internally"
+      },
+      {
+        "name": "Database Backends",
+        "description": "External database engines supported for data persistence (LevelDB, Pebble, RocksDB). The node links to one of these for storing chain state and can be configured to use the preferred backend"
+      }
+    ]
+  },
+  "user_flows": [
+    {
+      "flow_name": "Transaction Submission",
+      "description": "User submits a transaction to the Reth execution client via JSON-RPC, which is then propagated and eventually included in a block",
+      "steps": [
+        "User calls eth_sendRawTransaction through the JSON-RPC API with a signed transaction",
+        "Execution client validates the transaction’s syntax, signature (ECDSA), nonce, and gas limits. If valid and sender has sufficient balance, it is added to the TxPool (queued by gas price and nonce order)",
+        "The TxPool broadcasts the new transaction to connected peers over p2p, and also makes it available for block production",
+        "When a block is being built (by a connected Beacon node proposer via the Engine API), the highest-priority pending transactions are pulled from the TxPool to form the block proposal",
+        "The proposed block (including the transaction) is executed by the Execution client (EVM) to ensure validity. Through the Engine API (engine_executePayload), the consensus client gets the execution result (success state root or error)",
+        "Once the block is validated and sealed by the consensus layer, it is propagated across the network. All execution clients (including this Reth node) receive the block and update their state (marking the transaction as mined)",
+        "After block execution and insertion, Reth emits an ExExNotification for post-execution processing, allowing any installed Execution Extensions to process the new transaction and resulting state changes"
+      ],
+      "security_checkpoints": [
+        "Signature and nonce validation (ensure transaction is from a valid sender and in correct sequence)",
+        "Balance and gas verification (sender has enough ETH to pay gas, gas limit within block limits)",
+        "Transaction fee pricing checks (meets minimum gas price or base fee requirements; replacement transaction must have >10% gas price bump to prevent spam)",
+        "TxPool admission control (reject or deprioritize malicious or malformed transactions to mitigate DoS attacks)",
+        "Engine API execution result check (the block including this tx is only accepted if execution succeeds and state root matches, preventing invalid transactions from entering the chain)"
+      ]
+    },
+    {
+      "flow_name": "Block Propagation and Insertion",
+      "description": "The node receives a new block from peers (or from its paired consensus client) and processes it to update the chain state",
+      "steps": [
+        "A new block announcement is received via the p2p network (ETH gossip protocol) from a peer, or via the consensus client through Engine API if this node’s validator proposed or received it",
+        "The execution client first verifies the block header (parent hash linkage, timestamp, etc.). If running post-Merge, the PoS consensus portion (signature, proposer validity) is verified by the external Beacon node, while the execution client focuses on things like block format and hashes",
+        "If the block is new and fits onto the current chain (or a fork), the execution client downloads any missing data (transactions or state) via p2p as needed (e.g., requesting block bodies if only header was announced)",
+        "The Execution client executes all transactions in the block in order (using the EVM), computing the new state root and verifying it matches the block’s stated post-state root. Receipts are generated and the block’s compliance with protocol rules (like gas used within limit) is checked",
+        "Upon successful execution, the block is inserted into the chain. If it extends the current best chain, the chain head is updated; if it belongs to a fork with higher total difficulty or later PoS checkpoint, a reorganization may occur (switching the canonical chain to this new fork)",
+        "Through the Engine API, the consensus client is notified of the new block and updated fork choice (in a PoS context, engine_newPayload and engine_forkchoiceUpdated calls ensure EL and CL agree on the new head)",
+        "After finalizing block insertion, the ExEx Manager emits a ChainCommitted event via ExExNotification to all registered Execution Extensions, allowing them to process the block’s transactions and state changes in real-time. In case of a reorg, ChainReverted notifications would be sent for rolled-back blocks so ExEx tasks can undo their state:contentReference[oaicite:2]{index=2}"
+      ],
+      "security_checkpoints": [
+        "Block header validation (correct parent reference, timestamp within allowed range, proper difficulty or beacon chain consensus data)",
+        "Proof-of-Stake consensus checks (handled by external CL: valid proposer signature, slot, no slashable offenses) or Proof-of-Work proof validation if pre-Merge (correct PoW nonce/difficulty)",
+        "State root and receipt root verification after execution (ensures the computed state and receipts match the block’s commitments, proving all transactions executed correctly)",
+        "Consensus rules enforcement (no exceeding block gas limit, no invalid transactions or trie inconsistencies; if any check fails, block is rejected)",
+        "Reorg safety and finality checks (ensure that long reorgs obey consensus finalization rules; do not accept forks that conflict with finalized blocks. Reth’s Engine API integration refuses reorgs deeper than finalized checkpoint)"
+      ]
+    }
+  ],
+  "security_features": [
+    {
+      "feature": "DoS Guard & Resource Limits",
+      "description": "Protections against denial-of-service: Reth limits expensive operations and request rates. For example, JSON-RPC endpoints can be rate-limited or disabled, and malicious peers sending invalid data are dropped. Internally, staged sync and execution have timeouts and batching to prevent one peer or task from monopolizing resources"
+    },
+    {
+      "feature": "Snap Sync Access Control",
+      "description": "Snapshot sync serving restrictions to prevent abuse: the node can limit which peers can request large state snapshot chunks (using an ACL or only serving to peers with certain reputation or on request), mitigating potential DoS via snapshot data requests. This ensures only legitimate syncs use the heavy snapshot transfer feature"
+    },
+    {
+      "feature": "Reorg Protection",
+      "description": "Mechanisms to handle chain reorganizations safely. Reth tracks multiple recent forks and ensures that reorg depth is within protocol limits (e.g., finalized blocks are not reverted). Execution Extensions also incorporate reorg handling: on a reorg, ExEx tasks receive ChainReverted events to undo state, maintaining consistency. This prevents inconsistent state in off-chain computations and guards against deep reorg attacks"
+    },
+    {
+      "feature": "Transaction Pool Spam Control",
+      "description": "Strict txpool rules to mitigate spam: requires a minimum gas price (or base fee in EIP-1559) for inclusion; replacement transactions (same nonce) must pay a significant gas price bump (commonly ~10% above the pending tx):contentReference[oaicite:3]{index=3}; limits on number of pending transactions per sender (nonce gaps not allowed beyond a threshold). These rules prevent attackers from flooding the mempool with low-value or non-executable transactions"
+    },
+    {
+      "feature": "Engine API Authentication",
+      "description": "Secure communication between the execution client and consensus client: Reth requires a JWT secret for the Engine JSON-RPC API, so only an authorized consensus client can issue block execution commands:contentReference[oaicite:4]{index=4}. This prevents unauthorized parties from using Engine methods (which could inject blocks or alter fork choice). Additionally, the Engine API runs on a separate interface/port not exposed to public networks"
+    }
+  ],
+  "protocol_specifications": {
+    "p2p_protocol": "DevP2P v5 with RLPx for encrypted peer connections and Ethereum subprotocols (eth/66 for block & tx gossip, snap for state sync, etc.)",
+    "discovery_protocol": "Discovery v5 for peer discovery (finding and maintaining peer addresses using UDP-based node discovery)",
+    "engine_api": "Ethereum Engine API v1 (JSON-RPC) for CL-EL communication post-Merge, including methods like engine_newPayload and engine_forkchoiceUpdated. Uses HTTP with JWT authentication for security",
+    "execution_extensions": "Execution Extensions use internal asynchronous interfaces; Reth provides an ExExNotification stream and an ExEx Manager. ExEx tasks can also interface externally via gRPC or other protocols if built that way, but core integration is in-process using Rust futures",
+    "data_serialization": "RLP encoding for block and transaction data, and Cap’n Proto used internally for certain high-performance serialization needs in Reth (e.g., possible use in networking or IPC). Standard formats (SSZ for beacon data via consensus client, Protobuf for any gRPC services built on ExEx) are used as needed",
+    "implementation_language": "Reth is implemented in Rust (Rust 1.78) for safety and performance. (For context, Geth is implemented in Go v1.22; both target Ethereum protocol compatibility)",
+    "key_libraries": "Utilizes the revm EVM library for execution:contentReference[oaicite:5]{index=5}, tokio for async runtime, and RocksDB/Pebble for storage (with abstraction to switch DB engines). Libraries are chosen for performance and maintained at recent stable versions",
+    "build_and_deployment": "Distributed as a Rust crate/binary; builds reproducibly via Cargo. Official Docker images are provided (e.g., built on Linux with Rust toolchain and minimal base OS) for cloud deployment. CI pipelines ensure builds against stable Rust and test vectors (Ubuntu 22.04-based build environments commonly used)"
+  },
+  "external_dependencies": {
+    "beacon_node": {
+      "required": true,
+      "description": "An external Consensus Layer client (Beacon node) is required for Reth to operate on Ethereum Mainnet (post-Merge). The beacon node and Reth communicate via the Engine API with a shared JWT secret, allowing the beacon node to instruct Reth on block proposals and validate execution payloads"
+    },
+    "bootnodes_list": {
+      "required": true,
+      "description": "A list of Ethereum network bootnodes (typically included by default for mainnet/testnets) is needed for initial peer discovery. These are well-known nodes to connect with in order to find more peers"
+    },
+    "oracle_services": {
+      "required": false,
+      "description": "No external oracle services are required for core functionality. Reth does not depend on price or data oracles; all consensus-critical data comes from the Ethereum protocol and connected beacon node"
+    },
+    "external_signer": {
+      "required": false,
+      "description": "No mandatory external signer; Reth can manage keys locally. However, it supports integration with external signing services (e.g., clef or hardware wallets) via standard JSON-RPC keystore APIs if the user chooses to keep keys outside the node"
+    },
+    "mev_boost": {
+      "required": false,
+      "description": "Optional MEV-Boost integration for validators: while Reth itself does not directly communicate with MEV-Boost, a validator setup may use MEV-Boost through the consensus client to source payloads. Reth’s Engine API is compatible with payloads from MEV-Boost relays (through the CL), so it supports this optional external component"
+    },
+    "light_client_fallback": {
+      "available": false,
+      "description": "Reth does not include a built-in light client mode for fail-safe operation. If the connected beacon node fails or disconnects, Reth cannot progress on its own. No automatic fallback to a light client; continuous operation relies on the external consensus connection. (Light client support on EL is not applicable post-Merge, as consensus must come from a CL)"
+    }
+  },
+  "design_changes": [
+    {
+      "change_type": "Merge Upgrade (Eth1 to Eth2 merge)",
+      "rationale": "Ethereum’s transition from Proof-of-Work to Proof-of-Stake required splitting the node into execution and consensus roles. This change was implemented to increase energy efficiency and allow the Beacon Chain to drive consensus while execution clients handle transaction execution",
+      "impact_on_specification": "Introduced the Engine API for EL–CL communication, removing the mining component from Reth. Reth had to implement new JSON-RPC methods (engine_*) and trust the external consensus inputs for block progression. Internal architecture was adjusted: block production now occurs via instructions from the beacon node, and the Execution Layer enforces only execution validity. The specification reflects separation of concerns: consensus validation is external, and finality constraints (no reorg past finalized block) are now part of the engine interface"
+    },
+    {
+      "change_type": "EIP-4844 (Proto-Danksharding, Blob Transactions)",
+      "rationale": "This upgrade (planned as part of Ethereum’s Cancun/Deneb fork) introduces blob-carrying transactions to increase data availability for Layer-2 rollups without putting the data in the execution payload. Blobs allow ephemeral large data to be attached to blocks, improving scalability",
+      "impact_on_specification": "Reth needed to support a new transaction type (blob transaction) and maintain a blob store for pending blobs:contentReference[oaicite:6]{index=6}. The Engine API is extended to handle blob sidecars (the consensus client provides blob data commitments). Execution logic validates blob transaction fields and gas costs, though the blob data itself is not executed by the EVM (just stored temporarily and verified via commitments). Specification updates include handling of new fields (KZG commitments, blob count) and ensuring backward compatibility. ExEx modules can potentially leverage blob data streams for L2 indexing, given the node now processes blobs"
+    },
+    {
+      "change_type": "Snap Sync v2",
+      "rationale": "An improved state synchronization method to accelerate node syncing. Snap Sync v2 builds on the snapshot sync protocol to allow downloading the state trie in chunks from peers, significantly reducing initial sync time compared to classical block-by-block or trie node-by-node sync",
+      "impact_on_specification": "Reth incorporates the Snap protocol:contentReference[oaicite:7]{index=7} to serve and request state data. Version 2 brings optimizations in how trie nodes are requested (e.g., larger range requests or better compression) and may refine peer selection strategy. The specification accounts for a dedicated Snap sync stage in the sync pipeline. Security considerations were added: nodes may restrict snapshot serving (Snap Sync ACL) to trusted peers to avoid abuse. After sync, normal block execution resumes from the acquired state. Snap Sync does not alter consensus rules but affects node architecture: Reth’s design needed modular stages to support plugging in this new sync mode"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "攻撃タイトル": "Consensus flaw during block processing (EL‑2022‑09)",
+    "対象クライアント": "Erigon",
+    "URL": "https://github.com/advisories/GHSA-xw37-57qp-9mm4",
+    "攻撃手順": [
+      "1. 攻撃者は自己がブロック提案者になるスロットを待つか、ハッシュパワーで私設ネットを用意する。",
+      "2. 特定シナリオ（SELF‑DESTRUCT → CREATE 直後に balance を操作）を含む 2 連続トランザクションを細工してブロックに封入する。",
+      "3. Erigon ≤v2.37.0 は go‑ethereum 旧コードを継承しており、削除済みアカウントに対し誤って旧 balance をコピーし state root がずれる。",
+      "4. 他実装は正しい state root を算出してブロックを拒否、Erigon ノードは分岐チェーンを構築してチェーンスプリットに至る。"
+    ],
+    "チェックポイント": "core/state/statedb.go の CreateAccount() で `prev.deleted` を検証してから balance をコピーしているか確認する。Hive EVM テスト `SELFDESTRUCT_Create_ThenCall` を CI に追加し、state root 差異が出ないかを検証する。"
+  },
+  {
+    "攻撃タイトル": "bad_block_hash 無限リトライによるノード停止 (Gnosischain incident, 2023‑02‑28)",
+    "対象クライアント": "Erigon",
+    "URL": "https://github.com/ledgerwatch/erigon/issues/6982",
+    "攻撃手順": [
+      "1. 攻撃者が無効トランザクションを含むブロックを生成し、Erigon ノードに配信する（例: Gnosis chain で再現）。",
+      "2. Erigon 2.39.x は staged‑sync 処理中に検証失敗 (`bad_block_hash=0x00…00`) を検出してもステージを抜けられず同ブロックを繰り返し再試行。 ",
+      "3. ループの間ヘッダー同期が停止し、Execution‑>Consensus ping が失敗して Beacon から切断、ノードは実質的に停止する。",
+      "4. 再起動しても同ブロックを受信すると再度ハングするため、永続的 DoS が成立。"
+    ],
+    "チェックポイント": "eth/stagedsync/* で BadBlock を検出したら `return StageResult{Unwind: true}` でロールバックし次ステージへ進む実装 (#7025) が入っているか。`integration/sync_bad_block.yaml` の再現テストを追加。"
+  }
+]

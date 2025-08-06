@@ -49,12 +49,21 @@ pub enum Statistics {
     Altair(AltairStatistics),
 }
 
+// @audit input-validation: Entry point for untrusted network blocks - main attack surface
+// ↳ This function processes blocks from potentially malicious peers without prior validation
+// @audit state-transition: Uses StateRootPolicy::Verify and MultiVerifier for untrusted inputs
+// ↳ Critical security boundary - ensures cryptographic verification of all signatures
+// @audit CRITICAL: Primary attack vector entry point for malicious consensus blocks
+// ↳ All signature verification and state validation must be enforced here
 pub fn untrusted_state_transition<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     signed_block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
+    // @audit-ok cryptographic-verification: Correctly uses MultiVerifier::default() for untrusted blocks
+    // @audit-ok state-root-verification: StateRootPolicy::Verify ensures state root consistency
+    // @audit-ok slot-processing: ProcessSlots::Always ensures proper slot transitions
     custom_state_transition(
         config,
         pubkey_cache,
@@ -123,7 +132,10 @@ pub fn custom_state_transition<P: Preset>(
     slot_report: impl SlotReport + Send,
 ) -> Result<()> {
     // > Process slots (including those with no blocks) since block
+    // @audit state-consistency: Slot processing must happen before block processing
+    // ↳ Ensures state is advanced to correct slot before applying block changes
     if process_slots.should_process(state, block.message()) {
+        // @audit slot-validation: process_slots validates state.slot() < target_slot to prevent regression
         self::process_slots(config, pubkey_cache, state, block.message().slot())?;
     }
 
@@ -205,11 +217,17 @@ pub fn custom_state_transition<P: Preset>(
             // Cause a compilation error if a new phase is added.
             const_assert_eq!(Phase::CARDINALITY, 6);
 
+            // @audit phase-mismatch: This should never be reached due to slot processing validation
+            // ↳ If reached, indicates a logic error in phase matching or slot processing
             unreachable!("successful slot processing ensures that phases match")
         }
     }
 }
 
+// @audit cryptographic-verification: Critical block signature verification for gossip
+// ↳ Used to verify block signatures against head state before full processing
+// @audit proposer-authentication: Ensures block is signed by the correct proposer
+// @audit CRITICAL: Primary defense against invalid block proposals from network
 pub fn verify_base_signature_with_head_state<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -220,6 +238,8 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
     let fork_version = config.version(phase);
 
     // Block signature
+    // @audit domain-separation: Proper domain separation prevents signature reuse across contexts
+    // @audit-ok fork-versioning: Correctly uses fork version for signature domain
     let domain = misc::compute_domain(
         config,
         DOMAIN_BEACON_PROPOSER,
@@ -227,9 +247,15 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
         Some(head_state.genesis_validators_root()),
     );
 
+    // @audit-ok signing-root: Standard signing root computation following spec
     let signing_root = misc::compute_signing_root(block.message(), domain);
+    
+    // @audit proposer-index-validation: Must validate proposer index before accessing pubkey
+    // @audit-ok bounds-check: accessors::public_key validates proposer_index bounds internally
     let pubkey_bytes = accessors::public_key(head_state, block.message().proposer_index())?;
 
+    // @audit bls-verification: Critical BLS signature verification - must not be bypassed
+    // @audit-ok single-verifier: Uses SingleVerifier (no bypass) for gossip validation
     SingleVerifier.verify_singular(
         signing_root,
         block.signature(),
@@ -238,6 +264,10 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
     )
 }
 
+// @audit cryptographic-dispatcher: Central signature verification dispatcher
+// ↳ Routes to phase-specific verification logic - critical for consensus security
+// @audit CRITICAL: All cryptographic validation flows through this function
+// ↳ Verifier abstraction allows bypassing (NullVerifier) or enforcing (MultiVerifier) verification
 pub fn verify_signatures<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -245,23 +275,33 @@ pub fn verify_signatures<P: Preset>(
     block: &SignedBeaconBlock<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
+    // @audit verifier-abstraction: Uses generic Verifier trait allowing different verification strategies
+    // ↳ NullVerifier bypasses checks, MultiVerifier enforces full validation
+    // @audit verification-bypass-risk: Must ensure NullVerifier only used for trusted inputs
     match (state, block) {
         (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => {
+            // @audit-ok phase0-verification: Standard BLS signature verification
             phase0::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Altair(state), SignedBeaconBlock::Altair(block)) => {
+            // @audit-ok altair-verification: Includes sync committee signature verification
             altair::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Bellatrix(state), SignedBeaconBlock::Bellatrix(block)) => {
+            // @audit-ok bellatrix-verification: Post-merge signature verification
             bellatrix::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Capella(state), SignedBeaconBlock::Capella(block)) => {
+            // @audit-ok capella-verification: Includes withdrawal credential changes
             capella::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Deneb(state), SignedBeaconBlock::Deneb(block)) => {
+            // @audit-ok deneb-verification: Blob sidecar related signatures
             deneb::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Electra(state), SignedBeaconBlock::Electra(block)) => {
+            // @audit electra-verification: New Electra signature verification logic
+            // ↳ Includes consolidation requests and pending deposits validation
             electra::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         _ => {
@@ -269,6 +309,8 @@ pub fn verify_signatures<P: Preset>(
             // Cause a compilation error if a new phase is added.
             const_assert_eq!(Phase::CARDINALITY, 6);
 
+            // @audit-ok phase-mismatch: Properly rejects mismatched phases
+            // @audit security-good: Prevents cross-phase attacks through type safety
             bail!(PhaseError {
                 state_phase: state.phase(),
                 block_phase: block.phase(),
@@ -289,6 +331,8 @@ pub fn process_slots<P: Preset>(
     // (see <https://github.com/ethereum/consensus-specs/releases/tag/v0.11.3>).
     // However, without this `process_slots` and `process_slots_internal` become idempotent.
     // As a result, transitions with preprocessed states succeed even with `ProcessSlots::Always`.
+    // @audit slot-regression: Critical validation preventing slot regression attacks
+    // ↳ Prevents malicious actors from moving state backwards in time
     ensure!(
         state.slot() < slot,
         Error::<P>::SlotNotLater {
@@ -593,6 +637,13 @@ fn post_process_slots_for_epoch_report<P: Preset>(
     Ok(())
 }
 
+// @audit input-validation: Processes untrusted blocks from network peers
+// ↳ Must validate all block fields including headers, operations, and execution payload
+// @audit crypto-bypass: skip_randao_verification parameter allows bypassing RANDAO verification
+// ↳ Should only be used in specific testing/sync scenarios, not for gossip validation
+// @audit VULN-03000001: skip_randao_verification vulnerability allows RANDAO bypass
+// ↳ CONFIRMED: If exposed to untrusted callers, could compromise randomness
+// ↳ Should be restricted to sync contexts only, never for gossip validation
 pub fn process_untrusted_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -601,9 +652,14 @@ pub fn process_untrusted_block<P: Preset>(
     slot_report: impl SlotReport,
     skip_randao_verification: bool,
 ) -> Result<()> {
+    // @audit verification-control: Conditional RANDAO verification based on skip flag
+    // ↳ When skip_randao_verification=true, RANDAO signatures are not verified but mix is still applied
     let verifier = if skip_randao_verification {
+        // @audit security-note: SkipRandaoVerification should only be used during sync, not gossip
+        // @audit RISK: This creates a bypass that could be exploited if used incorrectly
         MultiVerifier::new([VerifierOption::SkipRandaoVerification])
     } else {
+        // @audit-ok default-verification: Uses full verification for normal block processing
         MultiVerifier::default()
     };
 
@@ -667,12 +723,16 @@ fn process_block<P: Preset>(
     }
 }
 
+// @audit phase-matching: Validates block phase matches state phase for gossip validation
+// ↳ Phase mismatches could allow cross-phase attacks if not properly validated
 pub fn process_block_for_gossip<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &BeaconState<P>,
     block: &SignedBeaconBlock<P>,
 ) -> Result<()> {
+    // @audit dispatcher-pattern: Routes to phase-specific validators based on state/block types
+    // ↳ Each phase has unique validation rules that must be enforced
     match (state, block) {
         (BeaconState::Phase0(state), SignedBeaconBlock::Phase0(block)) => {
             phase0::process_block_for_gossip(config, pubkey_cache, state, block)
@@ -697,6 +757,7 @@ pub fn process_block_for_gossip<P: Preset>(
             // Cause a compilation error if a new phase is added.
             const_assert_eq!(Phase::CARDINALITY, 6);
 
+            // @audit-ok phase-validation: Correctly rejects phase mismatches
             bail!(PhaseError {
                 state_phase: state.phase(),
                 block_phase: block.phase(),
@@ -705,6 +766,11 @@ pub fn process_block_for_gossip<P: Preset>(
     }
 }
 
+// @audit blinded-block-processing: Processes untrusted blinded blocks (execution payload hidden)
+// ↳ Blinded blocks contain only execution payload header, not full payload
+// @audit VULN-03000011: Same skip_randao_verification vulnerability as process_untrusted_block
+// ↳ CONFIRMED: Blinded blocks should also enforce RANDAO verification in production
+// ↳ Blinded blocks should not bypass RANDAO verification in production environment
 pub fn process_untrusted_blinded_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -713,9 +779,14 @@ pub fn process_untrusted_blinded_block<P: Preset>(
     slot_report: impl SlotReport,
     skip_randao_verification: bool,
 ) -> Result<()> {
+    // @audit crypto-bypass: Same skip_randao_verification vulnerability as process_untrusted_block
+    // ↳ Allows bypassing RANDAO verification for blinded blocks - should only be used during sync
+    // @audit RISK: Malicious bypass could compromise randomness integrity even for blinded blocks
     let verifier = if skip_randao_verification {
+        // @audit security-warning: SkipRandaoVerification creates verification bypass
         MultiVerifier::new([VerifierOption::SkipRandaoVerification])
     } else {
+        // @audit-ok default-verification: Full verification for untrusted blinded blocks
         MultiVerifier::default()
     };
 
@@ -801,6 +872,10 @@ fn process_blinded_block<P: Preset>(
     }
 }
 
+// @audit deposit-processing: Phase dispatcher for deposit data validation
+// ↳ Routes to phase-specific implementations with different validation logic
+// @audit signature-verification: Each phase implementation must verify deposit signatures
+// ↳ Critical for preventing unauthorized validator creation and balance manipulation
 pub fn process_deposit_data(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -809,27 +884,34 @@ pub fn process_deposit_data(
 ) -> Result<Option<ValidatorIndex>> {
     match state {
         BeaconState::Phase0(state) => {
+            // @audit-ok phase0-processing: Standard deposit processing with signature verification
             phase0::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Altair(state) => {
+            // @audit-ok altair-processing: Reuses phase0 logic for compatibility
             altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Bellatrix(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Bellatrix does not modify `process_deposit_data`.
+            // @audit-ok bellatrix-compatibility: Correctly reuses altair implementation
             altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Capella(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Capella does not modify `process_deposit_data`.
+            // @audit-ok capella-compatibility: Correctly reuses altair implementation
             altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Deneb(state) => {
             // The use of `altair::process_deposit_data` is intentional.
             // Deneb does not modify `process_deposit_data`.
+            // @audit-ok deneb-compatibility: Correctly reuses altair implementation
             altair::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
         BeaconState::Electra(state) => {
+            // @audit electra-changes: New Electra deposit processing with modified logic
+            // ↳ Includes eth1_deposit_index increment and different balance handling
             electra::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
     }

@@ -1,0 +1,244 @@
+{
+  "metadata": {
+    "target_folder": "transition_functions/",
+    "static_callgraph": "NONE",
+    "spec_loaded": true,
+    "generated_at": "2025-01-05T00:00:00Z",
+    "schema_version": "1.0.0"
+  },
+  "audit_chunks": [
+    {
+      "chunk_title": "🌐 Network Entry Points - Untrusted State Transitions",
+      "rationale": "External untrusted data entry through network blocks and state transitions. First attack surface",
+      "functions": [
+        {"name": "untrusted_state_transition", "file": "src/combined.rs", "line": 52, "review_count": 1},
+        {"name": "process_untrusted_block", "file": "src/combined.rs", "line": 596, "review_count": 1},
+        {"name": "process_untrusted_blinded_block", "file": "src/combined.rs", "line": 708, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/combined.rs", "line": 670, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/electra/block_processing.rs", "line": 122, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/deneb/block_processing.rs", "line": 84, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/capella/block_processing.rs", "line": 85, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/bellatrix/block_processing.rs", "line": 79, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/altair/block_processing.rs", "line": 92, "review_count": 0},
+        {"name": "process_block_for_gossip", "file": "src/phase0/block_processing.rs", "line": 78, "review_count": 0},
+        {"name": "process_block_header_for_gossip", "file": "src/unphased/block_processing.rs", "line": 73, "review_count": 1}
+      ]
+    },
+    {
+      "chunk_title": "🔐 Cryptographic Signature Verification",
+      "rationale": "Critical authentication layer preventing unauthorized state changes. BLS signature verification",
+      "functions": [
+        {"name": "verify_signatures", "file": "src/combined.rs", "line": 241, "review_count": 0},
+        {"name": "verify_base_signature_with_head_state", "file": "src/combined.rs", "line": 213, "review_count": 0},
+        {"name": "verify_signatures", "file": "src/electra/state_transition.rs", "line": 82, "review_count": 0},
+        {"name": "verify_signatures", "file": "src/deneb/state_transition.rs", "line": 96, "review_count": 0},
+        {"name": "verify_signatures", "file": "src/capella/state_transition.rs", "line": 96, "review_count": 0},
+        {"name": "verify_signatures", "file": "src/bellatrix/state_transition.rs", "line": 94, "review_count": 0},
+        {"name": "verify_signatures", "file": "src/altair/state_transition.rs", "line": 90, "review_count": 0},
+        {"name": "verify_signatures", "file": "src/phase0/state_transition.rs", "line": 93, "review_count": 0},
+        {"name": "verify_sync_aggregate_signature", "file": "src/altair/block_processing.rs", "line": 592, "review_count": 0},
+        {"name": "count_required_signatures", "file": "src/electra/state_transition.rs", "line": 229, "review_count": 0},
+        {"name": "count_required_signatures", "file": "src/electra/block_processing.rs", "line": 147, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "⚠️ Slashing & Penalty Operations",
+      "rationale": "Slashing detection and penalties are critical for protocol security. Prevent equivocation",
+      "functions": [
+        {"name": "validate_proposer_slashing", "file": "src/unphased/block_processing.rs", "line": 207, "review_count": 1},
+        {"name": "validate_proposer_slashing_with_verifier", "file": "src/unphased/block_processing.rs", "line": 222, "review_count": 1},
+        {"name": "process_proposer_slashing", "file": "src/electra/block_processing.rs", "line": 644, "review_count": 0},
+        {"name": "process_proposer_slashing", "file": "src/bellatrix/block_processing.rs", "line": 324, "review_count": 0},
+        {"name": "process_proposer_slashing", "file": "src/altair/block_processing.rs", "line": 261, "review_count": 0},
+        {"name": "process_proposer_slashing", "file": "src/phase0/block_processing.rs", "line": 241, "review_count": 0},
+        {"name": "validate_attester_slashing", "file": "src/unphased/block_processing.rs", "line": 284, "review_count": 0},
+        {"name": "validate_attester_slashing_with_verifier", "file": "src/unphased/block_processing.rs", "line": 299, "review_count": 0},
+        {"name": "process_attester_slashing", "file": "src/electra/block_processing.rs", "line": 672, "review_count": 0},
+        {"name": "process_attester_slashing", "file": "src/bellatrix/block_processing.rs", "line": 352, "review_count": 0},
+        {"name": "process_attester_slashing", "file": "src/altair/block_processing.rs", "line": 289, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "📝 Attestation Processing & Validation",
+      "rationale": "Attestations form consensus. Must validate inclusion windows and prevent double voting",
+      "functions": [
+        {"name": "validate_attestation", "file": "src/unphased/block_processing.rs", "line": 348, "review_count": 1},
+        {"name": "validate_attestation_with_verifier", "file": "src/unphased/block_processing.rs", "line": 357, "review_count": 1},
+        {"name": "validate_attestation_with_verifier", "file": "src/electra/block_processing.rs", "line": 761, "review_count": 0},
+        {"name": "validate_attestation_with_verifier", "file": "src/deneb/block_processing.rs", "line": 362, "review_count": 0},
+        {"name": "apply_attestation", "file": "src/electra/block_processing.rs", "line": 702, "review_count": 0},
+        {"name": "apply_attestation", "file": "src/altair/block_processing.rs", "line": 319, "review_count": 0},
+        {"name": "apply_attestation", "file": "src/phase0/block_processing.rs", "line": 299, "review_count": 0},
+        {"name": "process_attestation", "file": "src/electra/block_processing.rs", "line": 1754, "review_count": 0},
+        {"name": "process_attestation", "file": "src/deneb/block_processing.rs", "line": 800, "review_count": 0},
+        {"name": "process_attestation", "file": "src/capella/block_processing.rs", "line": 911, "review_count": 0},
+        {"name": "process_attestation", "file": "src/altair/block_processing.rs", "line": 911, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "💰 Deposits & Withdrawals Processing", 
+      "rationale": "Financial operations with direct economic impact. Withdrawal credential validation critical",
+      "functions": [
+        {"name": "validate_deposits", "file": "src/unphased/block_processing.rs", "line": 424, "review_count": 1},
+        {"name": "verify_deposit_merkle_branch", "file": "src/unphased/block_processing.rs", "line": 569, "review_count": 1},
+        {"name": "process_deposit_data", "file": "src/combined.rs", "line": 804, "review_count": 0},
+        {"name": "process_deposit_data", "file": "src/electra/block_processing.rs", "line": 839, "review_count": 0},
+        {"name": "process_deposit_data", "file": "src/altair/block_processing.rs", "line": 389, "review_count": 0},
+        {"name": "process_deposit_data", "file": "src/phase0/block_processing.rs", "line": 328, "review_count": 0},
+        {"name": "process_withdrawals", "file": "src/electra/block_processing.rs", "line": 246, "review_count": 0},
+        {"name": "process_withdrawals", "file": "src/capella/block_processing.rs", "line": 415, "review_count": 0},
+        {"name": "process_withdrawals_root", "file": "src/electra/blinded_block_processing.rs", "line": 131, "review_count": 0},
+        {"name": "process_withdrawals_root", "file": "src/capella/blinded_block_processing.rs", "line": 122, "review_count": 0},
+        {"name": "get_expected_withdrawals", "file": "src/electra/block_processing.rs", "line": 325, "review_count": 0},
+        {"name": "get_expected_withdrawals", "file": "src/capella/block_processing.rs", "line": 482, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "🔄 Core State Transition Logic",
+      "rationale": "Main state mutation functions. Must ensure deterministic transitions across all nodes",
+      "functions": [
+        {"name": "state_transition", "file": "src/electra/state_transition.rs", "line": 30, "review_count": 0},
+        {"name": "state_transition", "file": "src/deneb/state_transition.rs", "line": 30, "review_count": 0},
+        {"name": "state_transition", "file": "src/capella/state_transition.rs", "line": 30, "review_count": 0},
+        {"name": "state_transition", "file": "src/bellatrix/state_transition.rs", "line": 29, "review_count": 0},
+        {"name": "state_transition", "file": "src/altair/state_transition.rs", "line": 25, "review_count": 0},
+        {"name": "state_transition", "file": "src/phase0/state_transition.rs", "line": 26, "review_count": 0},
+        {"name": "custom_state_transition", "file": "src/combined.rs", "line": 114, "review_count": 0},
+        {"name": "state_transition_for_report", "file": "src/combined.rs", "line": 90, "review_count": 0},
+        {"name": "trusted_state_transition", "file": "src/combined.rs", "line": 71, "review_count": 0},
+        {"name": "verify", "file": "src/unphased/state_transition.rs", "line": 16, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "🧱 Block Processing Operations",
+      "rationale": "Block validation and processing. Validates headers, RANDAO, operations in sequence",
+      "functions": [
+        {"name": "process_block", "file": "src/combined.rs", "line": 630, "review_count": 0},
+        {"name": "process_block", "file": "src/electra/block_processing.rs", "line": 94, "review_count": 0},
+        {"name": "process_block", "file": "src/deneb/block_processing.rs", "line": 56, "review_count": 0},
+        {"name": "process_block", "file": "src/capella/block_processing.rs", "line": 57, "review_count": 0},
+        {"name": "process_block", "file": "src/bellatrix/block_processing.rs", "line": 51, "review_count": 0},
+        {"name": "process_block", "file": "src/altair/block_processing.rs", "line": 65, "review_count": 0},
+        {"name": "process_block", "file": "src/phase0/block_processing.rs", "line": 51, "review_count": 0},
+        {"name": "process_block_header", "file": "src/unphased/block_processing.rs", "line": 120, "review_count": 0},
+        {"name": "process_randao", "file": "src/unphased/block_processing.rs", "line": 146, "review_count": 1},
+        {"name": "process_eth1_data", "file": "src/unphased/block_processing.rs", "line": 182, "review_count": 0},
+        {"name": "process_operations", "file": "src/electra/block_processing.rs", "line": 507, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "📅 Epoch Processing & Finalization",
+      "rationale": "Epoch boundaries handle rewards, penalties, finalization. Economic security enforcement",
+      "functions": [
+        {"name": "process_epoch", "file": "src/combined.rs", "line": 473, "review_count": 0},
+        {"name": "process_epoch", "file": "src/electra/epoch_processing.rs", "line": 48, "review_count": 0},
+        {"name": "process_epoch", "file": "src/deneb/epoch_processing.rs", "line": 28, "review_count": 0},
+        {"name": "process_epoch", "file": "src/capella/epoch_processing.rs", "line": 22, "review_count": 0},
+        {"name": "process_epoch", "file": "src/bellatrix/epoch_processing.rs", "line": 25, "review_count": 0},
+        {"name": "process_epoch", "file": "src/altair/epoch_processing.rs", "line": 42, "review_count": 0},
+        {"name": "process_epoch", "file": "src/phase0/epoch_processing.rs", "line": 36, "review_count": 0},
+        {"name": "process_justification_and_finalization", "file": "src/combined.rs", "line": 442, "review_count": 0},
+        {"name": "process_justification_and_finalization", "file": "src/phase0/epoch_processing.rs", "line": 125, "review_count": 0},
+        {"name": "process_justification_and_finalization", "file": "src/altair/epoch_processing.rs", "line": 151, "review_count": 0},
+        {"name": "weigh_justification_and_finalization", "file": "src/unphased/epoch_processing.rs", "line": 215, "review_count": 0},
+        {"name": "process_slashings", "file": "src/electra/epoch_processing.rs", "line": 464, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "⚙️ Execution Layer Integration",
+      "rationale": "Interface with execution engine. Validates execution payloads and state roots",
+      "functions": [
+        {"name": "process_execution_payload", "file": "src/electra/block_processing.rs", "line": 452, "review_count": 0},
+        {"name": "process_execution_payload_for_gossip", "file": "src/electra/block_processing.rs", "line": 218, "review_count": 0},
+        {"name": "process_execution_payload", "file": "src/deneb/block_processing.rs", "line": 161, "review_count": 0},
+        {"name": "process_execution_payload_for_gossip", "file": "src/deneb/block_processing.rs", "line": 214, "review_count": 0},
+        {"name": "process_execution_payload", "file": "src/capella/block_processing.rs", "line": 165, "review_count": 0},
+        {"name": "process_execution_payload_for_gossip", "file": "src/capella/block_processing.rs", "line": 204, "review_count": 0},
+        {"name": "process_execution_payload", "file": "src/bellatrix/block_processing.rs", "line": 155, "review_count": 0},
+        {"name": "process_execution_payload_for_gossip", "file": "src/bellatrix/block_processing.rs", "line": 195, "review_count": 0},
+        {"name": "process_blinded_block", "file": "src/combined.rs", "line": 742, "review_count": 0},
+        {"name": "custom_process_blinded_block", "file": "src/electra/blinded_block_processing.rs", "line": 35, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "🎯 Voluntary Exits & Registry Updates",
+      "rationale": "Validator lifecycle management. Exit validation prevents premature withdrawals",
+      "functions": [
+        {"name": "validate_voluntary_exit", "file": "src/unphased/block_processing.rs", "line": 608, "review_count": 0},
+        {"name": "validate_voluntary_exit_with_verifier", "file": "src/unphased/block_processing.rs", "line": 623, "review_count": 0},
+        {"name": "validate_voluntary_exit", "file": "src/electra/block_processing.rs", "line": 1039, "review_count": 0},
+        {"name": "validate_voluntary_exit_with_verifier", "file": "src/electra/block_processing.rs", "line": 1054, "review_count": 0},
+        {"name": "process_voluntary_exit", "file": "src/unphased/block_processing.rs", "line": 589, "review_count": 0},
+        {"name": "process_voluntary_exit", "file": "src/electra/block_processing.rs", "line": 1020, "review_count": 0},
+        {"name": "process_registry_updates", "file": "src/unphased/epoch_processing.rs", "line": 68, "review_count": 0},
+        {"name": "process_registry_updates", "file": "src/electra/epoch_processing.rs", "line": 163, "review_count": 0},
+        {"name": "process_registry_updates", "file": "src/deneb/epoch_processing.rs", "line": 141, "review_count": 0},
+        {"name": "add_validator_to_registry", "file": "src/electra/block_processing.rs", "line": 897, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "📊 Rewards, Penalties & Epoch Deltas",
+      "rationale": "Economic incentive calculations. Must be precise to maintain validator behavior",
+      "functions": [
+        {"name": "process_rewards_and_penalties", "file": "src/unphased/epoch_processing.rs", "line": 48, "review_count": 0},
+        {"name": "epoch_deltas", "file": "src/electra/epoch_intermediates.rs", "line": 18, "review_count": 0},
+        {"name": "epoch_deltas", "file": "src/deneb/epoch_intermediates.rs", "line": 18, "review_count": 0},
+        {"name": "epoch_deltas", "file": "src/capella/epoch_intermediates.rs", "line": 18, "review_count": 0},
+        {"name": "epoch_deltas", "file": "src/bellatrix/epoch_intermediates.rs", "line": 18, "review_count": 0},
+        {"name": "epoch_deltas", "file": "src/altair/epoch_intermediates.rs", "line": 239, "review_count": 0},
+        {"name": "epoch_deltas", "file": "src/phase0/epoch_intermediates.rs", "line": 665, "review_count": 0},
+        {"name": "statistics", "file": "src/combined.rs", "line": 838, "review_count": 0},
+        {"name": "statistics", "file": "src/altair/epoch_intermediates.rs", "line": 174, "review_count": 0},
+        {"name": "statistics", "file": "src/phase0/epoch_intermediates.rs", "line": 552, "review_count": 0},
+        {"name": "process_effective_balance_updates", "file": "src/unphased/epoch_processing.rs", "line": 152, "review_count": 0},
+        {"name": "process_effective_balance_updates", "file": "src/electra/epoch_processing.rs", "line": 416, "review_count": 0}
+      ]
+    },
+    {
+      "chunk_title": "🕒 Slot Processing & Historical Updates",
+      "rationale": "Time-based state progression. Updates roots and manages historical data",
+      "functions": [
+        {"name": "process_slots", "file": "src/combined.rs", "line": 281, "review_count": 0},
+        {"name": "process_slots", "file": "src/electra/slot_processing.rs", "line": 12, "review_count": 0},
+        {"name": "process_slots", "file": "src/deneb/slot_processing.rs", "line": 12, "review_count": 0},
+        {"name": "process_slots", "file": "src/capella/slot_processing.rs", "line": 12, "review_count": 0},
+        {"name": "process_slots", "file": "src/bellatrix/slot_processing.rs", "line": 12, "review_count": 0},
+        {"name": "process_slots", "file": "src/altair/slot_processing.rs", "line": 12, "review_count": 0},
+        {"name": "process_slots", "file": "src/phase0/slot_processing.rs", "line": 13, "review_count": 0},
+        {"name": "process_slot", "file": "src/unphased/slot_processing.rs", "line": 31, "review_count": 0},
+        {"name": "process_historical_roots_update", "file": "src/unphased/epoch_processing.rs", "line": 197, "review_count": 0},
+        {"name": "process_historical_summaries_update", "file": "src/electra/epoch_processing.rs", "line": 448, "review_count": 0},
+        {"name": "process_historical_summaries_update", "file": "src/deneb/epoch_processing.rs", "line": 216, "review_count": 0},
+        {"name": "process_historical_summaries_update", "file": "src/capella/epoch_processing.rs", "line": 134, "review_count": 0}
+      ]
+    }
+  ],
+  "top_attack_paths": [
+    {
+      "entry_function": "untrusted_state_transition",
+      "sink_function": "process_execution_payload",
+      "risk_reason": "Untrusted network block could contain malicious execution payload leading to state corruption"
+    },
+    {
+      "entry_function": "process_block_for_gossip",
+      "sink_function": "process_withdrawals",
+      "risk_reason": "Invalid withdrawal credentials in gossip block could lead to unauthorized fund extraction"
+    },
+    {
+      "entry_function": "validate_attestation_with_verifier",
+      "sink_function": "apply_attestation",
+      "risk_reason": "Attestation validation bypass could allow double voting and consensus manipulation"
+    },
+    {
+      "entry_function": "process_deposit_data",
+      "sink_function": "add_validator_to_registry",
+      "risk_reason": "Invalid deposit signature verification could allow unauthorized validator activation"
+    },
+    {
+      "entry_function": "validate_proposer_slashing",
+      "sink_function": "process_slashings",
+      "risk_reason": "Invalid slashing proof could lead to wrongful validator penalties and fund loss"
+    }
+  ],
+  "ordering_strategy": "Breadth-first from untrusted boundaries inward, guided by call-graph depth and STRIDE-like risk categories (S,T,R,I,D,E)."
+}

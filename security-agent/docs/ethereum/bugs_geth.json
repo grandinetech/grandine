@@ -1,0 +1,74 @@
+[
+  {
+    "攻撃タイトル": "DoS via malicious p2p message (invalid EC key)",
+    "対象クライアント": "Geth",
+    "URL": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-q26p-9cq4-7fc2",
+    "攻撃手順": [
+      "1. 攻撃者が victim Geth ノードに TCP‑level で接続し、ETH p2p ハンドシェイクを開始する",
+      "2. Auth Hello パケット内の EC 公開鍵に all‑zero の無効ポイントを設定して送信する",
+      "3. Geth は secp256k1 曲線上の有効性を検証せず共有秘密鍵を計算しようとして panic する",
+      "4. ノードがクラッシュしてプロセスが強制終了し、ネットワークから切断される"
+    ],
+    "チェックポイント": "p2p/handshake.go の EC 公開鍵検証ロジック: `elliptic.IsOnCurve(pub.X, pub.Y)` を追加し nil‑check だけになっていないか確認する"
+  },
+  {
+    "攻撃タイトル": "DoS via malicious GetBlockHeaders(count=0) での整数オーバーフロー",
+    "対象クライアント": "Geth",
+    "URL": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-4xc9-8hmq-j652",
+    "攻撃手順": [
+      "1. 攻撃者が ETH プロトコルで peer 接続し `GetBlockHeaders` を送信、`count` フィールドを 0 に設定",
+      "2. `count-1` が uint64 アンダーフローで UINT64_MAX となり、内部関数 `GetHeadersFrom()` に渡る",
+      "3. `maxHeadersServe` 制限をバイパスして genesis までの全ヘッダーを読み出そうとし、メモリを枯渇させる",
+      "4. victim ノードは OOM で応答不能またはクラッシュする"
+    ],
+    "チェックポイント": "eth/protocol/handler.go の header リクエスト処理で `count==0` を即座に拒否し、`count-1` 演算にオーバーフローガードがあるかを検証"
+  },
+  {
+    "攻撃タイトル": "Ping flood によるゴルーチン枯渇 DoS",
+    "対象クライアント": "Geth",
+    "URL": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-ppjg-v974-84cm",
+    "攻撃手順": [
+      "1. 攻撃者が victim ノードに多数の `Ping` メッセージを高頻度で送信",
+      "2. Geth は各 Ping 受信ごとに新しい goroutine を生成する実装だった",
+      "3. 数万〜数十万 goroutine が生成されヒープとスケジューラが飽和、メモリ不足に陥る",
+      "4. ノードが OOM killer で停止し、DoS が成立する"
+    ],
+    "チェックポイント": "p2p/protocol.go の Ping/Pong handler が goroutine を逐一 spawn していないか、rate‑limit または単一ワーカー処理になっているかを確認"
+  },
+  {
+    "攻撃タイトル": "GraphQL endpoint への巨大クエリによるメモリ枯渇 DoS (CVE‑2023‑42319)",
+    "対象クライアント": "Geth",
+    "URL": "https://nvd.nist.gov/vuln/detail/CVE-2023-42319",
+    "攻撃手順": [
+      "1. victim ノードが `--http --graphql` を有効にしている前提で、攻撃者が HTTP で接続",
+      "2. 数百〜数千の重いサブクエリを 1 request に alias で埋め込み送信",
+      "3. クエリ解析と応答生成でヒープを大量消費し、ガベージコレクタが追いつかなくなる",
+      "4. 数 GB のメモリ使用後にプロセスが swap/OOM でハング・クラッシュしサービス不能"
+    ],
+    "チェックポイント": "`graphql/http_handler.go` 付近で 1 リクエストのクエリ数・AST ノード数・応答サイズなどに制限が追加されているか、また `DepthLimit` などの query cost ルールが有効かを確認"
+  },
+  {
+    "攻撃タイトル": "Gethlighting — 部分 Eclipse によるチェーン分断攻撃",
+    "対象クライアント": "Geth",
+    "URL": "https://www.ndss-symposium.org/ndss-paper/partitioning-ethereum-without-eclipsing-it/",
+    "攻撃手順": [
+      "1. 攻撃者が数十台の VPS を用意し、victim ノードの約半数 (≈25/50) のピアスロットを占有",
+      "2. 占有ピアがブロック伝搬を意図的に 2–3 秒遅延させる low‑rate DoS を継続",
+      "3. 残りの健全ピア経由ではヘッダー到達が間に合わず、victim のローカルチェーン成長が停止",
+      "4. victim は数時間にわたりネットワークから論理的に分断され、古い tip に固定される"
+    ],
+    "チェックポイント": "ピア管理 (`p2p/peer.go`) で同一 /16 IP や AS peer 数制限、Outbound 保障ピアのランダム化が実装されているか、また `delay > MAX_DELAY` 時に遅延ピアを切断するロジックがあるか確認"
+  },
+  {
+    "攻撃タイトル": "DETER‑X — future tx 乱用による txpool 枯渇攻撃",
+    "対象クライアント": "Geth",
+    "URL": "https://tristartom.github.io/docs/ccs21.pdf",
+    "攻撃手順": [
+      "1. 攻撃者が残高 0 ETH の新規アカウントを作成",
+      "2. nonce = 0 のダミー送金ではなく、いきなり nonce = 1000 など未来 nonce の高 GasPrice trx を大量送信 (future tx)",
+      "3. txpool は高 GasPrice を優先し通常トランザクションを eviction、future tx でプール容量を占有",
+      "4. 正常ユーザの取引がプールに入れず、マイナーも空ブロックを掘るためネットワーク throughput が低下"
+    ],
+    "チェックポイント": "txpool/tx_pool.go の `MaxFutureNonceGap` と per‑sender limit (`txsPerSender`) が適切に設定され、未来 nonce の受け入れ時に eviction が高 GasPrice 偏重になっていないか確認。また invalid tx は一定ブロック経過後に `RemoveInvalid()` でパージされるかを検証"
+  }
+]

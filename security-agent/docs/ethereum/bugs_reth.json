@@ -1,0 +1,62 @@
+[
+  {
+    "攻撃タイトル": "Critical chain‑reorg logic bug (v1.4.8)",
+    "対象クライアント": "Reth",
+    "URL": "https://github.com/paradigmxyz/reth/releases/tag/v1.4.8",
+    "攻撃手順": [
+      "1. 攻撃者は Reth ≤1.4.7 を実行するバリデータ／RPC ノードを観測する。",
+      "2. 自身または共謀者が Tip 付近で 2 つ以上の competing チェーンを構築し、Persistence‑Threshold を下回る短い reorg を連続送信する。",
+      "3. Reth の fork 処理バグで Trie 更新が正しく巻き戻らず、誤った state root を canonical 化する。",
+      "4. 当該ノードは以降ネットワークと分岐し、ブロック提案・検証でペナルティ／DoS 状態となる。"
+    ],
+    "チェックポイント": "`engine::reorg::recompute_trie_updates()` が forked blocks について全パスを再計算しているか、`ParallelSparseTrie` の prefix set更新 (#16568) をテスト。"
+  },
+  {
+    "攻撃タイトル": "OP Mainnet ガス返却ミスマッチによるチェーンスプリット (v1.4.7)",
+    "対象クライアント": "Reth",
+    "URL": "https://github.com/paradigmxyz/reth/releases/tag/v1.4.7",
+    "攻撃手順": [
+      "1. 攻撃者は Optimism Mainnet で `SSTORE` GasRefund を最大化するトランザクションを含むブロックを提案。",
+      "2. Reth ≤1.4.6 が GasRefund 算出時に余剰ガスを低く見積もり、ブロック GasUsed を誤計算。",
+      "3. 同ブロックを受信した Reth ノードは \"block invalid\" として自身のチェーンを分岐させ、OP geth 系と fork。",
+      "4. 対象ノードは同期不能になり、Sequencer／RPC が停止する。"
+    ],
+    "チェックポイント": "`optimism::gas_refund::apply_refund()` の EIP‑3529/EIP‑3855 条件分岐をテストし、unit test に高リファンド Tx を追加して GasUsed 差異がないか検証。"
+  },
+  {
+    "攻撃タイトル": "Stack Overflow DoS via malformed block (#6452)",
+    "対象クライアント": "Reth",
+    "URL": "https://github.com/paradigmxyz/reth/issues/6452",
+    "攻撃手順": [
+      "1. 攻撃者はバリデータとして、不正トランザクションを含むブロックを生成し P2P に流す。",
+      "2. Reth ≤0.1.0‑alpha.20 の `BlockchainTree::insert_block()` が無限再帰で `stack overflow`。",
+      "3. 受信ノードは panic でプロセスがクラッシュし、再起動→同ブロック受信のループで永続 DoS。",
+      "4. 他実装はブロックを拒否するためネットワーク全体は継続、Reth ノードのみ排除される。"
+    ],
+    "チェックポイント": "`block_validation::BadBlockError` 受信時に再帰せずエラー early‑return するか、fuzz テストで無限再帰が起きないことを確認。"
+  },
+  {
+    "攻撃タイトル": "無効 state root ループでノードクラッシュ (#16113)",
+    "対象クライアント": "Reth",
+    "URL": "https://github.com/paradigmxyz/reth/issues/16113",
+    "攻撃手順": [
+      "1. 攻撃者は改ざんされた receipts を含むブロックを作成し、state root が実際と不一致になるよう細工。",
+      "2. Reth 1.3.12 付近では `ExecutionStage::apply_block()` が失敗しても 直前ロールバックせず同ブロックを再試行。",
+      "3. Sync pipeline が失敗→retry→失敗を繰り返し、最終的に `Fatal error: mismatched state root` でプロセスが停止。",
+      "4. 長時間の再同期が必要となり、RPC やバリデータがオフライン化。"
+    ],
+    "チェックポイント": "`apply_block()` 完了後の state root 検証で失敗した場合、`StageError::BadBlock` を上流に propagate して Unwind stage が必ず実行されるかをユニットテスト。"
+  },
+  {
+    "攻撃タイトル": "大量 RPC 読み出しによる Beacon 断線 DoS (#17323)",
+    "対象クライアント": "Reth",
+    "URL": "https://github.com/paradigmxyz/reth/issues/17323",
+    "攻撃手順": [
+      "1. 攻撃者は Archive RPC を公開している Reth 1.5.x ノードへ多並列の `eth_call` を IPC/HTTP で送信。",
+      "2. `Database::reader()` が 5 min 以上ロック保持し、`Long‑lived read transaction timed out` を発生。",
+      "3. エンジンの Engine API レスポンスがタイムアウトし、Beacon (例: Lighthouse) からのペイロード要求が失敗。",
+      "4. ノードは Beacon と通信断絶しブロック提案失敗、バリデータ報酬損失・サービス不可となる。"
+    ],
+    "チェックポイント": "`db::TX_READ_TIMEOUT` を短縮または `reader()` 完了後に Beacon 通信用スレッドへ協調キャンセルを実装。負荷テスト (`tokio` + `alloy`) で 10k rps を送っても Beacon ping が途絶えないことを CI で検査。"
+  }
+]

@@ -1,0 +1,440 @@
+{
+  "forks": {
+    "Paris": {
+      "block": 15537394,
+      "date": "2022-09-15",
+      "changes": "Merge activation (Proof-of-Stake). Removed mining and difficulty, introduced Engine API. EIPs: 3675 (PoS merge), 4399 (prevRandao randomness) [oai_citation:0‡github.com](https://github.com/ethereum/execution-specs#:~:text=Blog%20Paris%2015537394%202022,4399%20Specification%20Blog)."
+    },
+    "Shanghai": {
+      "block": 17034870,
+      "date": "2023-04-12",
+      "changes": "Enabled withdrawals (Shapella upgrade). EIPs: 3651 (warm coinbase), 3855 (PUSH0 opcode), 3860 (initcode gas & size limit), 4895 (beacon chain withdrawals), 6049 (SELFDESTRUCT deprecation notice) [oai_citation:1‡github.com](https://github.com/ethereum/execution-specs#:~:text=Shanghai%2017034870%202023,4399%20Specification%20Blog)."
+    },
+    "Cancun": {
+      "block": 19426587,
+      "date": "2024-03-13",
+      "changes": "Introduced blob transactions (proto-danksharding). EIPs: 1153 (transient storage opcodes), 4788 (beacon root access), 4844 (blob tx type with data blobs), 5656 (MCOPY opcode), 6780 (restrict SELFDESTRUCT), 7516 (BLOBBASEFEE opcode) [oai_citation:2‡github.com](https://github.com/ethereum/execution-specs#:~:text=Cancun%2019426587%202024,7514)."
+    },
+    "Prague": {
+      "block": 22431084,
+      "date": "2025-05-07",
+      "changes": "Expanded scalability and EL-CL integration. EIPs: 2537 (BLS12-381 precompiles), 2935 (historical block hashes in state), 6110 (direct deposits on-chain) [oai_citation:3‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-6110#:~:text=This%20EIP%20allows%20for%20an,proposer%20voting%20mechanism%20utilized%20currently), 7002 (triggerable validator exits) [oai_citation:4‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-7002#:~:text=Adds%20a%20new%20mechanism%20to,0x01%29%20withdrawal%20credentials), 7623 (calldata cost increase), 7685 (EL->CL request bus), 7691 (blob count 6→9) [oai_citation:5‡ethpandaops.io](https://ethpandaops.io/posts/eip7691-retrospective/#:~:text=EIP,justified%20the%20increase%20was%20correct), 7702 (set code tx for EOAs)."
+    }
+  },
+  "evm_opcodes": [
+    {
+      "opcode": "0x00",
+      "mnemonic": "STOP",
+      "description": "Halts execution.",
+      "gas_cost": 0
+    },
+    {
+      "opcode": "0x01",
+      "mnemonic": "ADD",
+      "description": "Addition (pop 2, push sum).",
+      "gas_cost": 3
+    },
+    {
+      "opcode": "0x02",
+      "mnemonic": "MUL",
+      "description": "Multiplication (pop 2, push product).",
+      "gas_cost": 5
+    },
+    {
+      "opcode": "0x03",
+      "mnemonic": "SUB",
+      "description": "Subtraction (pop 2, push result).",
+      "gas_cost": 3
+    },
+    {
+      "opcode": "0x04",
+      "mnemonic": "DIV",
+      "description": "Integer division.",
+      "gas_cost": 5
+    },
+    {
+      "opcode": "0x44",
+      "mnemonic": "PREVRANDAO",
+      "description": "Prior randomness (formerly DIFFICULTY, changed by EIP-4399).",
+      "gas_cost": 2
+    },
+    {
+      "opcode": "0x48",
+      "mnemonic": "BASEFEE",
+      "description": "Current block's base fee per gas.",
+      "gas_cost": 2
+    },
+    {
+      "opcode": "0x49",
+      "mnemonic": "BLOBHASH",
+      "description": "Get blob KZG commitment hash by index (EIP-4844).",
+      "gas_cost": 3
+    },
+    {
+      "opcode": "0x4a",
+      "mnemonic": "BLOBBASEFEE",
+      "description": "Get current blob base fee (EIP-7516).",
+      "gas_cost": 2
+    },
+    {
+      "opcode": "0x5c",
+      "mnemonic": "TLOAD",
+      "description": "Transient storage load (EIP-1153).",
+      "gas_cost": 100
+    },
+    {
+      "opcode": "0x5d",
+      "mnemonic": "TSTORE",
+      "description": "Transient storage store (EIP-1153).",
+      "gas_cost": 100
+    },
+    {
+      "opcode": "0x5e",
+      "mnemonic": "MCOPY",
+      "description": "Memory copy (EIP-5656).",
+      "gas_cost": "3 + 3 * ceil(size/32)"
+    },
+    {
+      "opcode": "0x5f",
+      "mnemonic": "PUSH0",
+      "description": "Push 0 onto stack (EIP-3855).",
+      "gas_cost": 2
+    },
+    {
+      "opcode": "0xff",
+      "mnemonic": "SELFDESTRUCT",
+      "description": "Destroy contract and send funds. Only self-delete effective post-Cancun (EIP-6780).",
+      "gas_cost": 5000
+    }
+  ],
+  "transactions": {
+    "types": {
+      "0": {
+        "name": "Legacy",
+        "fields": [
+          "nonce",
+          "gasPrice",
+          "gasLimit",
+          "to",
+          "value",
+          "data",
+          "v",
+          "r",
+          "s"
+        ],
+        "notes": "No explicit chainId (EIP-155 replay-protection uses v)."
+      },
+      "1": {
+        "name": "AccessList",
+        "fields": [
+          "chainId",
+          "nonce",
+          "gasPrice",
+          "gasLimit",
+          "to",
+          "value",
+          "data",
+          "accessList",
+          "v",
+          "r",
+          "s"
+        ],
+        "introduced": "EIP-2930 (Berlin)",
+        "notes": "Adds an access list to warm certain addresses/keys and reduce gas."
+      },
+      "2": {
+        "name": "DynamicFee",
+        "fields": [
+          "chainId",
+          "nonce",
+          "maxPriorityFeePerGas",
+          "maxFeePerGas",
+          "gasLimit",
+          "to",
+          "value",
+          "data",
+          "accessList",
+          "v",
+          "r",
+          "s"
+        ],
+        "introduced": "EIP-1559 (London)",
+        "notes": "Introduces baseFee burn and tip; tx specifies maxFee and priority fee."
+      },
+      "3": {
+        "name": "Blob",
+        "fields": [
+          "chainId",
+          "nonce",
+          "maxPriorityFeePerGas",
+          "maxFeePerGas",
+          "gasLimit",
+          "to",
+          "value",
+          "data",
+          "accessList",
+          "blobVersionedHashes",
+          "v",
+          "r",
+          "s"
+        ],
+        "introduced": "EIP-4844 (Cancun)",
+        "notes": "Carries blob data commitments (blobs separate). Pays blob fee (data gas) in addition to normal gas."
+      },
+      "4": {
+        "name": "SetCode",
+        "fields": [
+          "chainId",
+          "nonce",
+          "maxPriorityFeePerGas",
+          "maxFeePerGas",
+          "gasLimit",
+          "to",
+          "value",
+          "data",
+          "accessList",
+          "authorizationList",
+          "v",
+          "r",
+          "s"
+        ],
+        "introduced": "EIP-7702 (Prague)",
+        "notes": "Allows setting code for EOAs via signed authorizations. Each authorization sets an EOA's code to a delegate contract [oai_citation:6‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-7702#:~:text=A%20new%20EIP,RLP%20serialization%20of%20the%20following)."
+      }
+    },
+    "intrinsic_gas": {
+      "base": 21000,
+      "per_data_byte": {
+        "zero": 4,
+        "non_zero": 16
+      },
+      "access_list_cost": {
+        "address": 2400,
+        "storage_key": 1900
+      },
+      "blob_data_cost": "131072 gas per blob (data gas, separate from normal gas)"
+    },
+    "validation": {
+      "nonce": "Must equal sender's current nonce (then increment).",
+      "balance": "Sender balance must cover gasLimit * maxFeePerGas (or gasPrice) + value.",
+      "signature": "Must have valid secp256k1 signature (correct chainId).",
+      "gas_limits": "gasLimit <= block.gasLimit. Base fee <= maxFeePerGas for 1559-style tx (else invalid). Blob tx must satisfy blob base fee requirements."
+    }
+  },
+  "state": {
+    "world_state": "Global state is a Merkle-Patricia trie of accounts. Each account: {nonce, balance, storageRoot, codeHash}.",
+    "account": {
+      "nonce": "Transaction count for EOAs / creation count for contracts (uint64, capped by 2^64-1).",
+      "balance": "Account balance in wei.",
+      "code": "Contract bytecode (immutable). EOAs have no code (codeHash of empty).",
+      "storage": "Contract storage as a trie mapping 32-byte keys to 32-byte values. Absent keys = 0."
+    },
+    "storage_gas": {
+      "SLOAD": {
+        "cold": 2100,
+        "warm": 100
+      },
+      "SSTORE": "20k for 0->non0 (no refund after London), 5k for non0->non0, 5k for non0->0 (with 4800 gas refund)."
+    },
+    "state_transition": {
+      "begin_block": "Process system operations: credit withdrawals (post-Shanghai) at start of block.",
+      "tx_execution": "For each tx: deduct upfront gas, increment sender nonce, execute EVM code or value transfer, deduct gas used, refund allowable gas (max 1/2). Base fee is burned, tip goes to coinbase.",
+      "end_block": "After txs, transfer total validator tips to coinbase. No block reward after Merge. Update block hash history (EIP-2935 stores parent hash in state for ~8192 blocks) [oai_citation:7‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-2935#:~:text=At%20the%20start%20of%20processing,4788%20and%20therefore)."
+    }
+  },
+  "precompiles": [
+    {
+      "address": "0x0001",
+      "name": "ECRecover",
+      "description": "ECDSA signature recovery",
+      "gas": 3000
+    },
+    {
+      "address": "0x0002",
+      "name": "SHA256",
+      "description": "SHA-256 hash function",
+      "gas": "60 + 12 * (len//32)"
+    },
+    {
+      "address": "0x0003",
+      "name": "RIPEMD160",
+      "description": "RIPEMD-160 hash function",
+      "gas": "600 + 120 * (len//32)"
+    },
+    {
+      "address": "0x0004",
+      "name": "Identity",
+      "description": "Identity (copy) function",
+      "gas": "15 + 3 * (len//32)"
+    },
+    {
+      "address": "0x0005",
+      "name": "ModExp",
+      "description": "Modular exponentiation (EIP-198 & 2565)",
+      "gas": "varies (complex formula)"
+    },
+    {
+      "address": "0x0006",
+      "name": "ECAdd (bn128)",
+      "description": "Elliptic curve add on alt BN128 (EIP-196)",
+      "gas": 150
+    },
+    {
+      "address": "0x0007",
+      "name": "ECMul (bn128)",
+      "description": "Elliptic curve mul on alt BN128 (EIP-196)",
+      "gas": 6000
+    },
+    {
+      "address": "0x0008",
+      "name": "ECPairing (bn128)",
+      "description": "Bilinear pairing check on alt BN128 (EIP-197)",
+      "gas": "34000 + 81900 * pairs (reduced via EIP-1108)"
+    },
+    {
+      "address": "0x0009",
+      "name": "BeaconRoot",
+      "description": "Reads latest beacon state root (EIP-4788) via system contract",
+      "gas": 5000
+    },
+    {
+      "address": "0x000b",
+      "name": "BLS12_G1ADD",
+      "description": "BLS12-381 G1 point addition",
+      "gas": 375,
+      "introduced": "EIP-2537 [oai_citation:8‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-2537#:~:text=Name%20Value%20Comment%20BLS12_G1ADD%200x0b,address%20BLS12_MAP_FP2_TO_G2%200x11%20precompile%20address)"
+    },
+    {
+      "address": "0x000c",
+      "name": "BLS12_G1MSM",
+      "description": "BLS12-381 G1 multi-scalar multiplication",
+      "gas": "varies",
+      "introduced": "EIP-2537"
+    },
+    {
+      "address": "0x000d",
+      "name": "BLS12_G2ADD",
+      "description": "BLS12-381 G2 point addition",
+      "gas": 600,
+      "introduced": "EIP-2537"
+    },
+    {
+      "address": "0x000e",
+      "name": "BLS12_G2MSM",
+      "description": "BLS12-381 G2 multi-scalar multiplication",
+      "gas": "varies",
+      "introduced": "EIP-2537"
+    },
+    {
+      "address": "0x000f",
+      "name": "BLS12_PAIRING",
+      "description": "BLS12-381 pairing check",
+      "gas": "varies (per pairs)",
+      "introduced": "EIP-2537"
+    },
+    {
+      "address": "0x0010",
+      "name": "BLS12_MAP_FP_TO_G1",
+      "description": "Map field element to G1 curve point",
+      "gas": 5500,
+      "introduced": "EIP-2537"
+    },
+    {
+      "address": "0x0011",
+      "name": "BLS12_MAP_FP2_TO_G2",
+      "description": "Map field elements to G2 curve point",
+      "gas": 23800,
+      "introduced": "EIP-2537"
+    }
+  ],
+  "engine_api": {
+    "versions": {
+      "v1": {
+        "fork": "Paris",
+        "methods": [
+          "engine_exchangeTransitionConfigurationV1",
+          "engine_newPayloadV1",
+          "engine_forkchoiceUpdatedV1",
+          "engine_getPayloadV1"
+        ],
+        "notes": "Initial Engine API (post-Merge). Transition configuration exchange and basic block submit/execute."
+      },
+      "v2": {
+        "fork": "Shanghai",
+        "methods": [
+          "engine_newPayloadV2",
+          "engine_forkchoiceUpdatedV2",
+          "engine_getPayloadV2",
+          "engine_getPayloadBodiesByHashV1",
+          "engine_getPayloadBodiesByRangeV1"
+        ],
+        "notes": "Supports withdrawals. NewPayloadV2/FCU2 include withdrawals in payload structures [oai_citation:9‡raw.githubusercontent.com](https://raw.githubusercontent.com/ethereum/execution-apis/main/src/engine/shanghai.md#:~:text=%60prevRandao%60%3A%20%60DATA%60%2C%2032%20Bytes%20,ExecutionPayloadBodyV1)."
+      },
+      "v3": {
+        "fork": "Cancun",
+        "methods": [
+          "engine_newPayloadV3",
+          "engine_forkchoiceUpdatedV3",
+          "engine_getPayloadV3",
+          "engine_getBlobsV1"
+        ],
+        "notes": "Supports blob transactions. NewPayloadV3 includes blobGasUsed & excessBlobGas in payload [oai_citation:10‡raw.githubusercontent.com](https://raw.githubusercontent.com/ethereum/execution-apis/main/src/engine/cancun.md#:~:text=%5B%60ExecutionPayloadV2%60%5D%28.%2Fshanghai.md,DATA); getBlobsV1 fetches blob data."
+      },
+      "v4": {
+        "fork": "Prague",
+        "methods": [
+          "engine_newPayloadV4",
+          "engine_forkchoiceUpdatedV4",
+          "engine_getPayloadV4"
+        ],
+        "notes": "Anticipated for EL->CL requests (ExecutionPayloadV4 with requestsHash) [oai_citation:11‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-7685#:~:text=Extend%20the%20header%20with%20a,requests_hash) and new tx types."
+      }
+    },
+    "methods": {
+      "engine_newPayload": "CL -> EL: Submit a block for execution (validate & execute payload, return VALID/INVALID).",
+      "engine_forkchoiceUpdated": "CL -> EL: Update fork choice head and finalized blocks, optionally provide payloadAttributes to start building a new block.",
+      "engine_getPayload": "CL -> EL: Request execution engine to build a new block (for a proposer, if not using external builder).",
+      "engine_getBlobs": "CL -> EL: Retrieve blob commitments/proofs/data for blob transactions in a block (added in v3).",
+      "engine_exchangeTransitionConfiguration": "CL <-> EL: (v1 only) Exchange Merge TTD configuration (no longer used after transition)."
+    }
+  },
+  "block": {
+    "header": {
+      "Frontier_fields": [
+        "parentHash",
+        "ommersHash",
+        "beneficiary",
+        "stateRoot",
+        "transactionsRoot",
+        "receiptsRoot",
+        "logsBloom",
+        "difficulty",
+        "number",
+        "gasLimit",
+        "gasUsed",
+        "timestamp",
+        "extraData",
+        "mixHash",
+        "nonce"
+      ],
+      "Paris_changes": "difficulty fixed at 0 (no PoW) [oai_citation:12‡github.com](https://github.com/ethereum/execution-specs#:~:text=Blog%20Paris%2015537394%202022,4399%20Specification%20Blog); mixHash carries prevRandao from beacon chain (randomness); nonce field unused (8 bytes 0).",
+      "Shanghai_changes": "Added withdrawals list to block (ExecutionPayloadV2) containing validator withdrawals.",
+      "Cancun_changes": "Added blobGasUsed & excessBlobGas fields to header (ExecutionPayloadV3) for blob data usage [oai_citation:13‡raw.githubusercontent.com](https://raw.githubusercontent.com/ethereum/execution-apis/main/src/engine/cancun.md#:~:text=%5B%60ExecutionPayloadV2%60%5D%28.%2Fshanghai.md,DATA).",
+      "Prague_changes": "Added requestsHash field to header (ExecutionPayloadV4) for EL requests commitment [oai_citation:14‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-7685#:~:text=Extend%20the%20header%20with%20a,requests_hash).",
+      "ommers": "No ommers/uncles after Merge (ommer list empty; ommersHash = Keccak256([]))."
+    },
+    "body": {
+      "transactions": "List of transactions included. No block size limit aside from gas limit. All must pass validation; their execution updates state.",
+      "withdrawals": "List of withdrawals (post-Shanghai). Each entry has {index, validatorIndex, address, amount} and is processed by crediting the address with amount (in wei) at block execution start.",
+      "blobs": "If block contains blob tx (post-Cancun), associated blob data (commitments, blobs, proofs) are included via side channels (not in main block RLP). BlobGasUsed and excessBlobGas in header track their usage; blob base fee applies to blob tx.",
+      "deposits": "New validator deposits (32 ETH) are processed on EL after EIP-6110 (Prague) instead of waiting for CL voting. This eliminates ~12hr activation delay by including deposit data directly on-chain [oai_citation:15‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-6110#:~:text=This%20EIP%20allows%20for%20an,proposer%20voting%20mechanism%20utilized%20currently).",
+      "exits": "Validator exits can be triggered by EL for validators with 0x01 withdrawal credentials (post-EIP-7002), enabling voluntary exits via a special EL request/transaction [oai_citation:16‡eips.ethereum.org](https://eips.ethereum.org/EIPS/eip-7002#:~:text=Adds%20a%20new%20mechanism%20to,0x01%29%20withdrawal%20credentials)."
+    },
+    "fees": {
+      "baseFee": "Base fee per gas (EIP-1559) in header, burned from transaction fees. Adjusted each block (±12.5%) to target 50% gas usage.",
+      "blob_base_fee": "Blob data base fee (EIP-4844) for blob gas, adjusted by excessBlobGas to target ~3 blobs (later 6 blobs) per block. Exposed via BLOBBASEFEE opcode.",
+      "gas_limit": "Block gasLimit is 2x target (e.g. 30M limit for 15M target). Miner/validator can adjust within protocol constraints (vote mechanism).",
+      "excessGas": "excessBlobGas = blobGasUsed - targetBlobGas per block. This is used to adjust blob base fee (similar to how gasUsed - targetGas adjusts baseFee) [oai_citation:17‡ethpandaops.io](https://ethpandaops.io/posts/eip7691-retrospective/#:~:text=EIP,justified%20the%20increase%20was%20correct)."
+    }
+  }
+}

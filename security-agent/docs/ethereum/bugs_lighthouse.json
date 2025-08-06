@@ -1,0 +1,86 @@
+[
+  {
+    "攻撃タイトル": "BlocksByRange \"count\" オーバーフローによる DoS (CL‑2023‑01)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://raw.githubusercontent.com/ethereum/public-disclosures/master/disclosures/CL-2023-05-03.md",
+    "攻撃手順": [
+      "1. 攻撃者がビーコン P2P でノードに接続する",
+      "2. start_slot を任意、count に 4,294,967,295 など極端に大きい値を入れた BlocksByRange 要求を送信",
+      "3. v4.4.0 以前の Lighthouse は count を usize にキャスト → 巨大ベクタ確保で panic しプロセスが強制終了",
+      "4. 多数ノードに同時送信するとネットワーク同期が停止する"
+    ],
+    "チェックポイント": "network/rpc/requests.rs 内 handle_blocks_by_range() で count <= MAX_BLOCKS_BY_RANGE を強制し、fuzz で 2^32 超を検証する行を追加するかを確認"
+  },
+  {
+    "攻撃タイトル": "Electra Max‑EB 重複適用で total_active_balance が狂う (#7209)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://github.com/sigp/lighthouse/pull/7209",
+    "攻撃手順": [
+      "1. 攻撃者は 2048 ETH コンソリデーション対象バリデータ A を用意し、連続する 2 エポックでステーク移転トランザクションを発行",
+      "2. v7.0.0‑beta.4 以前は consolidation 毎に update_effective_balance() を二重呼び出しする実装バグがある",
+      "3. A の effective_balance が 2 倍に膨張し、fork‑choice の total_active_balance も高く計算される",
+      "4. 他実装と報酬計算が食い違いチェーンスプリットの引き金となる"
+    ],
+    "チェックポイント": "beacon_chain::epoch_processing::update_effective_balance() が同エポック内で同じ validator に 2 回走らないかユニットテストを追加"
+  },
+  {
+    "攻撃タイトル": "旧フォーク向け Attestation を受理して fork‑choice がズレる (#7084)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://github.com/sigp/lighthouse/pull/7084",
+    "攻撃手順": [
+      "1. 攻撃者はチェーン分岐後の過去ブロックに対する attestations を大量生成しブロードキャスト",
+      "2. v7.0.0‑beta.3 以前の Lighthouse は split_slot 判定が抜けており有効としてプールに格納",
+      "3. fork‑choice が古いチェーンにバイアスし提案ブロックが遅延 → 最終化停止",
+      "4. DoS を継続すると Lighthouse ノードのみ long‑range fork に巻き込まれる"
+    ],
+    "チェックポイント": "attestation_verification.rs の check_target_fork() で target.slot < split_slot を Invalid にするテストを追加"
+  },
+  {
+    "攻撃タイトル": "Holesky で無効 Justified‑block を正当化してしまうバグ (#7041)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://github.com/sigp/lighthouse/issues/7041",
+    "攻撃手順": [
+      "1. 攻撃者(or 誤設定ノード)が無効 execution‑payload を含むブロックを Holesky に投下し、Justified チェックポイントを細工",
+      "2. v7.0.0‑beta.0‑2 の Lighthouse は invalid block root を blacklist できず採用",
+      "3. Lighthouse ノードのみ最終化が止まり、ネットワークが分断",
+      "4. 攻撃者は MEV 独占や検閲を強要可能"
+    ],
+    "チェックポイント": "fork_choice::on_block() で known‑invalid block_root を事前照会し blacklist, BanPeer を即実行することを確認"
+  },
+  {
+    "攻撃タイトル": "Light‑client Merkle proof 誤生成で同期停止 (#7007)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://github.com/sigp/lighthouse/pull/7007",
+    "攻撃手順": [
+      "1. 攻撃者は /light_client/updates を高頻度で要求する軽量クライアントを多数起動",
+      "2. v6.1.x‑v7.0.0‑beta.0 は hot‑state cache ミスマッチで無効 proof を生成し返却",
+      "3. 受信側 Light Client は検証失敗で同期停止し UX が損なわれる",
+      "4. 大量要求でビーコンノード側も CPU 負荷が増大"
+    ],
+    "チェックポイント": "light_client::builder::build_merkle_proof() で state variant と proof パスの整合を SSZ‑fuzz で検証、EIP‑4788 ブロックルートのユニットテストを追加"
+  },
+  {
+    "攻撃タイトル": "Attestation subscription regression により InsufficientPeers 連発 (#6869 相当)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://github.com/sigp/lighthouse/releases/tag/v7.0.1",
+    "攻撃手順": [
+      "1. 攻撃者は gossipsub ネットワークで Subnets の subscribe/unsubscribe を高速で繰り返す",
+      "2. v7.0.0 では attestation サブスク数の計算がバグり VC が \"InsufficientPeers\" を連発",
+      "3. ブロック提案前準備がスキップされ、同ノードの提案/投票が欠落 → 最終化遅延",
+      "4. ログスパムと CPU 負荷で軽度 DoS"
+    ],
+    "チェックポイント": "network::attestation_service::subscribe_all_subnets() で peer_count underflow を防ぐガード追加、回帰テストを CI に"
+  },
+  {
+    "攻撃タイトル": "Unfinalized BlocksByRange ルート計算が重く DoS 可能 (#7098)",
+    "対象クライアント": "Lighthouse",
+    "URL": "https://github.com/sigp/lighthouse/pull/7098",
+    "攻撃手順": [
+      "1. 攻撃者は未 finality 状態の大量スロットに対し BlocksByRange を連続送信",
+      "2. v7.0.0‑beta.5 以前は fork‑choice を毎回走らせ未確定ブロック root を計算、CPU が飽和",
+      "3. ノード応答レイテンシが悪化し、同期遅延が広がる",
+      "4. 並列に送ればリソース枯渇でクラッシュも狙える"
+    ],
+    "チェックポイント": "rpc::block_by_range() で fork‑choice 呼び出しをキャッシュまたは finalized 範囲外を拒否するロジックがあるか確認"
+  }
+]

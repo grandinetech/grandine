@@ -1,0 +1,507 @@
+[
+  {
+    "EIP": 1559,
+    "Title": "Fee market change for ETH 1.0 chain",
+    "Category": "Core",
+    "Status": "Final",
+    "StateMachines": [
+      {
+        "Name": "Execution Layer",
+        "StateTransitions": [
+          {
+            "CurrentState": "Legacy gas auction model (pre-EIP-1559)",
+            "Trigger": "Activation of London fork (block number specific to network) introducing EIP-1559:contentReference[oaicite:0]{index=0}",
+            "NewState": "EIP-1559 fee market: blocks have dynamic base fee and target gas usage (block gas limit is twice target):contentReference[oaicite:1]{index=1}:contentReference[oaicite:2]{index=2}"
+          }
+        ]
+      }
+    ],
+    "NewStructures": [
+      {
+        "Name": "Transaction Type 0x02 (EIP-1559)",
+        "Description": "New transaction format with fields: chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to, value, data, access_list, and signature (reuses EIP-2718 envelope):contentReference[oaicite:3]{index=3}"
+      },
+      {
+        "Name": "BlockHeader.baseFeePerGas",
+        "Description": "New field in block header representing the base fee for that block (initially 1 gwei at fork):contentReference[oaicite:4]{index=4}:contentReference[oaicite:5]{index=5}"
+      }
+    ],
+    "NewFunctions": [
+      {
+        "Name": "compute_base_fee",
+        "Description": "Algorithm to update base fee each block: if previous block gasUsed > target, baseFee increases (up to 12.5%); if below target, baseFee decreases:contentReference[oaicite:6]{index=6}",
+        "Inputs": "parent_base_fee, parent_gas_used, parent_gas_target",
+        "Outputs": "new base_fee_per_gas for current block"
+      },
+      {
+        "Name": "effective_gas_price",
+        "Description": "Determines transaction fee per gas for EVM (returned by GASPRICE opcode): equals baseFee + priority_fee (capped by tx.max_fee_per_gas):contentReference[oaicite:7]{index=7}",
+        "Inputs": "Transaction (max_fee_per_gas, max_priority_fee_per_gas), block.base_fee_per_gas",
+        "Outputs": "effective gas price used for execution and fee accounting"
+      }
+    ],
+    "NewRules": [
+      {
+        "Name": "Block Base Fee Validity",
+        "Description": "Each block’s baseFeePerGas must equal the expected value computed from parent block’s baseFee and gas usage (or initial value at fork block):contentReference[oaicite:8]{index=8}. If not, the block is invalid."
+      },
+      {
+        "Name": "Dynamic Block Gas Limits",
+        "Description": "Block gas usage (gasUsed) can be up to twice the target gas (elastic limit); protocol enforces block.gas_used ≤ block.gas_limit and that block.gas_limit does not change by more than 0.0976% (1/1024) from parent:contentReference[oaicite:9]{index=9}."
+      },
+      {
+        "Name": "Transaction Fee Cap",
+        "Description": "Included transactions must have max_fee_per_gas ≥ block.baseFeePerGas to cover the base fee. Otherwise, the transaction cannot be executed in that block (miners won’t include it):contentReference[oaicite:10]{index=10}."
+      },
+      {
+        "Name": "Fee Distribution",
+        "Description": "Base fee is burned (removed from circulation) rather than given to the miner; only the priority fee is rewarded to the block’s miner:contentReference[oaicite:11]{index=11}:contentReference[oaicite:12]{index=12}."
+      },
+      {
+        "Name": "GasPrice Opcode Change",
+        "Description": "The EVM GASPRICE opcode (0x3A) now returns the effective_gas_price (post-1559 calculation) instead of the user-specified gas price:contentReference[oaicite:13]{index=13}."
+      }
+    ],
+    "Preconditions": [
+      "EIP-2718 (typed transaction envelopes):contentReference[oaicite:14]{index=14} and EIP-2930 (access lists) are already implemented (London fork includes them) as EIP-1559 builds on them.",
+      "Network reaches the specified London fork block number to enable EIP-1559 changes."
+    ],
+    "Exceptions": [
+      "Transactions of type 0x02 are invalid before the fork block (clients reject them prior to activation).",
+      "Legacy transactions (type 0) remain valid post-fork, but all blocks after fork must include the baseFee field and follow the new fee rules (old clients not aware of baseFee will reject post-fork blocks)."
+    ],
+    "ClientNotes": {
+      "Geth": "Introduced EIP-1559 in v1.10.x, adding support for type-0x2 transactions in mempool and mining. Adjusted block structure (adding baseFee), transaction pool logic for fee cap, and burning mechanism (reducing miner reward by base fee):contentReference[oaicite:15]{index=15}.",
+      "Erigon": "Implemented EIP-1559 with its own execution layer; needed to handle new transaction type in its staged sync architecture and ensure baseFee is stored in block headers. Erigon’s RPC and database schemas updated to record baseFee per block.",
+      "Reth": "Built after EIP-1559, so it natively supports type-0x2 transactions and base fee calculation. Uses Rust libraries for transaction pool management with EIP-1559 fee logic.",
+      "Lighthouse": "N/A (Consensus client) – however, after the Merge, consensus layer includes execution payloads with baseFee. Lighthouse ensures the execution payload it receives/produces has the correct baseFee and verifies it via the Engine API.",
+      "Prysm": "N/A (Consensus client) – similar to Lighthouse, Prysm passes the baseFee from execution engine in block proposals and verifies execution payloads include the correct baseFee in the post-merge context."
+    }
+  },
+  {
+    "EIP": 3675,
+    "Title": "Upgrade consensus to Proof-of-Stake",
+    "Category": "Core",
+    "Status": "Final",
+    "StateMachines": [
+      {
+        "Name": "Execution Layer",
+        "StateTransitions": [
+          {
+            "CurrentState": "Proof-of-Work chain (Ethash mining, PoW fork-choice)",
+            "Trigger": "Terminal Total Difficulty (TTD) is reached on the PoW chain (or Terminal Block Hash override matches):contentReference[oaicite:16]{index=16}:contentReference[oaicite:17]{index=17}",
+            "NewState": "Transition block is produced under Proof-of-Stake consensus (first PoS block), marking the start of the PoS chain:contentReference[oaicite:18]{index=18}:contentReference[oaicite:19]{index=19}"
+          },
+          {
+            "CurrentState": "Post-merge chain (under PoS)",
+            "Trigger": "Consensus layer sends a POS_FORKCHOICE_UPDATED event (new finalized or head update):contentReference[oaicite:20]{index=20}",
+            "NewState": "Execution client updates canonical head to the block nominated by PoS (LMD-GHOST) and recognizes finalized blocks as instructed:contentReference[oaicite:21]{index=21}"
+          }
+        ]
+      },
+      {
+        "Name": "Beacon Chain (Consensus Layer)",
+        "StateTransitions": [
+          {
+            "CurrentState": "Beacon chain running separately (not yet dictating mainnet blocks)",
+            "Trigger": "Execution chain hits TTD, triggering the Merge handshake between Execution and Consensus:contentReference[oaicite:22]{index=22}",
+            "NewState": "Beacon chain takes over block production for Ethereum mainnet; validators propose blocks and drive fork-choice for execution layer:contentReference[oaicite:23]{index=23}"
+          }
+        ]
+      }
+    ],
+    "NewStructures": [
+      {
+        "Name": "BlockHeader Fields after Merge",
+        "Description": "Several block header fields become fixed constants at the transition: ommersHash = Keccak(RLP([])), difficulty = 0, mixHash = 0x00..00, nonce = 0x0000000000000000 (no PoW data):contentReference[oaicite:24]{index=24}"
+      },
+      {
+        "Name": "Removed Ommer List",
+        "Description": "The block header ommers (uncle blocks) list is always empty post-merge; no ommers are included in PoS blocks:contentReference[oaicite:25]{index=25}"
+      },
+      {
+        "Name": "POS_FORKCHOICE_UPDATED (Event)",
+        "Description": "Consensus-to-execution event introduced to notify the execution layer of new head and finalized blocks in PoS. Execution clients must handle this to update their fork choice and finality state:contentReference[oaicite:26]{index=26}"
+      }
+    ],
+    "NewFunctions": [
+      {
+        "Name": "HandlePosForkchoiceUpdated",
+        "Description": "Procedure to handle POS_FORKCHOICE_UPDATED events from the consensus layer: update the canonical chain head to the provided block hash and update finalized checkpoint:contentReference[oaicite:27]{index=27}",
+        "Inputs": "Head block hash (new head), Finalized block hash (if any) from the consensus layer",
+        "Outputs": "Canonical head updated to new PoS head; finalized block marked in execution state"
+      }
+    ],
+    "NewRules": [
+      {
+        "Name": "No PoW Block After Transition",
+        "Description": "Execution clients must reject any new block that is mined (PoW) after the terminal PoW block. The terminal PoW block is the last permissible PoW block:contentReference[oaicite:28]{index=28}"
+      },
+      {
+        "Name": "Block Fields Constants",
+        "Description": "From the transition block onward, block header fields related to PoW (ommers, difficulty, mixHash, nonce) must equal the fixed values (no variability):contentReference[oaicite:29]{index=29}. ExtraData field is limited to 32 bytes:contentReference[oaicite:30]{index=30}"
+      },
+      {
+        "Name": "Post-Merge Block Validity",
+        "Description": "Ethash-specific validity checks are removed: do not verify difficulty target or mixHash/nonce (PoW), and ignore ommer-related rules. Instead, enforce new constants and extraData length limit:contentReference[oaicite:31]{index=31}:contentReference[oaicite:32]{index=32}"
+      },
+      {
+        "Name": "No Mining Rewards",
+        "Description": "Block rewards and ommer inclusion rewards are abolished from the transition block onward. The coinbase (beneficiary) only receives transaction fees, no protocol block reward:contentReference[oaicite:33]{index=33}"
+      },
+      {
+        "Name": "Fork Choice Switch to PoS",
+        "Description": "The fork-choice rule is replaced at the first PoS event: abandon PoW longest-chain rule, adopt PoS LMD-GHOST guided by the consensus layer’s inputs for chain head and finality:contentReference[oaicite:34]{index=34}"
+      }
+    ],
+    "Preconditions": [
+      "The network’s Terminal Total Difficulty (TTD) value must be reached (for Ethereum mainnet, TTD = 58750000000000000000000) to initiate the merge transition:contentReference[oaicite:35]{index=35}",
+      "Clients are configured with identical merge parameters (TTD or Terminal Block Hash/Number):contentReference[oaicite:36]{index=36} so that they trigger the transition simultaneously when conditions are met"
+    ],
+    "Exceptions": [
+      "If a Terminal Block Hash and Terminal Block Number are explicitly configured (non-zero), that specific block triggers the transition regardless of total difficulty:contentReference[oaicite:37]{index=37}",
+      "Any PoW block received after the merge transition (i.e., after a terminal PoW block) is invalid and must not be added to the chain:contentReference[oaicite:38]{index=38}"
+    ],
+    "ClientNotes": {
+      "Geth": "Implemented EIP-3675 by stopping Ethash mining once TTD is met and switching to the Engine API for block production via a connected consensus client. Geth’s fork-choice logic was modified to defer to the beacon chain (via POS_FORKCHOICE_UPDATED messages) for head updates:contentReference[oaicite:39]{index=39}. PoW block import beyond TTD is disabled:contentReference[oaicite:40]{index=40}.",
+      "Erigon": "Similar to Geth, Erigon ceased PoW operations at TTD and relies on the Engine API to receive blocks from consensus layer. It handles the transition block by applying the new block validation rules (no nonce/difficulty checks, no rewards). Erigon’s database and sync were adjusted to account for constant header fields post-merge.",
+      "Reth": "As a post-merge execution client, Reth was built with PoS-only assumptions (no PoW code). It inherently supports Engine API calls for PoS and enforces the EIP-3675 rules (constant block fields, no rewards) from genesis, simplifying the merge logic (since Reth did not operate during PoW).",
+      "Lighthouse": "Consensus client (Ethereum Beacon). During the Merge, Lighthouse coordinated with execution engines via Engine API (e.g., `engine_executePayload`, `engine_forkchoiceUpdated`). It ensured that execution payloads conform to EIP-3675 (e.g., no non-zero difficulty or stray ommers) and that the execution chain progresses only when the beacon chain dictates (e.g., no unsolicited chain extensions without POS_FORKCHOICE_UPDATED).",
+      "Prysm": "Consensus client (Go). Prysm similarly used the Engine API to drive execution. It managed the transition by selecting the terminal PoW block at TTD and then began feeding execution payloads (PoS blocks) to the execution client. Prysm monitors that execution clients reject any PoW blocks after the transition, and handles any edge cases (like Terminal Block Hash overrides) to ensure a smooth swap to PoS."
+    }
+  },
+  {
+    "EIP": 4399,
+    "Title": "Supplant DIFFICULTY opcode with PREVRANDAO",
+    "Category": "Core",
+    "Status": "Final",
+    "StateMachines": [
+      {
+        "Name": "Execution Layer",
+        "StateTransitions": [
+          {
+            "CurrentState": "Pre-Merge: Block header mixHash used for PoW, DIFFICULTY opcode returns mining difficulty",
+            "Trigger": "At the Merge transition block (requires EIP-3675 activation):contentReference[oaicite:41]{index=41}",
+            "NewState": "Post-Merge: Block header mixHash field is populated with the beacon chain’s latest RANDAO random value:contentReference[oaicite:42]{index=42}, and the DIFFICULTY (0x44) opcode now returns this value (renamed PREVRANDAO):contentReference[oaicite:43]{index=43}"
+          }
+        ]
+      }
+    ],
+    "NewStructures": [
+      {
+        "Name": "BlockHeader.prevRandao (mixHash repurposed)",
+        "Description": "The existing mixHash field in block headers is repurposed to store the previous beacon chain RANDAO output (randomness) for PoS blocks:contentReference[oaicite:44]{index=44}. This field may be referred to as prevRandao after the transition."
+      }
+    ],
+    "NewFunctions": [],
+    "NewRules": [
+      {
+        "Name": "Populate prevRandao",
+        "Description": "For each block after the transition, set block.mixHash (= prevRandao) to the beacon chain’s randomness mix from the previous slot:contentReference[oaicite:45]{index=45}"
+      },
+      {
+        "Name": "Opcode Return Value Change",
+        "Description": "The EVM instruction DIFFICULTY (0x44) must return the 32-byte value in the block header’s mixHash/prevRandao field, instead of a PoW difficulty value:contentReference[oaicite:46]{index=46}. (Gas cost remains the same.)"
+      },
+      {
+        "Name": "Opcode Renaming",
+        "Description": "For clarity, the mixHash header field is conceptually renamed to prevRandao, and the DIFFICULTY opcode is referred to as PREVRANDAO to reflect its new semantics:contentReference[oaicite:47]{index=47}"
+      }
+    ],
+    "Preconditions": [
+      "EIP-3675 (The Merge to Proof-of-Stake) must be activated – i.e., after the transition block, difficulty is fixed at 0 and PoW is halted:contentReference[oaicite:48]{index=48}",
+      "Beacon chain must be supplying RANDAO values each slot (inherited from PoS consensus; the merge ensures this input is available)"
+    ],
+    "Exceptions": [
+      "Before the merge transition, the DIFFICULTY opcode behaves as originally (returns PoW difficulty). After transition, contracts may detect the new behavior because the returned value (prevRandao) will typically exceed 2^64, a signal of PoS block:contentReference[oaicite:49]{index=49}",
+      "No changes to gas costs or other opcodes; this change is backwards-compatible with contracts that used DIFFICULTY for randomness (they now get superior entropy):contentReference[oaicite:50]{index=50}"
+    ],
+    "ClientNotes": {
+      "Geth": "Needed to obtain the prevRandao from the consensus layer (via Engine API) and fill it into the block header when building or verifying blocks post-merge. Internally, Geth treats the mixHash field as random seed after merge, and its EVM execution reads from there for opcode 0x44.",
+      "Erigon": "Similar to Geth, Erigon populates the mixHash/prevRandao in its block representation using data from the beacon chain. Ensured that difficulty-related code (e.g., total difficulty computation) is disabled after merge to avoid conflicts.",
+      "Reth": "Designed with PoS in mind, Reth uses the prevRandao provided in execution payloads directly. No legacy difficulty handling needed, it directly maps the consensus random to the execution block field.",
+      "Lighthouse": "Provides the execution layer with a `prev_randao` field in each ExecutionPayload during block proposal. Lighthouse (and other consensus clients) compute this from the beacon state’s RANDAO and pass it down so execution clients can include it in block headers:contentReference[oaicite:51]{index=51}.",
+      "Prysm": "Calculates the RANDAO mix for each slot as part of consensus and sends it to the execution client via the Engine API. Prysm ensures that the execution payloads it creates have the correct prevRandao and that execution engines apply EIP-4399 by returning that value for opcode 0x44."
+    }
+  },
+  {
+    "EIP": 4895,
+    "Title": "Beacon chain push withdrawals as operations",
+    "Category": "Core",
+    "Status": "Final",
+    "StateMachines": [
+      {
+        "Name": "Execution Layer",
+        "StateTransitions": [
+          {
+            "CurrentState": "Pre-Withdrawals Upgrade: Execution blocks contain no direct validator withdrawal data",
+            "Trigger": "Activation of Shanghai/Capella upgrade at specified timestamp (FORK_TIMESTAMP):contentReference[oaicite:52]{index=52}",
+            "NewState": "Post-Upgrade: ExecutionPayloads include a list of withdrawals from the beacon chain, which the execution client processes every block:contentReference[oaicite:53]{index=53}:contentReference[oaicite:54]{index=54}"
+          }
+        ]
+      },
+      {
+        "Name": "Beacon Chain",
+        "StateTransitions": [
+          {
+            "CurrentState": "Validators' ETH accumulates in beacon chain withdrawal queue (not delivered to execution)",
+            "Trigger": "Capella fork on consensus layer (enabling withdrawals) synchronously with Shanghai on execution:contentReference[oaicite:55]{index=55}",
+            "NewState": "Beacon chain creates withdrawal operations and includes them in execution payloads (up to a protocol-defined limit per block) to push ETH to validators’ Ethereum addresses:contentReference[oaicite:56]{index=56}:contentReference[oaicite:57]{index=57}"
+          }
+        ]
+      }
+    ],
+    "NewStructures": [
+      {
+        "Name": "Withdrawal Object",
+        "Description": "A new system-level operation object describing a validator withdrawal: [index (uint64), validator_index (uint64), address (20-byte), amount (uint64 in Gwei)]:contentReference[oaicite:58]{index=58}. This is RLP-serialized and is not a normal transaction (no signature or gas)."
+      },
+      {
+        "Name": "ExecutionPayload.withdrawals (field)",
+        "Description": "A new field in the execution payload/body: an RLP list of Withdrawal data included in the block:contentReference[oaicite:59]{index=59}. This list can be empty or contain multiple withdrawals, and is ordered by the withdrawal index."
+      },
+      {
+        "Name": "ExecutionPayloadHeader.withdrawals_root",
+        "Description": "A new block header field committing to the withdrawals list via a 32-byte Merkle Patricia trie root:contentReference[oaicite:60]{index=60}, similar to transactions_root. It ensures the execution payload’s withdrawals are authenticated in the header."
+      }
+    ],
+    "NewFunctions": [
+      {
+        "Name": "compute_withdrawals_root",
+        "Description": "Calculate the withdrawals_root by inserting each withdrawal into a Merkle trie (keyed by its list index) and taking the root hash:contentReference[oaicite:61]{index=61}",
+        "Inputs": "List of Withdrawal objects in the block",
+        "Outputs": "Merkle root (withdrawals_root) that must match the header"
+      },
+      {
+        "Name": "process_withdrawals",
+        "Description": "State transition routine to apply each withdrawal after executing all transactions in a block:contentReference[oaicite:62]{index=62}",
+        "Inputs": "List of Withdrawal objects, current execution state",
+        "Outputs": "Updated execution state with increased balances for the specified addresses"
+      }
+    ],
+    "NewRules": [
+      {
+        "Name": "Withdrawals Root Validation",
+        "Description": "The block header’s withdrawals_root must equal the trie root computed from the list of withdrawals in the block:contentReference[oaicite:63]{index=63}. A block with a mismatched root is invalid."
+      },
+      {
+        "Name": "Withdrawal Processing Order",
+        "Description": "Withdrawal operations are processed at the end of the block’s execution (after all user transactions):contentReference[oaicite:64]{index=64}. For each withdrawal, increase the balance of the specified address by the given amount (in wei; note amount is provided in Gwei):contentReference[oaicite:65]{index=65}. This balance change is unconditional and MUST not fail."
+      },
+      {
+        "Name": "No Gas or Fees for Withdrawals",
+        "Description": "Withdrawals do not consume gas and have no fees. They are system operations not initiated by users, so they do not affect gasUsed or block rewards:contentReference[oaicite:66]{index=66}:contentReference[oaicite:67]{index=67}."
+      }
+    ],
+    "Preconditions": [
+      "The Shanghai (execution layer) and Capella (consensus layer) upgrades must be enabled (at the predetermined epoch/timestamp) for withdrawals to be included:contentReference[oaicite:68]{index=68}",
+      "Validator withdrawals must have been initiated on the beacon chain (only validators with a 0x01 withdrawal credential and exiting/withdrawable status will be processed by consensus)"
+    ],
+    "Exceptions": [
+      "If there are no withdrawals ready in a given slot, the withdrawals list in the execution payload may be empty (header.withdrawals_root will commit to an empty trie). This is valid.",
+      "Withdrawal operations cannot fail or be reverted by the EVM:contentReference[oaicite:69]{index=69}. Even if a recipient address is a smart contract, the balance increase occurs without running contract code.",
+      "Older execution clients (pre-upgrade) will not recognize the new withdrawals_root field and will reject post-fork blocks – thus all nodes must upgrade for Shanghai."
+    ],
+    "ClientNotes": {
+      "Geth": "Implemented EIP-4895 by updating block and state transition logic: after executing transactions, Geth applies each withdrawal by incrementing the balance of the target address. Geth also exposes the withdrawals list and root via JSON-RPC (enabling explorers to display withdrawals). The change required adding support for this new field in block propagation and verification logic.",
+      "Erigon": "Erigon, with its focus on flat data structures, added a stage to handle withdrawals in its execution pipeline. It stores withdrawals in its block representation and ensures they are accounted for in the trie for the withdrawals_root. Erigon’s JSON-RPC and database were extended to track withdrawals per block.",
+      "Reth": "Integrated withdrawals from the start. Reth’s execution engine processes the provided withdrawal list from the Engine API, updates balances accordingly, and verifies the withdrawals_root. Being built post-Merge, Reth had native support for this system operation, simplifying its implementation.",
+      "Lighthouse": "Consensus client that handles selecting and bundling up to the maximum allowed (e.g., 16) withdrawals into each block’s payload. Lighthouse obtains pending withdrawals from the beacon state, constructs Withdrawal objects, and passes them to the execution engine via `engine_executePayload`. It ensures the execution payload header returned has the correct withdrawals_root and that all withdrawals are applied.",
+      "Prysm": "Prysm’s Capella implementation manages the validator withdrawal queue and packages withdrawals into the execution payload. It uses the Engine API to deliver these to the execution layer. Prysm and other CL clients ensure that the number of withdrawals per payload does not exceed protocol limits and that each withdrawal is processed in the execution layer without needing gas or causing reverts."
+    }
+  },
+  {
+    "EIP": 4788,
+    "Title": "Beacon state root in the EVM",
+    "Category": "Core",
+    "Status": "Draft",
+    "StateMachines": [
+      {
+        "Name": "Execution Layer",
+        "StateTransitions": [
+          {
+            "CurrentState": "No beacon state visibility: Post-merge execution blocks have ommers field empty and EVM cannot access beacon state",
+            "Trigger": "Activation of fork (Deneb/Cancun or similar) at specified timestamp (FORK_TIMESTAMP):contentReference[oaicite:70]{index=70}",
+            "NewState": "Execution blocks include the latest beacon state root in the block structure and make it available to EVM via a new opcode:contentReference[oaicite:71]{index=71}:contentReference[oaicite:72]{index=72}"
+          }
+        ]
+      },
+      {
+        "Name": "Beacon Chain",
+        "StateTransitions": [
+          {
+            "CurrentState": "Beacon chain state root only used internally by consensus (not exposed to execution)",
+            "Trigger": "Fork epoch that aligns with execution’s FORK_TIMESTAMP for EIP-4788",
+            "NewState": "Beacon chain provides its state root from the previous slot to execution clients for inclusion in each block (delivered via the Engine API). This allows proofs of beacon state to be verified inside the EVM:contentReference[oaicite:73]{index=73}"
+          }
+        ]
+      }
+    ],
+    "NewStructures": [
+      {
+        "Name": "BlockHeader.ommers (BeaconStateRoot)",
+        "Description": "Reuse the ommers list field (previously empty post-merge) to store a single entry: the 32-byte beacon chain state root of the slot preceding the block:contentReference[oaicite:74]{index=74}. Consequently, the ommersHash in the header becomes Keccak(RLP([beacon_state_root]))."
+      },
+      {
+        "Name": "Historical Roots Contract",
+        "Description": "A protocol-defined contract at address 0xFFFF...FFFD (HISTORY_STORAGE_ADDRESS):contentReference[oaicite:75]{index=75} used to store beacon state roots. It is not a user-creatable contract, but an implicit part of the protocol for persisting state roots."
+      },
+      {
+        "Name": "Opcode BEACON_STATE_ROOT (0x48)",
+        "Description": "A new EVM opcode that retrieves a beacon state root from history. Takes a block number from the stack, and pushes the 32-byte beacon state root of that block (if available) or 0 if not found:contentReference[oaicite:76]{index=76}. Gas cost = G_beacon_state_root (similar to BLOCKHASH):contentReference[oaicite:77]{index=77}:contentReference[oaicite:78]{index=78}"
+      }
+    ],
+    "NewFunctions": [
+      {
+        "Name": "inject_beacon_state_root",
+        "Description": "At block construction, place the beacon state root into the ommers field (as a single-element list) and update ommersHash accordingly:contentReference[oaicite:79]{index=79}",
+        "Inputs": "BeaconStateRoot (32 bytes) for the previous slot, Block being built",
+        "Outputs": "Block with ommers = [beaconStateRoot], header.ommersHash = Keccak(RLP([beaconStateRoot]))"
+      },
+      {
+        "Name": "store_historical_root",
+        "Description": "During block processing (before transactions execute), store the beacon state root of the current block into the HISTORY_STORAGE contract’s storage, keyed by the block number:contentReference[oaicite:80]{index=80}",
+        "Inputs": "BeaconStateRoot (from block.ommers[0]), Block number, State",
+        "Outputs": "State updated with SSTORE(HISTORY_STORAGE_ADDRESS, block.number, beaconStateRoot)"
+      }
+    ],
+    "NewRules": [
+      {
+        "Name": "Block Header Commitment",
+        "Description": "Each block at or after the fork must include exactly one beacon state root in its ommers list:contentReference[oaicite:81]{index=81}. The header’s ommersHash is calculated from this list and must match the included root’s hash:contentReference[oaicite:82]{index=82}. A block missing this or with multiple entries is invalid."
+      },
+      {
+        "Name": "Beacon Root Storage",
+        "Description": "Upon processing a block (at the start of execution), the execution client must write the beacon state root from the block into the special history contract’s storage under the key of the block number:contentReference[oaicite:83]{index=83}. This makes the root available for future queries."
+      },
+      {
+        "Name": "BEACON_STATE_ROOT Opcode Behavior",
+        "Description": "The new opcode 0x48 pops a block number and pushes the 32-byte beacon state root stored for that block:contentReference[oaicite:84]{index=84}. If no beacon state root is stored for that block (e.g., block predates this feature or is beyond retention), the opcode returns 0:contentReference[oaicite:85]{index=85}."
+      }
+    ],
+    "Preconditions": [
+      "The network upgrade for EIP-4788 must be activated (with a chosen beacon chain epoch and corresponding execution layer timestamp) so that both layers start including and expecting the beacon state root commitment:contentReference[oaicite:86]{index=86}",
+      "Proof-of-Stake must be active (requires EIP-3675) since beacon chain state exists only in PoS. This EIP builds on the Merge and EIP-4399 (for methodology of integrating beacon data into execution):contentReference[oaicite:87]{index=87}"
+    ],
+    "Exceptions": [
+      "Blocks prior to activation will not contain beacon state roots (ommers list remains empty), and the BEACON_STATE_ROOT opcode will return 0 for those block numbers:contentReference[oaicite:88]{index=88}",
+      "The historical beacon state roots are stored in state and contribute to state size (one 32-byte entry per block); clients might prune or cap this history, but the opcode simply returns 0 if a root is not found (similar to BLOCKHASH returning 0 for ancient blocks).",
+      "Because the ommers field is reused, any tooling or RPC that assumed ommers is always empty post-merge must be updated to handle one entry. However, this change does not break block hashes or proofs (ommersHash is computed as defined, including the new root)."
+    ],
+    "ClientNotes": {
+      "Geth": "Would implement EIP-4788 by adjusting block assembly: when receiving a payload from the consensus layer, Geth places the provided beacon state root into the ommers field. It also modifies its state transition function to include storing the root in the special contract storage before executing transactions. Changes to JSON-RPC would expose the new ommers list entry if requested.",
+      "Erigon": "Likely to treat the beacon state root similarly to how it handles other system data (like withdrawals). Erigon would incorporate the root into its block model and ensure the storage of roots is included in its staged execution. The team would optimize access to the HISTORY_STORAGE contract so as not to degrade performance (e.g., by not indexing it as a normal contract).",
+      "Reth": "Would natively support the beacon state root as it was developed around the time of these upgrades. Reth’s design might simplify storing the root by using its internal database to track state roots per block. The BEACON_STATE_ROOT opcode logic can be implemented in Rust by reading from its state DB or a cached history of recent roots.",
+      "Lighthouse": "As a consensus client, Lighthouse would compute the beacon state root for the end of each slot and pass it to the execution engine as part of block proposals (likely inserting it into the ommers field of the ExecutionPayload). It must ensure that the execution layer included it correctly and that the ommersHash matches. Lighthouse coordinates the fork activation so that from the fork slot onward it provides this data.",
+      "Prysm": "Prysm would similarly include the beacon state root in every block it proposes after the Capella+Deneb upgrade. It uses the Engine API to deliver this to execution clients. Prysm’s responsibilities include calculating the state root of the beacon state at the appropriate point (previous slot) and verifying that execution acknowledges it in the block. This introduces an extra cross-layer consistency check during block proposal."
+    }
+  },
+  {
+    "EIP": 4844,
+    "Title": "Shard Blob Transactions (Proto-Danksharding)",
+    "Category": "Core",
+    "Status": "Final",
+    "StateMachines": [
+      {
+        "Name": "Execution Layer",
+        "StateTransitions": [
+          {
+            "CurrentState": "No blob data transactions (L1 scaling limited to calldata)",
+            "Trigger": "Cancún upgrade activation (which includes EIP-4844) on execution layer",
+            "NewState": "Blocks may contain blob-carrying transactions and new blob-related header fields. Execution engine processes blob transactions with special validity rules and gas accounting:contentReference[oaicite:89]{index=89}:contentReference[oaicite:90]{index=90}"
+          }
+        ]
+      },
+      {
+        "Name": "Beacon Chain",
+        "StateTransitions": [
+          {
+            "CurrentState": "No blob sidecar handling (pre-Danksharding, beacon blocks have no extra data blobs)",
+            "Trigger": "Deneb upgrade activation on consensus layer (paired with Cancún):contentReference[oaicite:91]{index=91}",
+            "NewState": "Beacon chain creates blob sidecars for each block containing blob transactions and ensures data availability. Validators gossip and commit to blobs in blocks; consensus includes KZG commitments for blobs in ExecutionPayload to tie execution to available data:contentReference[oaicite:92]{index=92}:contentReference[oaicite:93]{index=93}"
+          }
+        ]
+      }
+    ],
+    "NewStructures": [
+      {
+        "Name": "Blob Transaction (Type 0x03)",
+        "Description": "A new EIP-2718 transaction type carrying large data blobs. Fields: [chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to, value, data, access_list, max_fee_per_blob_gas, blob_versioned_hashes, y_parity, r, s]:contentReference[oaicite:94]{index=94}. The blob_versioned_hashes are commitments (VersionedHashes) to actual blob data, and max_fee_per_blob_gas is analogous to max_fee for a separate blob fee market."
+      },
+      {
+        "Name": "BlockHeader.blobGasUsed & excessBlobGas",
+        "Description": "New header fields to track blob data gas usage. blobGasUsed records total blob gas consumed by all blob transactions in the block:contentReference[oaicite:95]{index=95}, and excessBlobGas tracks the difference from target usage (used for adjusting blob fee, similar to base fee mechanism):contentReference[oaicite:96]{index=96}."
+      },
+      {
+        "Name": "BLOBHASH Opcode (0x49)",
+        "Description": "New EVM opcode that allows contracts to access blob commitments. PUSHes the VersionedHash of a blob at a given index in the current transaction’s blob list:contentReference[oaicite:97]{index=97}. This enables contracts to get a reference to blob data (but not the data itself) by index."
+      },
+      {
+        "Name": "Point Evaluation Precompile (0x0A)",
+        "Description": "A new precompile at address 0x000...000A that verifies a KZG proof of evaluation of a polynomial (blob) at a given point:contentReference[oaicite:98]{index=98}:contentReference[oaicite:99]{index=99}. It expects input: versioned_hash || z || y || commitment || proof (192 bytes total) and returns success if the blob data corresponds to the commitment. Gas cost = 50,000:contentReference[oaicite:100]{index=100}:contentReference[oaicite:101]{index=101}."
+      },
+      {
+        "Name": "Blob Sidecar (Consensus)",
+        "Description": "In the consensus layer, each block with blob transactions has an associated “blob sidecar” containing the full blob data. This is not part of the execution payload, but beacon nodes ensure its availability and propagate it separately:contentReference[oaicite:102]{index=102}. Execution nodes do not receive the raw blob through the execution payload, only the commitments."
+      }
+    ],
+    "NewFunctions": [
+      {
+        "Name": "calc_excess_blob_gas",
+        "Description": "Computes the updated excessBlobGas for a block header based on the parent’s excess and blob gas usage. Mirrors the EIP-1559 base fee update logic for blobs, adjusting up or down depending on blob usage relative to target:contentReference[oaicite:103]{index=103}",
+        "Inputs": "Parent header’s excessBlobGas (or 0 if none), parent blobGasUsed",
+        "Outputs": "New excessBlobGas for current block header (to be used in computing blob fee)"
+      },
+      {
+        "Name": "get_base_fee_per_blob_gas",
+        "Description": "Determines the current minimum blob fee (in gas per blob unit), derived from parent block’s blob usage and BLOB_BASE_FEE_UPDATE_FRACTION (similar to baseFee per gas formula):contentReference[oaicite:104]{index=104}:contentReference[oaicite:105]{index=105}. This must be ≤ tx.max_fee_per_blob_gas for each blob tx to be included:contentReference[oaicite:106]{index=106}",
+        "Inputs": "Parent base_fee_per_blob_gas, parent blobGasUsed",
+        "Outputs": "Current block’s base_fee_per_blob_gas (not explicitly in header, computed on the fly)"
+      },
+      {
+        "Name": "verify_blob_commitments",
+        "Description": "Verifies that blob data commitments and proofs match the transaction’s declared versioned hashes. Used during gossip: when a blob tx is received, ensure each KZG commitment corresponds to provided blob data and that `kzg_to_versioned_hash(commitment)` equals the advertised hash:contentReference[oaicite:107]{index=107} (batch verification may be used).",
+        "Inputs": "Transaction (minus blobs), blobs, commitments, proofs",
+        "Outputs": "Boolean indicating blob data validity (node rejects tx if false)"
+      }
+    ],
+    "NewRules": [
+      {
+        "Name": "Block Header Blob Gas Checks",
+        "Description": "The block’s excessBlobGas must be correctly computed from the parent block’s values:contentReference[oaicite:108]{index=108}. The block’s blobGasUsed must equal the sum of blob gas of all included blob transactions and not exceed MAX_BLOB_GAS_PER_BLOCK (e.g., 786432):contentReference[oaicite:109]{index=109}. If these conditions fail, the block is invalid."
+      },
+      {
+        "Name": "Blob Transaction Validity",
+        "Description": "Each blob transaction must satisfy additional rules: it must carry at least one blob (blob_versioned_hashes list not empty):contentReference[oaicite:110]{index=110}; every blob VersionedHash must start with the correct prefix (0x01 for KZG commitments):contentReference[oaicite:111]{index=111}; and tx.max_fee_per_blob_gas must be ≥ the current base_fee_per_blob_gas (so the blob fee can be paid):contentReference[oaicite:112]{index=112}. If a transaction violates these, the containing block is invalid."
+      },
+      {
+        "Name": "Blob Gas Accounting",
+        "Description": "The total blob gas from all blob transactions in a block cannot exceed MAX_BLOB_GAS_PER_BLOCK:contentReference[oaicite:113]{index=113}. The header’s blobGasUsed must exactly equal the sum of blob gas from transactions:contentReference[oaicite:114]{index=114}. Blob gas is separate from normal gas – a block could hit the normal gas limit and still include blobs, as long as blobGasUsed stays within limit."
+      },
+      {
+        "Name": "Separate Fee Market for Blobs",
+        "Description": "The base fee for blob gas adjusts each block (similar to EIP-1559 for tx gas) using excessBlobGas. This means blob data pricing rises when usage is high and falls when low, maintaining a target (~0.375 MB per block) usage:contentReference[oaicite:115]{index=115}:contentReference[oaicite:116]{index=116}."
+      },
+      {
+        "Name": "Data Availability Enforcement (Consensus)",
+        "Description": "A beacon block with blob transactions is only valid if the blob sidecar data is available to the network:contentReference[oaicite:117]{index=117}. Validators must download blobs and verify that their KZG commitments match the ExecutionPayload references. Missing blobs or invalid proofs will cause consensus to reject the block."
+      }
+    ],
+    "Preconditions": [
+      "The Cancún (execution) and Deneb (consensus) upgrades must activate together. EIP-4844 requires prior EIPs (1559, 2718, 2930, 4895):contentReference[oaicite:118]{index=118}, so those must be in effect.",
+      "A trusted setup for KZG polynomial commitments is completed (to provide the parameters for blob commitments). Clients must integrate a KZG verification library (e.g., BLST or c-kzg) to validate blob proofs."
+    ],
+    "Exceptions": [
+      "Blob-carrying transactions are invalid before the upgrade (old nodes will reject unknown tx type 0x03).",
+      "EVM execution cannot directly read blob contents – contracts only see blob commitments (via BLOBHASH opcode) and can verify proofs via the precompile, but cannot access raw blob data:contentReference[oaicite:119]{index=119}.",
+      "If blob data for a block is unavailable (blob sidecar missing), the block will not be finalized by consensus. Execution nodes alone cannot detect missing data (they trust commitments), so they rely on the consensus layer to handle such cases."
+    ],
+    "ClientNotes": {
+      "Geth": "Implements EIP-4844 by introducing a new transaction type in its mempool and block processing. Geth integrates a KZG library (c-kzg or Go KZG) to validate blob commitments and proofs when receiving blob transactions:contentReference[oaicite:120]{index=120}:contentReference[oaicite:121]{index=121}. It adds support for the new header fields (blobGasUsed, excessBlobGas) and enforces blob gas limits and fee updates. P2P logic is updated to handle announcing blob tx hashes and serving blob data on request (no automatic broadcast of full blobs):contentReference[oaicite:122]{index=122}.",
+      "Erigon": "Erigon adds support for blob transactions in its execution engine, storing blob commitments and related metadata. It offloads actual blob data handling to the consensus layer and focuses on verifying commitments and calculating blob gas costs. Its pipeline stages for transactions and state were updated for the new gas accounting and block structure. Erigon’s RPC interfaces were extended to accommodate the new tx type and block fields.",
+      "Reth": "As a newer client, Reth was built with upcoming features like blobs in mind. It uses Rust KZG/BLST libraries for commitment checks. Reth handles blob transactions and the updated block format (including blobGasUsed/excessBlobGas) natively, and being post-London and post-Shanghai, it integrated the blob fee market with minimal legacy refactoring. It fully supports Engine API changes for blob sidecar handling and any concurrent changes (like EIP-4788’s use of ommers).",
+      "Lighthouse": "Consensus client implementing Deneb. It manages blob sidecars (storing and gossiping blob data). When proposing blocks, Lighthouse includes up to the max allowed blobs and computes their KZG commitments, placing those in the execution payload:contentReference[oaicite:123]{index=123}. It verifies incoming blob data against commitments via KZG proofs. Lighthouse uses Engine API calls to ensure the execution payload and header (blobGasUsed, etc.) align with what was expected and that the execution client accepted the blob transactions.",
+      "Prysm": "Prysm’s consensus node handles blob transactions by tracking the beacon state’s blob availability queue and coordinating with execution. It partakes in the blob sidecar gossip network, ensuring blob data is disseminated and stored for the required duration. When proposing, Prysm attaches the blob sidecar to the beacon block and uses the Engine API (`engine_preparePayload`/`executePayload`) to pass blob commitments to the execution layer. During block validation, Prysm checks that each blob’s commitment in the execution payload matches the received blob sidecar data, leveraging the point evaluation precompile or off-chain batch verification techniques to ensure consistency."
+    }
+  }
+]
