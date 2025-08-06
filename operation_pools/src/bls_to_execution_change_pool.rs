@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use eth1_api::ApiController;
-use fork_choice_control::Wait;
+use fork_choice_control::{EventChannels, Wait};
 use futures::{
     channel::{
         mpsc::{UnboundedReceiver, UnboundedSender},
@@ -11,7 +11,6 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::predicates;
-use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
@@ -34,7 +33,7 @@ impl BlsToExecutionChangePool {
     #[must_use]
     pub fn new<P: Preset, W: Wait>(
         controller: ApiController<P, W>,
-        event_channels: Arc<EventChannels>,
+        event_channels: Arc<EventChannels<P>>,
         pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
         metrics: Option<Arc<Metrics>>,
     ) -> (Arc<Self>, Service<P, W>) {
@@ -102,7 +101,7 @@ impl BlsToExecutionChangePool {
 pub struct Service<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     bls_to_execution_changes: HashMap<ValidatorIndex, SignedBlsToExecutionChange>,
-    event_channels: Arc<EventChannels>,
+    event_channels: Arc<EventChannels<P>>,
     metrics: Option<Arc<Metrics>>,
     pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
     rx: UnboundedReceiver<PoolMessage>,
@@ -179,7 +178,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
                     }
 
                     self.event_channels
-                        .send_bls_to_execution_change_event(&signed_bls_to_execution_change);
+                        .send_bls_to_execution_change_event(signed_bls_to_execution_change);
 
                     PoolAdditionOutcome::Accept
                 }

@@ -10,10 +10,9 @@ use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::{ApiController, Eth1Api};
 use features::Feature;
-use fork_choice_control::Wait;
+use fork_choice_control::{EventChannels, Wait};
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
-use http_api_utils::EventChannels;
 use liveness_tracker::ApiToLiveness;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{ApiToP2p, NetworkConfig, ToSubnetService};
@@ -82,7 +81,7 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
     pub is_synced: Arc<SyncedStatus>,
-    pub event_channels: Arc<EventChannels>,
+    pub event_channels: Arc<EventChannels<P>>,
     pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
     pub api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
     pub api_to_validator_tx: UnboundedSender<ApiToValidator<P>>,
@@ -163,7 +162,7 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<SyncedStatus> {
     }
 }
 
-impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<EventChannels> {
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<EventChannels<P>> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.event_channels.clone_arc()
     }

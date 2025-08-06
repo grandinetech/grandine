@@ -14,6 +14,7 @@
 
 pub use crate::{
     controller::Controller,
+    events::{Event, EventChannels, Topic, DEFAULT_MAX_EVENTS},
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
         ValidatorMessage,
@@ -36,6 +37,7 @@ pub mod checkpoint_sync;
 
 mod block_processor;
 mod controller;
+mod events;
 mod messages;
 mod misc;
 mod mutator;

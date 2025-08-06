@@ -17,12 +17,12 @@ use eth1_api::{Eth1Api, Eth1ExecutionEngine, ExecutionService};
 use eth2_cache_utils::mainnet;
 use features::Feature;
 use fork_choice_control::{
-    Controller, StateLoadStrategy, Storage, StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+    Controller, EventChannels, StateLoadStrategy, Storage, StorageMode,
+    DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
 };
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
 use genesis::AnchorCheckpointProvider;
-use http_api_utils::EventChannels;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use once_cell::sync::OnceCell;

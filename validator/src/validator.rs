@@ -22,7 +22,7 @@ use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{ValidatorMessage, Wait};
+use fork_choice_control::{EventChannels, ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -35,7 +35,6 @@ use helper_functions::{
     accessors, misc,
     signing::{RandaoEpoch, SignForAllForks, SignForSingleFork},
 };
-use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
@@ -143,7 +142,7 @@ pub struct Validator<P: Preset, W: Wait> {
     own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
-    event_channels: Arc<EventChannels>,
+    event_channels: Arc<EventChannels<P>>,
     last_registration_epoch: Option<Epoch>,
     proposer_configs: Arc<ProposerConfigs>,
     signer: Arc<Signer>,
@@ -173,7 +172,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
         doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
-        event_channels: Arc<EventChannels>,
+        event_channels: Arc<EventChannels<P>>,
         proposer_configs: Arc<ProposerConfigs>,
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
@@ -381,7 +380,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_attester_slashing_event(&slashing);
+                            self.event_channels.send_attester_slashing_event(slashing);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -399,7 +398,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_proposer_slashing_event(&slashing);
+                            self.event_channels.send_proposer_slashing_event(*slashing);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -417,7 +416,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_voluntary_exit_event(&voluntary_exit);
+                            self.event_channels.send_voluntary_exit_event(*voluntary_exit);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -2036,7 +2035,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 match result {
                     Ok(_) => {
                         self.event_channels
-                            .send_contribution_and_proof_event(&contribution_and_proof);
+                            .send_contribution_and_proof_event(contribution_and_proof);
 
                         ValidatorToP2p::PublishContributionAndProof(Box::new(
                             contribution_and_proof,

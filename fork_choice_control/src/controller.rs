@@ -29,7 +29,6 @@ use fork_choice_store::{
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
-use http_api_utils::EventChannels;
 use log::debug;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
@@ -52,6 +51,7 @@ use types::{
 
 use crate::{
     block_processor::BlockProcessor,
+    events::EventChannels,
     messages::{
         AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
         SyncMessage, ValidatorMessage,
@@ -105,7 +105,7 @@ where
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         tick: Tick,
-        event_channels: Arc<EventChannels>,
+        event_channels: Arc<EventChannels<P>>,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
