@@ -9,7 +9,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{
-        sse::{Event, KeepAlive},
+        sse::{Event as ServerSentEvent, KeepAlive},
         IntoResponse as _, Response, Sse,
     },
     Json,
@@ -20,7 +20,7 @@ use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
-use fork_choice_control::{ForkChoiceContext, ForkTip, Wait};
+use fork_choice_control::{Event, EventChannels, ForkChoiceContext, ForkTip, Topic, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::{
     channel::{mpsc::UnboundedSender, oneshot::Receiver as OneshotReceiver},
@@ -28,7 +28,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use http_api_utils::{BlockId, EventChannels, StateId, Topic};
+use http_api_utils::{BlockId, StateId};
 use itertools::{izip, Either, Itertools as _};
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
@@ -47,7 +47,7 @@ use serde_with::{As, DisplayFromStr};
 use ssz::{ContiguousList, DynamicList, Hc, Ssz, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
-use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
+use tokio_stream::wrappers::BroadcastStream;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -1479,7 +1479,7 @@ pub async fn pool_attestations_v2<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/proposer_slashings`
 pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
-    State(event_channels): State<Arc<EventChannels>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(proposer_slashing): EthJson<Box<ProposerSlashing>>,
 ) -> Result<(), Error> {
@@ -1488,7 +1488,7 @@ pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        event_channels.send_proposer_slashing_event(&proposer_slashing);
+        event_channels.send_proposer_slashing_event(*proposer_slashing);
         ApiToP2p::PublishProposerSlashing(proposer_slashing).send(&api_to_p2p_tx);
     }
 
@@ -1511,7 +1511,7 @@ pub async fn pool_proposer_slashings<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/voluntary_exits`
 pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
-    State(event_channels): State<Arc<EventChannels>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(signed_voluntary_exit): EthJson<Box<SignedVoluntaryExit>>,
 ) -> Result<(), Error> {
@@ -1520,7 +1520,7 @@ pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        event_channels.send_voluntary_exit_event(&signed_voluntary_exit);
+        event_channels.send_voluntary_exit_event(*signed_voluntary_exit);
         ApiToP2p::PublishVoluntaryExit(signed_voluntary_exit).send(&api_to_p2p_tx);
     }
 
@@ -1543,7 +1543,7 @@ pub async fn pool_voluntary_exits<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/attester_slashings`
 pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
-    State(event_channels): State<Arc<EventChannels>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attester_slashing): EthJson<Box<Phase0AttesterSlashing<P>>>,
 ) -> Result<(), Error> {
@@ -1554,7 +1554,7 @@ pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        event_channels.send_attester_slashing_event(&attester_slashing);
+        event_channels.send_attester_slashing_event(attester_slashing.clone());
         ApiToP2p::PublishAttesterSlashing(attester_slashing).send(&api_to_p2p_tx);
     }
 
@@ -1568,7 +1568,7 @@ pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
 /// `POST /eth/v2/beacon/pool/attester_slashings`
 pub async fn submit_pool_attester_slashing_v2<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
-    State(event_channels): State<Arc<EventChannels>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attester_slashing): EthJson<Box<AttesterSlashing<P>>>,
 ) -> Result<(), Error> {
@@ -1577,7 +1577,7 @@ pub async fn submit_pool_attester_slashing_v2<P: Preset, W: Wait>(
         .await?;
 
     if outcome.is_publishable() {
-        event_channels.send_attester_slashing_event(&attester_slashing);
+        event_channels.send_attester_slashing_event(attester_slashing.clone());
         ApiToP2p::PublishAttesterSlashing(attester_slashing).send(&api_to_p2p_tx);
     }
 
@@ -1848,10 +1848,10 @@ pub async fn beacon_heads<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/events`
-pub async fn beacon_events(
-    State(event_channels): State<Arc<EventChannels>>,
+pub async fn beacon_events<P: Preset>(
+    State(event_channels): State<Arc<EventChannels<P>>>,
     EthQuery(events): EthQuery<EventsQuery>,
-) -> Result<Sse<impl Stream<Item = Result<Event, BroadcastStreamRecvError>>>, Error> {
+) -> Result<Sse<impl Stream<Item = Result<ServerSentEvent>>>, Error> {
     let EventsQuery { topics } = events;
 
     if topics.is_empty() {
@@ -1863,6 +1863,27 @@ pub async fn beacon_events(
         .map(|topic| event_channels.receiver_for(topic))
         .map(BroadcastStream::new)
         .pipe(futures::stream::select_all)
+        .map(|event| {
+            let event = event?;
+            let topic = event.topic();
+            let ssevent = ServerSentEvent::default().event(topic);
+
+            match event {
+                Event::Attestation(data) => ssevent.json_data(data),
+                Event::AttesterSlashing(data) => ssevent.json_data(data),
+                Event::BlobSidecar(data) => ssevent.json_data(data),
+                Event::Block(data) => ssevent.json_data(data),
+                Event::BlsToExecutionChange(data) => ssevent.json_data(data),
+                Event::ChainReorg(data) => ssevent.json_data(data),
+                Event::ContributionAndProof(data) => ssevent.json_data(data),
+                Event::FinalizedCheckpoint(data) => ssevent.json_data(data),
+                Event::Head(data) => ssevent.json_data(data),
+                Event::PayloadAttributes(data) => ssevent.json_data(data),
+                Event::ProposerSlashing(data) => ssevent.json_data(data),
+                Event::VoluntaryExit(data) => ssevent.json_data(data),
+            }
+            .map_err(Into::into)
+        })
         .pipe(Sse::new)
         .keep_alive(KeepAlive::default())
         .pipe(Ok)

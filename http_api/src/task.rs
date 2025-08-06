@@ -6,7 +6,7 @@ use axum::Router;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::{ApiController, Eth1Api};
-use fork_choice_control::Wait;
+use fork_choice_control::{EventChannels, Wait};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future::{FutureExt as _, TryFutureExt as _},
@@ -14,7 +14,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use genesis::AnchorCheckpointProvider;
-use http_api_utils::{ApiMetrics, EventChannels};
+use http_api_utils::ApiMetrics;
 use liveness_tracker::ApiToLiveness;
 use log::info;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
@@ -46,7 +46,7 @@ pub struct HttpApi<P: Preset, W: Wait> {
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub eth1_api: Arc<Eth1Api>,
-    pub event_channels: Arc<EventChannels>,
+    pub event_channels: Arc<EventChannels<P>>,
     pub validator_keys: Arc<HashSet<PublicKeyBytes>>,
     pub validator_config: Arc<ValidatorConfig>,
     pub network_config: Arc<NetworkConfig>,
