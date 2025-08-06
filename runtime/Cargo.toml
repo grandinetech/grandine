@@ -29,7 +29,6 @@ genesis = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 http_api = { workspace = true }
-http_api_utils = { workspace = true }
 keymanager = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }

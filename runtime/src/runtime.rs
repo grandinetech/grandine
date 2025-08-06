@@ -17,7 +17,7 @@ use eth1_api::{
     Eth1Api, Eth1ApiToMetrics, Eth1ConnectionData, Eth1ExecutionEngine, Eth1Metrics,
     ExecutionBlobFetcher, ExecutionService, RealController,
 };
-use fork_choice_control::{Controller, StateLoadStrategy, Storage};
+use fork_choice_control::{Controller, EventChannels, StateLoadStrategy, Storage};
 use fork_choice_store::StoreConfig;
 use futures::{
     channel::{
@@ -32,7 +32,6 @@ use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_NAME_WITH_VERSION_AND_COMMIT;
 use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
-use http_api_utils::EventChannels;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use log::{info, warn};

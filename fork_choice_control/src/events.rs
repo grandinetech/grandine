@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{response::sse::Event, Error};
 use dashmap::DashMap;
 use execution_engine::{
     PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, WithdrawalV1,
@@ -54,37 +53,68 @@ pub enum Topic {
     VoluntaryExit,
 }
 
-impl Topic {
-    pub fn build(self, data: impl Serialize) -> Result<Event, Error> {
-        Event::default().event(self).json_data(data)
+#[derive(Clone, Debug)]
+pub enum Event<P: Preset> {
+    Attestation(Arc<Attestation<P>>),
+    AttesterSlashing(Box<AttesterSlashing<P>>),
+    BlobSidecar(BlobSidecarEvent),
+    Block(BlockEvent),
+    BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
+    ChainReorg(ChainReorgEvent),
+    ContributionAndProof(Box<SignedContributionAndProof<P>>),
+    FinalizedCheckpoint(FinalizedCheckpointEvent),
+    Head(HeadEvent),
+    PayloadAttributes(PayloadAttributesEvent),
+    ProposerSlashing(Box<ProposerSlashing>),
+    VoluntaryExit(Box<SignedVoluntaryExit>),
+}
+
+impl<P: Preset> Event<P> {
+    #[must_use]
+    pub const fn topic(&self) -> Topic {
+        match self {
+            Self::Attestation(_) => Topic::Attestation,
+            Self::AttesterSlashing(_) => Topic::AttesterSlashing,
+            Self::BlobSidecar(_) => Topic::BlobSidecar,
+            Self::Block(_) => Topic::Block,
+            Self::BlsToExecutionChange(_) => Topic::BlsToExecutionChange,
+            Self::ChainReorg(_) => Topic::ChainReorg,
+            Self::ContributionAndProof(_) => Topic::ContributionAndProof,
+            Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
+            Self::Head(_) => Topic::Head,
+            Self::PayloadAttributes(_) => Topic::PayloadAttributes,
+            Self::ProposerSlashing(_) => Topic::ProposerSlashing,
+            Self::VoluntaryExit(_) => Topic::VoluntaryExit,
+        }
     }
 }
 
 #[expect(clippy::partial_pub_fields)]
-pub struct EventChannels {
-    pub attestations: Sender<Event>,
-    pub attester_slashings: Sender<Event>,
-    pub blob_sidecars: Sender<Event>,
-    pub blocks: Sender<Event>,
-    pub bls_to_execution_changes: Sender<Event>,
-    pub chain_reorgs: Sender<Event>,
-    pub contribution_and_proofs: Sender<Event>,
-    pub finalized_checkpoints: Sender<Event>,
-    pub heads: Sender<Event>,
-    pub payload_attributes: Sender<Event>,
-    pub proposer_slashings: Sender<Event>,
-    pub voluntary_exits: Sender<Event>,
+#[derive(Clone, Debug)]
+pub struct EventChannels<P: Preset> {
+    pub attestations: Sender<Event<P>>,
+    pub attester_slashings: Sender<Event<P>>,
+    pub blob_sidecars: Sender<Event<P>>,
+    pub blocks: Sender<Event<P>>,
+    pub bls_to_execution_changes: Sender<Event<P>>,
+    pub chain_reorgs: Sender<Event<P>>,
+    pub contribution_and_proofs: Sender<Event<P>>,
+    pub finalized_checkpoints: Sender<Event<P>>,
+    pub heads: Sender<Event<P>>,
+    pub payload_attributes: Sender<Event<P>>,
+    pub proposer_slashings: Sender<Event<P>>,
+    pub voluntary_exits: Sender<Event<P>>,
     // See <https://github.com/grandinetech/grandine/issues/254> for rationale
     optimistic_reorgs: DashMap<(H256, Slot), ChainReorgEvent>,
 }
 
-impl Default for EventChannels {
+impl<P: Preset> Default for EventChannels<P> {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_EVENTS)
     }
 }
 
-impl EventChannels {
+impl<P: Preset> EventChannels<P> {
     #[must_use]
     pub fn new(max_events: usize) -> Self {
         Self {
@@ -105,7 +135,7 @@ impl EventChannels {
     }
 
     #[must_use]
-    pub fn receiver_for(&self, topic: Topic) -> Receiver<Event> {
+    pub fn receiver_for(&self, topic: Topic) -> Receiver<Event<P>> {
         match topic {
             Topic::Attestation => &self.attestations,
             Topic::AttesterSlashing => &self.attester_slashings,
@@ -123,23 +153,19 @@ impl EventChannels {
         .subscribe()
     }
 
-    pub fn send_attestation_event<P: Preset>(&self, attestation: &Attestation<P>) {
+    pub fn send_attestation_event(&self, attestation: Arc<Attestation<P>>) {
         if let Err(error) = self.send_attestation_event_internal(attestation) {
             warn!("unable to send attestation event: {error}");
         }
     }
 
-    pub fn send_attester_slashing_event<P: Preset>(&self, attester_slashing: &AttesterSlashing<P>) {
+    pub fn send_attester_slashing_event(&self, attester_slashing: Box<AttesterSlashing<P>>) {
         if let Err(error) = self.send_attester_slashing_event_internal(attester_slashing) {
             warn!("unable to send attester slashing event: {error}");
         }
     }
 
-    pub fn send_blob_sidecar_event<P: Preset>(
-        &self,
-        block_root: H256,
-        blob_sidecar: &BlobSidecar<P>,
-    ) {
+    pub fn send_blob_sidecar_event(&self, block_root: H256, blob_sidecar: &BlobSidecar<P>) {
         if let Err(error) = self.send_blob_sidecar_event_internal(block_root, blob_sidecar) {
             warn!("unable to send blob sidecar event: {error}");
         }
@@ -153,7 +179,7 @@ impl EventChannels {
 
     pub fn send_bls_to_execution_change_event(
         &self,
-        signed_bls_to_execution_change: &SignedBlsToExecutionChange,
+        signed_bls_to_execution_change: SignedBlsToExecutionChange,
     ) {
         if let Err(error) =
             self.send_bls_to_execution_change_event_internal(signed_bls_to_execution_change)
@@ -162,7 +188,7 @@ impl EventChannels {
         }
     }
 
-    pub fn send_chain_reorg_event<P: Preset, S: Storage<P>>(
+    pub fn send_chain_reorg_event<S: Storage<P>>(
         &self,
         store: &Store<P, S>,
         new_head: &ChainLink<P>,
@@ -182,9 +208,9 @@ impl EventChannels {
             .insert((new_head.block_root, new_head.slot()), chain_reorg_event);
     }
 
-    pub fn send_contribution_and_proof_event<P: Preset>(
+    pub fn send_contribution_and_proof_event(
         &self,
-        signed_contribution_and_proof: &SignedContributionAndProof<P>,
+        signed_contribution_and_proof: SignedContributionAndProof<P>,
     ) {
         if let Err(error) =
             self.send_contribution_and_proof_event_internal(signed_contribution_and_proof)
@@ -208,7 +234,7 @@ impl EventChannels {
         }
     }
 
-    pub fn send_head_event<P: Preset>(
+    pub fn send_head_event(
         &self,
         head: &ChainLink<P>,
         calculate_dependent_roots: impl FnOnce(&ChainLink<P>) -> Result<DependentRootsBundle>,
@@ -232,7 +258,7 @@ impl EventChannels {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub fn send_payload_attributes_event<P: Preset>(
+    pub fn send_payload_attributes_event(
         &self,
         phase: Phase,
         proposal_slot: Slot,
@@ -255,13 +281,13 @@ impl EventChannels {
         }
     }
 
-    pub fn send_proposer_slashing_event(&self, proposer_slashing: &ProposerSlashing) {
+    pub fn send_proposer_slashing_event(&self, proposer_slashing: ProposerSlashing) {
         if let Err(error) = self.send_proposer_slashing_event_internal(proposer_slashing) {
             warn!("unable to send proposer slashing event: {error}");
         }
     }
 
-    pub fn send_voluntary_exit_event(&self, voluntary_exit: &SignedVoluntaryExit) {
+    pub fn send_voluntary_exit_event(&self, voluntary_exit: SignedVoluntaryExit) {
         if let Err(error) = self.send_voluntary_exit_event_internal(voluntary_exit) {
             warn!("unable to send voluntary exit event: {error}");
         }
@@ -283,38 +309,35 @@ impl EventChannels {
         );
     }
 
-    fn send_attestation_event_internal<P: Preset>(
-        &self,
-        attestation: &Attestation<P>,
-    ) -> Result<()> {
+    fn send_attestation_event_internal(&self, attestation: Arc<Attestation<P>>) -> Result<()> {
         if self.attestations.receiver_count() > 0 {
-            let event = Topic::Attestation.build(attestation)?;
+            let event = Event::Attestation(attestation);
             self.attestations.send(event)?;
         }
 
         Ok(())
     }
 
-    fn send_attester_slashing_event_internal<P: Preset>(
+    fn send_attester_slashing_event_internal(
         &self,
-        attester_slashing: &AttesterSlashing<P>,
+        attester_slashing: Box<AttesterSlashing<P>>,
     ) -> Result<()> {
         if self.attester_slashings.receiver_count() > 0 {
-            let event = Topic::AttesterSlashing.build(attester_slashing)?;
+            let event = Event::AttesterSlashing(attester_slashing);
             self.attester_slashings.send(event)?;
         }
 
         Ok(())
     }
 
-    fn send_blob_sidecar_event_internal<P: Preset>(
+    fn send_blob_sidecar_event_internal(
         &self,
         block_root: H256,
         blob_sidecar: &BlobSidecar<P>,
     ) -> Result<()> {
         if self.blob_sidecars.receiver_count() > 0 {
             let blob_sidecar_event = BlobSidecarEvent::new(block_root, blob_sidecar);
-            let event = Topic::BlobSidecar.build(blob_sidecar_event)?;
+            let event = Event::BlobSidecar(blob_sidecar_event);
             self.blob_sidecars.send(event)?;
         }
 
@@ -334,7 +357,7 @@ impl EventChannels {
                 execution_optimistic,
             };
 
-            let event = Topic::Block.build(block_event)?;
+            let event = Event::Block(block_event);
             self.blocks.send(event)?;
         }
 
@@ -343,10 +366,10 @@ impl EventChannels {
 
     fn send_bls_to_execution_change_event_internal(
         &self,
-        signed_bls_to_execution_change: &SignedBlsToExecutionChange,
+        signed_bls_to_execution_change: SignedBlsToExecutionChange,
     ) -> Result<()> {
         if self.bls_to_execution_changes.receiver_count() > 0 {
-            let event = Topic::BlsToExecutionChange.build(signed_bls_to_execution_change)?;
+            let event = Event::BlsToExecutionChange(Box::new(signed_bls_to_execution_change));
             self.bls_to_execution_changes.send(event)?;
         }
 
@@ -355,19 +378,19 @@ impl EventChannels {
 
     fn send_chain_reorg_event_internal(&self, chain_reorg_event: ChainReorgEvent) -> Result<()> {
         if self.chain_reorgs.receiver_count() > 0 {
-            let event = Topic::ChainReorg.build(chain_reorg_event)?;
+            let event = Event::ChainReorg(chain_reorg_event);
             self.chain_reorgs.send(event)?;
         }
 
         Ok(())
     }
 
-    fn send_contribution_and_proof_event_internal<P: Preset>(
+    fn send_contribution_and_proof_event_internal(
         &self,
-        signed_contribution_and_proof: &SignedContributionAndProof<P>,
+        signed_contribution_and_proof: SignedContributionAndProof<P>,
     ) -> Result<()> {
         if self.contribution_and_proofs.receiver_count() > 0 {
-            let event = Topic::ContributionAndProof.build(signed_contribution_and_proof)?;
+            let event = Event::ContributionAndProof(Box::new(signed_contribution_and_proof));
             self.contribution_and_proofs.send(event)?;
         }
 
@@ -390,21 +413,21 @@ impl EventChannels {
                 execution_optimistic,
             };
 
-            let event = Topic::FinalizedCheckpoint.build(finalized_checkpoint_event)?;
+            let event = Event::FinalizedCheckpoint(finalized_checkpoint_event);
             self.finalized_checkpoints.send(event)?;
         }
 
         Ok(())
     }
 
-    fn send_head_event_internal<P: Preset>(
+    fn send_head_event_internal(
         &self,
         head: &ChainLink<P>,
         calculate_dependent_roots: impl FnOnce(&ChainLink<P>) -> Result<DependentRootsBundle>,
     ) -> Result<()> {
         if self.heads.receiver_count() > 0 {
             let head_event = HeadEvent::new(head, calculate_dependent_roots(head)?);
-            let event = Topic::Head.build(head_event)?;
+            let event = Event::Head(head_event);
             self.heads.send(event)?;
         }
 
@@ -412,7 +435,7 @@ impl EventChannels {
     }
 
     #[expect(clippy::too_many_arguments)]
-    fn send_payload_attributes_event_internal<P: Preset>(
+    fn send_payload_attributes_event_internal(
         &self,
         phase: Phase,
         proposal_slot: Slot,
@@ -435,7 +458,7 @@ impl EventChannels {
                 },
             };
 
-            let event = Topic::PayloadAttributes.build(payload_attributes_event)?;
+            let event = Event::PayloadAttributes(payload_attributes_event);
             self.payload_attributes.send(event)?;
         }
 
@@ -444,10 +467,10 @@ impl EventChannels {
 
     fn send_proposer_slashing_event_internal(
         &self,
-        proposer_slashing: &ProposerSlashing,
+        proposer_slashing: ProposerSlashing,
     ) -> Result<()> {
         if self.proposer_slashings.receiver_count() > 0 {
-            let event = Topic::ProposerSlashing.build(proposer_slashing)?;
+            let event = Event::ProposerSlashing(Box::new(proposer_slashing));
             self.proposer_slashings.send(event)?;
         }
 
@@ -456,10 +479,10 @@ impl EventChannels {
 
     fn send_voluntary_exit_event_internal(
         &self,
-        voluntary_exit: &SignedVoluntaryExit,
+        voluntary_exit: SignedVoluntaryExit,
     ) -> Result<()> {
         if self.voluntary_exits.receiver_count() > 0 {
-            let event = Topic::VoluntaryExit.build(voluntary_exit)?;
+            let event = Event::VoluntaryExit(Box::new(voluntary_exit));
             self.voluntary_exits.send(event)?;
         }
 
@@ -473,15 +496,15 @@ pub struct DependentRootsBundle {
     pub previous_duty_dependent_root: H256,
 }
 
-#[derive(Debug, Serialize)]
-struct BlobSidecarEvent {
-    block_root: H256,
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct BlobSidecarEvent {
+    pub block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
-    index: BlobIndex,
+    pub index: BlobIndex,
     #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-    kzg_commitment: KzgCommitment,
-    versioned_hash: VersionedHash,
+    pub slot: Slot,
+    pub kzg_commitment: KzgCommitment,
+    pub versioned_hash: VersionedHash,
 }
 
 impl BlobSidecarEvent {
@@ -498,27 +521,27 @@ impl BlobSidecarEvent {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct BlockEvent {
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct BlockEvent {
     #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-    block: H256,
-    execution_optimistic: bool,
+    pub slot: Slot,
+    pub block: H256,
+    pub execution_optimistic: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct ChainReorgEvent {
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ChainReorgEvent {
     #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
+    pub slot: Slot,
     #[serde(with = "serde_utils::string_or_native")]
-    depth: u64,
-    old_head_block: H256,
-    new_head_block: H256,
-    old_head_state: H256,
-    new_head_state: H256,
+    pub depth: u64,
+    pub old_head_block: H256,
+    pub new_head_block: H256,
+    pub old_head_state: H256,
+    pub new_head_state: H256,
     #[serde(with = "serde_utils::string_or_native")]
-    epoch: Epoch,
-    execution_optimistic: bool,
+    pub epoch: Epoch,
+    pub execution_optimistic: bool,
 }
 
 impl ChainReorgEvent {
@@ -560,25 +583,25 @@ impl ChainReorgEvent {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct FinalizedCheckpointEvent {
-    block: H256,
-    state: H256,
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct FinalizedCheckpointEvent {
+    pub block: H256,
+    pub state: H256,
     #[serde(with = "serde_utils::string_or_native")]
-    epoch: Epoch,
-    execution_optimistic: bool,
+    pub epoch: Epoch,
+    pub execution_optimistic: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct HeadEvent {
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct HeadEvent {
     #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-    block: H256,
-    state: H256,
-    epoch_transition: bool,
-    previous_duty_dependent_root: H256,
-    current_duty_dependent_root: H256,
-    execution_optimistic: bool,
+    pub slot: Slot,
+    pub block: H256,
+    pub state: H256,
+    pub epoch_transition: bool,
+    pub previous_duty_dependent_root: H256,
+    pub current_duty_dependent_root: H256,
+    pub execution_optimistic: bool,
 }
 
 impl HeadEvent {
@@ -602,70 +625,70 @@ impl HeadEvent {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct PayloadAttributesEvent {
-    version: Phase,
-    data: PayloadAttributesEventData,
+#[derive(Clone, Debug, Serialize)]
+pub struct PayloadAttributesEvent {
+    pub version: Phase,
+    pub data: PayloadAttributesEventData,
 }
 
-#[derive(Debug, Serialize)]
-struct PayloadAttributesEventData {
+#[derive(Clone, Debug, Serialize)]
+pub struct PayloadAttributesEventData {
     #[serde(with = "serde_utils::string_or_native")]
-    proposal_slot: Slot,
-    parent_block_root: H256,
+    pub proposal_slot: Slot,
+    pub parent_block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
-    parent_block_number: ExecutionBlockNumber,
-    parent_block_hash: ExecutionBlockHash,
+    pub parent_block_number: ExecutionBlockNumber,
+    pub parent_block_hash: ExecutionBlockHash,
     #[serde(with = "serde_utils::string_or_native")]
-    proposer_index: ValidatorIndex,
-    payload_attributes: CombinedPayloadAttributesEventData,
+    pub proposer_index: ValidatorIndex,
+    pub payload_attributes: CombinedPayloadAttributesEventData,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged, bound = "")]
-enum CombinedPayloadAttributesEventData {
+pub enum CombinedPayloadAttributesEventData {
     Bellatrix(PayloadAttributesEventDataV1),
     Capella(PayloadAttributesEventDataV2),
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
 }
 
-#[derive(Debug, Serialize)]
-struct PayloadAttributesEventDataV1 {
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PayloadAttributesEventDataV1 {
     #[serde(with = "serde_utils::string_or_native")]
-    timestamp: UnixSeconds,
-    prev_randao: H256,
-    suggested_fee_recipient: ExecutionAddress,
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
 }
 
-#[derive(Debug, Serialize)]
-struct PayloadAttributesEventDataV2 {
+#[derive(Clone, Debug, Serialize)]
+pub struct PayloadAttributesEventDataV2 {
     #[serde(with = "serde_utils::string_or_native")]
-    timestamp: UnixSeconds,
-    prev_randao: H256,
-    suggested_fee_recipient: ExecutionAddress,
-    withdrawals: Vec<WithdrawalEventDataV1>,
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+    pub withdrawals: Vec<WithdrawalEventDataV1>,
 }
 
-#[derive(Debug, Serialize)]
-struct PayloadAttributesEventDataV3 {
+#[derive(Clone, Debug, Serialize)]
+pub struct PayloadAttributesEventDataV3 {
     #[serde(with = "serde_utils::string_or_native")]
-    timestamp: UnixSeconds,
-    prev_randao: H256,
-    suggested_fee_recipient: ExecutionAddress,
-    withdrawals: Vec<WithdrawalEventDataV1>,
-    parent_beacon_block_root: H256,
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+    pub withdrawals: Vec<WithdrawalEventDataV1>,
+    pub parent_beacon_block_root: H256,
 }
 
-#[derive(Debug, Serialize)]
-struct WithdrawalEventDataV1 {
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct WithdrawalEventDataV1 {
     #[serde(with = "serde_utils::string_or_native")]
-    index: WithdrawalIndex,
+    pub index: WithdrawalIndex,
     #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    address: ExecutionAddress,
+    pub validator_index: ValidatorIndex,
+    pub address: ExecutionAddress,
     #[serde(with = "serde_utils::string_or_native")]
-    amount: Gwei,
+    pub amount: Gwei,
 }
 
 impl From<WithdrawalV1> for WithdrawalEventDataV1 {

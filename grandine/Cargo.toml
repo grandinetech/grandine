@@ -36,7 +36,6 @@ grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex-literal = { workspace = true }
 http_api = { workspace = true }
-http_api_utils = { workspace = true }
 itertools = { workspace = true }
 libmdbx = { workspace = true }
 keymanager = { workspace = true }

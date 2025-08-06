@@ -7,7 +7,6 @@ use database::Database;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use fork_choice_store::StoreConfig;
 use futures::sink::Drain;
-use http_api_utils::EventChannels;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
@@ -21,6 +20,7 @@ use types::{
 
 use crate::{
     controller::{Controller, MutatorHandle},
+    events::EventChannels,
     messages::{AttestationVerifierMessage, P2pMessage},
     storage::{Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL},
     unbounded_sink::UnboundedSink,
