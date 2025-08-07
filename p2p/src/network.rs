@@ -169,11 +169,8 @@ impl<P: Preset> Network<P> {
         let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
 
         // TODO: get custody value from metadata
-        let custody_group_count = if network_config.subscribe_all_data_column_subnets {
-            chain_config.number_of_custody_groups
-        } else {
-            chain_config.custody_requirement
-        };
+        let custody_group_count =
+            chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
 
         let context = Context {
             chain_config: chain_config.clone_arc(),
