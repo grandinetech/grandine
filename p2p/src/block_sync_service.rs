@@ -1073,7 +1073,7 @@ impl<P: Preset> BlockSyncService<P> {
         } = data_columns_by_root;
 
         if self.controller.contains_block(block_root) {
-            debug!("Block {block_root:?} already imported into the fork choice");
+            debug!("block {block_root:?} already imported into the fork choice");
             return Ok(());
         }
 

@@ -1479,10 +1479,15 @@ where
                             .mark_requested_blobs_from_el(block_root, data_column_sidecar.slot());
                         self.update_store_snapshot();
 
-                        let data_column_identifiers =
-                            (0..self.store.chain_config().number_of_columns)
-                                .map(|index| DataColumnIdentifier { block_root, index })
-                                .collect::<Vec<_>>();
+                        let data_column_identifiers = self
+                            .store
+                            .sampling_columns()
+                            .iter()
+                            .map(|index| DataColumnIdentifier {
+                                block_root,
+                                index: *index,
+                            })
+                            .collect::<Vec<_>>();
                         self.request_blobs_from_execution_engine(
                             EngineGetBlobsV2Params {
                                 block_or_sidecar: data_column_sidecar.clone_arc().into(),

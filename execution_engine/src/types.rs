@@ -1046,7 +1046,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
     pub fn block_root(&self) -> H256 {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.hash_tree_root(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
         }
     }
 
