@@ -221,7 +221,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
     ) {
         let slot = block_or_sidecar.slot();
         let block_root = block_or_sidecar.block_root();
-        let block_header = block_or_sidecar.signed_block_header().message;
 
         if self.controller.contains_block(block_root)
             || self.sidecars_construction_started.contains_key(&block_root)
@@ -233,12 +232,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         if let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() {
             let missing_columns_indices = data_column_identifiers
                 .iter()
-                .filter(|identifier| {
-                    !self
-                        .controller
-                        .accepted_data_column_sidecar(block_header, identifier.index)
-                        || !self.received_data_column_sidecars.contains_key(identifier)
-                })
+                .filter(|identifier| !self.received_data_column_sidecars.contains_key(identifier))
                 .map(|identifier| identifier.index)
                 .collect::<HashSet<ColumnIndex>>();
 
