@@ -2,6 +2,7 @@
 //!
 //! [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
 
+use core::time::Duration;
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, ensure, Error as AnyhowError, Result};
@@ -50,6 +51,7 @@ use serde_with::{As, DisplayFromStr};
 use ssz::{ContiguousList, DynamicList, Ssz, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
+use tokio::time::timeout;
 use tokio_stream::wrappers::BroadcastStream;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -1759,15 +1761,23 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
 /// `POST /eth/v1/beacon/pool/attestations`
 pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(attestations): EthJson<Vec<Arc<Attestation<P>>>>,
 ) -> Result<(), Error> {
-    submit_attestations_to_pool(controller, api_to_p2p_tx, attestations.into_iter()).await
+    submit_attestations_to_pool(
+        controller,
+        event_channels,
+        api_to_p2p_tx,
+        attestations.into_iter(),
+    )
+    .await
 }
 
 /// `POST /eth/v2/beacon/pool/attestations`
 pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSsz(attestations, _): EthJsonOrSsz<
         ContiguousList<SingleApiAttestation<P>, P::MaxAttestersPerSlot>,
@@ -1776,6 +1786,7 @@ pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
 ) -> Result<(), Error> {
     submit_attestations_to_pool(
         controller,
+        event_channels,
         api_to_p2p_tx,
         attestations
             .into_iter()
@@ -2647,11 +2658,14 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 /// `GET /eth/v1/validator/attestation_data`
 pub async fn validator_attestation_data<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(validator_config): State<Arc<ValidatorConfig>>,
     EthQuery(query): EthQuery<AttestationDataQuery>,
     headers: HeaderMap,
 ) -> Result<EthResponse<AttestationData, (), JsonOrSsz>, Error> {
+    const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
     let _timer = metrics.map(|metrics| metrics.validator_api_attestation_data_times.start_timer());
 
     let AttestationDataQuery {
@@ -2705,7 +2719,27 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     };
 
     if is_optimistic {
-        return Err(Error::HeadIsOptimistic);
+        if let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+            loop {
+                let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
+                    Ok(Event::Block(block_event)) => block_event,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        debug!("error receiving block event: {error:?}");
+                        continue;
+                    }
+                };
+
+                if block_event.block == block_root && !block_event.execution_optimistic {
+                    break;
+                }
+            }
+        })
+        .await
+        {
+            debug!("timeout while waiting for block event: {error:?}");
+            return Err(Error::HeadIsOptimistic);
+        }
     }
 
     if state.slot() < slot {
@@ -3527,9 +3561,12 @@ fn build_attestation_item<P: Preset, W: Wait>(
 
 async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
     attestations: impl Iterator<Item = Arc<Attestation<P>>>,
 ) -> Result<(), Error> {
+    const MISSING_BLOCKS_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
     let grouped_by_target = attestations
         .enumerate()
         .chunk_by(|(_, attestation)| attestation.data().target);
@@ -3538,6 +3575,17 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
         .into_iter()
         .map(|(target, attestations)| (target, attestations.collect_vec()))
         .unzip();
+
+    wait_for_missing_blocks_with_timeout(
+        &controller,
+        &event_channels,
+        target_attestations
+            .iter()
+            .flatten()
+            .map(|(_, attestation)| attestation.data().beacon_block_root),
+        MISSING_BLOCKS_WAIT_TIMEOUT,
+    )
+    .await?;
 
     let (prevalidated, mut failures): (Vec<_>, Vec<_>) = targets
         .into_iter()
@@ -3692,6 +3740,50 @@ async fn submit_data_column_sidecars<P: Preset, W: Wait>(
             }
         }
         Err(error) => return Err(Error::InvalidBlock(error)),
+    }
+
+    Ok(())
+}
+
+async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    event_channels: &EventChannels<P>,
+    block_roots: impl IntoIterator<Item = H256>,
+    wait_duration: Duration,
+) -> Result<()> {
+    let mut missing_blocks = block_roots
+        .into_iter()
+        .unique()
+        .map(|root| Ok::<_, AnyhowError>((root, controller.block_by_root(root)?.is_none())))
+        .process_results(|iter| {
+            iter.filter(|(_, is_missing)| *is_missing)
+                .map(|(root, _)| root)
+                .collect::<HashSet<_>>()
+        })?;
+
+    if !missing_blocks.is_empty() {
+        if let Err(error) = timeout(wait_duration, async {
+            loop {
+                if missing_blocks.is_empty() {
+                    break;
+                }
+
+                let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
+                    Ok(Event::Block(block_event)) => block_event,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        debug!("error receiving block event: {error:?}");
+                        continue;
+                    }
+                };
+
+                missing_blocks.remove(&block_event.block);
+            }
+        })
+        .await
+        {
+            debug!("timeout while waiting for block events: {error:?}");
+        }
     }
 
     Ok(())
