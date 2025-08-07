@@ -1996,13 +1996,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             || self.last_cgc_update_epoch.is_none()
         {
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
-            ToSubnetService::UpdateCustodyRequirements(
-                current_epoch,
-                validator_custody_requirement,
-            )
-            .send(&self.subnet_service_tx);
-
-            ToSubnetService::AttemptToUpdateCustodyGroupCount(validator_custody_requirement)
+            ToSubnetService::UpdateDataColumnSubnets(validator_custody_requirement)
                 .send(&self.subnet_service_tx);
 
             ToSubnetService::UpdateEarliestAvailableSlot(current_slot)
