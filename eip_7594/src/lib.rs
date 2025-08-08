@@ -56,6 +56,11 @@ pub fn get_custody_groups(
         },
     );
 
+    // Skip computation for super node
+    if custody_group_count == number_of_custody_groups {
+        return Ok((0..number_of_custody_groups).collect::<HashSet<_>>());
+    }
+
     let mut current_id = NodeId::from_be_bytes(raw_node_id);
 
     let mut custody_groups = BTreeSet::new();
