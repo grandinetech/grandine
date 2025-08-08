@@ -46,6 +46,7 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     back_sync::{
         BackSync, BackSyncDataBySlot, Data as BackSyncData, Error as BackSyncError, SyncCheckpoint,
+        SyncMode as BackSyncMode,
     },
     messages::{ArchiverToSync, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p},
     misc::{PeerReportReason, RPCRequestType, RequestId},
@@ -163,11 +164,14 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                     });
 
-                let back_sync_process = BackSync::<P>::new(BackSyncData {
-                    current: anchor_checkpoint,
-                    high: anchor_checkpoint,
-                    low: back_sync_terminus,
-                });
+                let back_sync_process = BackSync::<P>::new(
+                    BackSyncData {
+                        current: anchor_checkpoint,
+                        high: anchor_checkpoint,
+                        low: back_sync_terminus,
+                    },
+                    BackSyncMode::Default,
+                );
 
                 if !back_sync_process.is_finished() {
                     back_sync_process.save(&db)?;
@@ -575,6 +579,11 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::PeerCgcUpdated(peer_id) => {
                             self.sync_manager.update_peer_cgc(peer_id);
                         }
+                        P2pToSync::RequestCustodyGroupBackfill(column_indices) => {
+                            if let Err(error) = self.request_custody_group_backfill(column_indices) {
+                                warn!("failed to start data column backfill: {error}");
+                            }
+                        }
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
 
@@ -611,7 +620,7 @@ impl<P: Preset> BlockSyncService<P> {
         };
 
         if let Err(error) = back_sync.verify_blocks(&self.config, database, &self.controller) {
-            warn!("error occurred while verifying back-sync blocks: {error:?}");
+            warn!("error occurred while verifying back-sync data: {error:?}");
 
             if let Some(BackSyncError::FinalCheckpointMismatch::<P> { .. }) = error.downcast_ref() {
                 back_sync.remove(database)?;
@@ -954,6 +963,43 @@ impl<P: Preset> BlockSyncService<P> {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    fn request_custody_group_backfill(&mut self, column_indices: HashSet<u64>) -> Result<()> {
+        let Some(db) = &self.database else {
+            return Ok(());
+        };
+
+        let current = self.controller.head().value.block.as_ref().into();
+        let high = current;
+
+        let low = match &self.back_sync {
+            Some(back_sync) => back_sync.data().current,
+            // If back sync does not exist, that means all the back sync is completed
+            None => {
+                let terminus_epoch = self.controller.min_checked_block_availability_epoch();
+                SyncCheckpoint {
+                    slot: misc::compute_start_slot_at_epoch::<P>(terminus_epoch),
+                    block_root: H256::zero(),
+                    parent_root: H256::zero(),
+                }
+            }
+        };
+
+        let back_sync_process = BackSync::<P>::new(
+            BackSyncData { current, high, low },
+            BackSyncMode::DataColumnsOnly { column_indices },
+        );
+
+        if !back_sync_process.is_finished() {
+            back_sync_process.save(db)?;
+        }
+
+        self.back_sync = Some(back_sync_process);
+
+        self.request_blobs_and_blocks_if_ready()?;
 
         Ok(())
     }

@@ -451,11 +451,23 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
+                        ValidatorToP2p::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
+                            self.attempt_to_update_custody_group_count(custody_group_count);
+                        }
+                        ValidatorToP2p::UpdateCustodyRequirements(advertise_epoch, custody_group_count, backfill_custody_groups) => {
+                            self.update_custody_requirements(advertise_epoch, custody_group_count, backfill_custody_groups);
+                        }
+                        ValidatorToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
+                        }
                     }
                 },
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {
                     match message {
+                        SyncToP2p::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
+                            self.attempt_to_update_custody_group_count(custody_group_count);
+                        }
                         SyncToP2p::ReportPeer(peer_id, peer_action, report_source, reason) => {
                             self.report_peer(
                                 peer_id,
@@ -496,17 +508,8 @@ impl<P: Preset> Network<P> {
 
                 message = self.channels.subnet_service_to_p2p_rx.select_next_some() => {
                     match message {
-                        SubnetServiceToP2p::AttemptToUpdateCustodyGroupCount(custody_group_count) => {
-                            self.attempt_to_update_custody_group_count(custody_group_count);
-                        }
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
-                        }
-                        SubnetServiceToP2p::UpdateCustodyRequirements(advertise_epoch, custody_group_count) => {
-                            self.update_custody_requirements(advertise_epoch, custody_group_count);
-                        }
-                        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
-                            self.update_earliest_available_slot(slot);
                         }
                         SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions) => {
                             self.update_sync_committee_subnets(actions);
@@ -948,7 +951,12 @@ impl<P: Preset> Network<P> {
             .send(&self.network_to_service_tx);
     }
 
-    fn update_custody_requirements(&self, advertise_epoch: Epoch, custody_group_count: u64) {
+    fn update_custody_requirements(
+        &self,
+        advertise_epoch: Epoch,
+        custody_group_count: u64,
+        backfill_custody_groups: bool,
+    ) {
         let node_id = self.network_globals.local_enr().node_id().raw();
         let config = self.controller.chain_config();
         let sampling_size = config.sampling_size(custody_group_count);
@@ -985,6 +993,14 @@ impl<P: Preset> Network<P> {
                     custody_group_count,
                 )
                 .send(&self.network_to_service_tx);
+
+                if backfill_custody_groups {
+                    let current_sampling_columns = self.controller.sampling_columns();
+                    let backfill_column_indices = &sampling_columns - &current_sampling_columns;
+
+                    P2pToSync::RequestCustodyGroupBackfill(backfill_column_indices)
+                        .send(&self.channels.p2p_to_sync_tx);
+                }
 
                 // Lastly, update `sampling_columns` in fork choice store
                 self.controller.on_store_sampling_columns(sampling_columns);
