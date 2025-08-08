@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::error::Error as StdError;
+use core::{error::Error as StdError, time::Duration};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
@@ -21,7 +21,7 @@ use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{EventChannels, ValidatorMessage, Wait};
+use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -50,6 +50,7 @@ use ssz::{BitList, BitVector, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use tokio::time::timeout;
 use try_from_iterator::TryFromIterator as _;
 use types::{
     altair::{
@@ -974,16 +975,41 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         wait_group: &W,
         slot_head: &SlotHead<P>,
     ) -> Result<()> {
-        // Skip attesting if validators already attested at slot
-        if self.attested_in_current_slot() {
-            return Ok(());
-        }
+        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
-        if slot_head.optimistic {
+        if slot_head.optimistic
+            && timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+                loop {
+                    let block_event =
+                        match self.event_channels.receiver_for(Topic::Block).recv().await {
+                            Ok(Event::Block(block_event)) => block_event,
+                            Ok(_) => continue,
+                            Err(error) => {
+                                debug!("error receiving block event: {error:?}");
+                                continue;
+                            }
+                        };
+
+                    if block_event.block == slot_head.beacon_block_root
+                        && !block_event.execution_optimistic
+                    {
+                        break;
+                    }
+                }
+            })
+            .await
+            .is_err()
+        {
             warn!(
                 "validator cannot participate in attestation because \
                  chain head has not been fully verified by an execution engine",
             );
+
+            return Ok(());
+        }
+
+        // Skip attesting if validators already attested at slot
+        if self.attested_in_current_slot() {
             return Ok(());
         }
 
