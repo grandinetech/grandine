@@ -8,7 +8,7 @@ use execution_engine::{
     ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId, PayloadStatusV1,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use tokio::runtime::{Builder, Handle};
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
@@ -126,15 +126,15 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
 
         match result {
             Ok(Some(pow_block)) => {
-                info!("request for Eth1 block {block_hash:?} returned {pow_block:?}");
+                info_with_peers!("request for Eth1 block {block_hash:?} returned {pow_block:?}");
                 Some(pow_block.into())
             }
             Ok(None) => {
-                warn!("Eth1 block {block_hash:?} not found");
+                warn_with_peers!("Eth1 block {block_hash:?} not found");
                 None
             }
             Err(error) => {
-                warn!("request for Eth1 block {block_hash:?} failed: {error:?}");
+                warn_with_peers!("request for Eth1 block {block_hash:?} failed: {error:?}");
                 None
             }
         }

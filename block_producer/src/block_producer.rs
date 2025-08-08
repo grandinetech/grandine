@@ -23,7 +23,7 @@ use futures::{
 use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
-use log::{error, info, warn};
+use logging::{error_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PoolAdditionOutcome, PoolRejectionReason,
     SyncCommitteeAggPool,
@@ -413,7 +413,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 PoolAdditionOutcome::Accept
             }
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "external proposer slashing rejected (error: {error}, slashing: {slashing:?})",
                 );
                 PoolAdditionOutcome::Reject(PoolRejectionReason::InvalidProposerSlashing, error)
@@ -516,7 +516,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             current_slot,
             controller.snapshot().nonempty_slots(head_block_root),
         ) {
-            warn!("cannot use Builder API for execution payload: {error}");
+            warn_with_peers!("cannot use Builder API for execution payload: {error}");
             return None;
         }
 
@@ -530,7 +530,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         {
             Ok(execution_payload) => execution_payload,
             Err(error) => {
-                warn!("failed to post blinded block to the builder node: {error:?}");
+                warn_with_peers!("failed to post blinded block to the builder node: {error:?}");
                 return None;
             }
         };
@@ -679,7 +679,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .saturating_mul(builder_boost_factor);
 
                     if local_mev >= boosted_builder_mev {
-                        info!(
+                        info_with_peers!(
                             "using more profitable local payload: \
                              local MEV: {local_mev}, builder MEV: {builder_mev}, \
                              boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
@@ -857,7 +857,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         match operation_pools::convert_to_electra_attestation(attestation) {
                             Ok(electra_attestation) => Some((electra_attestation, committee_index)),
                             Err(error) => {
-                                warn!("unable to convert to electra attestation: {error:?}");
+                                warn_with_peers!("unable to convert to electra attestation: {error:?}");
                                 None
                             }
                         }
@@ -885,7 +885,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         match Self::compute_on_chain_aggregate(attestations.into_iter()) {
                             Ok(electra_aggregate) => Some(electra_aggregate),
                             Err(error) => {
-                                warn!("unable to compute on chain aggregate: {error:?}");
+                                warn_with_peers!("unable to compute on chain aggregate: {error:?}");
                                 None
                             }
                         }
@@ -974,7 +974,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         ) {
             Ok(block) => block,
             Err(error) => {
-                warn!("constructed invalid blinded beacon block (error: {error:?})");
+                warn_with_peers!("constructed invalid blinded beacon block (error: {error:?})");
                 return None;
             }
         };
@@ -996,7 +996,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let (post_state, block_rewards) = match result {
             Ok((state, block_rewards)) => (state, block_rewards),
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "constructed invalid blinded beacon block \
                      (error: {error:?}, without_state_root: {without_state_root:?})",
                 );
@@ -1032,7 +1032,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let (post_state, block_rewards) = match result {
             Ok((state, block_rewards)) => (state, block_rewards),
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "constructed invalid beacon block \
                      (error: {error:?}, without_state_root: {without_state_root:?})",
                 );
@@ -1145,7 +1145,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
             Ok(None) => Ok(None),
             Err(error) => {
-                warn!("failed to get execution payload header: {error}");
+                warn_with_peers!("failed to get execution payload header: {error}");
                 Ok(None)
             }
         }
@@ -1402,7 +1402,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .signed_bls_to_execution_changes()
             .await
             .map_err(|error| {
-                warn!("unable to retrieve BLS to execution changes from operation pool: {error:?}");
+                warn_with_peers!("unable to retrieve BLS to execution changes from operation pool: {error:?}");
             })
             .unwrap_or_default()
             .into_iter()
@@ -1521,7 +1521,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Ok(payload_id_option) => {
                 match payload_id_option {
                     Some(payload_id) => {
-                        info!(
+                        info_with_peers!(
                             "started work on execution payload with id {payload_id:?} \
                              for head {head_root:?} at slot {slot}",
                         );
@@ -1531,13 +1531,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     // If we have no block at 4th-second mark, we preprocess new state without the block.
                     // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
                     // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
-                    None => warn!(
+                    None => warn_with_peers!(
                         "could not prepare execution payload: payload_id is None; \
                          ensure that multiple consensus clients are not driving the same execution client",
                     ),
                 }
             }
-            Err(error) => warn!("error while preparing execution payload: {error:?}"),
+            Err(error) => warn_with_peers!("error while preparing execution payload: {error:?}"),
         }
     }
 
@@ -1622,7 +1622,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .snapshot()
                         .nonempty_slots(self.head_block_root),
                 ) {
-                    warn!("cannot use Builder API for execution payload header: {error}");
+                    warn_with_peers!("cannot use Builder API for execution payload header: {error}");
                     return None;
                 }
 
@@ -1673,7 +1673,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .map(PayloadIdEntry::Cached);
 
         if payload_id.is_none() {
-            warn!(
+            warn_with_peers!(
                 "payload_id not found in payload_id_cache for {:?}",
                 self.head_block_root
             );
@@ -1691,7 +1691,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
 
         let Some(payload_id) = payload_id else {
-            error!(
+            error_with_peers!(
                 "payload_id from execution layer was not received; This will lead to missed block"
             );
 
@@ -1706,7 +1706,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         {
             Ok(payload) => payload,
             Err(error) => {
-                warn!("unable to retrieve payload with payload_id {payload_id:?}: {error:?}");
+                warn_with_peers!("unable to retrieve payload with payload_id {payload_id:?}: {error:?}");
 
                 match payload_id {
                     PayloadIdEntry::Cached(_) => {
@@ -1725,14 +1725,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         }
 
                         if let Some(payload_id) = payload_id {
-                            info!("successfully retrieved non-cached payload_id: {payload_id:?}");
+                            info_with_peers!("successfully retrieved non-cached payload_id: {payload_id:?}");
 
                             self.producer_context
                                 .execution_engine
                                 .get_execution_payload(payload_id)
                                 .await?
                         } else {
-                            error!(
+                            error_with_peers!(
                                 "payload_id from execution layer was not received; This will lead to missed block"
                             );
 
@@ -1796,7 +1796,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         self.local_execution_payload_result()
             .await
-            .map_err(|error| warn!("execution engine failed to produce payload: {error:?}"))
+            .map_err(|error| warn_with_peers!("execution engine failed to produce payload: {error:?}"))
             .ok()
             .flatten()
     }

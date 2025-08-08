@@ -11,7 +11,7 @@ use futures::channel::mpsc::UnboundedSender;
 use im::OrdMap;
 use itertools::Either;
 use libmdbx::{DatabaseFlags, Environment, Geometry, ObjectLength, Stat, WriteFlags};
-use log::{debug, error};
+use logging::{debug_with_peers, error_with_peers};
 use snap::raw::{Decoder, Encoder};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -38,7 +38,7 @@ pub enum RestartMessage {
 impl RestartMessage {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if let Err(message) = tx.unbounded_send(self) {
-            debug!("send to restart service failed because the receiver was dropped: {message:?}");
+            debug_with_peers!("send to restart service failed because the receiver was dropped: {message:?}");
         }
     }
 }
@@ -113,14 +113,14 @@ impl Database {
         let existing_db = transaction.open_db(Some(legacy_name));
 
         let database_name = if existing_db.is_err() {
-            debug!("database: {legacy_name} with name {name}");
+            debug_with_peers!("database: {legacy_name} with name {name}");
             if !mode.is_read_only() {
                 transaction.create_db(Some(name), DatabaseFlags::default())?;
             }
 
             name
         } else {
-            debug!("legacy database: {legacy_name}");
+            debug_with_peers!("legacy database: {legacy_name}");
             legacy_name
         }
         .to_owned();
@@ -580,7 +580,7 @@ fn handle_write_error(
     restart_tx: Option<&UnboundedSender<RestartMessage>>,
 ) -> libmdbx::Error {
     if error == libmdbx::Error::MapFull {
-        error!("error while writing to {database_name} database: {error}");
+        error_with_peers!("error while writing to {database_name} database: {error}");
 
         if let Some(restart_tx) = restart_tx {
             RestartMessage::StorageMapFull(error).send(restart_tx);

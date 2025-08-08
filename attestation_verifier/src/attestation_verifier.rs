@@ -23,7 +23,7 @@ use helper_functions::{
     verifier::{MultiVerifier, Triple, Verifier},
 };
 use itertools::Either;
-use log::{debug, warn};
+use logging::{debug_with_peers,warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
@@ -153,7 +153,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                             wait_group,
                             mut attestations,
                         } => {
-                            debug!(
+                            debug_with_peers!(
                                 "received attestation batch with {} attestations, existing batch attestations: {}",
                                 attestations.len(),
                                 self.batch_attestations.len()
@@ -202,7 +202,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         self.active_attestations_task_count += 1;
         self.track_active_task_count();
 
-        debug!(
+        debug_with_peers!(
             "spawn verify attestation batch task: attestation_len: {}",
             self.attestations.len(),
         );
@@ -230,7 +230,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         self.active_batch_attestations_task_count += 1;
         self.track_active_task_count();
 
-        debug!(
+        debug_with_peers!(
             "spawn verify batch attestation task: batch_attestation_len: {}",
             self.batch_attestations.len()
         );
@@ -289,7 +289,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
         match self.controller.preprocessed_state_at_current_slot() {
             Ok(state) => state,
             Err(error) => {
-                debug!(
+                debug_with_peers!(
                     "failed to get state at current slot for aggregate and proof batch signature verification: {error}. \
                      Using head state instead",
                 );
@@ -336,7 +336,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                 self.send_results_to_fork_choice(accepted);
             }
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "signature verification for gossip aggregate and proof batch failed: {error}",
                 );
 
@@ -481,7 +481,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
         match self.controller.preprocessed_state_at_current_slot() {
             Ok(state) => state,
             Err(error) => {
-                debug!(
+                debug_with_peers!(
                     "failed to get state at current slot for attestation batch signature verification: {error}. \
                      Using head state instead",
                 );
@@ -522,7 +522,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
                 self.send_results_to_fork_choice(accepted);
             }
             Err(error) => {
-                warn!("signature verification for gossip attestation batch failed: {error}");
+                warn_with_peers!("signature verification for gossip attestation batch failed: {error}");
 
                 for accepted_attestation in accepted.into_iter().flatten() {
                     if let AttestationAction::Accept { attestation, .. } = accepted_attestation {
@@ -647,7 +647,7 @@ enum TaskMessage<W> {
 impl<W> TaskMessage<W> {
     fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!(
+            debug_with_peers!(
                 "send from verification task to attestation verifier failed because the receiver was dropped"
             );
         }

@@ -24,7 +24,8 @@ helper_functions = { workspace = true }
 hex-literal = { workspace = true, optional = true }
 itertools = { workspace = true }
 keymanager = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
+logging ={ workspace = true }
 operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }

@@ -12,7 +12,7 @@ use execution_engine::{
     PayloadStatusV1, RawExecutionRequests,
 };
 use futures::{channel::mpsc::UnboundedSender, Future};
-use log::warn;
+use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use reqwest::{header::HeaderMap, Client};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -565,12 +565,12 @@ impl Eth1Api {
                     self.on_error_response(endpoint);
 
                     match endpoints_for_request.peek() {
-                        Some(next_endpoint) => warn!(
+                        Some(next_endpoint) => warn_with_peers!(
                             "Eth1 RPC endpoint {} returned an error: {error}; switching to {}",
                             endpoint.url(),
                             next_endpoint.url(),
                         ),
-                        None => warn!(
+                        None => warn_with_peers!(
                             "last available Eth1 RPC endpoint {} returned an error: {error}",
                             endpoint.url(),
                         ),

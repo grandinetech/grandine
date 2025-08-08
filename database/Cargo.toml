@@ -14,7 +14,8 @@ futures = { workspace = true }
 im = { workspace = true }
 itertools = { workspace = true }
 libmdbx = { workspace = true }
-log = { workspace = true }
+tracing ={ workspace = true }
+logging = { workspace = true }
 snap = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }

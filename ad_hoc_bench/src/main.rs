@@ -10,7 +10,7 @@ use eth2_cache_utils::{goerli, holesky, holesky_devnet, mainnet, medalla, withdr
 use fork_choice_control::AdHocBenchController;
 use fork_choice_store::StoreConfig;
 use itertools::Itertools as _;
-use tracing::info;
+use logging::info_with_peers;
 use pubkey_cache::PubkeyCache;
 use rand::seq::SliceRandom as _;
 use types::{
@@ -359,7 +359,7 @@ fn run<P: Preset>(
     } = options;
 
     if let Some(blacklisted_blocks) = blacklisted_blocks {
-        info!("setting blacklisted blocks to: {blacklisted_blocks:?}");
+        info_with_peers!("setting blacklisted blocks to: {blacklisted_blocks:?}");
         chain_config.blacklisted_blocks = blacklisted_blocks;
     }
 
@@ -405,7 +405,7 @@ fn run<P: Preset>(
                 .keep())
         })?;
 
-    info!("database dir: {}", database_dir.as_path().display());
+    info_with_peers!("database dir: {}", database_dir.as_path().display());
 
     let database = Database::persistent(
         "ad_hoc_bench_db",
@@ -437,7 +437,7 @@ fn run<P: Preset>(
     let block_count = blocks.len();
     let slot_count = last_slot - first_slot;
 
-    info!("processing {block_count} blocks in {slot_count} slots (not including anchor)");
+    info_with_peers!("processing {block_count} blocks in {slot_count} slots (not including anchor)");
 
     let start = Instant::now();
 
@@ -474,19 +474,19 @@ fn run<P: Preset>(
     let block_throughput = time_per_block.recip();
     let slot_throughput = time_per_slot.recip();
 
-    info!("blocks processed:         {block_count}");
-    info!("slots processed:          {slot_count}");
-    info!("time taken:               {time:.3} s");
-    info!(
+    info_with_peers!("blocks processed:         {block_count}");
+    info_with_peers!("slots processed:          {slot_count}");
+    info_with_peers!("time taken:               {time:.3} s");
+    info_with_peers!(
         "average time per block:   {:.3} ms",
         time_per_block * 1000_f64,
     );
-    info!(
+    info_with_peers!(
         "average time per slot:    {:.3} ms",
         time_per_slot * 1000_f64,
     );
-    info!("average block throughput: {block_throughput:.3} blocks/s");
-    info!("average slot throughput:  {slot_throughput:.3} slots/s");
+    info_with_peers!("average block throughput: {block_throughput:.3} blocks/s");
+    info_with_peers!("average slot throughput:  {slot_throughput:.3} slots/s");
 
     #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;
@@ -498,7 +498,7 @@ fn run<P: Preset>(
 fn print_jemalloc_stats() -> Result<()> {
     tikv_jemalloc_ctl::epoch::advance().map_err(anyhow::Error::msg)?;
 
-    info!(
+    info_with_peers!(
         "allocated: {}, \
          active: {}, \
          metadata: {}, \

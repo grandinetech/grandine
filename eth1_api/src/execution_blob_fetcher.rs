@@ -11,7 +11,7 @@ use futures::{
     StreamExt as _,
 };
 use helper_functions::misc;
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use types::{
     combined::SignedBeaconBlock,
     deneb::{containers::BlobIdentifier, primitives::BlobIndex},
@@ -75,7 +75,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .collect::<Vec<_>>();
 
             if kzg_commitments.is_empty() {
-                debug!(
+                debug_with_peers!(
                     "cannot fetch blobs from EL: all requested blob sidecars have been received"
                 );
                 return;
@@ -106,7 +106,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                         let blob_identifier = BlobIdentifier { block_root, index };
 
                         if self.received_blob_sidecars.contains_key(&blob_identifier) {
-                            debug!(
+                            debug_with_peers!(
                                 "received blob from EL is already known: {blob_identifier:?}, \
                                  slot: {slot}"
                             );
@@ -120,7 +120,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                 proof,
                             ) {
                                 Ok(blob_sidecar) => {
-                                    debug!(
+                                    debug_with_peers!(
                                         "received blob sidecar from EL: {blob_identifier:?}, \
                                          slot: {slot}"
                                     );
@@ -130,7 +130,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     self.received_blob_sidecars.insert(blob_identifier, slot);
                                     blob_sidecars.push(Arc::new(blob_sidecar));
                                 }
-                                Err(error) => warn!(
+                                Err(error) => warn_with_peers!(
                                     "failed to construct blob sidecar with blob and proof \
                                      received from execution layer: {error:?}"
                                 ),
@@ -138,7 +138,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                         }
                     }
                 }
-                Err(error) => warn!("engine_getBlobsV1 call failed: {error}"),
+                Err(error) => warn_with_peers!("engine_getBlobsV1 call failed: {error}"),
             }
 
             for blob_sidecar in blob_sidecars {
@@ -151,7 +151,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .filter(|identifier| !self.received_blob_sidecars.contains_key(identifier))
                 .collect::<Vec<_>>();
 
-            debug!("missing blob sidecars after EL: {missing_blob_identifiers:?}");
+            debug_with_peers!("missing blob sidecars after EL: {missing_blob_identifiers:?}");
 
             if !missing_blob_identifiers.is_empty() {
                 BlobFetcherToP2p::BlobsNeeded(missing_blob_identifiers, slot, peer_id)
