@@ -12,7 +12,7 @@ use features::Feature::DebugAttestationPacker;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
 use helper_functions::accessors;
-use log::warn;
+use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
@@ -312,7 +312,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
                 if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
                     controller.head_state().value
                 } else {
-                    warn!(
+                    warn_with_peers!(
                         "failed get preprocessed state at current slot needed for validating registered validator pubkeys: {error}",
                     );
                     return Ok(());

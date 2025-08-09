@@ -17,7 +17,8 @@ eth1_api = { workspace = true }
 features = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
+logging = { workspace = true }
 p2p = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }

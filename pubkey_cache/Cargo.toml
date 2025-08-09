@@ -11,7 +11,8 @@ anyhow = { workspace = true }
 bls = { workspace = true }
 dashmap = { workspace = true }
 database = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
+tracing = { workspace = true }
 prometheus_metrics = { workspace = true }
 std_ext = { workspace = true }
 tynm = { workspace = true }

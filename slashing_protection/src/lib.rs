@@ -7,7 +7,7 @@ use derivative::Derivative;
 use fs_err::File;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use rusqlite::{Connection, OptionalExtension, Rows, Transaction, TransactionBehavior};
 use ssz::{SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
@@ -223,7 +223,7 @@ impl SlashingProtector {
     ) -> Result<ImportReport> {
         let interchange = InterchangeFormat::load_from_file(interchange_file_path)?;
 
-        debug!("loaded interchange file for import: {interchange:?}");
+        debug_with_peers!("loaded interchange file for import: {interchange:?}");
 
         interchange.validate(genesis_validators_root)?;
 
@@ -244,7 +244,7 @@ impl SlashingProtector {
             let result = Self::find_or_store_validator(&transaction, pubkey);
 
             if let Ok(validator_id) = result {
-                debug!("successfully imported validator (pubkey: {pubkey:?})");
+                debug_with_peers!("successfully imported validator (pubkey: {pubkey:?})");
 
                 report.validators.succeeded.push(interchange_record.pubkey);
 
@@ -256,11 +256,11 @@ impl SlashingProtector {
 
                     match Self::store_proposal(&transaction, validator_id, &proposal) {
                         Ok(()) => {
-                            debug!("successfully imported block: {proposal:?}");
+                            debug_with_peers!("successfully imported block: {proposal:?}");
                             report.blocks.succeeded.push(proposal);
                         }
                         Err(error) => {
-                            debug!("failed to import block (block: {proposal:?}, error: {error})");
+                            debug_with_peers!("failed to import block (block: {proposal:?}, error: {error})");
                             report.blocks.failed.push(proposal);
                         }
                     }
@@ -275,11 +275,11 @@ impl SlashingProtector {
 
                     match Self::store_attestation(&transaction, validator_id, &attestation) {
                         Ok(()) => {
-                            debug!("successfully imported attestation: {attestation:?}");
+                            debug_with_peers!("successfully imported attestation: {attestation:?}");
                             report.attestations.succeeded.push(attestation);
                         }
                         Err(error) => {
-                            debug!(
+                            debug_with_peers!(
                                 "failed to import attestation \
                                  (attestation: {attestation:?}, error: {error})",
                             );
@@ -288,7 +288,7 @@ impl SlashingProtector {
                     }
                 }
             } else {
-                debug!("failed to import validator (pubkey: {pubkey:?})");
+                debug_with_peers!("failed to import validator (pubkey: {pubkey:?})");
                 report.validators.failed.push(pubkey);
                 continue;
             }
@@ -308,7 +308,7 @@ impl SlashingProtector {
 
         let interchange_file_path = interchange_file_path.as_ref();
 
-        info!(
+        info_with_peers!(
             "saving validator information to interchange file: {}",
             interchange_file_path.display()
         );
@@ -316,7 +316,7 @@ impl SlashingProtector {
         let file = File::create(interchange_file_path)?;
         serde_json::to_writer(file, &interchange)?;
 
-        info!("interchange file saved");
+        info_with_peers!("interchange file saved");
 
         Ok(interchange)
     }
@@ -415,7 +415,7 @@ impl SlashingProtector {
             return Ok(validator_id);
         }
 
-        debug!("saving validator information to slashing protection db (pubkey: {pubkey:?})");
+        debug_with_peers!("saving validator information to slashing protection db (pubkey: {pubkey:?})");
 
         transaction.execute(
             "INSERT INTO validators (pubkey) VALUES (?1)",
@@ -527,7 +527,7 @@ impl SlashingProtector {
 
         if let Some(matching_proposal) = matching_proposal {
             if matching_proposal.signing_root == proposal.signing_root {
-                debug!(
+                debug_with_peers!(
                     "found identical block proposal in database \
                      (matching proposal: {matching_proposal:?})",
                 );
@@ -554,7 +554,7 @@ impl SlashingProtector {
 
         transaction.commit()?;
 
-        debug!(
+        debug_with_peers!(
             "inserted block proposal into database (validator_id: {}, slot: {}, signing_root: {:?})",
             validator_id, proposal.slot, proposal.signing_root,
         );
@@ -574,11 +574,11 @@ impl SlashingProtector {
         let control_flow = match validation_outcome {
             SlashingValidationOutcome::Accept => ControlFlow::Continue(()),
             SlashingValidationOutcome::Ignore => {
-                warn!("slashing protector ignored duplicate beacon block: {proposal:?}");
+                warn_with_peers!("slashing protector ignored duplicate beacon block: {proposal:?}");
                 ControlFlow::Break(())
             }
             SlashingValidationOutcome::Reject(error) => {
-                warn!(
+                warn_with_peers!(
                     "slashing protector rejected slashable beacon block \
                      (error: {error}, block: {proposal:?})",
                 );
@@ -627,12 +627,12 @@ impl SlashingProtector {
                 Ok(outcome) => match outcome {
                     SlashingValidationOutcome::Accept => Some(attestation),
                     SlashingValidationOutcome::Ignore => {
-                        warn!("slashing protector ignored duplicate attestation: {attestation:?}");
+                        warn_with_peers!("slashing protector ignored duplicate attestation: {attestation:?}");
 
                         None
                     }
                     SlashingValidationOutcome::Reject(error) => {
-                        warn!(
+                        warn_with_peers!(
                             "slashing protector rejected slashable attestation \
                                  (error: {error}, attestation: {attestation:?})",
                         );
@@ -641,7 +641,7 @@ impl SlashingProtector {
                     }
                 },
                 Err(error) => {
-                    warn!(
+                    warn_with_peers!(
                         "slashing protector returned an error while checking proposable \
                              attestation (error: {error}, attestation: {attestation:?})",
                     );
@@ -701,7 +701,7 @@ impl SlashingProtector {
                     stored_epoch,
                 };
 
-                warn!("slashing protector rejected current_epoch: {error:?}");
+                warn_with_peers!("slashing protector rejected current_epoch: {error:?}");
 
                 return Ok(Some(SlashingValidationOutcome::Reject(error)));
             }
@@ -748,10 +748,10 @@ impl SlashingProtector {
             None => self.store_current_epoch(current_epoch)?,
         }
 
-        info!("pruning slashing protection db, current epoch: {current_epoch}");
+        info_with_peers!("pruning slashing protection db, current epoch: {current_epoch}");
 
         let Some(prune_up_to_epoch) = current_epoch.checked_sub(self.history_limit) else {
-            debug!("skipping slashing protection db pruning for epoch: {current_epoch}");
+            debug_with_peers!("skipping slashing protection db pruning for epoch: {current_epoch}");
 
             return Ok(());
         };
@@ -764,8 +764,8 @@ impl SlashingProtector {
         };
 
         match run() {
-            Ok(()) => info!("slashing protection db pruning completed for epoch: {current_epoch}"),
-            Err(error) => warn!("error occurred while pruning slashing protection db: {error:?}"),
+            Ok(()) => info_with_peers!("slashing protection db pruning completed for epoch: {current_epoch}"),
+            Err(error) => warn_with_peers!("error occurred while pruning slashing protection db: {error:?}"),
         }
 
         Ok(())
@@ -914,7 +914,7 @@ fn remove_fork_version_from_validators_if_needed(
         return Ok(());
     }
 
-    info!("migrating the slashing protection database. Please wait…");
+    info_with_peers!("migrating the slashing protection database. Please wait…");
 
     let interchange = slashing_protector.build_interchange_data(genesis_validators_root)?;
 
@@ -923,7 +923,7 @@ fn remove_fork_version_from_validators_if_needed(
         chrono::Local::now().format("%Y-%m-%dT%H_%M_%S"),
     ));
 
-    info!(
+    info_with_peers!(
         "saving validator information to interchange file as a backup: {}",
         interchange_file_path.display(),
     );
@@ -931,7 +931,7 @@ fn remove_fork_version_from_validators_if_needed(
     let file = File::create(interchange_file_path)?;
     serde_json::to_writer(file, &interchange)?;
 
-    info!("interchange file saved");
+    info_with_peers!("interchange file saved");
 
     fs_err::remove_file(validator_directory.as_ref().join(DB_PATH))?;
 
@@ -964,7 +964,7 @@ fn move_interchange_backup_files_to_validator_dir(
                     fs_err::copy(&beacon_backup_path, &validator_backup_path)?;
                     fs_err::remove_file(&beacon_backup_path)?;
 
-                    info!(
+                    info_with_peers!(
                         "moved interchange backup file from {} to {}",
                         beacon_backup_path.display(),
                         validator_backup_path.display(),
@@ -994,7 +994,7 @@ fn move_slashing_protection_db_to_validator_dir(
         fs_err::copy(&beacon_db_path, &validator_db_path)?;
         fs_err::remove_file(&beacon_db_path)?;
 
-        info!(
+        info_with_peers!(
             "moved {DB_PATH} from {} to {}",
             beacon_db_path.display(),
             validator_db_path.display()

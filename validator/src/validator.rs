@@ -38,7 +38,7 @@ use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
-use log::{debug, error, info, warn};
+use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use once_cell::sync::OnceCell;
 use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
@@ -290,7 +290,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             let proposer_index = match slot_head.proposer_index() {
                                 Ok(proposer_index) => proposer_index,
                                 Err(error) => {
-                                    error!("failed to compute proposer index while preparing execution payload: {error:?}");
+                                    error_with_peers!("failed to compute proposer index while preparing execution payload: {error:?}");
                                     continue;
                                 }
                             };
@@ -312,11 +312,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             let payload_attributes = match block_build_context.prepare_execution_payload_attributes().await {
                                 Ok(Some(attributes)) => attributes,
                                 Ok(None) => {
-                                    debug!("no payload attributes prepared");
+                                    debug_with_peers!("no payload attributes prepared");
                                     continue;
                                 },
                                 Err(error) => {
-                                    warn!("failed to prepare execution payload attributes: {error:?}");
+                                    warn_with_peers!("failed to prepare execution payload attributes: {error:?}");
                                     continue
                                 },
                             };
@@ -369,7 +369,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .await {
                                 Ok(outcome) => outcome,
                                 Err(error) => {
-                                    warn!("failed to handle attester slashing: {error}");
+                                    warn_with_peers!("failed to handle attester slashing: {error}");
                                     continue;
                                 }
                             };
@@ -387,7 +387,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .await {
                                 Ok(outcome) => outcome,
                                 Err(error) => {
-                                    warn!("failed to handle proposer slashing: {error}");
+                                    warn_with_peers!("failed to handle proposer slashing: {error}");
                                     continue;
                                 }
                             };
@@ -405,7 +405,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .await {
                                 Ok(outcome) => outcome,
                                 Err(error) => {
-                                    warn!("failed to handle voluntary exit: {error}");
+                                    warn_with_peers!("failed to handle voluntary exit: {error}");
                                     continue;
                                 }
                             };
@@ -485,7 +485,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     };
 
                     if !success {
-                        debug!("send to HTTP API failed because the receiver was dropped");
+                        debug_with_peers!("send to HTTP API failed because the receiver was dropped");
                     }
                 }
 
@@ -516,7 +516,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if let Some(metrics) = self.metrics.as_ref() {
             if tick.is_start_of_interval() {
                 let tick_delay = tick.delay(&self.chain_config, self.controller.genesis_time())?;
-                debug!("tick_delay: {tick_delay:?} for {tick:?}");
+                debug_with_peers!("tick_delay: {tick_delay:?} for {tick:?}");
                 metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
             }
         }
@@ -527,7 +527,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             && self.registered_validators.is_empty()
             && self.block_producer.no_prepared_proposers().await;
 
-        debug!("{kind:?} tick in slot {slot}");
+        debug_with_peers!("{kind:?} tick in slot {slot}");
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
 
@@ -579,7 +579,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         } else {
             self.slot_head(slot)
                 .await?
-                .map_err(|head_far_behind| warn!("{head_far_behind}"))
+                .map_err(|head_far_behind| warn_with_peers!("{head_far_behind}"))
                 .ok()
         };
 
@@ -646,14 +646,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .attest_and_start_aggregating(&wait_group, &slot_head)
                     .await
                 {
-                    error!("failed to produce and publish own attestations: {error:?}");
+                    error_with_peers!("failed to produce and publish own attestations: {error:?}");
                 }
 
                 if let Err(error) = self
                     .publish_sync_committee_messages(&wait_group, slot_head)
                     .await
                 {
-                    error!("failed to produce and publish own sync_committee messages: {error:?}");
+                    error_with_peers!("failed to produce and publish own sync_committee messages: {error:?}");
                 }
             }
             TickKind::Aggregate => {
@@ -689,7 +689,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.slot_head(slot)
             .await
             .map(Result::ok)
-            .map_err(|error| error!("state transition to slot {slot} failed: {error:?}"))
+            .map_err(|error| error_with_peers!("state transition to slot {slot} failed: {error:?}"))
             .unwrap_or_default()
     }
 
@@ -744,7 +744,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         if slot_head.optimistic {
-            warn!(
+            warn_with_peers!(
                 "validator cannot produce a block because \
                  chain head has not been fully verified by an execution engine",
             );
@@ -766,7 +766,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         if let Some(doppelganger_protection) = &doppelganger_protection {
             if !doppelganger_protection.is_validator_active(*public_key) {
-                info!(
+                info_with_peers!(
                     "Validator {public_key:?} skipping proposer duty in slot {} \
                      since not enough time has passed to ensure there are \
                      no doppelganger validators participating on network. \
@@ -819,7 +819,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let randao_reveal = match result {
             Ok(signature) => signature.into(),
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "failed to sign RANDAO reveal (epoch: {epoch}, public_key: {public_key}): \
                     {error:?}",
                 );
@@ -838,7 +838,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         {
             Ok(block_opt) => block_opt,
             Err(error) => {
-                warn!("failed to produce beacon block: {error}");
+                warn_with_peers!("failed to produce beacon block: {error}");
                 return Ok(());
             }
         };
@@ -853,7 +853,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             _block_rewards,
         )) = beacon_block_option
         else {
-            warn!(
+            warn_with_peers!(
                 "validator {} skipping beacon block proposal in slot {}",
                 proposer_index,
                 slot_head.slot(),
@@ -897,7 +897,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 {
                     Ok(response) => response,
                     Err(error) => {
-                        warn!("failed to post blinded block to the builder node: {error:?}");
+                        warn_with_peers!("failed to post blinded block to the builder node: {error:?}");
                         return Ok(());
                     }
                 };
@@ -905,7 +905,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 block_proofs = proofs;
                 block_blobs = blobs;
 
-                debug!("received execution payload from the builder node: {execution_payload:?}");
+                debug_with_peers!("received execution payload from the builder node: {execution_payload:?}");
 
                 let (message, signature) = signed_blinded_block.split();
 
@@ -930,14 +930,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        info!(
+        info_with_peers!(
             "validator {} proposing beacon block with root {:?} in slot {}",
             proposer_index,
             beacon_block.message().hash_tree_root(),
             slot_head.slot(),
         );
 
-        debug!("beacon block: {beacon_block:?}");
+        debug_with_peers!("beacon block: {beacon_block:?}");
 
         let block = Arc::new(beacon_block);
 
@@ -981,7 +981,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         if slot_head.optimistic {
-            warn!(
+            warn_with_peers!(
                 "validator cannot participate in attestation because \
                  chain head has not been fully verified by an execution engine",
             );
@@ -1024,7 +1024,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        info!(
+        info_with_peers!(
             "validators [{}] attesting in slot {}",
             own_singular_attestations
                 .iter()
@@ -1042,7 +1042,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let committee_index = misc::committee_index(attestation);
 
-            debug!(
+            debug_with_peers!(
                 "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
                 validator_index,
                 committee_index,
@@ -1122,7 +1122,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[expect(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         if slot_head.optimistic {
-            warn!(
+            warn_with_peers!(
                 "validators cannot participate in aggregation because \
                  chain head has not been fully verified by an execution engine",
             );
@@ -1205,7 +1205,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let signatures = match sign_result {
             Ok(signature) => signature,
             Err(error) => {
-                warn!("failed to sign aggregates and proofs: {error:?}");
+                warn_with_peers!("failed to sign aggregates and proofs: {error:?}");
                 return;
             }
         };
@@ -1228,7 +1228,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                 };
 
-                debug!("constructed aggregate and proof: {aggregate_and_proof:?}");
+                debug_with_peers!("constructed aggregate and proof: {aggregate_and_proof:?}");
 
                 aggregate_and_proof
             })
@@ -1238,7 +1238,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         };
 
-        info!(
+        info_with_peers!(
             "validators [{}] aggregating in slot {}",
             aggregates_and_proofs
                 .iter()
@@ -1279,7 +1279,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         if slot_head.optimistic {
-            warn!(
+            warn_with_peers!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
             );
@@ -1290,7 +1290,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         for (subcommittee_index, messages) in &own_messages {
             if !messages.is_empty() {
-                info!(
+                info_with_peers!(
                     "validators [{}] participating in sync subcommittee {subcommittee_index} in slot {}",
                     messages.iter().map(|m| m.validator_index).format(", "),
                     slot_head.slot(),
@@ -1300,7 +1300,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         for (sync_subnet_id, messages) in own_messages {
             for sync_committee_message in &messages {
-                debug!(
+                debug_with_peers!(
                     "validator {} publishing sync committee message (subnet_id: {}): {:?}",
                     sync_committee_message.validator_index, sync_subnet_id, sync_committee_message,
                 );
@@ -1336,7 +1336,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         if slot_head.optimistic {
-            warn!(
+            warn_with_peers!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
             );
@@ -1346,7 +1346,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let contributions = match self.own_contributions_and_proofs(slot_head).await {
             Ok(contributions) => contributions,
             Err(error) => {
-                error!("error while producing own contributions and proofs: {error:?}");
+                error_with_peers!("error while producing own contributions and proofs: {error:?}");
                 return;
             }
         };
@@ -1355,7 +1355,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         }
 
-        info!(
+        info_with_peers!(
             "validators [{}] aggregating in sync committee in slot {}",
             contributions
                 .iter()
@@ -1365,7 +1365,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         );
 
         for contribution_and_proof in contributions {
-            debug!(
+            debug_with_peers!(
                 "validator {} publishing sync committee contribution and proof: {:?}",
                 contribution_and_proof.message.aggregator_index, contribution_and_proof,
             );
@@ -1407,7 +1407,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .attest_and_start_aggregating(wait_group, &slot_head)
                 .await
             {
-                error!("failed to produce and publish own attestations: {error:?}");
+                error_with_peers!("failed to produce and publish own attestations: {error:?}");
             }
         }
 
@@ -1419,7 +1419,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .publish_sync_committee_messages(wait_group, slot_head)
                 .await
             {
-                error!("failed to produce and publish own sync_committee messages: {error:?}");
+                error_with_peers!("failed to produce and publish own sync_committee messages: {error:?}");
             }
         }
     }
@@ -1471,7 +1471,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .filter_map(|member| {
                     if let Some(doppelganger_protection) = &doppelganger_protection {
                         if !doppelganger_protection.is_validator_active(member.public_key) {
-                            info!(
+                            info_with_peers!(
                                 "Validator {:?} skipping attesting duty in slot {} \
                                  since not enough time has passed to ensure there are \
                                  no doppelganger validators participating on network. \
@@ -1521,7 +1521,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let signatures = match result {
             Ok(signatures) => signatures,
             Err(error) => {
-                warn!("failed to sign attestations: {error:?}");
+                warn_with_peers!("failed to sign attestations: {error:?}");
                 return Ok(&[]);
             }
         };
@@ -1643,7 +1643,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         {
             Ok(messages) => messages,
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "failed to sign sync committee messages (slot: {}): {:?}",
                     slot_head.slot(),
                     error,
@@ -1721,7 +1721,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let signatures = match result {
             Ok(signatures) => signatures,
             Err(error) => {
-                warn!("failed to sign contributions and proofs: {error:?}");
+                warn_with_peers!("failed to sign contributions and proofs: {error:?}");
                 return Ok(vec![]);
             }
         };
@@ -1763,7 +1763,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         {
             Ok(proofs) => proofs,
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "failed to sign sync aggregator selection data for sync committee selection proofs (slot: {}): {:?}",
                     slot_head.slot(),
                     error,
@@ -1824,7 +1824,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     {
                         Ok(with_status) => with_status.value,
                         Err(error) => {
-                            warn!("failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}");
+                            warn_with_peers!("failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}");
                             break;
                         }
                     }
@@ -1883,7 +1883,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     );
 
                     if !is_too_many_empty_slots {
-                        warn!("failed to obtain beacon state for current slot: {error}");
+                        warn_with_peers!("failed to obtain beacon state for current slot: {error}");
                     }
 
                     return;
@@ -2028,13 +2028,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .map(ContiguousList::<_, P::ValidatorRegistryLimit>::try_from_iter)
                 .collect::<Result<Vec<_>, ReadError>>()
                 .inspect_err(|error| {
-                    warn!("failed to collect validator registrations: {error:?}")
+                    warn_with_peers!("failed to collect validator registrations: {error:?}")
                 })?;
 
             // Do not submit requests in parallel. Doing so causes all of them to be timed out.
             for registrations in signed_registrations {
                 if let Err(error) = builder_api.register_validators::<P>(registrations).await {
-                    warn!("failed to register validator batch: {error}");
+                    warn_with_peers!("failed to register validator batch: {error}");
                 }
             }
 
@@ -2097,6 +2097,6 @@ async fn update_beacon_committee_subscriptions(
         .send(subnet_service_tx);
 
     if let Err(error) = receiver.await {
-        warn!("failed to update beacon committee subscriptions: {error:?}");
+        warn_with_peers!("failed to update beacon committee subscriptions: {error:?}");
     }
 }

@@ -12,7 +12,7 @@ use chrono::DateTime;
 use eth1_api::{Eth1ConnectionData, Eth1Metrics};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::{accessors, predicates};
-use log::warn;
+use logging::warn_with_peers;
 use p2p::metrics::{PEERS_CONNECTED, RPC_RECV_BYTES, RPC_SENT_BYTES};
 use prometheus::{IntCounter, IntGauge};
 use serde::Serialize;
@@ -64,7 +64,7 @@ impl Meta {
             version: METRICS_VERSION,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map_err(|error| warn!("unable to calculate timestamp: {error:?}"))
+                .map_err(|error| warn_with_peers!("unable to calculate timestamp: {error:?}"))
                 .as_ref()
                 .map(Duration::as_millis)
                 .unwrap_or_default(),
@@ -274,11 +274,11 @@ impl PlatformSpecificSystemMetrics {
     #[cfg(target_os = "linux")]
     fn new() -> Self {
         let cpu_times = psutil::cpu::cpu_times()
-            .map_err(|error| warn!("unable to get CPU times information: {error:?}"))
+            .map_err(|error| warn_with_peers!("unable to get CPU times information: {error:?}"))
             .ok();
         let cpu = cpu_times.as_ref();
         let mem = psutil::memory::virtual_memory()
-            .map_err(|error| warn!("unable to get virtual memory information: {error:?}"))
+            .map_err(|error| warn_with_peers!("unable to get virtual memory information: {error:?}"))
             .ok();
 
         let mem = mem.as_ref();

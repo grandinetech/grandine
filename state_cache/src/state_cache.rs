@@ -6,7 +6,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use im::{HashMap, OrdMap};
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use parking_lot::{Mutex, MutexGuard};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -110,7 +110,7 @@ impl<P: Preset> StateCache<P> {
                     return Ok((state.clone_arc(), *rewards));
                 }
 
-                info!(
+                info_with_peers!(
                     "recomputing state cache entry for block {block_root:?} at slot {slot} \
                      because block rewards are missing",
                 );
@@ -165,7 +165,7 @@ impl<P: Preset> StateCache<P> {
                     return Ok(Some((state.clone_arc(), *rewards)));
                 }
 
-                info!(
+                info_with_peers!(
                     "recomputing state cache entry for block {block_root:?} at slot {slot} \
                      because block rewards are missing",
                 );
@@ -223,7 +223,7 @@ impl<P: Preset> StateCache<P> {
             let mut state_map = match self.try_lock_map(&state_map_lock, block_root) {
                 Ok(state_map) => state_map,
                 Err(error) => {
-                    warn!("failed to prune beacon state cache: {error:?}");
+                    warn_with_peers!("failed to prune beacon state cache: {error:?}");
                     continue;
                 }
             };
@@ -282,7 +282,7 @@ impl<P: Preset> StateCache<P> {
             let error = CacheLockError::CacheLockTimeout { timeout };
 
             if self.log_lock_timeouts.load(Ordering::SeqCst) {
-                warn!("{error:?}");
+                warn_with_peers!("{error:?}");
             }
 
             anyhow!(error)
@@ -303,7 +303,7 @@ impl<P: Preset> StateCache<P> {
             };
 
             if self.log_lock_timeouts.load(Ordering::SeqCst) {
-                warn!("{error:?}");
+                warn_with_peers!("{error:?}");
             }
 
             anyhow!(error)

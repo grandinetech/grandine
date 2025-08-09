@@ -2,7 +2,7 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use anyhow::Result;
-use log::warn;
+use logging::warn_with_peers;
 use once_cell::sync::OnceCell;
 use prometheus::{
     histogram_opts, opts, Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec,
@@ -1004,7 +1004,7 @@ impl Metrics {
             .get_metric_with_label_values(labels)
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
-            Err(error) => warn!("unable to track HTTP API response time for {labels:?}: {error:?}"),
+            Err(error) => warn_with_peers!("unable to track HTTP API response time for {labels:?}: {error:?}"),
         }
     }
 
@@ -1016,7 +1016,7 @@ impl Metrics {
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
             Err(error) => {
-                warn!("unable to track metrics server response time for {labels:?}: {error:?}")
+                warn_with_peers!("unable to track metrics server response time for {labels:?}: {error:?}")
             }
         }
     }
@@ -1029,7 +1029,7 @@ impl Metrics {
         {
             Ok(metrics) => metrics.observe(response_duration.as_secs_f64()),
             Err(error) => {
-                warn!("unable to track Validator API response time for {labels:?}: {error:?}")
+                warn_with_peers!("unable to track Validator API response time for {labels:?}: {error:?}")
             }
         }
     }
@@ -1049,7 +1049,7 @@ impl Metrics {
         match self.gossip_objects.get_metric_with_label_values(labels) {
             Ok(counter) => counter.inc(),
             Err(error) => {
-                warn!("unable to register received object over gossip for {labels:?}: {error:?}")
+                warn_with_peers!("unable to register received object over gossip for {labels:?}: {error:?}")
             }
         }
     }
@@ -1060,7 +1060,7 @@ impl Metrics {
             Ok(duration) => self
                 .gossip_block_slot_start_delay_time
                 .observe(duration.as_secs_f64()),
-            Err(error) => warn!("unable to observe block duration to slot: {error:?}"),
+            Err(error) => warn_with_peers!("unable to observe block duration to slot: {error:?}"),
         }
     }
 
@@ -1072,7 +1072,7 @@ impl Metrics {
         {
             Ok(counter) => counter.inc(),
             Err(error) => {
-                warn!("unable to register mutator attestation for {labels:?}: {error:?}")
+                warn_with_peers!("unable to register mutator attestation for {labels:?}: {error:?}")
             }
         }
     }
@@ -1084,7 +1084,7 @@ impl Metrics {
         {
             Ok(counter) => counter.inc(),
             Err(error) => {
-                warn!("unable to register mutator aggregate_and_proof for {labels:?}: {error:?}")
+                warn_with_peers!("unable to register mutator aggregate_and_proof for {labels:?}: {error:?}")
             }
         }
     }

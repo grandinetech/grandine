@@ -37,7 +37,7 @@ use http_api_utils::{ApiError, ApiMetrics};
 use keymanager::{
     KeyManager, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey, ValidatingPubkey,
 };
-use log::{debug, info};
+use logging::{debug_with_peers, info_with_peers};
 use prometheus_metrics::Metrics;
 use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
 use signer::{Signer, SigningMessage};
@@ -701,7 +701,7 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
         }
     })?;
 
-    info!(
+    info_with_peers!(
         "Validator API is listening on {address}, authorization token: {:?}",
         *Zeroizing::new(hex::encode(&token.bytes)),
     );
@@ -824,7 +824,7 @@ impl ApiToken {
                 match Self::load(token_file_path.as_path()) {
                     Ok(auth) => Ok(auth),
                     Err(error) => {
-                        debug!("unable to read Validator API token from default path: {error:?}");
+                        debug_with_peers!("unable to read Validator API token from default path: {error:?}");
 
                         let token = Self::new();
                         token.store(token_file_path.as_path())?;

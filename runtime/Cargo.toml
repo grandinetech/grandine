@@ -32,7 +32,8 @@ http_api = { workspace = true }
 http_api_utils = { workspace = true }
 keymanager = { workspace = true }
 liveness_tracker = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
+logging = { workspace = true }
 metrics = { workspace = true }
 nonzero_ext = { workspace = true }
 num_cpus = { workspace = true }

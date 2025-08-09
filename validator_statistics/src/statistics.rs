@@ -12,7 +12,8 @@ use anyhow::Result;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
-use log::{debug, info, log, trace, warn, Level};
+use log::{log, trace, Level};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use thiserror::Error;
@@ -74,7 +75,7 @@ impl ValidatorStatistics {
         &self,
         validator_indices: HashSet<ValidatorIndex>,
     ) {
-        debug!(
+        debug_with_peers!(
             "setting registered validator indices: {}",
             validator_indices.len()
         );
@@ -84,7 +85,7 @@ impl ValidatorStatistics {
     }
 
     pub fn set_tracking_start(&self, epoch: Epoch) {
-        debug!("setting tracking start at: {epoch}");
+        debug_with_peers!("setting tracking start at: {epoch}");
         self.tracking_start_epoch.store(epoch, Ordering::Relaxed);
     }
 
@@ -155,12 +156,12 @@ impl ValidatorStatistics {
         controller: &ApiController<P, W>,
         current_epoch: Epoch,
     ) {
-        debug!("reporting validator performance for current epoch: {current_epoch}");
+        debug_with_peers!("reporting validator performance for current epoch: {current_epoch}");
 
         let registered_validators = self.registered_validators.read().await;
 
         if registered_validators.is_empty() {
-            debug!(
+            debug_with_peers!(
                 "no registered validators for validator performance report for \
                 current epoch: {current_epoch}"
             );
@@ -172,14 +173,14 @@ impl ValidatorStatistics {
             .report_attestation_performance(controller, current_epoch, &registered_validators)
             .await
         {
-            warn!("unable to report validator attestation performance: {error}");
+            warn_with_peers!("unable to report validator attestation performance: {error}");
         }
 
         if let Err(error) = self
             .report_sync_committee_performance(controller, current_epoch, &registered_validators)
             .await
         {
-            warn!("unable to report validator sync committee performance: {error}");
+            warn_with_peers!("unable to report validator sync committee performance: {error}");
         }
     }
 
@@ -192,7 +193,7 @@ impl ValidatorStatistics {
         let previous_epoch = misc::previous_epoch(current_epoch);
         let epoch_before_previous = misc::previous_epoch(previous_epoch);
 
-        debug!("reporting attestation performance for epoch: {epoch_before_previous}");
+        debug_with_peers!("reporting attestation performance for epoch: {epoch_before_previous}");
 
         let Some(VoteReport {
             vote_summaries,
@@ -273,7 +274,7 @@ impl ValidatorStatistics {
                 }
             }
 
-            info!(
+            info_with_peers!(
                 "attestation performance for epoch: {epoch_before_previous}, \
                 expected: {expected}, produced: {total_votes}, \
                 correct target: {correct_target} ({}), correct head: {correct_head} ({}), \
@@ -297,7 +298,7 @@ impl ValidatorStatistics {
     ) -> Result<()> {
         let previous_epoch = misc::previous_epoch(current_epoch);
 
-        debug!("reporting sync committee performance for epoch: {previous_epoch}");
+        debug_with_peers!("reporting sync committee performance for epoch: {previous_epoch}");
 
         let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
         let snapshot = controller.snapshot();
@@ -326,7 +327,7 @@ impl ValidatorStatistics {
                 .count();
 
             if registered_validators_in_sync_committees.is_zero() {
-                info!(
+                info_with_peers!(
                     "no sync committee members for epoch {previous_epoch} with {} registered validators",
                     registered_validators.len()
                 );
@@ -391,7 +392,7 @@ impl ValidatorStatistics {
                 }
             }
 
-            info!(
+            info_with_peers!(
                 "sync committee message performance for epoch: {previous_epoch}, expected: {expected}, \
                 produced: {total_votes}, correct: {canonical_votes}, included: {included} ({})",
                 Rate::new(included as u64, total_votes as u64)

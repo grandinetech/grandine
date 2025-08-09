@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
 use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork as _};
-use log::warn;
+use logging::warn_with_peers;
 use p2p::BeaconCommitteeSubscription;
 use signer::{Signer, SigningMessage, SigningTriple};
 use std_ext::ArcExt as _;
@@ -94,7 +94,7 @@ impl OwnBeaconCommitteeMembers {
         *slot_members_opt = match self.compute_members_at_slot(state, slot).await {
             Ok(members) => members.map(|members| SlotBeaconCommitteeMembers { slot, members }),
             Err(error) => {
-                warn!("failed to compute own beacon committee members at slot {slot}: {error:?}");
+                warn_with_peers!("failed to compute own beacon committee members at slot {slot}: {error:?}");
                 None
             }
         };

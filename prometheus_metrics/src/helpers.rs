@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use log::warn;
+use logging::warn_with_peers;
 use prometheus::{Histogram, HistogramTimer, HistogramVec};
 use types::phase0::primitives::UnixSeconds;
 
@@ -13,7 +13,7 @@ pub fn start_timer_vec(histogram_vec: &HistogramVec, label: &str) -> Option<Hist
     {
         Ok(timer) => Some(timer),
         Err(error) => {
-            warn!(
+            warn_with_peers!(
                 "unable to observe {label} metric for histogram_vec ({histogram_vec:?}): \
                     {error}",
             );

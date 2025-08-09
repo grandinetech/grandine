@@ -4,7 +4,7 @@ use anyhow::Result;
 use bls::{traits::PublicKey as _, PublicKey, PublicKeyBytes, COMPRESSED_SIZE, DECOMPRESSED_SIZE};
 use dashmap::{DashMap, DashSet};
 use database::{Database, PrefixableKey};
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt;
 use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
@@ -21,7 +21,7 @@ pub struct PubkeyCache {
 impl PubkeyCache {
     pub fn load(database: Database) -> Self {
         let keys = Self::load_all_keys_from_db(&database)
-            .inspect_err(|error| warn!("failed to load cached public keys from database: {error}"))
+            .inspect_err(|error| warn_with_peers!("failed to load cached public keys from database: {error}"))
             .unwrap_or_default();
 
         Self {
@@ -35,7 +35,7 @@ impl PubkeyCache {
     // - Inserts any missing pubkeys from anchor state into the cache
     // - Persists unpersisted pubkeys to disk, making persist task on finalization faster
     pub fn load_and_persist_state_keys<P: Preset>(&self, state: &BeaconState<P>) -> Result<()> {
-        info!(
+        info_with_peers!(
             "decompressing new validator keys for state at slot: {}",
             state.slot()
         );
@@ -53,10 +53,10 @@ impl PubkeyCache {
         if let Some(database) = self.database.as_ref() {
             let entries = batch.len();
             database.put_batch(batch)?;
-            debug!("persisted {entries} validator pubkeys to pubkey cache db");
+            debug_with_peers!("persisted {entries} validator pubkeys to pubkey cache db");
         }
 
-        info!(
+        info_with_peers!(
             "finished decompressing new validator keys for state at slot: {}",
             state.slot()
         );
@@ -85,13 +85,13 @@ impl PubkeyCache {
         database.put_batch(batch)?;
 
         for pubkey in self.unpersisted.iter() {
-            debug!("pubkey {:?} unpersisted: removing from cache", *pubkey);
+            debug_with_peers!("pubkey {:?} unpersisted: removing from cache", *pubkey);
             self.keys.remove(&*pubkey);
         }
 
         self.unpersisted.clear();
 
-        debug!("persisted {entries} validator pubkeys to pubkey cache db");
+        debug_with_peers!("persisted {entries} validator pubkeys to pubkey cache db");
 
         Ok(())
     }
@@ -142,7 +142,7 @@ impl PubkeyCache {
             map.insert(pubkey_bytes, pubkey);
         }
 
-        debug!("loaded {} cached public keys from the database", map.len());
+        debug_with_peers!("loaded {} cached public keys from the database", map.len());
 
         Ok(map)
     }

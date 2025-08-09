@@ -8,7 +8,8 @@ authors = ["Grandine <info@grandine.io>"]
 anyhow = { workspace = true }
 features = { workspace = true }
 futures = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
+logging = { workspace = true }
 once_cell = { workspace = true }
 prometheus = { workspace = true }
 tokio = { workspace = true }

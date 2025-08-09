@@ -15,7 +15,8 @@ fs-err = { workspace = true }
 glob = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
+logging = { workspace = true }
 refinery = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }

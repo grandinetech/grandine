@@ -13,7 +13,7 @@ use futures::{
 use helper_functions::predicates;
 use http_api_utils::EventChannels;
 use itertools::Itertools as _;
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use transition_functions::capella;
 use types::{
@@ -151,7 +151,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
                 };
 
             if !success {
-                warn!("failed to send response because the receiver was dropped");
+                warn_with_peers!("failed to send response because the receiver was dropped");
             }
         }
 
@@ -200,7 +200,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
                     .send(&self.pool_to_p2p_tx);
                 }
 
-                warn!(
+                warn_with_peers!(
                     "external signed BLS to execution change rejected \
                      (error: {error}, message: {signed_bls_to_execution_change:?})",
                 );
@@ -216,7 +216,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
         let state = self.controller.preprocessed_state_at_current_slot()?;
 
         let Some(state) = state.post_capella() else {
-            warn!(
+            warn_with_peers!(
                 "signed BLS to execution change received before Capella fork \
                  (signed_bls_to_execution_change: {:?}, slot: {})",
                 signed_bls_to_execution_change,
@@ -252,7 +252,7 @@ impl<P: Preset, W: Wait> Service<P, W> {
             let validator = match finalized_state.validators().get(*validator_index) {
                 Ok(validator) => validator,
                 Err(error) => {
-                    debug!("BLS to execution change is too recent to discard: {error}");
+                    debug_with_peers!("BLS to execution change is too recent to discard: {error}");
                     return true;
                 }
             };
@@ -276,7 +276,7 @@ enum PoolMessage {
 impl PoolMessage {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if let Err(message) = tx.unbounded_send(self) {
-            debug!("internal send failed because the receiver was dropped: {message:?}");
+            debug_with_peers!("internal send failed because the receiver was dropped: {message:?}");
         }
     }
 }

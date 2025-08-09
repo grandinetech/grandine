@@ -11,6 +11,8 @@ anyhow = { workspace = true }
 eth1_api = { workspace = true }
 fork_choice_control = { workspace = true }
 helper_functions = { workspace = true }
+tracing = { workspace = true }
+logging = { workspace = true }
 log = { workspace = true }
 num-traits = { workspace = true }
 prometheus_metrics = { workspace = true }

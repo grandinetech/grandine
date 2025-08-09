@@ -14,7 +14,8 @@ fork_choice_control = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
+tracing = { workspace = true }
 operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 tynm = { workspace = true }
