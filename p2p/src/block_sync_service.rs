@@ -19,7 +19,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use ssz::SszReadDefault;
 use std_ext::ArcExt as _;
@@ -245,13 +245,13 @@ impl<P: Preset> BlockSyncService<P> {
                     None => Either::Right(futures::future::pending()),
                 }, if self.archiver_to_sync_rx.is_some() => match message {
                     ArchiverToSync::BackSyncStatesArchived => {
-                        debug!("received back-sync states archived message");
+                        debug_with_peers!("received back-sync states archived message");
 
                         if let Some(back_sync) = self.back_sync.as_mut() {
                             if let Some(database) = self.database.as_ref() {
                                 back_sync.remove(database)?;
 
-                                debug!("finishing back-sync: {:?}", back_sync.data());
+                                debug_with_peers!("finishing back-sync: {:?}", back_sync.data());
 
                                 if let Some(sync) = BackSync::load(database)? {
                                     self.back_sync = Some(sync);
@@ -273,7 +273,7 @@ impl<P: Preset> BlockSyncService<P> {
                         if let Some(database) = &self.database {
                             let checkpoint = block.as_ref().into();
 
-                            debug!("saving latest finalized back-sync checkpoint: {checkpoint:?}");
+                            debug_with_peers!("saving latest finalized back-sync checkpoint: {checkpoint:?}");
 
                             save_latest_finalized_back_sync_checkpoint(database, checkpoint)?;
                         }
@@ -387,7 +387,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     metrics.observe_block_duration_to_slot(block_slot_timestamp);
                                 }
 
-                                debug!(
+                                debug_with_peers!(
                                     "received beacon block as gossip (slot: {block_slot}, root: {block_root:?}, \
                                     peer_id: {peer_id})"
                                 );
@@ -498,7 +498,7 @@ impl<P: Preset> BlockSyncService<P> {
         };
 
         if let Err(error) = back_sync.verify_blocks(&self.config, database, &self.controller) {
-            warn!("error occurred while verifying back-sync blocks: {error:?}");
+            warn_with_peers!("error occurred while verifying back-sync blocks: {error:?}");
 
             if let Some(BackSyncError::FinalCheckpointMismatch::<P> { .. }) = error.downcast_ref() {
                 back_sync.remove(database)?;
@@ -546,7 +546,7 @@ impl<P: Preset> BlockSyncService<P> {
                     misc::blob_serve_range_slot::<P>(self.controller.chain_config(), self.slot);
 
                 if start_slot + count < blob_serve_range_slot {
-                    debug!(
+                    debug_with_peers!(
                         "skipping batch retry: blob back-sync batch is no longer relevant: \
                          {start_slot} + {count} < {blob_serve_range_slot}"
                     );
@@ -713,7 +713,7 @@ impl<P: Preset> BlockSyncService<P> {
         );
 
         if slot < blob_serve_slot {
-            debug!(
+            debug_with_peers!(
                 "Ignoring needed blob sidecar request: slot: {slot} < blob_serve_slot: {blob_serve_slot}"
             );
             return Ok(());
@@ -728,7 +728,7 @@ impl<P: Preset> BlockSyncService<P> {
             .collect::<Vec<_>>();
 
         if identifiers.is_empty() {
-            debug!(
+            debug_with_peers!(
                 "cannot request BlobSidecarsByRoot: all requested blob sidecars have been received",
             );
 
@@ -765,7 +765,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         if self.received_block_roots.contains_key(&block_root) {
-            debug!(
+            debug_with_peers!(
                 "cannot request BeaconBlocksByRoot: requested block has been received:\
                  {block_root:?}"
             );
@@ -802,13 +802,13 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_back_synced(&mut self, is_back_synced: bool) {
-        debug!("set back-synced: {is_back_synced}");
+        debug_with_peers!("set back-synced: {is_back_synced}");
 
         let was_back_synced = self.is_back_synced;
         self.is_back_synced = is_back_synced;
 
         if was_back_synced != is_back_synced && is_back_synced {
-            info!("back-sync completed");
+            info_with_peers!("back-sync completed");
 
             self.sync_manager.cache_clear();
             self.sync_direction = SyncDirection::Forward;
@@ -818,7 +818,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_forward_synced(&mut self, is_forward_synced: bool) -> Result<()> {
-        debug!("set forward synced: {is_forward_synced}");
+        debug_with_peers!("set forward synced: {is_forward_synced}");
 
         let was_forward_synced = self.is_forward_synced;
         self.is_forward_synced = is_forward_synced;
@@ -913,7 +913,7 @@ fn save_latest_finalized_back_sync_checkpoint(
 }
 
 pub fn print_sync_database_info(database: &Database) -> Result<()> {
-    info!(
+    info_with_peers!(
         "latest finalized back-sync checkpoint: {:#?}",
         get_latest_finalized_back_sync_checkpoint(database)?,
     );
@@ -929,7 +929,7 @@ pub fn print_sync_database_info(database: &Database) -> Result<()> {
 
         let back_sync = BackSyncData::from_ssz_default(value_bytes)?;
 
-        info!("{} : {back_sync:#?}", String::from_utf8_lossy(&key_bytes));
+        info_with_peers!("{} : {back_sync:#?}", String::from_utf8_lossy(&key_bytes));
     }
 
     Ok(())

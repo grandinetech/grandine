@@ -28,6 +28,7 @@ helper_functions = { workspace = true }
 igd-next = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+tracing ={ workspace = true }
 logging = { workspace = true }
 lru = { workspace = true }
 operation_pools = { workspace = true }

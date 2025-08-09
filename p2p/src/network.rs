@@ -31,8 +31,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::{accessors, misc};
-use log::{debug, error, info, trace, warn};
-use logging::PEER_LOG_METRICS;
+use logging::{debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,PEER_LOG_METRICS};
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -180,7 +179,7 @@ impl<P: Preset> Network<P> {
         if network_config.upnp_enabled && !network_config.disable_discovery {
             match PortMappings::new(&network_config) {
                 Ok(mappings) => port_mappings = Some(mappings),
-                Err(error) => warn!("error while initializing UPnP: {error}"),
+                Err(error) => warn_with_peers!("error while initializing UPnP: {error}"),
             }
         }
 
@@ -230,7 +229,7 @@ impl<P: Preset> Network<P> {
                 message = self.channels.blob_fetcher_to_p2p_rx.select_next_some() => {
                     match message {
                         BlobFetcherToP2p::BlobsNeeded(identifiers, slot, peer_id) => {
-                            debug!("blobs needed: {identifiers:?} from {peer_id:?}");
+                            debug_with_peers!("blobs needed: {identifiers:?} from {peer_id:?}");
 
                             let peer_id = self.ensure_peer_connected(peer_id);
 
@@ -289,7 +288,7 @@ impl<P: Preset> Network<P> {
                     };
 
                     if !success {
-                        debug!("send to HTTP API failed because the receiver was dropped");
+                        debug_with_peers!("send to HTTP API failed because the receiver was dropped");
                     }
                 },
 
@@ -358,7 +357,7 @@ impl<P: Preset> Network<P> {
                             }
                         }
                         P2pMessage::BlockNeeded(root, peer_id) => {
-                            debug!("block needed: {root:?} from {peer_id:?}");
+                            debug_with_peers!("block needed: {root:?} from {peer_id:?}");
 
                             let peer_id = self.ensure_peer_connected(peer_id);
 
@@ -481,7 +480,7 @@ impl<P: Preset> Network<P> {
         self.fork_context.update_current_fork(phase_by_slot);
 
         if phase_by_slot != phase_by_state {
-            info!("switching from {phase_by_state} to {phase_by_slot}");
+            info_with_peers!("switching from {phase_by_state} to {phase_by_slot}");
 
             let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
@@ -496,7 +495,7 @@ impl<P: Preset> Network<P> {
 
             if slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_phase_slot {
                 if let Some(fork_digest) = self.fork_context.to_context_bytes(next_phase) {
-                    info!("subscribing to new topics from {next_phase}");
+                    info_with_peers!("subscribing to new topics from {next_phase}");
 
                     ServiceInboundMessage::SubscribeNewForkTopics(next_phase, fork_digest)
                         .send(&self.network_to_service_tx);
@@ -510,7 +509,7 @@ impl<P: Preset> Network<P> {
             // Unsubscribe from the topics of previous phases.
             if chain_config.fork_epoch(phase_by_slot) + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
                 if let Some(fork_digest) = self.fork_context.to_context_bytes(phase_by_slot) {
-                    info!("unsubscribing from old topics");
+                    info_with_peers!("unsubscribing from old topics");
 
                     ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
                         .send(&self.network_to_service_tx);
@@ -559,7 +558,7 @@ impl<P: Preset> Network<P> {
     }
 
     fn publish_beacon_block(&self, beacon_block: Arc<SignedBeaconBlock<P>>) {
-        debug!(
+        debug_with_peers!(
             "publishing beacon block slot: {}, root: {:?}",
             beacon_block.message().slot(),
             beacon_block.message().hash_tree_root()
@@ -574,7 +573,7 @@ impl<P: Preset> Network<P> {
 
         let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-        debug!("publishing blob sidecar: {blob_identifier:?}, subnet_id: {subnet_id}");
+        debug_with_peers!("publishing blob sidecar: {blob_identifier:?}, subnet_id: {subnet_id}");
 
         self.publish(PubsubMessage::BlobSidecar(Box::new((
             subnet_id,
@@ -584,7 +583,7 @@ impl<P: Preset> Network<P> {
 
     fn publish_singular_attestation(&self, attestation: Arc<Attestation<P>>, subnet_id: SubnetId) {
         if attestation.count_aggregation_bits() != 1 {
-            error!(
+            error_with_peers!(
                 "attempted to publish singular attestation \
                  with invalid number of participants: {attestation:?}",
             );
@@ -592,7 +591,7 @@ impl<P: Preset> Network<P> {
             return;
         }
 
-        trace!(
+        trace_with_peers!(
             "publishing singular attestation (attestation: {attestation:?}, subnet_id: {subnet_id})",
         );
 
@@ -607,7 +606,7 @@ impl<P: Preset> Network<P> {
                 ) {
                     Ok(single_attestation) => single_attestation,
                     Err(error) => {
-                        warn!(
+                        warn_with_peers!(
                             "cannot convert electra attestation to single attestation: {error:?}"
                         );
                         return;
@@ -635,7 +634,7 @@ impl<P: Preset> Network<P> {
             .count_aggregation_bits()
             == 0
         {
-            error!(
+            error_with_peers!(
                 "attempted to publish aggregate and proof with no participants: \
                  {aggregate_and_proof:?}",
             );
@@ -643,7 +642,7 @@ impl<P: Preset> Network<P> {
             return;
         }
 
-        trace!("publishing aggregate and proof: {aggregate_and_proof:?}");
+        trace_with_peers!("publishing aggregate and proof: {aggregate_and_proof:?}");
 
         self.publish(PubsubMessage::AggregateAndProofAttestation(
             aggregate_and_proof,
@@ -651,25 +650,25 @@ impl<P: Preset> Network<P> {
     }
 
     fn publish_proposer_slashing(&self, slashing: Box<ProposerSlashing>) {
-        debug!("publishing proposer slashing: {slashing:?}");
+        debug_with_peers!("publishing proposer slashing: {slashing:?}");
 
         self.publish(PubsubMessage::ProposerSlashing(slashing));
     }
 
     fn publish_attester_slashing(&self, slashing: Box<AttesterSlashing<P>>) {
-        debug!("publishing attester slashing: {slashing:?}");
+        debug_with_peers!("publishing attester slashing: {slashing:?}");
 
         self.publish(PubsubMessage::AttesterSlashing(slashing));
     }
 
     fn publish_voluntary_exit(&self, voluntary_exit: Box<SignedVoluntaryExit>) {
-        debug!("publishing voluntary exit: {voluntary_exit:?}");
+        debug_with_peers!("publishing voluntary exit: {voluntary_exit:?}");
 
         self.publish(PubsubMessage::VoluntaryExit(voluntary_exit));
     }
 
     fn publish_sync_committee_message(&self, message: Box<(SubnetId, SyncCommitteeMessage)>) {
-        trace!("publishing sync committee message: {message:?}");
+        trace_with_peers!("publishing sync committee message: {message:?}");
 
         self.publish(PubsubMessage::SyncCommitteeMessage(message));
     }
@@ -684,7 +683,7 @@ impl<P: Preset> Network<P> {
             .aggregation_bits
             .none()
         {
-            warn!(
+            warn_with_peers!(
                 "attempted to publish sync committee contribution \
                 and proof with no participants: {contribution_and_proof:?}",
             );
@@ -692,7 +691,7 @@ impl<P: Preset> Network<P> {
             return;
         }
 
-        trace!("publishing sync committee contribution and proof: {contribution_and_proof:?}");
+        trace_with_peers!("publishing sync committee contribution and proof: {contribution_and_proof:?}");
 
         self.publish(PubsubMessage::SignedContributionAndProof(
             contribution_and_proof,
@@ -703,7 +702,7 @@ impl<P: Preset> Network<P> {
         &self,
         signed_bls_to_execution_change: Box<SignedBlsToExecutionChange>,
     ) {
-        trace!("publishing signed bls to execution change: {signed_bls_to_execution_change:?}");
+        trace_with_peers!("publishing signed bls to execution change: {signed_bls_to_execution_change:?}");
 
         self.publish(PubsubMessage::BlsToExecutionChange(
             signed_bls_to_execution_change,
@@ -751,7 +750,7 @@ impl<P: Preset> Network<P> {
             let subnet = Subnet::Attestation(subnet_id);
 
             if subscribe {
-                debug!("subscribing to attestation subnet (subnet_id: {subnet_id})");
+                debug_with_peers!("subscribing to attestation subnet (subnet_id: {subnet_id})");
 
                 // TODO(Grandine Team): The Honest Validator specification says:
                 //                      > *Note*: When preparing for a hard fork, a validator must
@@ -763,7 +762,7 @@ impl<P: Preset> Network<P> {
                     ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
                 }
             } else {
-                debug!("unsubscribing from attestation subnet {subnet_id}");
+                debug_with_peers!("unsubscribing from attestation subnet {subnet_id}");
 
                 if let Some(topic) = self.subnet_gossip_topic(subnet) {
                     ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
@@ -775,9 +774,9 @@ impl<P: Preset> Network<P> {
             let subnet = Subnet::Attestation(subnet_id);
 
             if add_to_enr {
-                debug!("adding attestation subnet to ENR (subnet_id: {subnet_id})");
+                debug_with_peers!("adding attestation subnet to ENR (subnet_id: {subnet_id})");
             } else {
-                debug!("removing attestation subnet from ENR (subnet_id: {subnet_id})");
+                debug_with_peers!("removing attestation subnet from ENR (subnet_id: {subnet_id})");
             }
 
             ServiceInboundMessage::UpdateEnrSubnet(subnet, add_to_enr)
@@ -820,7 +819,7 @@ impl<P: Preset> Network<P> {
 
             match action {
                 SyncCommitteeSubnetAction::Subscribe => {
-                    debug!("subscribing to sync committee subnet {subnet_id}");
+                    debug_with_peers!("subscribing to sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
                     if let Some(topic) = self.subnet_gossip_topic(subnet) {
@@ -831,10 +830,10 @@ impl<P: Preset> Network<P> {
                         .send(&self.network_to_service_tx);
                 }
                 SyncCommitteeSubnetAction::DiscoverPeers => {
-                    debug!("discovering peers in sync committee subnet {subnet_id}");
+                    debug_with_peers!("discovering peers in sync committee subnet {subnet_id}");
                 }
                 SyncCommitteeSubnetAction::Unsubscribe => {
-                    debug!("unsubscribing from sync committee subnet {subnet_id}");
+                    debug_with_peers!("unsubscribing from sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
                     if let Some(topic) = self.subnet_gossip_topic(subnet) {
@@ -851,16 +850,16 @@ impl<P: Preset> Network<P> {
     fn handle_network_event(&self, network_event: NetworkEvent<P>) {
         match network_event {
             NetworkEvent::PeerConnectedIncoming(peer_id) => {
-                debug!("peer {peer_id} connected incoming");
+                debug_with_peers!("peer {peer_id} connected incoming");
                 self.update_peer_count();
             }
             NetworkEvent::PeerConnectedOutgoing(peer_id) => {
-                debug!("peer {peer_id} connected outgoing");
+                debug_with_peers!("peer {peer_id} connected outgoing");
                 self.update_peer_count();
                 self.init_status_peer_request(peer_id);
             }
             NetworkEvent::PeerDisconnected(peer_id) => {
-                debug!("peer {peer_id} disconnected");
+                debug_with_peers!("peer {peer_id} disconnected");
                 P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
                 self.update_peer_count();
             }
@@ -869,7 +868,7 @@ impl<P: Preset> Network<P> {
                 peer_id,
                 error,
             } => {
-                debug!("app_request_id: {app_request_id:?} to peer {peer_id} failed: {error}");
+                debug_with_peers!("app_request_id: {app_request_id:?} to peer {peer_id} failed: {error}");
                 P2pToSync::RequestFailed(peer_id).send(&self.channels.p2p_to_sync_tx);
             }
             NetworkEvent::RequestReceived {
@@ -878,7 +877,7 @@ impl<P: Preset> Network<P> {
                 request_type,
             } => {
                 if let Err(error) = self.handle_request(peer_id, inbound_request_id, request_type) {
-                    error!("error while handling request: {error}");
+                    error_with_peers!("error while handling request: {error}");
                 }
             }
             NetworkEvent::ResponseReceived {
@@ -896,9 +895,9 @@ impl<P: Preset> Network<P> {
             NetworkEvent::NewListenAddr(multiaddr) => {
                 // These come from `libp2p`. We don't use them anywhere. `eth2_libp2p` outputs them
                 // even though Lighthouse only uses them in its REST API and could do without that.
-                debug!("libp2p listening on {multiaddr}");
+                debug_with_peers!("libp2p listening on {multiaddr}");
             }
-            NetworkEvent::ZeroListeners => debug!("libp2p has zero listeners"),
+            NetworkEvent::ZeroListeners => debug_with_peers!("libp2p has zero listeners"),
         }
     }
 
@@ -921,31 +920,31 @@ impl<P: Preset> Network<P> {
                 Ok(())
             }
             RequestType::DataColumnsByRange(_) => {
-                debug!("received DataColumnsByRange request (peer_id: {peer_id})");
+                debug_with_peers!("received DataColumnsByRange request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::DataColumnsByRoot(_) => {
-                debug!("received DataColumnsByRoot request (peer_id: {peer_id})");
+                debug_with_peers!("received DataColumnsByRoot request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientBootstrap request (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientBootstrap request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::LightClientFinalityUpdate => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientFinalityUpdate request (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientFinalityUpdate request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::LightClientOptimisticUpdate => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientOptimisticUpdate request (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientOptimisticUpdate request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::LightClientUpdatesByRange(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientUpdatesByRange request (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientUpdatesByRange request (peer_id: {peer_id})");
                 Ok(())
             }
             RequestType::BlobsByRange(request) => {
@@ -956,15 +955,15 @@ impl<P: Preset> Network<P> {
                 Ok(())
             }
             RequestType::Goodbye(goodbye_reason) => {
-                debug!("received GoodBye request (peer_id: {peer_id}, reason: {goodbye_reason:?})");
+                debug_with_peers!("received GoodBye request (peer_id: {peer_id}, reason: {goodbye_reason:?})");
                 Ok(())
             }
             RequestType::Ping(ping) => {
-                debug!("received Ping request (peer_id: {peer_id}, ping: {ping:?})");
+                debug_with_peers!("received Ping request (peer_id: {peer_id}, ping: {ping:?})");
                 Ok(())
             }
             RequestType::MetaData(request) => {
-                debug!("received MetaData request (peer_id: {peer_id}, request: {request:?})");
+                debug_with_peers!("received MetaData request (peer_id: {peer_id}, request: {request:?})");
                 Ok(())
             }
         }
@@ -976,11 +975,11 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         remote: StatusMessage,
     ) {
-        debug!("received Status request (peer_id: {peer_id}, remote: {remote:?})");
+        debug_with_peers!("received Status request (peer_id: {peer_id}, remote: {remote:?})");
 
         let local = self.local_status();
 
-        debug!(
+        debug_with_peers!(
             "sending Status response (inbound_request_id: {inbound_request_id:?}, \
             peer_id: {peer_id}, local: {local:?})",
         );
@@ -996,7 +995,7 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: OldBlocksByRangeRequest,
     ) -> Result<()> {
-        debug!("received BeaconBlocksByRange request (peer_id: {peer_id}, request: {request:?})");
+        debug_with_peers!("received BeaconBlocksByRange request (peer_id: {peer_id}, request: {request:?})");
 
         let start_slot = request.start_slot();
         let max_request_blocks = request.max_request_blocks(self.controller.chain_config());
@@ -1023,7 +1022,7 @@ impl<P: Preset> Network<P> {
                 for block_with_root in blocks {
                     let BlockWithRoot { block, root } = block_with_root;
 
-                    debug!(
+                    debug_with_peers!(
                         "sending BeaconBlocksByRange response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, root: {root:?})",
@@ -1038,7 +1037,7 @@ impl<P: Preset> Network<P> {
                     .send(&network_to_service_tx);
                 }
 
-                debug!("terminating BeaconBlocksByRange response stream");
+                debug_with_peers!("terminating BeaconBlocksByRange response stream");
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
@@ -1060,7 +1059,7 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: BlobsByRangeRequest,
     ) -> Result<()> {
-        debug!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
+        debug_with_peers!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
 
         let BlobsByRangeRequest { start_slot, count } = request;
 
@@ -1083,7 +1082,7 @@ impl<P: Preset> Network<P> {
                 for blob_sidecar in blob_sidecars {
                     let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-                    debug!(
+                    debug_with_peers!(
                         "sending BlobSidecarsByRange response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, id: {blob_identifier:?})",
@@ -1098,7 +1097,7 @@ impl<P: Preset> Network<P> {
                     .send(&network_to_service_tx);
                 }
 
-                debug!("terminating BlobSidecarsByRange response stream");
+                debug_with_peers!("terminating BlobSidecarsByRange response stream");
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
@@ -1120,7 +1119,7 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: BlobsByRootRequest,
     ) {
-        debug!("received BlobsByRootRequest request (peer_id: {peer_id}, request: {request:?})");
+        debug_with_peers!("received BlobsByRootRequest request (peer_id: {peer_id}, request: {request:?})");
 
         // TODO(feature/deneb): MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS
         let BlobsByRootRequest { blob_ids } = request;
@@ -1140,7 +1139,7 @@ impl<P: Preset> Network<P> {
                 for blob_sidecar in blob_sidecars {
                     let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-                    debug!(
+                    debug_with_peers!(
                         "sending BlobSidecarsByRoot response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, id: {blob_identifier:?})",
@@ -1155,7 +1154,7 @@ impl<P: Preset> Network<P> {
                     .send(&network_to_service_tx);
                 }
 
-                debug!("terminating BlobSidecarsByRoot response stream");
+                debug_with_peers!("terminating BlobSidecarsByRoot response stream");
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
@@ -1178,7 +1177,7 @@ impl<P: Preset> Network<P> {
         let max_request_blocks = request.max_request_blocks(self.controller.chain_config());
         let block_roots = request.block_roots();
 
-        debug!(
+        debug_with_peers!(
             "received BeaconBlocksByRoot request (peer_id: {peer_id}, block_roots: {block_roots:?})",
         );
 
@@ -1194,7 +1193,7 @@ impl<P: Preset> Network<P> {
                 let blocks = controller.blocks_by_root(block_roots)?;
 
                 for block in blocks.into_iter().map(WithStatus::value) {
-                    debug!(
+                    debug_with_peers!(
                         "sending BeaconBlocksByRoot response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {}, root: {:?})",
@@ -1210,7 +1209,7 @@ impl<P: Preset> Network<P> {
                     .send(&network_to_service_tx);
                 }
 
-                debug!("terminating BeaconBlocksByRoot response stream");
+                debug_with_peers!("terminating BeaconBlocksByRoot response stream");
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
@@ -1233,7 +1232,7 @@ impl<P: Preset> Network<P> {
     ) {
         match response {
             Response::Status(remote) => {
-                debug!("received Status response (peer_id: {peer_id}, remote: {remote:?})");
+                debug_with_peers!("received Status response (peer_id: {peer_id}, remote: {remote:?})");
 
                 self.check_status(&self.local_status(), remote, peer_id);
             }
@@ -1244,7 +1243,7 @@ impl<P: Preset> Network<P> {
             Response::BlobsByRange(Some(blob_sidecar)) => {
                 let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-                debug!(
+                debug_with_peers!(
                     "received BlobsByRange response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
                     slot: {}, id: {blob_identifier:?})",
@@ -1260,7 +1259,7 @@ impl<P: Preset> Network<P> {
                 .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRange(None) => {
-                debug!(
+                debug_with_peers!(
                     "peer {peer_id} terminated BlobsByRange response stream for \
                     app_request_id: {app_request_id:?}",
                 );
@@ -1271,7 +1270,7 @@ impl<P: Preset> Network<P> {
             Response::BlobsByRoot(Some(blob_sidecar)) => {
                 let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-                debug!(
+                debug_with_peers!(
                     "received BlobsByRoot response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
                     slot: {}, id: {blob_identifier:?})",
@@ -1287,7 +1286,7 @@ impl<P: Preset> Network<P> {
                 .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlobsByRoot(None) => {
-                debug!(
+                debug_with_peers!(
                     "peer {peer_id} terminated BlobsByRoot response stream for \
                     app_request_id: {app_request_id:?}",
                 );
@@ -1296,7 +1295,7 @@ impl<P: Preset> Network<P> {
                 let block_root = block.message().hash_tree_root();
                 let block_slot = block.message().slot();
 
-                debug!(
+                debug_with_peers!(
                     "received BeaconBlocksByRange response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
                     slot: {block_slot}, root: {block_root:?})",
@@ -1306,7 +1305,7 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::BlocksByRange(None) => {
-                debug!(
+                debug_with_peers!(
                     "peer {peer_id} terminated BeaconBlocksByRange response stream for \
                     app_request_id: {app_request_id:?}",
                 );
@@ -1318,7 +1317,7 @@ impl<P: Preset> Network<P> {
                 let block_root = block.message().hash_tree_root();
                 let block_slot = block.message().slot();
 
-                debug!(
+                debug_with_peers!(
                     "received BeaconBlocksByRoot response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
                     slot: {block_slot}, root: {block_root:?})",
@@ -1337,7 +1336,7 @@ impl<P: Preset> Network<P> {
                 }
             }
             Response::BlocksByRoot(None) => {
-                debug!(
+                debug_with_peers!(
                     "peer {peer_id} terminated BeaconBlocksByRoot response stream for \
                     app_request_id: {app_request_id:?}",
                 );
@@ -1345,19 +1344,19 @@ impl<P: Preset> Network<P> {
             Response::DataColumnsByRange(_) | Response::DataColumnsByRoot(_) => {}
             Response::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
             }
             Response::LightClientFinalityUpdate(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientFinalityUpdate response (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientFinalityUpdate response (peer_id: {peer_id})");
             }
             Response::LightClientOptimisticUpdate(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientOptimisticUpdate response (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientOptimisticUpdate response (peer_id: {peer_id})");
             }
             Response::LightClientUpdatesByRange(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
+                debug_with_peers!("received LightClientUpdatesByRange response (peer_id: {peer_id})");
             }
         }
     }
@@ -1391,7 +1390,7 @@ impl<P: Preset> Network<P> {
                 let (subnet_id, blob_sidecar) = *data;
                 let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
 
-                debug!(
+                debug_with_peers!(
                     "received blob sidecar as gossip in subnet {subnet_id}: {blob_identifier:?} \
                     from {source}",
                 );
@@ -1412,7 +1411,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["aggregate_and_proof_attestation"]);
                 }
 
-                trace!(
+                trace_with_peers!(
                     "received aggregate and proof as gossip: {aggregate_and_proof:?} from {source}",
                 );
 
@@ -1431,7 +1430,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["attestation"]);
                 }
 
-                trace!(
+                trace_with_peers!(
                     "received singular attestation as gossip in subnet {subnet_id}: \
                     {attestation:?} from {source}",
                 );
@@ -1450,7 +1449,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["attestation"]);
                 }
 
-                trace!(
+                trace_with_peers!(
                     "received single attestation as gossip in subnet {subnet_id}: \
                     {single_attestation:?} from {source}",
                 );
@@ -1471,7 +1470,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["voluntary_exit"]);
                 }
 
-                debug!(
+                debug_with_peers!(
                     "received signed voluntary exit as gossip: {signed_voluntary_exit:?} \
                     from {source}",
                 );
@@ -1487,7 +1486,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["proposer_slashing"]);
                 }
 
-                debug!("received proposer slashing as gossip: {proposer_slashing:?} from {source}");
+                debug_with_peers!("received proposer slashing as gossip: {proposer_slashing:?} from {source}");
 
                 let gossip_id = GossipId { source, message_id };
 
@@ -1499,7 +1498,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["attester_slashing"]);
                 }
 
-                debug!("received attester slashing as gossip: {attester_slashing:?} from {source}");
+                debug_with_peers!("received attester slashing as gossip: {attester_slashing:?} from {source}");
 
                 let gossip_id = GossipId { source, message_id };
 
@@ -1516,7 +1515,7 @@ impl<P: Preset> Network<P> {
 
                 let gossip_id = GossipId { source, message_id };
 
-                trace!("received signed contribution and proof as gossip: {proof:?} from {source}");
+                trace_with_peers!("received signed contribution and proof as gossip: {proof:?} from {source}");
 
                 // Handle it asynchronously to not block the event loop.
                 self.sync_committee_agg_pool
@@ -1533,7 +1532,7 @@ impl<P: Preset> Network<P> {
                 let (subnet_id, sync_committee_message) = *message;
                 let gossip_id = GossipId { source, message_id };
 
-                trace!(
+                trace_with_peers!(
                     "received sync committee message as gossip in subnet {subnet_id}: \
                     {sync_committee_message:?} from {source}",
                 );
@@ -1551,7 +1550,7 @@ impl<P: Preset> Network<P> {
                     metrics.register_gossip_object(&["bls_to_execution_change"]);
                 }
 
-                trace!(
+                trace_with_peers!(
                     "received signed bls execution change as gossip: \
                     {signed_bls_to_execution_change:?} from {source}"
                 );
@@ -1563,10 +1562,10 @@ impl<P: Preset> Network<P> {
                     );
             }
             PubsubMessage::LightClientFinalityUpdate(_) => {
-                debug!("received light client finality update as gossip");
+                debug_with_peers!("received light client finality update as gossip");
             }
             PubsubMessage::LightClientOptimisticUpdate(_) => {
-                debug!("received light client optimistic update as gossip");
+                debug_with_peers!("received light client optimistic update as gossip");
             }
         }
     }
@@ -1578,7 +1577,7 @@ impl<P: Preset> Network<P> {
     fn request_peer_status(&self, app_request_id: AppRequestId, peer_id: PeerId) {
         let status = self.local_status();
 
-        debug!(
+        debug_with_peers!(
             "sending Status request (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
             status: {status:?})"
         );
@@ -1606,7 +1605,7 @@ impl<P: Preset> Network<P> {
 
     fn check_status(&self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
         if local.fork_digest != remote.fork_digest {
-            debug!(
+            debug_with_peers!(
                 "local fork digest doesn't match remote fork digest \
                 (local: {local:?}, remote: {remote:?}, peer_id: {peer_id}); \
                 disconnecting from peer",
@@ -1654,7 +1653,7 @@ impl<P: Preset> Network<P> {
                     {
                         Ok(root) => root,
                         Err(error) => {
-                            warn!("failed to query for finalized block root: {error:?}");
+                            warn_with_peers!("failed to query for finalized block root: {error:?}");
                             None
                         }
                     };
@@ -1665,7 +1664,7 @@ impl<P: Preset> Network<P> {
 
         if let Some(root) = local_finalized_root_at_remote_finalized_epoch {
             if root != remote.finalized_root {
-                debug!(
+                debug_with_peers!(
                     "peer {peer_id} has different block finalized at epoch {} ({root:?} != {:?})",
                     remote.finalized_epoch, remote.finalized_root,
                 );
@@ -1684,7 +1683,7 @@ impl<P: Preset> Network<P> {
             && local.finalized_root != H256::zero()
             && remote.finalized_root != H256::zero()
         {
-            debug!(
+            debug_with_peers!(
                 "disconnecting peer {peer_id} due to missing historical data \
                  required to validate finalized root {:?} at epoch {}",
                 remote.finalized_root, remote.finalized_epoch,
@@ -1721,7 +1720,7 @@ impl<P: Preset> Network<P> {
         // TODO: is count capped in eth2_libp2p?
         let request = BlobsByRangeRequest { start_slot, count };
 
-        debug!(
+        debug_with_peers!(
             "sending BlobSidecarsByRange request (app_request_id: {app_request_id:?}, \
             peer_id: {peer_id}, request: {request:?})",
         );
@@ -1741,7 +1740,7 @@ impl<P: Preset> Network<P> {
             blob_identifiers.into_iter(),
         );
 
-        debug!(
+        debug_with_peers!(
             "sending BlobSidecarsByRoot request (app_request_id: {app_request_id:?}, \
             peer_id: {peer_id}, request: {request:?})",
         );
@@ -1758,7 +1757,7 @@ impl<P: Preset> Network<P> {
     ) {
         let request = OldBlocksByRangeRequest::new(start_slot, count, 1);
 
-        debug!(
+        debug_with_peers!(
             "sending BeaconBlocksByRange request (app_request_id: {app_request_id:?}, \
             peer_id: {peer_id}, request: {request:?})",
         );
@@ -1778,7 +1777,7 @@ impl<P: Preset> Network<P> {
             core::iter::once(block_root),
         );
 
-        debug!(
+        debug_with_peers!(
             "sending BeaconBlocksByRoot request (app_request_id: {app_request_id:?}, \
             peer_id: {peer_id}, request: {request:?})",
         );
@@ -1823,7 +1822,7 @@ impl<P: Preset> Network<P> {
     ) {
         let reason = reason.into();
 
-        debug!("reporting peer: {peer_id} {peer_action} {source:?} {reason}");
+        debug_with_peers!("reporting peer: {peer_id} {peer_action} {source:?} {reason}");
 
         ServiceInboundMessage::ReportPeer(peer_id, peer_action, source, reason)
             .send(&self.network_to_service_tx);
@@ -1864,7 +1863,7 @@ impl<P: Preset> Network<P> {
         peer_id
             .filter(|peer_id| self.network_globals.is_peer_connected(peer_id))
             .or_else(|| {
-                debug!("Peer {peer_id:?} is no longer connected, will find a new peer");
+                debug_with_peers!("Peer {peer_id:?} is no longer connected, will find a new peer");
 
                 None
             })
@@ -1936,7 +1935,7 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
                             if let Err(error) = service.send_request(peer_id, request_id, request) {
-                                debug!("Unable to send request to peer: {peer_id}: {error:?}");
+                                debug_with_peers!("Unable to send request to peer: {peer_id}: {error:?}");
                             }
                         }
                         ServiceInboundMessage::SendResponse(peer_id, inbound_request_id, response) => {
@@ -1969,7 +1968,7 @@ fn run_network_service<P: Preset>(
                                 active_validator_count,
                                 slot
                             ) {
-                                warn!("unable to update gossipsub scoring parameters: {error:?}");
+                                warn_with_peers!("unable to update gossipsub scoring parameters: {error:?}");
                             }
                         }
                         ServiceInboundMessage::Stop => break,
