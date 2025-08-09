@@ -58,3 +58,10 @@ macro_rules! error_with_peers {
         ::tracing::error!("[{}] {}", $crate::PEER_LOG_METRICS, format_args!($($arg)*));
     };
 }
+
+#[macro_export]
+macro_rules! trace_with_peers {
+    ($($arg:tt)*) => {
+        ::tracing::trace!("[{}] {}", $crate::PEER_LOG_METRICS, format!($($arg)*));
+    };
+}

@@ -12,8 +12,8 @@ use anyhow::Result;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
-use log::{log, trace, Level};
-use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use log::{log, Level};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers, trace_with_peers};
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use thiserror::Error;
@@ -122,7 +122,7 @@ impl ValidatorStatistics {
             let mut sync_committee_votes = self.sync_committee_votes.write().await;
 
             if !sync_committee_votes.insert_vote(epoch, &vote) {
-                trace!("sync committee vote already present: {epoch} {vote:?}");
+                trace_with_peers!("sync committee vote already present: {epoch} {vote:?}");
             }
         }
     }
@@ -266,7 +266,7 @@ impl ValidatorStatistics {
                         included += 1;
                         inclusion_delays.insert(inclusion_delay);
                     } else {
-                        trace!(
+                        trace_with_peers!(
                             "{validator_index} attestation from \
                             {epoch_before_previous} epoch not included"
                         );
