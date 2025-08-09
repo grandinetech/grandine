@@ -26,7 +26,8 @@ genesis = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
+tracing = { workspace = true }
 mime = { workspace = true }
 nonzero_ext = { workspace = true }
 num-traits = { workspace = true }

@@ -4,7 +4,7 @@ use std::{io::ErrorKind, path::Path, sync::Arc};
 use anyhow::{bail, Context as _, Result};
 use deposit_tree::DepositTree;
 use genesis::AnchorCheckpointProvider;
-use tracing::info;
+use logging::info_with_peers;
 use p2p::{Enr, NetworkConfig};
 use reqwest::Client;
 use ssz::SszRead as _;
@@ -288,14 +288,14 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
 
     let ssz_bytes = match fs_err::tokio::read(genesis_state_path.as_path()).await {
         Ok(bytes) => {
-            info!(
+            info_with_peers!(
                 "loading genesis state from file: {}…",
                 genesis_state_path.display()
             );
             bytes.into()
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            info!("downloading genesis state from {download_url}…");
+            info_with_peers!("downloading genesis state from {download_url}…");
 
             let bytes = client
                 .get(download_url.into_url())
@@ -316,7 +316,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
     let state = Arc::from_ssz(config, ssz_bytes)?;
     let block = Arc::new(genesis::beacon_block(&state));
 
-    info!("genesis state loaded at slot: {}", state.slot());
+    info_with_peers!("genesis state loaded at slot: {}", state.slot());
 
     Ok(WithOrigin::new_from_genesis(FinalizedCheckpoint {
         block,

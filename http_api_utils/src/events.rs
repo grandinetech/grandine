@@ -8,7 +8,7 @@ use execution_engine::{
 };
 use fork_choice_store::{ChainLink, Storage, Store};
 use helper_functions::misc;
-use log::warn;
+use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
@@ -125,13 +125,13 @@ impl EventChannels {
 
     pub fn send_attestation_event<P: Preset>(&self, attestation: &Attestation<P>) {
         if let Err(error) = self.send_attestation_event_internal(attestation) {
-            warn!("unable to send attestation event: {error}");
+            warn_with_peers!("unable to send attestation event: {error}");
         }
     }
 
     pub fn send_attester_slashing_event<P: Preset>(&self, attester_slashing: &AttesterSlashing<P>) {
         if let Err(error) = self.send_attester_slashing_event_internal(attester_slashing) {
-            warn!("unable to send attester slashing event: {error}");
+            warn_with_peers!("unable to send attester slashing event: {error}");
         }
     }
 
@@ -141,13 +141,13 @@ impl EventChannels {
         blob_sidecar: &BlobSidecar<P>,
     ) {
         if let Err(error) = self.send_blob_sidecar_event_internal(block_root, blob_sidecar) {
-            warn!("unable to send blob sidecar event: {error}");
+            warn_with_peers!("unable to send blob sidecar event: {error}");
         }
     }
 
     pub fn send_block_event(&self, slot: Slot, block_root: H256, execution_optimistic: bool) {
         if let Err(error) = self.send_block_event_internal(slot, block_root, execution_optimistic) {
-            warn!("unable to send block event: {error}");
+            warn_with_peers!("unable to send block event: {error}");
         }
     }
 
@@ -158,7 +158,7 @@ impl EventChannels {
         if let Err(error) =
             self.send_bls_to_execution_change_event_internal(signed_bls_to_execution_change)
         {
-            warn!("unable to send bls to execution change event: {error}");
+            warn_with_peers!("unable to send bls to execution change event: {error}");
         }
     }
 
@@ -172,7 +172,7 @@ impl EventChannels {
 
         if new_head.is_valid() {
             if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
-                warn!("unable to send chain reorg event: {error}");
+                warn_with_peers!("unable to send chain reorg event: {error}");
             }
 
             return;
@@ -189,7 +189,7 @@ impl EventChannels {
         if let Err(error) =
             self.send_contribution_and_proof_event_internal(signed_contribution_and_proof)
         {
-            warn!("unable to send contribution and proof event: {error}");
+            warn_with_peers!("unable to send contribution and proof event: {error}");
         }
     }
 
@@ -204,7 +204,7 @@ impl EventChannels {
             finalized_checkpoint,
             execution_optimistic,
         ) {
-            warn!("unable to send finalized checkpoint event: {error}");
+            warn_with_peers!("unable to send finalized checkpoint event: {error}");
         }
     }
 
@@ -214,7 +214,7 @@ impl EventChannels {
         calculate_dependent_roots: impl FnOnce(&ChainLink<P>) -> Result<DependentRootsBundle>,
     ) {
         if let Err(error) = self.send_head_event_internal(head, calculate_dependent_roots) {
-            warn!("unable to send head event: {error}");
+            warn_with_peers!("unable to send head event: {error}");
         }
 
         if head.is_valid() {
@@ -225,7 +225,7 @@ impl EventChannels {
                 chain_reorg_event.execution_optimistic = head.is_optimistic();
 
                 if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
-                    warn!("unable to send chain reorg event: {error}");
+                    warn_with_peers!("unable to send chain reorg event: {error}");
                 }
             }
         }
@@ -251,19 +251,19 @@ impl EventChannels {
             parent_block_number,
             parent_block_hash,
         ) {
-            warn!("unable to send payload attributes event: {error}");
+            warn_with_peers!("unable to send payload attributes event: {error}");
         }
     }
 
     pub fn send_proposer_slashing_event(&self, proposer_slashing: &ProposerSlashing) {
         if let Err(error) = self.send_proposer_slashing_event_internal(proposer_slashing) {
-            warn!("unable to send proposer slashing event: {error}");
+            warn_with_peers!("unable to send proposer slashing event: {error}");
         }
     }
 
     pub fn send_voluntary_exit_event(&self, voluntary_exit: &SignedVoluntaryExit) {
         if let Err(error) = self.send_voluntary_exit_event_internal(voluntary_exit) {
-            warn!("unable to send voluntary exit event: {error}");
+            warn_with_peers!("unable to send voluntary exit event: {error}");
         }
     }
 

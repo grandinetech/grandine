@@ -4,7 +4,7 @@ use anyhow::Result;
 use either::Either;
 use eth2_libp2p::PeerId;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
-use log::debug;
+use logging::debug_with_peers;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::BlobIdentifier,
@@ -41,7 +41,7 @@ pub enum ExecutionServiceMessage<P: Preset> {
 impl<P: Preset> ExecutionServiceMessage<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to execution service failed because the receiver was dropped");
+            debug_with_peers!("send to execution service failed because the receiver was dropped");
         }
     }
 }

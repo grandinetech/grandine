@@ -38,7 +38,7 @@ use http_api::HttpApiConfig;
 use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
 use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
-use tracing::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
 use prometheus_metrics::{Metrics, METRICS};
@@ -686,7 +686,7 @@ impl NetworkConfigOptions {
             }
 
             if !manual_options.is_empty() {
-                warn!(
+                warn_with_peers!(
                     "UPnP enabled with manual ENR settings: {}; \
                      manual ENR settings might be overridden by UPnP",
                     manual_options.join(", "),
@@ -998,7 +998,7 @@ impl GrandineArgs {
         } = validator_options;
 
         if in_memory {
-            warn!(
+            warn_with_peers!(
                 "running Grandine in in-memory mode; \
                  no data will be stored on disk; \
                  all data will be lost on exit",
@@ -1007,11 +1007,11 @@ impl GrandineArgs {
 
         // There's technically nothing wrong with this, but the user may have made a mistake.
         if configuration_file.is_some() && verify_configuration_file.is_some() {
-            warn!("both --configuration-file and --verify-configuration-file specified");
+            warn_with_peers!("both --configuration-file and --verify-configuration-file specified");
         }
 
         if remote_metrics_url.is_some() && !metrics_enabled {
-            warn!(
+            warn_with_peers!(
                 "remote metrics enabled without ---metrics. \
                  Network, system and process metrics will not be available"
             );
@@ -1020,7 +1020,7 @@ impl GrandineArgs {
         if let Some(directory) = configuration_directory {
             configuration_file = configuration_file
                 .inspect(|_| {
-                    warn!(
+                    warn_with_peers!(
                         "both --configuration-directory and --configuration-file specified; \
                          --configuration-file will take precedence",
                     );
@@ -1029,7 +1029,7 @@ impl GrandineArgs {
 
             deposit_contract_starting_block = match deposit_contract_starting_block {
                 Some(number) => {
-                    warn!(
+                    warn_with_peers!(
                         "both --configuration-directory and --deposit-contract-starting-block specified; \
                          --deposit-contract-starting-block will take precedence",
                     );
@@ -1043,7 +1043,7 @@ impl GrandineArgs {
 
             genesis_state_file = genesis_state_file
                 .inspect(|_| {
-                    warn!(
+                    warn_with_peers!(
                         "both --configuration-directory and --genesis-state-file specified; \
                          --genesis-state-file will take precedence",
                     );
@@ -1056,7 +1056,7 @@ impl GrandineArgs {
                 network_config_options.boot_nodes =
                     config_dir::parse_plain_bootnodes(bytes.as_str())?;
             } else {
-                warn!(
+                warn_with_peers!(
                     "both --configuration-directory and --boot-nodes specified; \
                      --boot-nodes will take precedence",
                 );
@@ -1086,7 +1086,7 @@ impl GrandineArgs {
         let unknown = core::mem::take(&mut chain_config.unknown);
 
         if !unknown.is_empty() {
-            warn!(
+            warn_with_peers!(
                 "unknown configuration variables: [{:?}]",
                 unknown.keys().format(", "),
             );
@@ -1252,12 +1252,12 @@ impl GrandineArgs {
         };
 
         if back_sync {
-            warn!("--back_sync option is deprecated. Use --back-sync instead.");
+            warn_with_peers!("--back_sync option is deprecated. Use --back-sync instead.");
             back_sync_enabled = true;
         }
 
         let builder_url = if builder_url.is_none() && builder_api_url.is_some() {
-            warn!("--builder-api-url option is deprecated. Use --builder-url instead.");
+            warn_with_peers!("--builder-api-url option is deprecated. Use --builder-url instead.");
             builder_api_url
         } else {
             builder_url
@@ -1272,7 +1272,7 @@ impl GrandineArgs {
         });
 
         let web3signer_urls = if web3signer_urls.is_empty() && !web3signer_api_urls.is_empty() {
-            warn!("--web3signer-api-urls option is deprecated. Use --web3signer-urls instead.");
+            warn_with_peers!("--web3signer-api-urls option is deprecated. Use --web3signer-urls instead.");
             web3signer_api_urls
         } else {
             web3signer_urls
@@ -1431,7 +1431,7 @@ fn verify_config(chain_config: &ChainConfig, file_path: Option<PathBuf>) -> Resu
         Error::ConfigMismatch { differences },
     );
 
-    info!("configuration matches the one in configuration file");
+    info_with_peers!("configuration matches the one in configuration file");
 
     Ok(())
 }
@@ -1507,7 +1507,7 @@ fn headers_to_allow_origin(allowed_origins: Vec<HeaderValue>) -> Option<AllowOri
         // `tower_http::cors::AllowOrigin::list` panics if a wildcard is passed to it.
         if allowed_origins.contains(&HeaderValue::from_static("*")) {
             if allowed_origins.len() > 1 {
-                warn!(
+                warn_with_peers!(
                     "extra values of Access-Control-Allow-Origin specified along with a wildcard; \
                     only the wildcard will be used",
                 );

@@ -14,7 +14,8 @@ eth2_libp2p = { workspace = true }
 ethereum-types = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
+tracing = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }

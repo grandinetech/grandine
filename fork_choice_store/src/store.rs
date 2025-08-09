@@ -24,7 +24,7 @@ use helper_functions::{
 };
 use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
-use log::{error, warn};
+use logging::{info_with_peers, error_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
@@ -974,7 +974,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     {
                         // `Backtrace::force_capture` can be costly and a warning may be excessive,
                         // but this is controlled by a `Feature` that should be disabled by default.
-                        warn!(
+                        warn_with_peers!(
                             "processing slots for beacon state not found in state cache before state transition \
                             (block root: {block_root:?}, parent block root: {:?}, from slot {} to {})\n{}",
                             parent.block_root,
@@ -2128,7 +2128,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if self.should_check_data_availability_at_slot(chain_link.slot()) {
                     let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
 
-                    log::info!(
+                    info_with_peers!(
                         "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
                         chain_link.slot(),
                     );
@@ -2137,7 +2137,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             }
 
-            log::info!(
+            info_with_peers!(
                 "imported beacon block (slot: {}, {block_root:?})",
                 chain_link.slot(),
             );
@@ -2699,7 +2699,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .prune(prune_slot, &preserved_older_states, &pruned_newer_states);
 
         if let Err(error) = prune_result {
-            error!("failed to prune beacon state cache: {error:?}");
+            error_with_peers!("failed to prune beacon state cache: {error:?}");
         }
     }
 
@@ -2834,7 +2834,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     {
                         Some(balance) => balance,
                         None => {
-                            error!(
+                            error_with_peers!(
                                 "{:?}",
                                 anyhow!("attesting balance should never go below zero"),
                             );
@@ -3087,7 +3087,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let stored_state_opt = match self.stored_state_by_block_root(block_root) {
                     Ok(state_opt) => state_opt,
                     Err(error) => {
-                        error!("failed to load persisted beacon state: {error:?}");
+                        error_with_peers!("failed to load persisted beacon state: {error:?}");
                         None
                     }
                 };
@@ -3101,7 +3101,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         match load_result {
             Ok(state_with_rewards) => state_with_rewards.0,
             Err(error) => {
-                error!("failed to load beacon state: {error:?}");
+                error_with_peers!("failed to load beacon state: {error:?}");
                 self.load_beacon_state_by_state_transition(block_root)
             }
         }
@@ -3117,7 +3117,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     match self.stored_state_by_block_root(chain_link.block_root) {
                         Ok(state_opt) => state_opt,
                         Err(error) => {
-                            error!("failed to load persisted beacon state: {error:?}");
+                            error_with_peers!("failed to load persisted beacon state: {error:?}");
                             None
                         }
                     }

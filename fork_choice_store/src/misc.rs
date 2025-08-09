@@ -11,7 +11,6 @@ use eth2_libp2p::{GossipId, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
-use log::error;
 use serde::{Serialize, Serializer};
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;

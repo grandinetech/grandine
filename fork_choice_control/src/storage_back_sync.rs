@@ -5,7 +5,7 @@ use anyhow::{bail, Error as AnyhowError, Result};
 use database::Database;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
@@ -56,13 +56,13 @@ impl<P: Preset> Storage<P> {
         if let Some(slot) = get_latest_archived_slot(&self.database)? {
             if self.stored_state(slot)?.is_some() && slot > start_slot && slot <= end_slot {
                 start_slot = slot;
-                info!("resuming back-sync archival from {slot} slot");
+                info_with_peers!("resuming back-sync archival from {slot} slot");
             }
         }
 
         let mut state = if start_slot == anchor_block_slot {
             if origin.is_checkpoint_sync() {
-                warn!("unable to back-sync to genesis state as it not available");
+                warn_with_peers!("unable to back-sync to genesis state as it not available");
             }
 
             anchor_state
@@ -105,7 +105,7 @@ impl<P: Preset> Storage<P> {
 
             if let Some(block) = previous_block.as_ref() {
                 if append_state {
-                    debug!("back-synced state in {slot} is ready for storage");
+                    debug_with_peers!("back-synced state in {slot} is ready for storage");
 
                     let block_root = block.message().hash_tree_root();
 
@@ -115,7 +115,7 @@ impl<P: Preset> Storage<P> {
                     states_in_batch += 1;
 
                     if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
-                        info!("archiving back-sync data up to {slot} slot");
+                        info_with_peers!("archiving back-sync data up to {slot} slot");
 
                         self.database.put_batch(batch)?;
 
@@ -128,7 +128,7 @@ impl<P: Preset> Storage<P> {
 
         self.database.put_batch(batch)?;
 
-        info!(
+        info_with_peers!(
             "back-synced state archival completed (start_slot: {start_slot}, end_slot: {end_slot})",
         );
 

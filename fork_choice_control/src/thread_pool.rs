@@ -17,7 +17,7 @@ use anyhow::Result;
 use derivative::Derivative;
 use derive_more::From;
 use execution_engine::ExecutionEngine;
-use log::debug;
+use logging::debug_with_peers;
 use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
 use types::preset::Preset;
@@ -225,7 +225,7 @@ impl<P: Preset, E, W> Spawn<P, E, W> for StateAtSlotCacheFlushTask<P> {
 }
 
 fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, W>) {
-    debug!("thread {} starting", thread_name());
+    debug_with_peers!("thread {} starting", thread_name());
 
     'outer: loop {
         let mut critical = shared.critical.lock();
@@ -237,14 +237,14 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
 
             if let Some(task) = critical.high_priority_tasks.pop_front() {
                 drop(critical);
-                debug!("thread {} received high priority task", thread_name());
+                debug_with_peers!("thread {} received high priority task", thread_name());
                 task.run_and_handle_panics();
                 continue 'outer;
             }
 
             if let Some(task) = critical.low_priority_tasks.pop_front() {
                 drop(critical);
-                debug!("thread {} received low priority task", thread_name());
+                debug_with_peers!("thread {} received low priority task", thread_name());
                 task.run_and_handle_panics();
                 continue 'outer;
             }
@@ -253,7 +253,7 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
         }
     }
 
-    debug!("thread {} stopping", thread_name());
+    debug_with_peers!("thread {} stopping", thread_name());
 }
 
 // Keeping the `Thread` and its name around as locals in `run_worker` seems to add a small amount of

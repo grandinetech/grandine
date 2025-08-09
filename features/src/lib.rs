@@ -9,7 +9,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use parse_display::{Display, FromStr};
 use variant_count::VariantCount;
 
@@ -75,11 +75,11 @@ impl Feature {
     pub fn log(self, message: impl Display) {
         // This seems like something that would be better done using structured logging.
         // Maybe `log::kv` will be stable someday. Or we could implement it ourselves.
-        info!("[{self}] {message}");
+        info_with_peers!("[{self}] {message}");
     }
 
     pub fn warn(self, message: impl Display) {
-        warn!("[{self}] {message}");
+        warn_with_peers!("[{self}] {message}");
     }
 }
 

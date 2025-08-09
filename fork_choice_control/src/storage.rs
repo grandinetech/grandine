@@ -8,7 +8,7 @@ use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
@@ -125,7 +125,7 @@ impl<P: Preset> Storage<P> {
                         let result = if let Some(checkpoint) =
                             anchor_checkpoint_provider.checkpoint().checkpoint_synced()
                         {
-                            info!("anchor checkpoint is already loaded from remote checkpoint sync server");
+                            info_with_peers!("anchor checkpoint is already loaded from remote checkpoint sync server");
                             Ok(checkpoint)
                         } else {
                             checkpoint_sync::load_finalized_from_remote(&self.config, client, &url)
@@ -141,10 +141,10 @@ impl<P: Preset> Storage<P> {
                                 loaded_from_remote = true;
                                 break 'block;
                             }
-                            Err(error) => warn!("{error:#}"),
+                            Err(error) => warn_with_peers!("{error:#}"),
                         }
                     } else {
-                        warn!(
+                        warn_with_peers!(
                             "skipping checkpoint sync: existing database found; \
                              pass --force-checkpoint-sync to force checkpoint sync",
                         );
@@ -203,14 +203,14 @@ impl<P: Preset> Storage<P> {
 
         // decompress and load all missing anchor state pubkeys into cache
         if let Err(error) = self.pubkey_cache.load_and_persist_state_keys(&anchor_state) {
-            warn!("error occurred while loading anchor state keys into pubkey_cache: {error:?}");
+            warn_with_peers!("error occurred while loading anchor state keys into pubkey_cache: {error:?}");
         }
 
         let anchor_slot = anchor_block.message().slot();
         let anchor_block_root = anchor_block.message().hash_tree_root();
         let anchor_state_root = anchor_block.message().state_root();
 
-        info!("loaded state at slot {anchor_slot}");
+        info_with_peers!("loaded state at slot {anchor_slot}");
 
         self.database.put_batch([
             serialize(FinalizedBlockByRoot(anchor_block_root), &anchor_block)?,
@@ -228,7 +228,7 @@ impl<P: Preset> Storage<P> {
         if let Some((state, block, blocks)) = self.load_state_and_blocks_from_checkpoint()? {
             Ok(OptionalStateStorage::Full((state, block, blocks)))
         } else {
-            info!(
+            info_with_peers!(
                 "latest state checkpoint was not found; \
                  attempting to find stored state by iteration",
             );
@@ -265,7 +265,7 @@ impl<P: Preset> Storage<P> {
             store_head_slot = chain_link.slot().max(store_head_slot);
         }
 
-        debug!("saving store head slot: {store_head_slot}");
+        debug_with_peers!("saving store head slot: {store_head_slot}");
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
@@ -298,7 +298,7 @@ impl<P: Preset> Storage<P> {
                     let append_state = misc::is_epoch_start::<P>(state_slot);
 
                     if append_state {
-                        info!("saving checkpoint block & state in slot {state_slot}");
+                        info_with_peers!("saving checkpoint block & state in slot {state_slot}");
 
                         batch.push(serialize(
                             BlockCheckpoint::<P>::KEY,
@@ -326,7 +326,7 @@ impl<P: Preset> Storage<P> {
                         && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
 
                     if append_state {
-                        info!("saving state in slot {state_slot}");
+                        info_with_peers!("saving state in slot {state_slot}");
 
                         batch.push(serialize(
                             StateByBlockRoot(block_root),

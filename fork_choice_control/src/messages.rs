@@ -12,7 +12,7 @@ use fork_choice_store::{
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink,
 };
-use log::debug;
+use logging::debug_with_peers;
 use serde::Serialize;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
@@ -58,7 +58,7 @@ pub enum AttestationVerifierMessage<P: Preset, W> {
 impl<P: Preset, W> AttestationVerifierMessage<P, W> {
     pub fn send(self, tx: &impl UnboundedSink<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to attestation verifier failed because the receiver was dropped");
+            debug_with_peers!("send to attestation verifier failed because the receiver was dropped");
         }
     }
 }
@@ -161,7 +161,7 @@ impl<P: Preset, W> MutatorMessage<P, W> {
         if tx.send(self).is_err() {
             // This can happen if the mutator thread exits early due to failure or if a task
             // is completed after the `Controller` is dropped and stops the mutator thread.
-            debug!("send to mutator failed because the receiver was dropped");
+            debug_with_peers!("send to mutator failed because the receiver was dropped");
         }
     }
 }
@@ -187,7 +187,7 @@ impl<P: Preset> P2pMessage<P> {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         // Don't log the value because it can contain entire `BeaconState`s.
         if tx.unbounded_send(self).is_err() {
-            debug!("send to p2p failed because the receiver was dropped");
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
         }
     }
 }
@@ -201,7 +201,7 @@ pub enum PoolMessage {
 impl PoolMessage {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to operation pools failed because the receiver was dropped");
+            debug_with_peers!("send to operation pools failed because the receiver was dropped");
         }
     }
 }
@@ -218,7 +218,7 @@ impl<P: Preset, W> ValidatorMessage<P, W> {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         // Don't log the value because it can contain entire `BeaconState`s.
         if tx.unbounded_send(self).is_err() {
-            debug!("send to validator failed because the receiver was dropped");
+            debug_with_peers!("send to validator failed because the receiver was dropped");
         }
     }
 }
@@ -231,7 +231,7 @@ pub enum SubnetMessage<W> {
 impl<W> SubnetMessage<W> {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to subnet service failed because the receiver was dropped");
+            debug_with_peers!("send to subnet service failed because the receiver was dropped");
         }
     }
 }
@@ -245,7 +245,7 @@ pub enum SyncMessage<P: Preset> {
 impl<P: Preset> SyncMessage<P> {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         if let Err(message) = tx.unbounded_send(self) {
-            debug!(
+            debug_with_peers!(
                 "send to block sync service failed because the receiver was dropped: {message:?}"
             );
         }

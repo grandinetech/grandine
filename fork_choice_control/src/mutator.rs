@@ -40,7 +40,7 @@ use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSe
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
 use http_api_utils::{DependentRootsBundle, EventChannels};
 use itertools::{Either, Itertools as _};
-use log::{debug, error, info, warn};
+use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
@@ -343,7 +343,7 @@ where
             let checkpoint = self.store.unrealized_justified_checkpoint();
 
             if !self.store.contains_checkpoint_state(checkpoint) {
-                debug!(
+                debug_with_peers!(
                     "tick waiting for checkpoint state \
                      (tick: {tick:?}, checkpoint: {checkpoint:?})",
                 );
@@ -436,7 +436,7 @@ where
         if changes.is_slot_updated() {
             let slot = tick.slot;
 
-            debug!("retrying objects delayed until slot {slot}");
+            debug_with_peers!("retrying objects delayed until slot {slot}");
 
             for delayed in self.take_delayed_until_slot(slot) {
                 self.retry_delayed(delayed, wait_group);
@@ -513,7 +513,7 @@ where
 
                 if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
                     if let Some((payload_status, _)) = delayed.payload_status.take() {
-                        debug!(
+                        debug_with_peers!(
                             "applying delayed payload status \
                             (payload_status: {payload_status:?}, beacon_block_root: {block_root:?})",
                         );
@@ -602,7 +602,7 @@ where
                             });
                     }
                     BlockBlobAvailability::Missing(missing_blob_indices) => {
-                        debug!("block delayed until blobs: {pending_block:?}");
+                        debug_with_peers!("block delayed until blobs: {pending_block:?}");
 
                         if let Some(gossip_id) = pending_block.origin.gossip_id() {
                             self.send_to_p2p(P2pMessage::Accept(gossip_id));
@@ -651,7 +651,7 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    debug!("block delayed until parent: {pending_block:?}");
+                    debug_with_peers!("block delayed until parent: {pending_block:?}");
 
                     let peer_id = pending_block.origin.peer_id();
 
@@ -678,7 +678,7 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    debug!("block delayed until slot: {pending_block:?}");
+                    debug_with_peers!("block delayed until slot: {pending_block:?}");
 
                     self.delay_block_until_slot(pending_block);
                 }
@@ -699,7 +699,7 @@ where
                 if self.store.contains_checkpoint_state(checkpoint) {
                     self.accept_block(&wait_group, pending_chain_link)?;
                 } else {
-                    debug!(
+                    debug_with_peers!(
                         "block waiting for checkpoint state \
                          (block_root: {:?}, block: {:?}, checkpoint: {checkpoint:?})",
                         pending_chain_link.chain_link.block_root,
@@ -744,7 +744,7 @@ where
                     metrics.register_mutator_aggregate_and_proof(&["accepted"]);
                 }
 
-                debug!(
+                debug_with_peers!(
                     "aggregate and proof accepted \
                      (aggregate_and_proof: {aggregate_and_proof:?}, origin: {origin:?})",
                 );
@@ -869,9 +869,9 @@ where
                     error.downcast_ref::<Error<P>>(),
                     Some(Error::AggregatorNotInCommittee { .. }),
                 ) {
-                    debug!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
+                    debug_with_peers!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
                 } else {
-                    warn!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
+                    warn_with_peers!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
                 }
 
                 let (gossip_id, sender) = origin.split();
@@ -917,7 +917,7 @@ where
                     metrics.register_mutator_attestation(&["accepted"]);
                 }
 
-                debug!("attestation accepted (attestation: {attestation:?})");
+                debug_with_peers!("attestation accepted (attestation: {attestation:?})");
 
                 if attestation.origin.should_generate_event() {
                     self.event_channels
@@ -1026,7 +1026,7 @@ where
                 }
 
                 let source = error.to_string();
-                warn!("attestation rejected (error: {error:?})",);
+                warn_with_peers!("attestation rejected (error: {error:?})",);
 
                 let attestation = error.attestation();
                 let (gossip_id, sender) = attestation.origin.split();
@@ -1107,7 +1107,7 @@ where
                     None
                 }
                 Err(error) => {
-                    warn!("block attestation rejected (error: {error})");
+                    warn_with_peers!("block attestation rejected (error: {error})");
                     None
                 }
             })
@@ -1154,7 +1154,7 @@ where
                     self.spawn_preprocess_head_state_for_next_slot_task();
                 }
             }
-            Err(error) => debug!("attester slashing rejected (error: {error}, origin: {origin:?})"),
+            Err(error) => debug_with_peers!("attester slashing rejected (error: {error}, origin: {origin:?})"),
         }
 
         Ok(())
@@ -1210,7 +1210,7 @@ where
                 {
                     self.retry_blob_sidecar(wait_group, pending_blob_sidecar, Some(state));
                 } else {
-                    debug!(
+                    debug_with_peers!(
                         "blob sidecar delayed until state at same slot is ready \
                          (blob_sidecar: {:?}, block_root: {block_root:?}, slot: {slot})",
                         pending_blob_sidecar.blob_sidecar,
@@ -1241,7 +1241,7 @@ where
                 if self.store.contains_block(parent_root) {
                     self.retry_blob_sidecar(wait_group, pending_blob_sidecar, None);
                 } else {
-                    debug!("blob sidecar delayed until block parent: {parent_root:?}");
+                    debug_with_peers!("blob sidecar delayed until block parent: {parent_root:?}");
 
                     let peer_id = pending_blob_sidecar.origin.peer_id();
 
@@ -1268,7 +1268,7 @@ where
                 if slot <= self.store.slot() {
                     self.retry_blob_sidecar(wait_group, pending_blob_sidecar, None);
                 } else {
-                    debug!("blob sidecar delayed until slot: {slot}");
+                    debug_with_peers!("blob sidecar delayed until slot: {slot}");
 
                     let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
                         pending_blob_sidecar,
@@ -1279,7 +1279,7 @@ where
                 }
             }
             Err(error) => {
-                warn!("blob sidecar rejected (error: {error}, origin: {origin:?})");
+                warn_with_peers!("blob sidecar rejected (error: {error}, origin: {origin:?})");
 
                 let (gossip_id, sender) = origin.split();
 
@@ -1417,7 +1417,7 @@ where
             //
             // [Engine API specification]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#payload-validation
             if latest_valid_hash != Some(execution_block_hash) {
-                warn!(
+                warn_with_peers!(
                     "execution engine returned inconsistent response \
                      (execution_block_hash: {execution_block_hash:?}, \
                      payload_status: {payload_status:?})",
@@ -1514,13 +1514,13 @@ where
                 &self.store,
             )?;
 
-            info!(
+            info_with_peers!(
                 "chain saved (finalized blocks: {}, unfinalized blocks: {})",
                 slots.finalized.len(),
                 slots.unfinalized.len(),
             );
 
-            debug!("appended block slots: {slots:?}");
+            debug_with_peers!("appended block slots: {slots:?}");
         }
 
         Ok(())
@@ -1561,7 +1561,7 @@ where
         // A block may become orphaned while being processed.
         // The fork choice store is not designed to accommodate blocks like that.
         if block.message().slot() <= self.store.finalized_slot() {
-            debug!(
+            debug_with_peers!(
                 "block became orphaned while being processed \
                  (block_root: {block_root:?}, block: {block:?}, \
                   origin: {origin:?}, finalized slot: {})",
@@ -1579,13 +1579,13 @@ where
             return Ok(());
         }
 
-        debug!("block accepted (block_root: {block_root:?}, block: {block:?}, origin: {origin:?})");
+        debug_with_peers!("block accepted (block_root: {block_root:?}, block: {block:?}, origin: {origin:?})");
 
         let block_slot = chain_link.slot();
 
         if let Some(existing_link) = self.store.chain_link_before_or_at(block_slot) {
             if block_slot == existing_link.slot() {
-                warn!(
+                warn_with_peers!(
                     "the store accepted a new block at slot {block_slot}, \
                     although it already contains one at the same slot on the canonical chain \
                     (existing canonical block: {:?}, new block: {:?})",
@@ -1614,7 +1614,7 @@ where
         {
             self.store.prune_state_cache(true);
 
-            info!("unloading old beacon states (head slot: {head_slot})");
+            info_with_peers!("unloading old beacon states (head slot: {head_slot})");
 
             let unloaded = self
                 .store_mut()
@@ -1628,7 +1628,7 @@ where
                 Builder::new()
                 .name("store-unloader".to_owned())
                 .spawn(move || {
-                    debug!("persisting unloaded old beacon states…");
+                    debug_with_peers!("persisting unloaded old beacon states…");
 
                     let states_with_block_roots = unloaded
                         .iter()
@@ -1636,13 +1636,13 @@ where
 
                     match storage.append_states(states_with_block_roots) {
                         Ok(slots) => {
-                            debug!(
+                            debug_with_peers!(
                                 "unloaded old beacon states persisted \
                                  (state slots: {slots:?})",
                             )
                         }
                         Err(error) => {
-                            error!("persisting unloaded old beacon states to storage failed: {error:?}")
+                            error_with_peers!("persisting unloaded old beacon states to storage failed: {error:?}")
                         }
                     }
 
@@ -1747,7 +1747,7 @@ where
 
                 result
                     .map_err(|error| {
-                        debug!("attester slashing rejected (error: {error}, origin: {origin:?})")
+                        debug_with_peers!("attester slashing rejected (error: {error}, origin: {origin:?})")
                     })
                     .unwrap_or_default()
             })
@@ -1765,7 +1765,7 @@ where
         self.update_store_snapshot();
 
         if let Some(objects) = self.take_delayed_until_block(block_root) {
-            debug!("retrying objects delayed until block {block_root:?}");
+            debug_with_peers!("retrying objects delayed until block {block_root:?}");
             self.retry_delayed(objects, wait_group);
         }
 
@@ -1838,7 +1838,7 @@ where
     }
 
     fn reject_block(&mut self, error: AnyhowError, block_root: H256, origin: BlockOrigin) {
-        warn!("block rejected (error: {error}, block root: {block_root:?}, origin: {origin:?})");
+        warn_with_peers!("block rejected (error: {error}, block root: {block_root:?}, origin: {origin:?})");
 
         let sender = match origin {
             BlockOrigin::Gossip(gossip_id) => {
@@ -1906,7 +1906,7 @@ where
         let justified_checkpoint = self.store.justified_checkpoint();
         let head = self.store.head();
 
-        info!(
+        info_with_peers!(
             "new finalized checkpoint \
              (epoch: {}, root: {:?}, head slot: {}, head root: {:?})",
             finalized_checkpoint.epoch,
@@ -1948,7 +1948,7 @@ where
             metrics.beacon_reorgs_total.inc();
         }
 
-        info!(
+        info_with_peers!(
             "chain reorganized (old head: {:?}, new head: {:?}), cause: {reorg_source:?}",
             old_head.block_root, new_head.block_root,
         );
@@ -2057,7 +2057,7 @@ where
         if self.store.contains_block(block_root) {
             self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         } else {
-            debug!(
+            debug_with_peers!(
                 "aggregate and proof delayed until block \
                  (pending_aggregate_and_proof: {pending_aggregate_and_proof:?}, \
                   block_root: {block_root:?})",
@@ -2087,7 +2087,7 @@ where
         if self.store.contains_block(block_root) {
             self.retry_attestation(wait_group.clone(), pending_attestation);
         } else {
-            debug!(
+            debug_with_peers!(
                 "attestation delayed until block \
                  (pending_attestation: {pending_attestation:?}, block_root: {block_root:?})",
             );
@@ -2118,7 +2118,7 @@ where
         beacon_block_root: H256,
         payload_status: PayloadStatusV1,
     ) {
-        debug!(
+        debug_with_peers!(
             "payload status handling delayed until block \
              (payload_status: {payload_status:?}, beacon_block_root: {beacon_block_root:?})",
         );
@@ -2158,7 +2158,7 @@ where
         if slot <= self.store.slot() {
             self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         } else {
-            debug!("aggregate and proof delayed until slot: {pending_aggregate_and_proof:?}");
+            debug_with_peers!("aggregate and proof delayed until slot: {pending_aggregate_and_proof:?}");
 
             self.delayed_until_slot
                 .entry(slot)
@@ -2178,7 +2178,7 @@ where
         if slot <= self.store.slot() {
             self.retry_attestation(wait_group.clone(), pending_attestation);
         } else {
-            debug!("attestation delayed until slot: {pending_attestation:?}");
+            debug_with_peers!("attestation delayed until slot: {pending_attestation:?}");
 
             // Attestations produced by the application itself should never be delayed.
             // Attestations included in blocks should never be delayed until a slot
@@ -2296,7 +2296,7 @@ where
     }
 
     fn retry_block(&self, wait_group: W, pending_block: PendingBlock<P>) {
-        debug!("retrying delayed block: {pending_block:?}");
+        debug_with_peers!("retrying delayed block: {pending_block:?}");
 
         let PendingBlock {
             block,
@@ -2320,7 +2320,7 @@ where
     }
 
     fn retry_attestation(&self, wait_group: W, attestation: PendingAttestation<P>) {
-        debug!("retrying delayed attestation: {attestation:?}");
+        debug_with_peers!("retrying delayed attestation: {attestation:?}");
 
         if attestation.verify_signatures() {
             self.send_to_attestation_verifier(AttestationVerifierMessage::Attestation {
@@ -2339,7 +2339,7 @@ where
     }
 
     fn retry_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
-        debug!("retrying delayed tick: {tick:?}");
+        debug_with_peers!("retrying delayed tick: {tick:?}");
 
         self.handle_tick(wait_group, tick)
     }
@@ -2349,7 +2349,7 @@ where
         wait_group: W,
         pending_aggregate_and_proof: PendingAggregateAndProof<P>,
     ) {
-        debug!("retrying delayed aggregate and proof: {pending_aggregate_and_proof:?}");
+        debug_with_peers!("retrying delayed aggregate and proof: {pending_aggregate_and_proof:?}");
 
         let PendingAggregateAndProof {
             aggregate_and_proof,
@@ -2369,7 +2369,7 @@ where
         pending_blob_sidecar: PendingBlobSidecar<P>,
         state: Option<Arc<BeaconState<P>>>,
     ) {
-        debug!("retrying delayed blob sidecar: {pending_blob_sidecar:?}");
+        debug_with_peers!("retrying delayed blob sidecar: {pending_blob_sidecar:?}");
 
         let PendingBlobSidecar {
             blob_sidecar,
@@ -2609,7 +2609,7 @@ where
         let current_tick = self.store.tick();
 
         if current_tick.slot == (block_slot + 1) && current_tick.is_before_attesting_interval() {
-            debug!("spawn preprocess state task for current slot: {block_slot}: {current_tick:?}");
+            debug_with_peers!("spawn preprocess state task for current slot: {block_slot}: {current_tick:?}");
 
             self.spawn(PreprocessStateTask {
                 store_snapshot: self.owned_store(),
@@ -2655,7 +2655,7 @@ where
 
     fn archive_finalized(&mut self, wait_group: &W) -> Result<()> {
         if let Some(latest_archivable_index) = self.store.latest_archivable_index() {
-            debug!("archiving finalized blocks and anchor state…");
+            debug_with_peers!("archiving finalized blocks and anchor state…");
 
             let store = self.owned_store();
             let storage = self.storage.clone_arc();
@@ -2671,7 +2671,7 @@ where
             Builder::new()
                 .name("store-archiver".to_owned())
                 .spawn(move || {
-                    debug!("saving finalized blocks and anchor state…");
+                    debug_with_peers!("saving finalized blocks and anchor state…");
 
                     match storage.append(core::iter::empty(), archived.iter(), &store) {
                         Ok(slots) => {
@@ -2683,24 +2683,24 @@ where
                                 }
                             }
 
-                            debug!(
+                            debug_with_peers!(
                                 "finalized blocks and anchor state saved \
                                  (appended block slots: {slots:?})",
                             )
                         }
-                        Err(error) => error!("saving to storage failed: {error:?}"),
+                        Err(error) => error_with_peers!("saving to storage failed: {error:?}"),
                     }
 
-                    debug!("removing unfinalized blocks");
+                    debug_with_peers!("removing unfinalized blocks");
 
                     if !storage.archive_storage_enabled() {
                         match storage.prune_unfinalized_blocks(last_finalized_slot) {
                             Ok(slots) => {
-                                debug!(
+                                debug_with_peers!(
                                     "unfinalized block pruning complete: pruned slots: {slots:?}"
                                 );
                             }
-                            Err(error) => error!("unfinalized block pruning failed: {error:?}"),
+                            Err(error) => error_with_peers!("unfinalized block pruning failed: {error:?}"),
                         }
                     }
 
@@ -2725,42 +2725,42 @@ where
         Builder::new()
             .name("old-data-pruner".to_owned())
             .spawn(move || {
-                debug!("pruning old blob sidecars from storage up to slot {blobs_up_to_slot}…");
+                debug_with_peers!("pruning old blob sidecars from storage up to slot {blobs_up_to_slot}…");
 
                 match storage.prune_old_blob_sidecars(blobs_up_to_slot) {
                     Ok(()) => {
-                        debug!(
+                        debug_with_peers!(
                             "pruned old blob sidecars from storage up to slot {blobs_up_to_slot}"
                         );
                     }
                     Err(error) => {
-                        error!("pruning old blob sidecars from storage failed: {error:?}")
+                        error_with_peers!("pruning old blob sidecars from storage failed: {error:?}")
                     }
                 }
 
-                debug!("pruning old blocks and states from storage up to slot {blocks_up_to_slot}…");
+                debug_with_peers!("pruning old blocks and states from storage up to slot {blocks_up_to_slot}…");
 
                 match storage.prune_old_blocks_and_states(blocks_up_to_slot) {
                     Ok(()) => {
-                        debug!(
+                        debug_with_peers!(
                             "pruned old blocks and states from storage up to slot {blocks_up_to_slot}"
                         );
                     }
                     Err(error) => {
-                        error!("pruning old blocks and states from storage failed: {error:?}")
+                        error_with_peers!("pruning old blocks and states from storage failed: {error:?}")
                     }
                 }
 
-                debug!("pruning old state roots from storage up to slot {blocks_up_to_slot}…");
+                debug_with_peers!("pruning old state roots from storage up to slot {blocks_up_to_slot}…");
 
                 match storage.prune_old_state_roots(blocks_up_to_slot) {
                     Ok(()) => {
-                        debug!(
+                        debug_with_peers!(
                             "pruned old state roots from storage up to slot {blocks_up_to_slot}"
                         );
                     }
                     Err(error) => {
-                        error!("pruning old state roots from storage failed: {error:?}")
+                        error_with_peers!("pruning old state roots from storage failed: {error:?}")
                     }
                 }
             })?;
@@ -3024,7 +3024,7 @@ fn reply_to_http_api(
 ) {
     if let Some(sender) = sender {
         if let Err(reply) = sender.send(reply) {
-            debug!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+            debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
         }
     }
 }
@@ -3035,7 +3035,7 @@ fn reply_block_validation_result_to_http_api(
 ) {
     if let Some(mut sender) = sender {
         if let Err(reply) = sender.try_send(reply) {
-            debug!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+            debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
         }
     }
 }

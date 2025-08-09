@@ -17,7 +17,7 @@ use helper_functions::{
     accessors, misc,
     verifier::{MultiVerifier, NullVerifier},
 };
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
@@ -175,7 +175,7 @@ impl<P: Preset, W> Run for BlockVerifyForGossipTask<P, W> {
             });
 
         if let Err(reply) = sender.try_send(validation_outcome) {
-            debug!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+            debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
         }
 
         drop(wait_group);
@@ -414,7 +414,7 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
                 .send(&mutator_tx);
             }
             Err(error) => {
-                warn!("failed to persist blob sidecars to storage: {error:?}");
+                warn_with_peers!("failed to persist blob sidecars to storage: {error:?}");
             }
         }
     }
@@ -453,7 +453,7 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
             match state_cache.try_state_at_slot(&pubkey_cache, &store_snapshot, root, slot) {
                 Ok(state) => state,
                 Err(error) => {
-                    warn!("failed to compute checkpoint state: {error:?}");
+                    warn_with_peers!("failed to compute checkpoint state: {error:?}");
                     return;
                 }
             };
@@ -503,13 +503,13 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
                 if let Err(error) =
                     initialize_preprocessed_state_cache(store_snapshot.chain_config(), &state)
                 {
-                    warn!("failed to initialize preprocessed state's cache values: {error:?}");
+                    warn_with_peers!("failed to initialize preprocessed state's cache values: {error:?}");
                 }
 
                 MutatorMessage::PreprocessedBeaconState { state }.send(&mutator_tx);
             }
             Err(error) => {
-                warn!("failed to preprocess beacon state for the next slot: {error:?}");
+                warn_with_peers!("failed to preprocess beacon state for the next slot: {error:?}");
             }
         }
     }
@@ -536,7 +536,7 @@ impl<P: Preset, W> Run for PersistPubkeyCacheTask<P, W> {
             .map(|metrics| metrics.fc_persist_pubkey_cache_task_times.start_timer());
 
         if let Err(error) = pubkey_cache.persist(&state) {
-            warn!("failed to persist pubkey cache to disk: {error:?}");
+            warn_with_peers!("failed to persist pubkey cache to disk: {error:?}");
         }
 
         drop(wait_group);
@@ -567,7 +567,7 @@ impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
         } = self;
 
         if let Err(error) = state_at_slot_cache.flush() {
-            warn!("failed to flush state at slot cache: {error:?}");
+            warn_with_peers!("failed to flush state at slot cache: {error:?}");
         }
     }
 }

@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use anyhow::{bail, Error, Result};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use eip_2335::Keystore;
-use tracing::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::KeyOrigin;
 use std_ext::ArcExt;
@@ -93,7 +93,7 @@ impl Validators {
                     if keystore_path.file_name().is_some_and(|filename| {
                         filename.to_string_lossy().starts_with("deposit_data")
                     }) {
-                        warn!(
+                        warn_with_peers!(
                             "Ignoring loading {} file because it's not a valid keystore file. \
                             Keystore can only contain valid keystore files. \
                             Please make sure that keystore dir does not contain deposit_data* file",
@@ -122,7 +122,7 @@ impl Validators {
 
         if let Some(cache) = validator_key_cache.as_mut() {
             if let Err(error) = cache.load(passwords) {
-                warn!(
+                warn_with_peers!(
                     "Unable to load validator key cache: {error:?}; \
                      Validator key cache will be reset",
                 );
@@ -147,7 +147,7 @@ impl Validators {
 
                         let public_key = secret_key.to_public_key().into();
 
-                        info!("decrypted validator key {public_key:?}");
+                        info_with_peers!("decrypted validator key {public_key:?}");
 
                         Ok((public_key, secret_key))
                     })?;

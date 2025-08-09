@@ -21,9 +21,7 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use http_api::HttpApiConfig;
-//use log::{error, info, warn};
-use tracing::{error, info, warn};
-use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers, PEER_LOG_METRICS};
+use logging::{error_with_peers, info_with_peers, warn_with_peers, PEER_LOG_METRICS};
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use pubkey_cache::PubkeyCache;
@@ -144,10 +142,10 @@ impl Context {
             match result {
                 Ok(Ok(())) => break Ok(()),
                 Ok(Err(error)) => {
-                    error!("application runtime failed: {error:?}");
+                    error_with_peers!("application runtime failed: {error:?}");
 
                     if error.downcast_ref::<libmdbx::Error>() == Some(&libmdbx::Error::MapFull) {
-                        info!("increasing environment map size limits");
+                        info_with_peers!("increasing environment map size limits");
                         db_size_modifier *= 2;
                     }
 
@@ -158,7 +156,7 @@ impl Context {
                         break Err(error);
                     }
                 }
-                Err(error) => error!("application runtime panicked: {error:?}"),
+                Err(error) => error_with_peers!("application runtime panicked: {error:?}"),
             }
         }
     }
@@ -342,7 +340,7 @@ enum Error {
 fn main() -> ExitCode {
     if let Err(error) = try_main() {
         error.downcast_ref().map(ClapError::exit);
-        error!("{error:?}");
+        error_with_peers!("{error:?}");
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -354,17 +352,13 @@ fn try_main() -> Result<()> {
     binary_utils::initialize_tracing_logger(module_path!(), cfg!(feature = "logger-always-write-style"))?;
     binary_utils::initialize_rayon()?;
     
-    info!("Tracing started!");
-    info_with_peers!("test info with peers");
-    debug_with_peers!("test debug with peers");
-    warn_with_peers!("test warn with peers");
-    error_with_peers!("test error with peers");
+    info_with_peers!("Tracing started!");
 
     let config = GrandineArgs::try_parse()?
         .try_into_config()
         .map_err(GrandineArgs::clap_error)?;
 
-    info!("starting beacon node");
+    info_with_peers!("starting beacon node");
     config.report();
 
     let GrandineConfig {
@@ -503,7 +497,7 @@ fn try_main() -> Result<()> {
         || validator_config.keystore_storage_password_file.is_some();
 
     if validator_enabled {
-        info!("started loading validator keys");
+        info_with_peers!("started loading validator keys");
     }
 
     let mut validator_keys = validators
@@ -529,7 +523,7 @@ fn try_main() -> Result<()> {
 
     if let Some(cache) = cache {
         if let Err(error) = cache.save() {
-            warn!("Unable to save validator key cache: {error:?}");
+            warn_with_peers!("Unable to save validator key cache: {error:?}");
         }
     }
 
@@ -735,7 +729,7 @@ fn handle_command<P: Preset>(
                 anchor_checkpoint_provider,
             )?;
 
-            info!("state and blocks exported to {}", output_dir.display());
+            info_with_peers!("state and blocks exported to {}", output_dir.display());
         }
         GrandineCommand::Replay {
             from,
@@ -780,7 +774,7 @@ fn handle_command<P: Preset>(
                     let import_report = slashing_protector
                         .import_interchange_file(&file_path, genesis_validators_root)?;
 
-                    info!(
+                    info_with_peers!(
                         "interchange file imported (imported records: {}, failed records: {})",
                         import_report.imported_records(),
                         import_report.failed_records(),
@@ -791,7 +785,7 @@ fn handle_command<P: Preset>(
                         .export_to_interchange_file(&file_path, genesis_validators_root)?;
 
                     if interchange.is_empty() {
-                        warn!(
+                        warn_with_peers!(
                             "no records were exported. \
                             This may indicate an issue if active validators are present. \
                             Please verify your configuration settings.",
@@ -804,14 +798,14 @@ fn handle_command<P: Preset>(
                                 signed_blocks,
                             } = data;
 
-                            info!(
+                            info_with_peers!(
                                 "exported {} records for {pubkey:?}",
                                 signed_attestations.len() + signed_blocks.len(),
                             );
                         }
                     }
 
-                    info!("interchange file exported to {}", file_path.display());
+                    info_with_peers!("interchange file exported to {}", file_path.display());
                 }
             }
         }

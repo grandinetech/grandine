@@ -6,7 +6,7 @@ use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 
 use anyhow::{bail, Result};
 use features::Feature;
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use pubkey_cache::PubkeyCache;
 use state_cache::{QueryOptions, StateCache, StateWithRewards};
 use std_ext::ArcExt as _;
@@ -277,7 +277,7 @@ fn process_slots<P: Preset, S: Storage<P>>(
     if warn_on_slot_processing {
         // `Backtrace::force_capture` can be costly and a warning may be excessive,
         // but this is controlled by a `Feature` that should be disabled by default.
-        warn!(
+        warn_with_peers!(
             "processing slots for beacon state not found in state cache \
              (block root: {block_root:?}, from slot {from_slot} to {slot})\n{}",
             Backtrace::force_capture(),
@@ -286,7 +286,7 @@ fn process_slots<P: Preset, S: Storage<P>>(
         let processing_count = currently_processing.load(Ordering::SeqCst);
 
         if processing_count > 1 {
-            warn!("currently processing slots for {processing_count} states in state cache");
+            warn_with_peers!("currently processing slots for {processing_count} states in state cache");
         }
     }
 
@@ -299,7 +299,7 @@ fn process_slots<P: Preset, S: Storage<P>>(
     process_slots_result?;
 
     if warn_on_slot_processing {
-        info!(
+        info_with_peers!(
             "processed slots for beacon state not found in state cache in {} ms \
             (block root: {block_root:?}, from slot {from_slot} to {slot})",
             started_at.elapsed().as_millis(),
