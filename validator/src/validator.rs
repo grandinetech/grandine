@@ -743,7 +743,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validator cannot produce a block because \
                  chain head has not been fully verified by an execution engine",
@@ -975,31 +975,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         wait_group: &W,
         slot_head: &SlotHead<P>,
     ) -> Result<()> {
-        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
-
-        if slot_head.optimistic
-            && timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
-                loop {
-                    let block_event =
-                        match self.event_channels.receiver_for(Topic::Block).recv().await {
-                            Ok(Event::Block(block_event)) => block_event,
-                            Ok(_) => continue,
-                            Err(error) => {
-                                debug!("error receiving block event: {error:?}");
-                                continue;
-                            }
-                        };
-
-                    if block_event.block == slot_head.beacon_block_root
-                        && !block_event.execution_optimistic
-                    {
-                        break;
-                    }
-                }
-            })
-            .await
-            .is_err()
-        {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validator cannot participate in attestation because \
                  chain head has not been fully verified by an execution engine",
@@ -1146,7 +1122,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validators cannot participate in aggregation because \
                  chain head has not been fully verified by an execution engine",
@@ -1303,7 +1279,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        if slot_head.optimistic {
+        if self
+            .wait_for_fully_validated_head(&slot_head)
+            .await
+            .is_err()
+        {
             warn!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
@@ -1360,7 +1340,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         }
 
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
@@ -2089,6 +2069,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if let Some(validator_statistics) = self.validator_statistics.as_ref() {
             validator_statistics.track_collection_metrics().await;
         }
+    }
+
+    async fn wait_for_fully_validated_head(&self, slot_head: &SlotHead<P>) -> Result<()> {
+        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+        if !slot_head.is_optimistic(&self.controller)? {
+            return Ok(());
+        }
+
+        timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+            loop {
+                let block_event = match self.event_channels.receiver_for(Topic::Block).recv().await
+                {
+                    Ok(Event::Block(block_event)) => block_event,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        warn!("error receiving block event: {error:?}");
+                        continue;
+                    }
+                };
+
+                if block_event.block == slot_head.beacon_block_root
+                    && !block_event.execution_optimistic
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .map_err(Into::into)
     }
 }
 
