@@ -1,6 +1,6 @@
 use core::sync::atomic::AtomicBool;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
     thread::Builder,
 };
@@ -17,6 +17,7 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use log::{debug, info, warn};
+use serde::{Deserialize, Serialize};
 use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -31,7 +32,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar},
         primitives::ColumnIndex,
     },
-    nonstandard::PayloadStatus,
+    nonstandard::{PayloadStatus, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Slot, H256},
@@ -47,6 +48,7 @@ pub struct BackSync<P: Preset> {
     batch: Batch<P>,
     data: Data,
     archiving: bool,
+    sync_mode: SyncMode,
 }
 
 impl<P: Preset> BackSync<P> {
@@ -55,21 +57,28 @@ impl<P: Preset> BackSync<P> {
 
         debug!("loaded back-sync: {data:?}");
 
-        if let Some(data) = data.as_ref() {
-            info!(
-                "starting back-sync from {} to {} slot",
-                data.current.slot, data.low.slot
-            );
-        }
+        let Some(data) = data else {
+            return Ok(None);
+        };
 
-        Ok(data.map(Self::new))
+        let sync_mode = SyncMode::load(database, data.low.slot)?;
+
+        info!(
+            "starting {} from {} to {} slot",
+            sync_mode.name(),
+            data.current.slot,
+            data.low.slot
+        );
+
+        Ok(Some(Self::new(data, sync_mode)))
     }
 
-    pub fn new(data: Data) -> Self {
+    pub fn new(data: Data, sync_mode: SyncMode) -> Self {
         Self {
             data,
             batch: Batch::default(),
             archiving: false,
+            sync_mode,
         }
     }
 
@@ -98,6 +107,7 @@ impl<P: Preset> BackSync<P> {
     }
 
     pub fn remove(&self, database: &Database) -> Result<()> {
+        self.sync_mode.remove(database, self.data.low.slot)?;
         self.data.remove(database)
     }
 
@@ -138,6 +148,7 @@ impl<P: Preset> BackSync<P> {
     }
 
     pub fn save(&self, database: &Database) -> Result<()> {
+        self.sync_mode.save(database, self.data.low.slot)?;
         self.data.save(database)
     }
 
@@ -192,13 +203,24 @@ impl<P: Preset> BackSync<P> {
     ) -> Result<()> {
         let last_block_checkpoint = self.data.current;
 
-        let (checkpoint, blocks, blob_sidecars, data_column_sidecars) = self
-            .batch
-            .verify_from_checkpoint(config, controller, last_block_checkpoint)?;
+        let (checkpoint, blocks, blob_sidecars, data_column_sidecars) = match &self.sync_mode {
+            SyncMode::Default => {
+                self.batch
+                    .verify_from_checkpoint(config, controller, last_block_checkpoint)?
+            }
+            SyncMode::DataColumnsOnly { column_indices } => {
+                self.batch.verify_extra_data_columns_from_checkpoint(
+                    config,
+                    controller,
+                    last_block_checkpoint,
+                    column_indices,
+                )?
+            }
+        };
 
         info!("back-synced to {} slot", checkpoint.slot);
 
-        if checkpoint.slot == self.low_slot() {
+        if self.sync_mode.validate_checkpoint_slot() && checkpoint.slot == self.low_slot() {
             let expected = self.data.low;
             let actual = checkpoint;
 
@@ -312,6 +334,7 @@ impl<P: Preset> Batch<P> {
         controller: &RealController<P>,
         block: &Arc<SignedBeaconBlock<P>>,
         parent: &Arc<SignedBeaconBlock<P>>,
+        validatable_columns: &HashSet<ColumnIndex>,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let block = block.message();
 
@@ -331,9 +354,9 @@ impl<P: Preset> Batch<P> {
             return Ok(vec![]);
         }
 
-        controller
-            .sampling_columns()
-            .into_iter()
+        validatable_columns
+            .iter()
+            .copied()
             .map(|index| {
                 let Some(data_column_sidear) = self
                     .data_column_sidecars
@@ -376,9 +399,9 @@ impl<P: Preset> Batch<P> {
         mut checkpoint: SyncCheckpoint,
     ) -> Result<(
         SyncCheckpoint,
-        impl Iterator<Item = Arc<SignedBeaconBlock<P>>>,
-        impl Iterator<Item = Arc<BlobSidecar<P>>>,
-        impl Iterator<Item = Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedBeaconBlock<P>>>,
+        Vec<Arc<BlobSidecar<P>>>,
+        Vec<Arc<DataColumnSidecar<P>>>,
     )> {
         debug!("verify back-sync batch from: {checkpoint:?}");
 
@@ -420,8 +443,13 @@ impl<P: Preset> Batch<P> {
                     .phase_at_slot::<P>(block.message().slot())
                     .is_peerdas_activated()
                 {
-                    let mut data_columns =
-                        self.valid_data_column_sidecars_for(config, controller, block, parent)?;
+                    let mut data_columns = self.valid_data_column_sidecars_for(
+                        config,
+                        controller,
+                        block,
+                        parent,
+                        &controller.sampling_columns(),
+                    )?;
 
                     verified_data_column_sidecars.append(&mut data_columns);
                 } else {
@@ -451,10 +479,77 @@ impl<P: Preset> Batch<P> {
 
         Ok((
             checkpoint,
-            verified_blocks.into_iter(),
-            verified_blob_sidecars.into_iter(),
-            verified_data_column_sidecars.into_iter(),
+            verified_blocks,
+            verified_blob_sidecars,
+            verified_data_column_sidecars,
         ))
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn verify_extra_data_columns_from_checkpoint(
+        &self,
+        config: &Config,
+        controller: &RealController<P>,
+        mut checkpoint: SyncCheckpoint,
+        column_indices: &HashSet<ColumnIndex>,
+    ) -> Result<(
+        SyncCheckpoint,
+        Vec<Arc<SignedBeaconBlock<P>>>,
+        Vec<Arc<BlobSidecar<P>>>,
+        Vec<Arc<DataColumnSidecar<P>>>,
+    )> {
+        debug!("verify back-sync batch from: {checkpoint:?}");
+
+        let mut verified_data_column_sidecars = vec![];
+
+        let block_roots = self
+            .data_column_sidecars
+            .keys()
+            .map(|key| key.block_root)
+            .collect::<HashSet<_>>();
+
+        let mut blocks_with_roots = HashMap::new();
+        let mut earliest_block: Option<Arc<SignedBeaconBlock<P>>> = None;
+
+        for root in block_roots {
+            if let Some(block) = controller.block_by_root(root)?.map(WithStatus::value) {
+                blocks_with_roots.insert(root, block);
+            }
+        }
+
+        for block in blocks_with_roots.values() {
+            if let Some(parent) = blocks_with_roots.get(&block.message().parent_root()) {
+                let block_slot = block.message().slot();
+
+                if config.phase_at_slot::<P>(block_slot).is_peerdas_activated() {
+                    let mut data_columns = self.valid_data_column_sidecars_for(
+                        config,
+                        controller,
+                        block,
+                        parent,
+                        column_indices,
+                    )?;
+
+                    verified_data_column_sidecars.append(&mut data_columns);
+
+                    if earliest_block
+                        .as_ref()
+                        .map(|block| block_slot < block.message().slot())
+                        .unwrap_or(true)
+                    {
+                        earliest_block = Some(block.clone_arc());
+                    }
+                }
+            }
+        }
+
+        if let Some(earliest_block) = earliest_block {
+            checkpoint = earliest_block.as_ref().into();
+        }
+
+        debug!("next batch checkpoint: {checkpoint:?}");
+
+        Ok((checkpoint, vec![], vec![], verified_data_column_sidecars))
     }
 }
 
@@ -494,6 +589,67 @@ impl Data {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SyncMode {
+    Default,
+    DataColumnsOnly {
+        column_indices: HashSet<ColumnIndex>,
+    },
+}
+
+impl SyncMode {
+    fn name(&self) -> String {
+        match self {
+            Self::Default => "back-sync".into(),
+            Self::DataColumnsOnly { column_indices } => {
+                format!("data column backfill (columns: {column_indices:?})")
+            }
+        }
+    }
+
+    fn save(&self, database: &Database, low_slot: Slot) -> Result<()> {
+        // Due to backwards compatibility and simplicity, back sync without additional sync mode record
+        // is treated as default back sync
+        if self.is_default() {
+            return Ok(());
+        }
+
+        database.put(Self::db_key(low_slot), bincode::serialize(&self)?)
+    }
+
+    fn remove(&self, database: &Database, low_slot: Slot) -> Result<()> {
+        if self.is_default() {
+            return Ok(());
+        }
+
+        database.delete(Self::db_key(low_slot))
+    }
+
+    fn load(database: &Database, low_slot: Slot) -> Result<Self> {
+        database
+            .get(Self::db_key(low_slot))?
+            .as_deref()
+            .map(bincode::deserialize)
+            .unwrap_or(Ok(Self::Default))
+            .map_err(Into::into)
+    }
+
+    fn db_key(low_slot: Slot) -> String {
+        SyncModeBySlot(low_slot).to_string()
+    }
+
+    const fn is_default(&self) -> bool {
+        matches!(self, Self::Default)
+    }
+
+    const fn validate_checkpoint_slot(&self) -> bool {
+        match self {
+            Self::Default => true,
+            Self::DataColumnsOnly { .. } => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Ssz)]
 #[cfg_attr(test, derive(Default))]
 pub struct SyncCheckpoint {
@@ -520,6 +676,14 @@ pub struct BackSyncDataBySlot(pub Slot);
 
 impl PrefixableKey for BackSyncDataBySlot {
     const PREFIX: &'static str = "b";
+}
+
+#[derive(Display)]
+#[display("{}{_0:020}", Self::PREFIX)]
+pub struct SyncModeBySlot(pub Slot);
+
+impl PrefixableKey for SyncModeBySlot {
+    const PREFIX: &'static str = "m";
 }
 
 #[derive(Debug, Error)]

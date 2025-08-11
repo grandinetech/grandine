@@ -1995,18 +1995,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if validator_custody_requirement > current_custody_requirements
             || self.last_cgc_update_epoch.is_none()
         {
+            let backfill_custody_groups = self.validator_config.backfill_custody_groups;
+
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
-            ToSubnetService::UpdateCustodyRequirements(
+            ValidatorToP2p::UpdateCustodyRequirements(
                 current_epoch,
                 validator_custody_requirement,
+                backfill_custody_groups,
             )
-            .send(&self.subnet_service_tx);
+            .send(&self.p2p_tx);
 
-            ToSubnetService::AttemptToUpdateCustodyGroupCount(validator_custody_requirement)
-                .send(&self.subnet_service_tx);
+            if !backfill_custody_groups {
+                ValidatorToP2p::AttemptToUpdateCustodyGroupCount(validator_custody_requirement)
+                    .send(&self.p2p_tx);
+            }
 
-            ToSubnetService::UpdateEarliestAvailableSlot(current_slot)
-                .send(&self.subnet_service_tx);
+            ValidatorToP2p::UpdateEarliestAvailableSlot(current_slot).send(&self.p2p_tx);
         }
 
         self.last_cgc_update_epoch = Some(current_epoch);
