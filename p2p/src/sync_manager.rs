@@ -29,7 +29,6 @@ use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::{
-        consts::NumberOfColumns,
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
@@ -77,7 +76,7 @@ pub enum SyncTarget {
 }
 
 #[derive(Debug, Clone)]
-pub struct SyncBatch {
+pub struct SyncBatch<P: Preset> {
     pub target: SyncTarget,
     pub direction: SyncDirection,
     pub peer_id: PeerId,
@@ -85,14 +84,14 @@ pub struct SyncBatch {
     pub count: u64,
     pub retry_count: usize,
     pub response_received: bool,
-    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, NumberOfColumns>>>,
+    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>>,
 }
 
-pub struct SyncManager {
+pub struct SyncManager<P: Preset> {
     peers: HashMap<PeerId, StatusMessage>,
-    blob_requests: RangeAndRootRequests<BlobIdentifier>,
-    block_requests: RangeAndRootRequests<H256>,
-    data_column_requests: RangeAndRootRequests<DataColumnIdentifier>,
+    blob_requests: RangeAndRootRequests<BlobIdentifier, P>,
+    block_requests: RangeAndRootRequests<H256, P>,
+    data_column_requests: RangeAndRootRequests<DataColumnIdentifier, P>,
     last_sync_head: Slot,
     last_sync_range: Range<Slot>,
     sequential_redownloads: usize,
@@ -107,7 +106,7 @@ pub struct SyncManager {
     custodial_peers: HashMap<ColumnIndex, HashSet<PeerId>>,
 }
 
-impl SyncManager {
+impl<P: Preset> SyncManager<P> {
     pub fn new(
         network_globals: Arc<NetworkGlobals>,
         target_peers: usize,
@@ -115,9 +114,9 @@ impl SyncManager {
     ) -> Self {
         Self {
             peers: HashMap::new(),
-            blob_requests: RangeAndRootRequests::<BlobIdentifier>::default(),
-            block_requests: RangeAndRootRequests::<H256>::default(),
-            data_column_requests: RangeAndRootRequests::<DataColumnIdentifier>::default(),
+            blob_requests: RangeAndRootRequests::<BlobIdentifier, P>::default(),
+            block_requests: RangeAndRootRequests::<H256, P>::default(),
+            data_column_requests: RangeAndRootRequests::<DataColumnIdentifier, P>::default(),
             last_sync_range: 0..0,
             last_sync_head: 0,
             sequential_redownloads: 0,
@@ -198,7 +197,7 @@ impl SyncManager {
         self.back_sync_black_list.put(peer_id, ());
     }
 
-    pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch> {
+    pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch<P>> {
         self.log(
             Level::Debug,
             format_args!("remove peer (peer_id: {peer_id})"),
@@ -227,7 +226,7 @@ impl SyncManager {
     pub fn retry_batch(
         &mut self,
         request_id: RequestId,
-        mut batch: SyncBatch,
+        mut batch: SyncBatch<P>,
         new_peer: Option<PeerId>,
     ) {
         match new_peer {
@@ -275,13 +274,13 @@ impl SyncManager {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn build_back_sync_batches<P: Preset>(
+    pub fn build_back_sync_batches(
         &mut self,
         config: &Config,
         data_availability_serve_range_slot: Slot,
         mut current_back_sync_slot: Slot,
         low_slot: Slot,
-    ) -> Vec<SyncBatch> {
+    ) -> Vec<SyncBatch<P>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(true) else {
             return vec![];
         };
@@ -433,13 +432,13 @@ impl SyncManager {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn build_forward_sync_batches<P: Preset>(
+    pub fn build_forward_sync_batches(
         &mut self,
         config: &Config,
         current_slot: Slot,
         local_head_slot: Slot,
         local_finalized_slot: Slot,
-    ) -> Result<Vec<SyncBatch>> {
+    ) -> Result<Vec<SyncBatch<P>>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(false) else {
             return Ok(vec![]);
         };
@@ -697,7 +696,7 @@ impl SyncManager {
         self.data_column_requests.request_by_root_count() == 0
     }
 
-    pub fn add_blob_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_blob_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch<P>) {
         self.log(
             Level::Debug,
             format_args!(
@@ -727,7 +726,7 @@ impl SyncManager {
             .collect_vec()
     }
 
-    pub fn add_block_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_block_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch<P>) {
         self.log(
             Level::Debug,
             format_args!(
@@ -753,7 +752,11 @@ impl SyncManager {
         self.block_requests.add_request_by_root(block_root, peer_id)
     }
 
-    pub fn add_data_columns_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_data_columns_request_by_range(
+        &mut self,
+        request_id: RequestId,
+        batch: SyncBatch<P>,
+    ) {
         self.log(
             Level::Debug,
             format_args!(
@@ -772,9 +775,9 @@ impl SyncManager {
 
     pub fn add_data_columns_request_by_root(
         &mut self,
-        data_columns_by_root: DataColumnsByRootIdentifier,
+        data_columns_by_root: DataColumnsByRootIdentifier<P>,
         peer_id: PeerId,
-    ) -> Option<DataColumnsByRootIdentifier> {
+    ) -> Option<DataColumnsByRootIdentifier<P>> {
         let DataColumnsByRootIdentifier {
             block_root,
             columns,
@@ -844,7 +847,7 @@ impl SyncManager {
         }
     }
 
-    pub fn blocks_by_range_request_finished<P: Preset>(
+    pub fn blocks_by_range_request_finished(
         &mut self,
         controller: &RealController<P>,
         peer_id: PeerId,
@@ -1211,19 +1214,19 @@ impl SyncManager {
 
     pub fn expired_blob_range_batches(
         &mut self,
-    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
         self.blob_requests.expired_range_batches()
     }
 
     pub fn expired_block_range_batches(
         &mut self,
-    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
         self.block_requests.expired_range_batches()
     }
 
     pub fn expired_data_column_range_batches(
         &mut self,
-    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
         self.data_column_requests.expired_range_batches()
     }
 
@@ -1258,7 +1261,7 @@ enum MapPeerCustodyError {
 }
 
 #[cfg(test)]
-impl SyncManager {
+impl<P: Preset> SyncManager<P> {
     pub fn add_blobs_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.blob_requests.add_request_by_range(
             1,
@@ -1360,7 +1363,7 @@ mod tests {
         }
     }
 
-    fn build_sync_manager(chain_config: Arc<Config>) -> SyncManager {
+    fn build_sync_manager<P: Preset>(chain_config: Arc<Config>) -> SyncManager<P> {
         let log = build_log(slog::Level::Debug, false);
         let network_config = Arc::new(NetworkConfig::default());
         let network_globals =
@@ -1465,7 +1468,7 @@ mod tests {
             head_slot,
         });
 
-        let mut sync_manager = build_sync_manager(config.clone_arc());
+        let mut sync_manager = build_sync_manager::<Minimal>(config.clone_arc());
 
         // Add 10 valid peers.
         // This will indirectly test that half of them are used for back-syncing (5 batches).
@@ -1484,7 +1487,7 @@ mod tests {
         sync_manager.add_data_columns_request_by_range_busy_peer(PeerId::random());
         sync_manager.add_data_columns_request_by_root_busy_peer(PeerId::random());
 
-        let batches = sync_manager.build_back_sync_batches::<Minimal>(
+        let batches = sync_manager.build_back_sync_batches(
             &config,
             data_availability_serve_start_slot,
             head_slot,
@@ -1515,12 +1518,12 @@ mod tests {
             head_slot: 20_000,
         });
 
-        let mut sync_manager = build_sync_manager(config.clone_arc());
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 
         for i in 0..50 {
-            let batches = sync_manager.build_forward_sync_batches::<Mainnet>(
+            let batches = sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot + i,
@@ -1564,11 +1567,11 @@ mod tests {
             head_slot: 20_000,
         });
 
-        let mut sync_manager = build_sync_manager(config.clone_arc());
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 
-        sync_manager.build_forward_sync_batches::<Mainnet>(
+        sync_manager.build_forward_sync_batches(
             &config,
             current_slot,
             local_head_slot,
@@ -1583,7 +1586,7 @@ mod tests {
         // From second to fifth retries try to download blocks from local head slot minus one epoch
 
         for _ in 0..4 {
-            sync_manager.build_forward_sync_batches::<Mainnet>(
+            sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot,
@@ -1602,7 +1605,7 @@ mod tests {
         let mut sync_range_to = 0;
 
         while sync_range_to < local_head_slot {
-            sync_manager.build_forward_sync_batches::<Mainnet>(
+            sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot,
@@ -1619,7 +1622,7 @@ mod tests {
 
         // Resume normal syncing behaviour
 
-        sync_manager.build_forward_sync_batches::<Mainnet>(
+        sync_manager.build_forward_sync_batches(
             &config,
             current_slot,
             local_head_slot,

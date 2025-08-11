@@ -21,6 +21,7 @@ use helper_functions::{
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use ssz::SszHash as _;
+use typenum::Unsigned as _;
 use types::{
     combined::{
         AttesterSlashing, BeaconState as CombinedBeaconState, SignedAggregateAndProof,
@@ -561,7 +562,7 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
-        let Ok(available_columns) = (0..store_snapshot.chain_config().number_of_columns)
+        let Ok(available_columns) = (0..P::NumberOfColumns::U64)
             .map(|index| {
                 let identifier = DataColumnIdentifier { block_root, index };
                 match store_snapshot.cached_data_column_sidecar_by_id(identifier) {
@@ -576,7 +577,7 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
             return;
         };
 
-        if available_columns.len() * 2 >= store_snapshot.chain_config().number_of_columns() {
+        if available_columns.len() * 2 >= P::NumberOfColumns::USIZE {
             let blob_count = available_columns
                 .first()
                 .expect("first data column sidecar must be available")

@@ -147,7 +147,7 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    DataColumnsByRootIdentifier,
+    DataColumnsByRootIdentifier<_>,
     "consensus-spec-tests/tests/mainnet/fulu/ssz_static/DataColumnsByRootIdentifier/*/*",
     "consensus-spec-tests/tests/minimal/fulu/ssz_static/DataColumnsByRootIdentifier/*/*",
 }

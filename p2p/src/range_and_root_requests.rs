@@ -5,6 +5,7 @@ use cached::{Cached, SizedCache, TimedSizedCache};
 use eth2_libp2p::PeerId;
 use itertools::Itertools as _;
 use prometheus_metrics::Metrics;
+use types::preset::Preset;
 
 use crate::{block_sync_service::SyncDirection, misc::RequestId, sync_manager::SyncBatch};
 
@@ -12,12 +13,12 @@ const MAX_ROOT_REQUESTS_PER_KEY: usize = 3;
 const REQUEST_BY_RANGE_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_BY_ROOT_TIMEOUT_IN_SECONDS: u64 = 5;
 
-pub struct RangeAndRootRequests<K> {
-    requests_by_range: SizedCache<RequestId, (SyncBatch, Instant)>,
+pub struct RangeAndRootRequests<K, P: Preset> {
+    requests_by_range: SizedCache<RequestId, (SyncBatch<P>, Instant)>,
     requests_by_root: TimedSizedCache<K, HashSet<PeerId>>,
 }
 
-impl<K: Hash + Eq + Clone> Default for RangeAndRootRequests<K> {
+impl<K: Hash + Eq + Clone, P: Preset> Default for RangeAndRootRequests<K, P> {
     fn default() -> Self {
         Self {
             requests_by_range: SizedCache::with_size(1000),
@@ -29,7 +30,7 @@ impl<K: Hash + Eq + Clone> Default for RangeAndRootRequests<K> {
     }
 }
 
-impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
+impl<K: Hash + Eq + Clone, P: Preset> RangeAndRootRequests<K, P> {
     pub fn busy_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
         self.busy_range_peers().chain(self.busy_root_peers())
     }
@@ -59,7 +60,7 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
             .map(|requests| requests.remove(peer_id));
     }
 
-    pub fn add_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch) {
+    pub fn add_request_by_range(&mut self, request_id: RequestId, batch: SyncBatch<P>) {
         self.requests_by_range
             .cache_set(request_id, (batch, Instant::now()));
     }
@@ -75,7 +76,7 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
         self.requests_by_root.cache_clear();
     }
 
-    pub fn expired_range_batches(&mut self) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    pub fn expired_range_batches(&mut self) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
         let expired_keys = self
             .requests_by_range_keys()
             .into_iter()
@@ -112,7 +113,7 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
         !requests.contains(&peer_id)
     }
 
-    pub fn remove_peer(&mut self, peer_id: &PeerId) -> impl Iterator<Item = SyncBatch> + '_ {
+    pub fn remove_peer(&mut self, peer_id: &PeerId) -> impl Iterator<Item = SyncBatch<P>> + '_ {
         let range_keys_to_remove = self
             .requests_by_range_keys()
             .into_iter()
@@ -156,7 +157,7 @@ impl<K: Hash + Eq + Clone> RangeAndRootRequests<K> {
     pub fn request_by_range_finished(
         &mut self,
         request_id: RequestId,
-    ) -> Option<(SyncBatch, Instant)> {
+    ) -> Option<(SyncBatch<P>, Instant)> {
         self.requests_by_range.cache_remove(&request_id)
     }
 
