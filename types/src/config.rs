@@ -12,6 +12,7 @@ use typenum::Unsigned as _;
 
 use crate::{
     bellatrix::primitives::Difficulty,
+    fulu::consts::NumberOfColumns,
     nonstandard::{Phase, Toption},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -171,8 +172,6 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub custody_requirement: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    pub number_of_columns: u64,
-    #[serde(with = "serde_utils::string_or_native")]
     pub number_of_custody_groups: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub samples_per_slot: u64,
@@ -285,7 +284,6 @@ impl Default for Config {
 
             // Custody
             custody_requirement: 4,
-            number_of_columns: 128,
             number_of_custody_groups: 128,
             samples_per_slot: 8,
             validator_custody_requirement: 8,
@@ -921,13 +919,7 @@ impl Config {
 
     #[must_use]
     pub const fn columns_per_group(&self) -> u64 {
-        self.number_of_columns
-            .saturating_div(self.number_of_custody_groups)
-    }
-
-    #[must_use]
-    pub fn number_of_columns(&self) -> usize {
-        usize::try_from(self.number_of_columns).expect("should be able to parse number_of_columns")
+        NumberOfColumns::U64.saturating_div(self.number_of_custody_groups)
     }
 
     #[must_use]

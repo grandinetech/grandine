@@ -15,6 +15,7 @@ use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
+use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
     config::Config,
@@ -97,7 +98,6 @@ impl<P: Preset> Context<P> {
         let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
 
         let phase = anchor_block.phase();
-        let number_of_columns = config.number_of_columns;
 
         let (controller, mutator_handle) = TestController::with_p2p_tx(
             config,
@@ -109,7 +109,7 @@ impl<P: Preset> Context<P> {
         );
 
         if phase.is_peerdas_activated() {
-            controller.on_store_sampling_columns((0..number_of_columns).collect());
+            controller.on_store_sampling_columns((0..P::NumberOfColumns::U64).collect());
         }
 
         Self {
