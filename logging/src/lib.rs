@@ -65,3 +65,10 @@ macro_rules! trace_with_peers {
         ::tracing::trace!("[{}] {}", $crate::PEER_LOG_METRICS, format!($($arg)*));
     };
 }
+
+#[macro_export]
+macro_rules! crit {
+    ($($arg:tt)*) => {
+        ::tracing::error!(error_type = "crit", $($arg)*);
+    };
+}
