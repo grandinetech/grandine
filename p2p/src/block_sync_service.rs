@@ -32,6 +32,7 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
+use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -71,7 +72,7 @@ pub enum SyncDirection {
 pub struct Channels<P: Preset> {
     pub fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     pub p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
-    pub sync_to_p2p_tx: UnboundedSender<SyncToP2p>,
+    pub sync_to_p2p_tx: UnboundedSender<SyncToP2p<P>>,
     pub sync_to_api_tx: UnboundedSender<SyncToApi>,
     pub sync_to_metrics_tx: Option<UnboundedSender<SyncToMetrics>>,
 }
@@ -83,7 +84,7 @@ pub struct BlockSyncService<P: Preset> {
     back_sync: Option<BackSync<P>>,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     controller: RealController<P>,
-    sync_manager: SyncManager,
+    sync_manager: SyncManager<P>,
     metrics: Option<Arc<Metrics>>,
     validator_statistics: Option<Arc<ValidatorStatistics>>,
     next_request_id: usize,
@@ -97,7 +98,7 @@ pub struct BlockSyncService<P: Preset> {
     data_dumper: Arc<DataDumper>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
-    sync_to_p2p_tx: UnboundedSender<SyncToP2p>,
+    sync_to_p2p_tx: UnboundedSender<SyncToP2p<P>>,
     sync_to_api_tx: UnboundedSender<SyncToApi>,
     sync_to_metrics_tx: Option<UnboundedSender<SyncToMetrics>>,
     archiver_to_sync_tx: Option<UnboundedSender<ArchiverToSync>>,
@@ -646,7 +647,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch>) -> Result<()> {
+    pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         for batch in batches {
             let SyncBatch {
                 target,
@@ -872,14 +873,13 @@ impl<P: Preset> BlockSyncService<P> {
                     && chain_config
                         .phase_at_slot::<P>(head_slot + 1)
                         .is_peerdas_activated()
-                    && self.controller.sampling_columns_count() * 2
-                        >= chain_config.number_of_columns()
+                    && self.controller.sampling_columns_count() * 2 >= P::NumberOfColumns::USIZE
                 {
                     self.controller
                         .on_reconstruct_data_column_sidecars(head_slot + 1);
                 }
 
-                self.sync_manager.build_forward_sync_batches::<P>(
+                self.sync_manager.build_forward_sync_batches(
                     self.controller.chain_config(),
                     self.slot,
                     head_slot,
@@ -905,7 +905,7 @@ impl<P: Preset> BlockSyncService<P> {
                     .as_ref()
                     .filter(|back_sync| !back_sync.is_finished())
                     .map(|back_sync| {
-                        self.sync_manager.build_back_sync_batches::<P>(
+                        self.sync_manager.build_back_sync_batches(
                             self.controller.chain_config(),
                             data_availability_serve_range_slot,
                             back_sync.current_slot(),
@@ -920,7 +920,7 @@ impl<P: Preset> BlockSyncService<P> {
         self.request_batches(batches)
     }
 
-    fn request_batches(&mut self, batches: Vec<SyncBatch>) -> Result<()> {
+    fn request_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         for batch in batches {
             let request_id = self.request_id()?;
             let SyncBatch {
@@ -1057,7 +1057,7 @@ impl<P: Preset> BlockSyncService<P> {
 
     fn request_needed_data_columns(
         &mut self,
-        data_columns_by_root: DataColumnsByRootIdentifier,
+        data_columns_by_root: DataColumnsByRootIdentifier<P>,
         slot: Slot,
     ) -> Result<()> {
         let data_column_serve_range_slot = misc::data_column_serve_range_slot::<P>(

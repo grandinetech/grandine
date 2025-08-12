@@ -40,7 +40,7 @@ pub struct ExecutionBlobFetcher<P: Preset, W: Wait> {
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
     sidecars_construction_started: Arc<DashMap<H256, Slot>>,
     metrics: Option<Arc<Metrics>>,
-    p2p_tx: UnboundedSender<BlobFetcherToP2p>,
+    p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
     rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
 }
 
@@ -53,7 +53,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
         sidecars_construction_started: Arc<DashMap<H256, Slot>>,
         metrics: Option<Arc<Metrics>>,
-        p2p_tx: UnboundedSender<BlobFetcherToP2p>,
+        p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
         rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
     ) -> Self {
         Self {
@@ -295,13 +295,11 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                             BlockOrDataColumnSidecar::Block(block) => eip_7594::construct_data_column_sidecars(
                                                 &block,
                                                 &cells_and_kzg_proofs,
-                                                self.controller.chain_config(),
                                                 self.metrics.as_ref(),
                                             ),
                                             BlockOrDataColumnSidecar::Sidecar(sidecar) => eip_7594::construct_data_column_sidecars_from_sidecar(
                                                 &sidecar,
                                                 &cells_and_kzg_proofs,
-                                                self.controller.chain_config(),
                                                 self.metrics.as_ref(),
                                             ),
                                         };
