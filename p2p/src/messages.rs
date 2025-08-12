@@ -19,7 +19,6 @@ use types::{
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        consts::NumberOfColumns,
         containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
@@ -46,7 +45,7 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
-    DataColumnsNeeded(DataColumnsByRootIdentifier, Slot),
+    DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, AppRequestId, RPCRequestType),
     RequestedBlock(
         Arc<SignedBeaconBlock<P>>,
@@ -137,7 +136,7 @@ impl SyncToMetrics {
     }
 }
 
-pub enum SyncToP2p {
+pub enum SyncToP2p<P: Preset> {
     ReportPeer(PeerId, PeerAction, ReportSource, PeerReportReason),
     RequestBlobsByRange(AppRequestId, PeerId, Slot, u64),
     RequestBlobsByRoot(AppRequestId, PeerId, Vec<BlobIdentifier>),
@@ -148,15 +147,15 @@ pub enum SyncToP2p {
         PeerId,
         Slot,
         u64,
-        Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
+        Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
     ),
-    RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnsByRootIdentifier>),
+    RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnsByRootIdentifier<P>>),
     RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,
     UpdateEarliestAvailableSlot(Slot),
 }
 
-impl SyncToP2p {
+impl<P: Preset> SyncToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug!("send to p2p failed because the receiver was dropped");
