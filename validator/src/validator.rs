@@ -986,7 +986,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     for data_column_sidecar in eip_7594::construct_data_column_sidecars(
                         &block,
                         &cells_and_kzg_proofs,
-                        &self.chain_config,
                         self.metrics.as_ref(),
                     )? {
                         let data_column_sidecar = Arc::new(data_column_sidecar);

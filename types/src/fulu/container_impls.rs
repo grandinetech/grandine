@@ -176,8 +176,8 @@ impl<P: Preset> From<&DataColumnSidecar<P>> for DataColumnIdentifier {
     }
 }
 
-impl From<DataColumnsByRootIdentifier> for Vec<DataColumnIdentifier> {
-    fn from(data_columns_by_root: DataColumnsByRootIdentifier) -> Self {
+impl<P: Preset> From<DataColumnsByRootIdentifier<P>> for Vec<DataColumnIdentifier> {
+    fn from(data_columns_by_root: DataColumnsByRootIdentifier<P>) -> Self {
         let DataColumnsByRootIdentifier {
             block_root,
             columns,

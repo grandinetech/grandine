@@ -51,7 +51,6 @@ use types::{
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        consts::NumberOfColumns,
         containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
@@ -102,12 +101,12 @@ const OLD_PHASE_TOPICS_REMAIN_EPOCHS: u64 = 2;
 
 pub struct Channels<P: Preset> {
     pub api_to_p2p_rx: UnboundedReceiver<ApiToP2p<P>>,
-    pub blob_fetcher_to_p2p_rx: UnboundedReceiver<BlobFetcherToP2p>,
+    pub blob_fetcher_to_p2p_rx: UnboundedReceiver<BlobFetcherToP2p<P>>,
     pub fork_choice_to_p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     pub pool_to_p2p_rx: UnboundedReceiver<PoolToP2pMessage>,
     pub p2p_to_sync_tx: UnboundedSender<P2pToSync<P>>,
     pub p2p_to_validator_tx: UnboundedSender<P2pToValidator<P>>,
-    pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p>,
+    pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p<P>>,
     pub validator_to_p2p_rx: UnboundedReceiver<ValidatorToP2p<P>>,
     pub network_to_slasher_tx: Option<UnboundedSender<P2pToSlasher<P>>>,
     pub subnet_service_to_p2p_rx: UnboundedReceiver<SubnetServiceToP2p>,
@@ -1257,7 +1256,7 @@ impl<P: Preset> Network<P> {
         peer_id: PeerId,
         peer_request_id: PeerRequestId,
         request_id: IncomingRequestId,
-        request: DataColumnsByRangeRequest,
+        request: DataColumnsByRangeRequest<P>,
     ) -> Result<()> {
         debug!("received DataColumnsByRange request (peer_id: {peer_id}, request: {request:?})");
 
@@ -1458,7 +1457,7 @@ impl<P: Preset> Network<P> {
         peer_id: PeerId,
         peer_request_id: PeerRequestId,
         request_id: IncomingRequestId,
-        request: DataColumnsByRootRequest,
+        request: DataColumnsByRootRequest<P>,
     ) {
         debug!("received DataColumnsByRoot request (peer_id: {peer_id}, request: {request:?})");
 
@@ -2147,7 +2146,7 @@ impl<P: Preset> Network<P> {
         peer_id: PeerId,
         start_slot: Slot,
         count: u64,
-        columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
+        columns: Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
     ) {
         // TODO: is count capped in eth2_libp2p?
         let request = DataColumnsByRangeRequest {
@@ -2172,7 +2171,7 @@ impl<P: Preset> Network<P> {
         &self,
         request_id: RequestId,
         peer_id: PeerId,
-        data_columns_by_root_identifiers: Vec<DataColumnsByRootIdentifier>,
+        data_columns_by_root_identifiers: Vec<DataColumnsByRootIdentifier<P>>,
     ) {
         let request = DataColumnsByRootRequest::new(
             self.controller.chain_config(),

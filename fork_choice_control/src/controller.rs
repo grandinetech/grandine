@@ -34,6 +34,7 @@ use log::debug;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
@@ -575,7 +576,7 @@ where
                 let accepted = store_snapshot.accepted_data_column_sidecars_at_slot(slot);
 
                 if accepted < store_snapshot.sampling_columns_count()
-                    && accepted * 2 >= store_snapshot.chain_config().number_of_columns()
+                    && accepted * 2 >= P::NumberOfColumns::USIZE
                 {
                     MutatorMessage::ReconstructMissingColumns {
                         wait_group: self.owned_wait_group(),
