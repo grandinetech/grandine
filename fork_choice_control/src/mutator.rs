@@ -38,7 +38,6 @@ use fork_choice_store::{
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
-use http_api_utils::{DependentRootsBundle, EventChannels};
 use itertools::{Either, Itertools as _};
 use log::{debug, error, info, warn};
 use num_traits::identities::Zero as _;
@@ -60,6 +59,7 @@ use types::{
 
 use crate::{
     block_processor::BlockProcessor,
+    events::{DependentRootsBundle, EventChannels},
     messages::{
         AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
         SyncMessage, ValidatorMessage,
@@ -87,7 +87,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     block_processor: Arc<BlockProcessor<P>>,
-    event_channels: Arc<EventChannels>,
+    event_channels: Arc<EventChannels<P>>,
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
@@ -145,7 +145,7 @@ where
         store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
         state_cache: Arc<StateCacheProcessor<P>>,
         block_processor: Arc<BlockProcessor<P>>,
-        event_channels: Arc<EventChannels>,
+        event_channels: Arc<EventChannels<P>>,
         execution_engine: E,
         storage: Arc<Storage<P>>,
         thread_pool: ThreadPool<P, E, W>,
@@ -921,7 +921,7 @@ where
 
                 if attestation.origin.should_generate_event() {
                     self.event_channels
-                        .send_attestation_event(&attestation.item);
+                        .send_attestation_event(attestation.item.clone_arc());
                 }
 
                 if attestation.origin.send_to_validator() {
