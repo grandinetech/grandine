@@ -49,6 +49,7 @@ use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -1729,7 +1730,7 @@ where
         if self.store.has_unpersisted_data_column_sidecars()
             && (self.store.is_forward_synced()
                 || self.store.unpersisted_data_column_sidecars().count()
-                    >= self.store.chain_config().number_of_columns())
+                    >= P::NumberOfColumns::USIZE)
         {
             self.spawn(PersistDataColumnSidecarsTask {
                 store_snapshot: self.owned_store(),
@@ -1781,7 +1782,6 @@ where
         let mut data_column_sidecars = eip_7594::construct_data_column_sidecars(
             &pending.block,
             &cells_and_kzg_proofs,
-            self.store.chain_config(),
             self.metrics.as_ref(),
         )?;
 
@@ -3672,7 +3672,7 @@ where
             .saturating_sub(missing_indices.len());
 
         if self.store.is_forward_synced()
-            && available_columns_count * 2 >= self.store.chain_config().number_of_columns()
+            && available_columns_count * 2 >= P::NumberOfColumns::USIZE
         {
             return BlockDataColumnAvailability::CompleteWithReconstruction;
         }

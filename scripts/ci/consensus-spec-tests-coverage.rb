@@ -20,6 +20,8 @@ IGNORED_GLOBS = %w[
   tests/*/eip7732/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/eip7441/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/eip7805/*/*/*/*/*.{ssz_snappy,yaml}
+  tests/general/phase0/ssz_generic/{progressive_bitlist,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
+  tests/general/phase0/ssz_generic/containers/{valid,invalid}/{ProgressiveBitsStruct,ProgressiveTestStruct}_*/*.{ssz_snappy,yaml}
   tests/diagnostics_obj.json{,.lock}
 ].map! { |glob| File.join(SUBMODULE, glob) }
 

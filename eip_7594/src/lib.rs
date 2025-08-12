@@ -145,10 +145,7 @@ pub fn compute_subnets_for_node(
 }
 
 /// Verify if the data column sidecar is valid.
-pub fn verify_data_column_sidecar<P: Preset>(
-    data_column_sidecar: &DataColumnSidecar<P>,
-    config: &Config,
-) -> bool {
+pub fn verify_data_column_sidecar<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> bool {
     let DataColumnSidecar {
         index,
         column,
@@ -158,7 +155,7 @@ pub fn verify_data_column_sidecar<P: Preset>(
     } = data_column_sidecar;
 
     // The sidecar index must be within the valid range
-    if *index >= config.number_of_columns {
+    if *index >= P::NumberOfColumns::U64 {
         return false;
     }
 
@@ -261,7 +258,6 @@ fn get_data_column_sidecars<P: Preset>(
     kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-    config: &Config,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let blob_count = kzg_commitments.len();
     ensure!(
@@ -273,7 +269,7 @@ fn get_data_column_sidecars<P: Preset>(
     );
 
     let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
-    for column_index in 0..config.number_of_columns() {
+    for column_index in 0..P::NumberOfColumns::USIZE {
         let column = ContiguousList::try_from_iter(
             (0..blob_count)
                 .map(|row_index| cells_and_kzg_proofs[row_index].0[column_index].clone()),
@@ -298,7 +294,6 @@ fn get_data_column_sidecars<P: Preset>(
 pub fn construct_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-    config: &Config,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let _timer = metrics
@@ -323,14 +318,12 @@ pub fn construct_data_column_sidecars<P: Preset>(
         kzg_commitments,
         kzg_commitments_inclusion_proof,
         cells_and_kzg_proofs,
-        config,
     )
 }
 
 pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-    config: &Config,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
     let _timer = metrics
@@ -349,7 +342,6 @@ pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
         kzg_commitments,
         *kzg_commitments_inclusion_proof,
         cells_and_kzg_proofs,
-        config,
     )
 }
 

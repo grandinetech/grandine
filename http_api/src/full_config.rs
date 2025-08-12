@@ -34,8 +34,8 @@ use types::{
         primitives::{DomainType, Epoch, NodeId, Slot},
     },
     preset::{
-        AltairPreset, BellatrixPreset, CapellaPreset, DenebPreset, ElectraPreset, Phase0Preset,
-        Preset,
+        AltairPreset, BellatrixPreset, CapellaPreset, DenebPreset, ElectraPreset, FuluPreset,
+        Phase0Preset, Preset,
     },
 };
 
@@ -55,6 +55,8 @@ pub struct FullConfig {
     deneb_preset: DenebPreset,
     #[serde(flatten)]
     electra_preset: ElectraPreset,
+    #[serde(flatten)]
+    fulu_preset: FuluPreset,
     #[serde(flatten)]
     config: Arc<Config>,
 
@@ -174,6 +176,7 @@ impl FullConfig {
             capella_preset: CapellaPreset::new::<P>(),
             deneb_preset: DenebPreset::new::<P>(),
             electra_preset: ElectraPreset::new::<P>(),
+            fulu_preset: FuluPreset::new::<P>(),
             config,
 
             // Phase 0 miscellaneous beacon chain constants

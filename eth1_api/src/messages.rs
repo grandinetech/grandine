@@ -45,12 +45,12 @@ impl<P: Preset> Eth1ApiToBlobFetcher<P> {
 }
 
 #[derive(Serialize)]
-pub enum BlobFetcherToP2p {
+pub enum BlobFetcherToP2p<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
-    DataColumnsNeeded(DataColumnsByRootIdentifier, Slot),
+    DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
 }
 
-impl BlobFetcherToP2p {
+impl<P: Preset> BlobFetcherToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug!("send to p2p failed because the receiver was dropped");
