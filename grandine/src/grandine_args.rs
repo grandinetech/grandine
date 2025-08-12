@@ -30,12 +30,11 @@ use eth2_libp2p::{
     PeerIdSerialized,
 };
 use features::Feature;
-use fork_choice_control::{StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL};
+use fork_choice_control::{StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS};
 use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
 use http_api::HttpApiConfig;
-use http_api_utils::DEFAULT_MAX_EVENTS;
 use itertools::{EitherOrBoth, Itertools as _};
 use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
 use log::{info, warn};

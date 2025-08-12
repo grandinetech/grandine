@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::error::Error as StdError;
+use core::{error::Error as StdError, time::Duration};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
@@ -21,7 +21,7 @@ use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{ValidatorMessage, Wait};
+use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -34,7 +34,6 @@ use helper_functions::{
     accessors, misc,
     signing::{RandaoEpoch, SignForAllForks, SignForSingleFork},
 };
-use http_api_utils::EventChannels;
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
 use liveness_tracker::ValidatorToLiveness;
@@ -51,6 +50,7 @@ use ssz::{BitList, BitVector, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use tokio::time::timeout;
 use try_from_iterator::TryFromIterator as _;
 use types::{
     altair::{
@@ -142,7 +142,7 @@ pub struct Validator<P: Preset, W: Wait> {
     own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
-    event_channels: Arc<EventChannels>,
+    event_channels: Arc<EventChannels<P>>,
     last_registration_epoch: Option<Epoch>,
     proposer_configs: Arc<ProposerConfigs>,
     signer: Arc<Signer>,
@@ -170,7 +170,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
         doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
-        event_channels: Arc<EventChannels>,
+        event_channels: Arc<EventChannels<P>>,
         proposer_configs: Arc<ProposerConfigs>,
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
@@ -375,7 +375,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_attester_slashing_event(&slashing);
+                            self.event_channels.send_attester_slashing_event(slashing);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -393,7 +393,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_proposer_slashing_event(&slashing);
+                            self.event_channels.send_proposer_slashing_event(*slashing);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -411,7 +411,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             };
 
                         if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_voluntary_exit_event(&voluntary_exit);
+                            self.event_channels.send_voluntary_exit_event(*voluntary_exit);
                         }
 
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -743,7 +743,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validator cannot produce a block because \
                  chain head has not been fully verified by an execution engine",
@@ -975,16 +975,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         wait_group: &W,
         slot_head: &SlotHead<P>,
     ) -> Result<()> {
-        // Skip attesting if validators already attested at slot
-        if self.attested_in_current_slot() {
-            return Ok(());
-        }
-
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validator cannot participate in attestation because \
                  chain head has not been fully verified by an execution engine",
             );
+
+            return Ok(());
+        }
+
+        // Skip attesting if validators already attested at slot
+        if self.attested_in_current_slot() {
             return Ok(());
         }
 
@@ -1121,7 +1122,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validators cannot participate in aggregation because \
                  chain head has not been fully verified by an execution engine",
@@ -1278,7 +1279,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        if slot_head.optimistic {
+        if self
+            .wait_for_fully_validated_head(&slot_head)
+            .await
+            .is_err()
+        {
             warn!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
@@ -1335,7 +1340,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         }
 
-        if slot_head.optimistic {
+        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
@@ -1919,7 +1924,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 match result {
                     Ok(_) => {
                         self.event_channels
-                            .send_contribution_and_proof_event(&contribution_and_proof);
+                            .send_contribution_and_proof_event(contribution_and_proof);
 
                         ValidatorToP2p::PublishContributionAndProof(Box::new(
                             contribution_and_proof,
@@ -2064,6 +2069,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if let Some(validator_statistics) = self.validator_statistics.as_ref() {
             validator_statistics.track_collection_metrics().await;
         }
+    }
+
+    async fn wait_for_fully_validated_head(&self, slot_head: &SlotHead<P>) -> Result<()> {
+        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+        if !slot_head.is_optimistic(&self.controller)? {
+            return Ok(());
+        }
+
+        timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+            loop {
+                let block_event = match self.event_channels.receiver_for(Topic::Block).recv().await
+                {
+                    Ok(Event::Block(block_event)) => block_event,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        warn!("error receiving block event: {error:?}");
+                        continue;
+                    }
+                };
+
+                if block_event.block == slot_head.beacon_block_root
+                    && !block_event.execution_optimistic
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .map_err(Into::into)
     }
 }
 
