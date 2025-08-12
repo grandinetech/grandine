@@ -2000,6 +2000,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if validator_custody_requirement > current_custody_requirements
             || self.last_cgc_update_epoch.is_none()
         {
+            if let Some(metrics) = self.metrics.as_ref() {
+                metrics.set_beacon_custody_groups(validator_custody_requirement);
+            }
+
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
             ToSubnetService::UpdateDataColumnSubnets(validator_custody_requirement)
                 .send(&self.subnet_service_tx);
