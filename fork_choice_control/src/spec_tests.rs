@@ -11,6 +11,7 @@ use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use test_generator::test_resources;
+use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
     config::Config,
@@ -261,7 +262,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     // If half of data column sidecars are available, we can reconstruct the rest
                     // and consider the block valid
                     if block.phase().is_peerdas_activated()
-                        && data_column_sidecar_count * 2 >= config.number_of_columns()
+                        && data_column_sidecar_count * 2 >= P::NumberOfColumns::USIZE
                     {
                         context.on_block_with_reconstructing_data_columns(&block);
                     } else {

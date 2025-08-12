@@ -1205,10 +1205,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         .collect::<Result<Vec<_>>>()?;
 
     let blob_sidecars = if version.is_peerdas_activated() {
-        let half_columns = controller
-            .chain_config()
-            .number_of_columns
-            .saturating_div(2);
+        let half_columns = P::NumberOfColumns::U64.saturating_div(2);
         let column_identifiers = (0..half_columns)
             .map(|index| DataColumnIdentifier { block_root, index })
             .collect::<Vec<_>>();
@@ -1216,12 +1213,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 
         // TODO(peerdas-fulu): with validator custody, node should reconstruct with any 64 columns,
         // then construct requested blobs, serve to the request
-        if data_column_sidecars.len()
-            == controller
-                .chain_config()
-                .number_of_columns()
-                .saturating_div(2)
-        {
+        if data_column_sidecars.len() == P::NumberOfColumns::USIZE.saturating_div(2) {
             let blob_sidecars = misc::construct_blob_sidecars_from_data_column_sidecars(
                 &block,
                 data_column_sidecars.into_iter(),
@@ -1279,7 +1271,6 @@ pub async fn publish_block<P: Preset, W: Wait>(
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
-            controller.chain_config(),
             metrics.as_ref(),
         )?;
 
@@ -1359,7 +1350,6 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
-            controller.chain_config(),
             metrics.as_ref(),
         )?;
 
@@ -1462,7 +1452,6 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
             &signed_beacon_block,
             &cells_and_kzg_proofs,
-            controller.chain_config(),
             metrics.as_ref(),
         )?;
 
@@ -2007,14 +1996,16 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
-    let number_of_columns = controller.chain_config().number_of_columns;
 
     let data_column_identifiers = query
         .indices
-        .unwrap_or_else(|| (0..number_of_columns).collect())
+        .unwrap_or_else(|| (0..P::NumberOfColumns::U64).collect())
         .into_iter()
         .map(|index| {
-            ensure!(index < number_of_columns, Error::InvalidColumnIndex(index));
+            ensure!(
+                index < P::NumberOfColumns::U64,
+                Error::InvalidColumnIndex(index)
+            );
             Ok(DataColumnIdentifier { block_root, index })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -2023,7 +2014,7 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
 
     let data_column_sidecars = DynamicList::try_from_iter_with_maximum(
         data_column_sidecars.into_iter(),
-        usize::try_from(number_of_columns).map_err(AnyhowError::new)?,
+        P::NumberOfColumns::USIZE,
     )
     .map_err(AnyhowError::new)?;
 
