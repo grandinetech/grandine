@@ -171,38 +171,6 @@ impl Eth1Api {
         Ok(None)
     }
 
-    // pub(crate) async fn get_blobs<P: Preset>(
-    //     &self,
-    //     blob_versioned_hashes: BlobVersionedHashes,
-    // ) -> Result<EngineGetBlobsResponse<P>> {
-    //     match blob_versioned_hashes {
-    //         BlobVersionedHashes::V1(versioned_hashes) => {
-    //             let params = vec![serde_json::to_value(versioned_hashes)?];
-
-    //             self.execute::<GetBlobsV1Response<P>>(
-    //                 ENGINE_GET_EL_BLOBS_V1,
-    //                 params,
-    //                 Some(ENGINE_GET_BLOBS_TIMEOUT),
-    //                 Some(ENGINE_GET_EL_BLOBS_V1),
-    //             )
-    //             .await
-    //             .map(Into::into)
-    //         }
-    //         BlobVersionedHashes::V2(versioned_hashes) => {
-    //             let params = vec![serde_json::to_value(versioned_hashes)?];
-
-    //             self.execute::<GetBlobsV2Response<P>>(
-    //                 ENGINE_GET_EL_BLOBS_V2,
-    //                 params,
-    //                 Some(ENGINE_GET_BLOBS_TIMEOUT),
-    //                 Some(ENGINE_GET_EL_BLOBS_V2),
-    //             )
-    //             .await
-    //             .map(Into::into)
-    //         }
-    //     }
-    // }
-
     pub(crate) async fn get_blobs_v1<P: Preset>(
         &self,
         versioned_hashes: Vec<VersionedHash>,

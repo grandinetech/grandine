@@ -3,7 +3,6 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
-use features::Feature;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
@@ -57,7 +56,6 @@ pub struct GrandineConfig {
     pub command: Option<GrandineCommand>,
     pub slashing_enabled: bool,
     pub slashing_history_limit: u64,
-    pub features: Vec<Feature>,
     pub state_slot: Option<Slot>,
     pub auth_options: AuthOptions,
     pub builder_config: Option<BuilderConfig>,
