@@ -3,18 +3,18 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(
-        "Custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}", 
+        "custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}", 
     )]
     InvalidCustodyGroupCount {
         custody_group_count: u64,
         number_of_custody_groups: u64,
     },
-    #[error("Custody group is invalid: {custody_group} expected < {number_of_custody_groups}")]
+    #[error("custody group is invalid: {custody_group} expected < {number_of_custody_groups}")]
     InvalidCustodyGroup {
         custody_group: u64,
         number_of_custody_groups: u64,
     },
-    #[error("Number of blobs {blob_count} does not match commitment length {commitments_length}")]
+    #[error("number of blobs {blob_count} does not match commitment length {commitments_length}")]
     BlobCommitmentsLengthMismatch {
         blob_count: usize,
         commitments_length: usize,

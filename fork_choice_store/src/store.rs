@@ -240,8 +240,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
 
 impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// [`get_forkchoice_store`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_forkchoice_store)
-    #[must_use]
     #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         chain_config: Arc<ChainConfig>,
         pubkey_cache: Arc<PubkeyCache>,

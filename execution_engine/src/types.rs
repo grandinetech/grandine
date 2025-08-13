@@ -411,14 +411,6 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
-// #[derive(Deserialize, Serialize)]
-// #[serde(bound = "", rename_all = "camelCase")]
-// pub struct BlobsBundleV1<P: Preset> {
-//     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-//     pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
-//     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-// }
-
 // Merge `BlobsBundleV1` with `BlobsBundleV2` by using the same `proofs` max length
 //
 /// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
