@@ -388,7 +388,6 @@ fn try_main() -> Result<()> {
         command,
         slashing_enabled,
         slashing_history_limit,
-        features,
         state_slot,
         auth_options,
         builder_config,
@@ -408,8 +407,6 @@ fn try_main() -> Result<()> {
         withhold_data_columns_publishing,
         disable_engine_getblobs,
     } = config;
-
-    features.into_iter().for_each(Feature::enable);
 
     PEER_LOG_METRICS.set_target_peer_count(network_config.target_peers);
 
