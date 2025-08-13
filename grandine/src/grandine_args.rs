@@ -1291,7 +1291,7 @@ impl GrandineArgs {
             .collect::<Vec<_>>();
 
         // enabling these features here, because it being used in below network config conversion
-        features.iter().for_each(|f| f.enable());
+        features.iter().for_each(|feature| feature.enable());
 
         let auth_options = AuthOptions {
             secrets_path: jwt_secret,
@@ -1384,7 +1384,6 @@ impl GrandineArgs {
             command,
             slashing_enabled,
             slashing_history_limit,
-            features,
             state_slot,
             auth_options,
             builder_config,

@@ -1,6 +1,6 @@
-//! Electra containers from [`builder-specs`].
+//! Fulu containers from [`builder-specs`].
 //!
-//! [`builder-specs`]: `TODO`
+//! [`builder-specs`]: `https://github.com/ethereum/builder-specs/blob/main/specs/fulu/builder.md`
 
 use bls::{PublicKeyBytes, SignatureBytes};
 use serde::Deserialize;
