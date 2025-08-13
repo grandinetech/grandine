@@ -40,7 +40,7 @@ pub enum Error<P: Preset> {
     },
     #[error("attestation votes for a checkpoint in the wrong epoch: {attestation:?}")]
     AttestationTargetsWrongEpoch { attestation: Arc<Attestation<P>> },
-    #[error("The current finalized_checkpoint is not an ancestor of the sidecar's block: {blob_sidecar:?}")]
+    #[error("the current finalized_checkpoint is not an ancestor of the sidecar's block: {blob_sidecar:?}")]
     BlobSidecarBlockNotADescendantOfFinalized { blob_sidecar: Arc<BlobSidecar<P>> },
     // TODO(feature/deneb): This is vague.
     //                      The validation that fails with this error actually checks commitments.
@@ -77,7 +77,7 @@ pub enum Error<P: Preset> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
     },
-    #[error("The current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}")]
+    #[error("the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}")]
     DataColumnSidecarBlockNotADescendantOfFinalized {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
