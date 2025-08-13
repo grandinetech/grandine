@@ -155,7 +155,7 @@ impl<P: Preset> Network<P> {
         let enr_fork_id = Self::enr_fork_id(&controller, &fork_context, slot);
         let logger = Logger::root(StdLog.fuse(), o!());
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
-        let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
+        let executor = TaskExecutor::new(shutdown_tx);
 
         let context = Context {
             chain_config: chain_config.clone_arc(),
