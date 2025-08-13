@@ -17,6 +17,7 @@ database = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 drain_filter_polyfill = { workspace = true }
+eip_7594 = { workspace = true }
 eth2_libp2p = { workspace = true }
 execution_engine = { workspace = true }
 features = { workspace = true }
@@ -49,6 +50,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 transition_functions = { workspace = true }
 tynm = { workspace = true }
+typenum = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]

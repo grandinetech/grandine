@@ -1,5 +1,5 @@
 use primitive_types::H384;
-use ssz::{ByteVector, ContiguousVector};
+use ssz::{ByteVector, ContiguousList, ContiguousVector};
 
 use crate::{
     phase0::primitives::H256,
@@ -20,3 +20,12 @@ pub type VersionedHash = H256;
 
 pub type BlobCommitmentInclusionProof<P> =
     ContiguousVector<H256, <P as Preset>::KzgCommitmentInclusionProofDepth>;
+
+// We choose max length of KZG proofs to be maximum possible cells per ext blob, where each cell is
+// a single field element. this is for future proof, if we want to make cells smaller without
+// needing to update the structure every increment.
+//
+// NOTE: this might be diverge from the specs (Deneb limits on `P::MaxBlobCommitmentsPerBlock` while
+// in Fulu limits on `P::MaxCellsProofsPerBlock`), we should chose to use the maximum possible
+// value on the length limits to avoid complicated types conversion in `builder_api`.
+pub type KzgProofs<P> = ContiguousList<KzgProof, <P as Preset>::MaxCellProofsPerBlock>;

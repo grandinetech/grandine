@@ -3,7 +3,6 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
-use features::Feature;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
@@ -57,7 +56,6 @@ pub struct GrandineConfig {
     pub command: Option<GrandineCommand>,
     pub slashing_enabled: bool,
     pub slashing_history_limit: u64,
-    pub features: Vec<Feature>,
     pub state_slot: Option<Slot>,
     pub auth_options: AuthOptions,
     pub builder_config: Option<BuilderConfig>,
@@ -74,10 +72,13 @@ pub struct GrandineConfig {
     pub kzg_backend: KzgBackend,
     pub blacklisted_blocks: HashSet<H256>,
     pub report_validator_performance: bool,
+    pub withhold_data_columns_publishing: bool,
+    pub disable_engine_getblobs: bool,
 }
 
 impl GrandineConfig {
     #[expect(clippy::cognitive_complexity)]
+    #[expect(clippy::too_many_lines)]
     pub fn report(&self) {
         let Self {
             predefined_network,
@@ -101,6 +102,8 @@ impl GrandineConfig {
             checkpoint_sync_url,
             use_validator_key_cache,
             validator_api_config,
+            withhold_data_columns_publishing,
+            disable_engine_getblobs,
             ..
         } = self;
 
@@ -190,6 +193,14 @@ impl GrandineConfig {
 
         if *use_validator_key_cache {
             info!("using validator key cache");
+        }
+
+        if *withhold_data_columns_publishing {
+            info!("withholding data column sidecars publishing");
+        }
+
+        if *disable_engine_getblobs {
+            info!("running without engine_getBlobs integration");
         }
     }
 }

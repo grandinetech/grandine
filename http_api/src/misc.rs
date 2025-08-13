@@ -1,31 +1,61 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    marker::PhantomData,
+    sync::atomic::{AtomicBool, Ordering},
+};
+use std::sync::Arc;
 
 use block_producer::ValidatorBlindedBlock;
+use derive_more::From;
 use enum_iterator::Sequence as _;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{DeserializeSeed, Error as _},
+    Deserialize, Serialize,
+};
 use ssz::{
     ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize, SszWrite,
     WriteError,
 };
 use types::{
     altair::containers::SignedBeaconBlock as AltairSignedBeaconBlock,
-    bellatrix::containers::SignedBeaconBlock as BellatrixSignedBeaconBlock,
-    capella::containers::SignedBeaconBlock as CapellaSignedBeaconBlock,
-    combined::{Attestation, BeaconBlock, SignedBeaconBlock},
-    deneb::{
-        containers::SignedBeaconBlock as DenebSignedBeaconBlock,
-        primitives::{Blob, KzgProof},
+    bellatrix::containers::{
+        SignedBeaconBlock as BellatrixSignedBeaconBlock,
+        SignedBlindedBeaconBlock as BellatrixSignedBlindedBeaconBlock,
     },
-    electra::containers::{SignedBeaconBlock as ElectraSignedBeaconBlock, SingleAttestation},
+    capella::containers::{
+        SignedBeaconBlock as CapellaSignedBeaconBlock,
+        SignedBlindedBeaconBlock as CapellaSignedBlindedBeaconBlock,
+    },
+    combined::{
+        Attestation, BeaconBlock, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedBlindedBeaconBlock,
+    },
+    deneb::{
+        containers::{
+            SignedBeaconBlock as DenebSignedBeaconBlock,
+            SignedBlindedBeaconBlock as DenebSignedBlindedBeaconBlock,
+        },
+        primitives::{Blob, KzgProofs},
+    },
+    electra::containers::{
+        SignedAggregateAndProof as ElectraSignedAggregateAndProof,
+        SignedBeaconBlock as ElectraSignedBeaconBlock,
+        SignedBlindedBeaconBlock as ElectraSignedBlindedBeaconBlock, SingleAttestation,
+    },
+    fulu::containers::{
+        SignedBeaconBlock as FuluSignedBeaconBlock,
+        SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
+    },
     nonstandard::{Phase, WithBlobsAndMev},
-    phase0::containers::{
-        Attestation as Phase0Attestation, SignedBeaconBlock as Phase0SignedBeaconBlock,
+    phase0::{
+        consts::TargetAggregatorsPerCommittee,
+        containers::{
+            Attestation as Phase0Attestation,
+            SignedAggregateAndProof as Phase0SignedAggregateAndProof,
+            SignedBeaconBlock as Phase0SignedBeaconBlock,
+        },
     },
     preset::Preset,
 };
-
-#[cfg(test)]
-use std::sync::Arc;
 
 #[cfg(test)]
 use ::{
@@ -61,7 +91,7 @@ impl SyncedStatus {
 
 pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
     SignedBeaconBlock<P>,
-    ContiguousList<KzgProof, <P as Preset>::MaxBlobCommitmentsPerBlock>,
+    KzgProofs<P>,
     ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>,
 );
 
@@ -69,7 +99,7 @@ pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
 #[serde(bound = "")]
 pub struct SignedDenebBlockWithBlobs<P: Preset> {
     pub signed_block: DenebSignedBeaconBlock<P>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub kzg_proofs: KzgProofs<P>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -77,7 +107,15 @@ pub struct SignedDenebBlockWithBlobs<P: Preset> {
 #[serde(bound = "")]
 pub struct SignedElectraBlockWithBlobs<P: Preset> {
     pub signed_block: ElectraSignedBeaconBlock<P>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub kzg_proofs: KzgProofs<P>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+#[derive(Deserialize, Ssz)]
+#[serde(bound = "")]
+pub struct SignedFuluBlockWithBlobs<P: Preset> {
+    pub signed_block: FuluSignedBeaconBlock<P>,
+    pub kzg_proofs: KzgProofs<P>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -86,7 +124,7 @@ pub struct SignedElectraBlockWithBlobs<P: Preset> {
 #[ssz(derive_read = false, derive_hash = false)]
 pub struct BlockWithBlobs<B: Serialize + SszWrite, P: Preset> {
     pub block: B,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub kzg_proofs: KzgProofs<P>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -130,6 +168,11 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
                 blobs: blobs.unwrap_or_default(),
             }),
             BeaconBlock::Electra(block) => Self::WithBlobs(BlockWithBlobs {
+                block: block.into(),
+                kzg_proofs: proofs.unwrap_or_default(),
+                blobs: blobs.unwrap_or_default(),
+            }),
+            BeaconBlock::Fulu(block) => Self::WithBlobs(BlockWithBlobs {
                 block: block.into(),
                 kzg_proofs: proofs.unwrap_or_default(),
                 blobs: blobs.unwrap_or_default(),
@@ -180,13 +223,101 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                     kzg_proofs: proofs.unwrap_or_default(),
                     blobs: blobs.unwrap_or_default(),
                 }),
+                BeaconBlock::Fulu(block) => Self::WithBlobs(BlockWithBlobs {
+                    block: ValidatorBlindedBlock::BeaconBlock(block.into()),
+                    kzg_proofs: proofs.unwrap_or_default(),
+                    blobs: blobs.unwrap_or_default(),
+                }),
             },
         }
     }
 }
 
-#[derive(Deserialize)]
-#[serde(bound = "", untagged)]
+pub struct SignedAggregateAndProofListFromPhaseDeserializer<P: Preset> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for SignedAggregateAndProofListFromPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPhaseDeserializer<P> {
+    type Value = ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let result =
+            match self.phase {
+                Phase::Phase0
+                | Phase::Altair
+                | Phase::Bellatrix
+                | Phase::Capella
+                | Phase::Deneb => ContiguousList::<
+                    Phase0SignedAggregateAndProof<P>,
+                    TargetAggregatorsPerCommittee,
+                >::deserialize(deserializer)?
+                .map(Into::into)
+                .map(Arc::new),
+                Phase::Electra | Phase::Fulu => ContiguousList::<
+                    ElectraSignedAggregateAndProof<P>,
+                    TargetAggregatorsPerCommittee,
+                >::deserialize(deserializer)?
+                .map(Into::into)
+                .map(Arc::new),
+            };
+
+        Ok(result)
+    }
+}
+
+pub struct SingleApiAttestationListPhaseDeserializer<P: Preset> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for SingleApiAttestationListPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de> for SingleApiAttestationListPhaseDeserializer<P> {
+    type Value = ContiguousList<SingleApiAttestation<P>, P::MaxAttestersPerSlot>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let result = match self.phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                ContiguousList::<Phase0Attestation<P>, P::MaxAttestersPerSlot>::deserialize(
+                    deserializer,
+                )?
+                .map(Into::into)
+            }
+            Phase::Electra | Phase::Fulu => ContiguousList::<
+                SingleAttestation,
+                P::MaxAttestersPerSlot,
+            >::deserialize(deserializer)?
+            .map(Into::into),
+        };
+
+        Ok(result)
+    }
+}
+
+#[derive(From)]
 pub enum SingleApiAttestation<P: Preset> {
     Phase0(Phase0Attestation<P>),
     Electra(SingleAttestation),
@@ -195,7 +326,7 @@ pub enum SingleApiAttestation<P: Preset> {
 impl<P: Preset> SszSize for SingleApiAttestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0Attestation::<P>::SIZE,
         SingleAttestation::SIZE,
     ]);
@@ -207,7 +338,7 @@ impl<P: Preset> SszRead<Phase> for SingleApiAttestation<P> {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
             }
-            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(api_attestation)
@@ -223,7 +354,80 @@ impl<P: Preset> From<SingleApiAttestation<P>> for Attestation<P> {
     }
 }
 
-#[derive(Deserialize)]
+pub struct SignedBlindedBeaconPhaseDeserializer<P: Preset> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for SignedBlindedBeaconPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de> for SignedBlindedBeaconPhaseDeserializer<P> {
+    type Value = Box<SignedBlindedBeaconBlock<P>>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let result = match self.phase {
+            Phase::Phase0 | Phase::Altair => return Err(D::Error::custom("invalid phase")),
+            Phase::Bellatrix => {
+                BellatrixSignedBlindedBeaconBlock::deserialize(deserializer)?.into()
+            }
+            Phase::Capella => CapellaSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Deneb => DenebSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Electra => ElectraSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Fulu => FuluSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
+        };
+
+        Ok(Box::new(result))
+    }
+}
+pub struct SignedAPIBlockPhaseDeserializer<P: Preset> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for SignedAPIBlockPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de> for SignedAPIBlockPhaseDeserializer<P> {
+    type Value = Box<SignedAPIBlock<P>>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let result = match self.phase {
+            Phase::Phase0 => Phase0SignedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Altair => AltairSignedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Bellatrix => BellatrixSignedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Capella => CapellaSignedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Deneb => SignedDenebBlockWithBlobs::deserialize(deserializer)?.into(),
+            Phase::Electra => SignedElectraBlockWithBlobs::deserialize(deserializer)?.into(),
+            Phase::Fulu => SignedFuluBlockWithBlobs::deserialize(deserializer)?.into(),
+        };
+
+        Ok(Box::new(result))
+    }
+}
+
+// Deserialize does not correctly deserialize between Electra and Fulu versions
+// because contents of the blocks are identical. Implemented for legacy reasons.
+// Mainly `eth/v1/beacon/blocks`
+#[derive(From, Deserialize)]
 #[serde(bound = "", untagged)]
 pub enum SignedAPIBlock<P: Preset> {
     Phase0(Phase0SignedBeaconBlock<P>),
@@ -232,6 +436,7 @@ pub enum SignedAPIBlock<P: Preset> {
     Capella(CapellaSignedBeaconBlock<P>),
     Deneb(SignedDenebBlockWithBlobs<P>),
     Electra(SignedElectraBlockWithBlobs<P>),
+    Fulu(SignedFuluBlockWithBlobs<P>),
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
@@ -275,6 +480,15 @@ impl<P: Preset> SignedAPIBlock<P> {
 
                 (signed_block.into(), kzg_proofs, blobs)
             }
+            Self::Fulu(block) => {
+                let SignedFuluBlockWithBlobs {
+                    signed_block,
+                    kzg_proofs,
+                    blobs,
+                } = block;
+
+                (signed_block.into(), kzg_proofs, blobs)
+            }
         }
     }
 }
@@ -289,6 +503,7 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
         CapellaSignedBeaconBlock::<P>::SIZE,
         SignedDenebBlockWithBlobs::<P>::SIZE,
         SignedElectraBlockWithBlobs::<P>::SIZE,
+        SignedFuluBlockWithBlobs::<P>::SIZE,
     ]);
 }
 
@@ -301,6 +516,7 @@ impl<P: Preset> SszRead<Phase> for SignedAPIBlock<P> {
             Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(api_block)

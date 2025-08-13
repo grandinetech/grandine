@@ -319,7 +319,7 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
             .expect("any number below N is a valid index because self contains exactly N elements")
     }
 
-    fn get(&self, index: u64) -> Result<&T, IndexError>
+    pub fn get(&self, index: u64) -> Result<&T, IndexError>
     where
         N: Unsigned + NonZero,
     {

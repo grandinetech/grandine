@@ -8,7 +8,7 @@ use eth2_libp2p::GossipId;
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
-    AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink,
+    AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
@@ -17,6 +17,10 @@ use types::{
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
+    },
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
     },
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
@@ -34,6 +38,7 @@ pub struct Delayed<P: Preset> {
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
+    pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,6 +94,7 @@ impl<P: Preset> Delayed<P> {
             aggregates,
             attestations,
             blob_sidecars,
+            data_column_sidecars,
         } = self;
 
         blocks.is_empty()
@@ -96,6 +102,7 @@ impl<P: Preset> Delayed<P> {
             && aggregates.is_empty()
             && attestations.is_empty()
             && blob_sidecars.is_empty()
+            && data_column_sidecars.is_empty()
     }
 }
 
@@ -155,6 +162,14 @@ pub struct PendingBlobSidecar<P: Preset> {
     pub submission_time: Instant,
 }
 
+#[derive(Debug)]
+pub struct PendingDataColumnSidecar<P: Preset> {
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub block_seen: bool,
+    pub origin: DataColumnSidecarOrigin,
+    pub submission_time: Instant,
+}
+
 pub struct VerifyAggregateAndProofResult<P: Preset> {
     pub result: Result<AggregateAndProofAction<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
@@ -174,6 +189,10 @@ pub enum MutatorRejectionReason {
     #[strum(serialize = "invalid_blob_sidecar")]
     InvalidBlobSidecar {
         blob_identifier: BlobIdentifier,
+    },
+    #[strum(serialize = "invalid_data_column_sidecar")]
+    InvalidDataColumnSidecar {
+        data_column_identifier: DataColumnIdentifier,
     },
 }
 
@@ -212,4 +231,12 @@ pub enum ReorgSource {
     BlockAttestation,
     PayloadResponse,
     Tick,
+}
+
+pub enum BlockDataColumnAvailability {
+    Complete,
+    CompleteWithReconstruction,
+    AnyPending,
+    Missing(Vec<ColumnIndex>),
+    Irrelevant,
 }

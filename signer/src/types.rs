@@ -19,6 +19,9 @@ use types::{
     electra::containers::{
         BeaconBlock as ElectraBeaconBlock, BlindedBeaconBlock as ElectraBlindedBeaconBlock,
     },
+    fulu::containers::{
+        BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
+    },
     phase0::{
         containers::{
             AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
@@ -134,6 +137,20 @@ impl<P: Preset> From<&ElectraBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
     }
 }
 
+impl<P: Preset> From<&FuluBeaconBlock<P>> for SigningMessage<'_, P> {
+    fn from(block: &FuluBeaconBlock<P>) -> Self {
+        let block_header = block.to_header();
+        Self::BeaconBlock(SigningBlock::Fulu { block_header })
+    }
+}
+
+impl<P: Preset> From<&FuluBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
+    fn from(blinded_block: &FuluBlindedBeaconBlock<P>) -> Self {
+        let block_header = blinded_block.to_header();
+        Self::BeaconBlock(SigningBlock::Fulu { block_header })
+    }
+}
+
 impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<'block, P> {
     fn from(block: &'block CombinedBeaconBlock<P>) -> Self {
         match block {
@@ -143,6 +160,7 @@ impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<
             CombinedBeaconBlock::Capella(block) => block.into(),
             CombinedBeaconBlock::Deneb(block) => block.into(),
             CombinedBeaconBlock::Electra(block) => block.into(),
+            CombinedBeaconBlock::Fulu(block) => block.into(),
         }
     }
 }
@@ -166,6 +184,10 @@ impl<P: Preset> From<&CombinedBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
                 let block_header = blinded_block.to_header();
                 Self::BeaconBlock(SigningBlock::Electra { block_header })
             }
+            CombinedBlindedBeaconBlock::Fulu(blinded_block) => {
+                let block_header = blinded_block.to_header();
+                Self::BeaconBlock(SigningBlock::Fulu { block_header })
+            }
         }
     }
 }
@@ -184,6 +206,7 @@ pub enum SigningBlock<'block, P: Preset> {
     Capella { block_header: BeaconBlockHeader },
     Deneb { block_header: BeaconBlockHeader },
     Electra { block_header: BeaconBlockHeader },
+    Fulu { block_header: BeaconBlockHeader },
 }
 
 impl<P: Preset> SigningBlock<'_, P> {
@@ -194,7 +217,8 @@ impl<P: Preset> SigningBlock<'_, P> {
             SigningBlock::Bellatrix { block_header }
             | SigningBlock::Capella { block_header }
             | SigningBlock::Deneb { block_header }
-            | SigningBlock::Electra { block_header } => block_header.slot,
+            | SigningBlock::Electra { block_header }
+            | SigningBlock::Fulu { block_header } => block_header.slot,
         }
     }
 }

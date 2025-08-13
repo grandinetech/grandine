@@ -13,18 +13,25 @@ use std::{
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
+use dashmap::DashMap;
 use eth1_api::RealController;
-use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, PeerId};
+use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, NetworkGlobals, PeerId};
 use helper_functions::misc;
-use itertools::Itertools as _;
+use itertools::Itertools;
 use log::{log, Level};
 use lru::LruCache;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
+use ssz::ContiguousList;
+use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+        primitives::ColumnIndex,
+    },
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -40,8 +47,8 @@ struct ChainId {
 impl From<&StatusMessage> for ChainId {
     fn from(status: &StatusMessage) -> Self {
         Self {
-            finalized_root: status.finalized_root,
-            finalized_epoch: status.finalized_epoch,
+            finalized_root: status.finalized_root(),
+            finalized_epoch: status.finalized_epoch(),
         }
     }
 }
@@ -62,10 +69,11 @@ const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
 pub enum SyncTarget {
     BlobSidecar,
     Block,
+    DataColumnSidecar,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct SyncBatch {
+#[derive(Debug, Clone)]
+pub struct SyncBatch<P: Preset> {
     pub target: SyncTarget,
     pub direction: SyncDirection,
     pub peer_id: PeerId,
@@ -73,12 +81,14 @@ pub struct SyncBatch {
     pub count: u64,
     pub retry_count: usize,
     pub response_received: bool,
+    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>>,
 }
 
-pub struct SyncManager {
+pub struct SyncManager<P: Preset> {
     peers: HashMap<PeerId, StatusMessage>,
-    blob_requests: RangeAndRootRequests<BlobIdentifier>,
-    block_requests: RangeAndRootRequests<H256>,
+    blob_requests: RangeAndRootRequests<BlobIdentifier, P>,
+    block_requests: RangeAndRootRequests<H256, P>,
+    data_column_requests: RangeAndRootRequests<DataColumnIdentifier, P>,
     last_sync_head: Slot,
     last_sync_range: Range<Slot>,
     sequential_redownloads: usize,
@@ -88,14 +98,22 @@ pub struct SyncManager {
     // store peers that don't serve blocks prior to `MIN_EPOCHS_FOR_BLOCK_REQUESTS`
     // so that we can filter them when back-syncing
     back_sync_black_list: LruCache<PeerId, ()>,
+    network_globals: Arc<NetworkGlobals>,
+    received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+    custodial_peers: HashMap<ColumnIndex, HashSet<PeerId>>,
 }
 
-impl SyncManager {
-    pub fn new(target_peers: usize) -> Self {
+impl<P: Preset> SyncManager<P> {
+    pub fn new(
+        network_globals: Arc<NetworkGlobals>,
+        target_peers: usize,
+        received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+    ) -> Self {
         Self {
             peers: HashMap::new(),
-            blob_requests: RangeAndRootRequests::<BlobIdentifier>::default(),
-            block_requests: RangeAndRootRequests::<H256>::default(),
+            blob_requests: RangeAndRootRequests::<BlobIdentifier, P>::default(),
+            block_requests: RangeAndRootRequests::<H256, P>::default(),
+            data_column_requests: RangeAndRootRequests::<DataColumnIdentifier, P>::default(),
             last_sync_range: 0..0,
             last_sync_head: 0,
             sequential_redownloads: 0,
@@ -105,6 +123,9 @@ impl SyncManager {
             back_sync_black_list: LruCache::new(
                 NonZeroUsize::new(target_peers).expect("target_peers must be be a nonzero"),
             ),
+            network_globals,
+            received_data_column_sidecars,
+            custodial_peers: HashMap::new(),
         }
     }
 
@@ -128,10 +149,24 @@ impl SyncManager {
             .record_received_response(&block_root, &peer_id, app_request_id);
     }
 
+    pub fn record_received_data_column_sidecar_response(
+        &mut self,
+        data_column_identifier: DataColumnIdentifier,
+        peer_id: PeerId,
+        app_request_id: AppRequestId,
+    ) {
+        self.data_column_requests.record_received_response(
+            &data_column_identifier,
+            &peer_id,
+            app_request_id,
+        );
+    }
+
     pub fn request_direction(&mut self, app_request_id: AppRequestId) -> Option<SyncDirection> {
         self.block_requests
             .request_direction(app_request_id)
             .or_else(|| self.blob_requests.request_direction(app_request_id))
+            .or_else(|| self.data_column_requests.request_direction(app_request_id))
     }
 
     pub fn add_peer(&mut self, peer_id: PeerId, status: StatusMessage) {
@@ -141,6 +176,7 @@ impl SyncManager {
         );
 
         self.peers.insert(peer_id, status);
+        self.refresh_custodial_peers();
     }
 
     pub fn add_peer_to_back_sync_black_list(&mut self, peer_id: PeerId) {
@@ -155,7 +191,7 @@ impl SyncManager {
         self.back_sync_black_list.put(peer_id, ());
     }
 
-    pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch> {
+    pub fn remove_peer(&mut self, peer_id: &PeerId) -> Vec<SyncBatch<P>> {
         self.log(
             Level::Debug,
             format_args!("remove peer (peer_id: {peer_id})"),
@@ -163,41 +199,54 @@ impl SyncManager {
 
         self.peers.remove(peer_id);
         self.back_sync_black_list.pop(peer_id);
+        self.refresh_custodial_peers();
 
         self.block_requests
             .remove_peer(peer_id)
             .chain(self.blob_requests.remove_peer(peer_id))
+            .chain(self.data_column_requests.remove_peer(peer_id))
             .collect_vec()
+    }
+
+    pub fn update_peer_cgc(&mut self, peer_id: PeerId) {
+        self.log(
+            Level::Debug,
+            format_args!("update peer custody group count (peer_id: {peer_id})"),
+        );
+
+        self.update_peer_columns_custody(peer_id);
     }
 
     pub fn retry_batch(
         &mut self,
         app_request_id: AppRequestId,
-        batch: SyncBatch,
-        use_black_list: bool,
-    ) -> Option<PeerId> {
-        let peer = self.random_peer(use_black_list);
-
-        self.log(
-            Level::Debug,
-            format_args!(
-                "retrying batch {batch:?}, new peer: {peer:?}, app_request_id: {app_request_id:?}"
-            ),
-        );
-
-        match peer {
+        mut batch: SyncBatch<P>,
+        new_peer: Option<PeerId>,
+    ) {
+        match new_peer {
             Some(peer_id) => {
-                let batch = SyncBatch {
-                    target: batch.target,
-                    direction: batch.direction,
-                    peer_id,
-                    start_slot: batch.start_slot,
-                    count: batch.count,
-                    retry_count: batch.retry_count + 1,
-                    response_received: false,
-                };
+                if matches!(batch.target, SyncTarget::Block | SyncTarget::BlobSidecar) {
+                    self.log(
+                        Level::Debug,
+                        format_args!("retrying batch {batch:?}, new peer: {peer_id}, app_request_id: {app_request_id:?}"),
+                    );
+
+                    batch = SyncBatch {
+                        target: batch.target,
+                        direction: batch.direction,
+                        peer_id,
+                        start_slot: batch.start_slot,
+                        count: batch.count,
+                        retry_count: batch.retry_count + 1,
+                        response_received: false,
+                        data_columns: batch.data_columns,
+                    };
+                }
 
                 match batch.target {
+                    SyncTarget::DataColumnSidecar => {
+                        self.add_data_columns_request_by_range(app_request_id, batch)
+                    }
                     SyncTarget::BlobSidecar => {
                         self.add_blob_request_by_range(app_request_id, batch)
                     }
@@ -218,16 +267,16 @@ impl SyncManager {
                 }
             }
         }
-
-        peer
     }
 
-    pub fn build_back_sync_batches<P: Preset>(
+    #[expect(clippy::too_many_lines)]
+    pub fn build_back_sync_batches(
         &mut self,
-        blob_serve_range_slot: Slot,
+        config: &Config,
+        data_availability_serve_range_slot: Slot,
         mut current_back_sync_slot: Slot,
         low_slot: Slot,
-    ) -> Vec<SyncBatch> {
+    ) -> Vec<SyncBatch<P>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(true) else {
             return vec![];
         };
@@ -238,7 +287,7 @@ impl SyncManager {
         let mut sync_batches = vec![];
 
         while let Some(peer) = peers.next() {
-            let should_batch_blobs = current_back_sync_slot > blob_serve_range_slot;
+            let should_batch_blobs = current_back_sync_slot > data_availability_serve_range_slot;
 
             let count = if should_batch_blobs {
                 P::SlotsPerEpoch::non_zero().get()
@@ -259,30 +308,86 @@ impl SyncManager {
                         let mut start_slot = start_slot;
                         let mut count = count;
 
-                        if start_slot < blob_serve_range_slot {
+                        if start_slot < data_availability_serve_range_slot {
                             count = (start_slot + count)
-                                .checked_sub(blob_serve_range_slot)
+                                .checked_sub(data_availability_serve_range_slot)
                                 .unwrap_or(1);
 
-                            start_slot = blob_serve_range_slot;
+                            start_slot = data_availability_serve_range_slot;
                         }
 
-                        let batch = SyncBatch {
-                            target: SyncTarget::BlobSidecar,
-                            direction: SyncDirection::Back,
-                            peer_id: *next_peer,
-                            start_slot,
-                            count,
-                            response_received: false,
-                            retry_count: 0,
-                        };
+                        if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
+                            let missing_column_indices =
+                                self.missing_column_indices_by_range(start_slot, count);
 
-                        self.log(
-                            Level::Debug,
-                            format_args!("back-sync batch built: {batch:?})"),
-                        );
+                            if !missing_column_indices.is_empty() {
+                                self.log(
+                                    Level::Debug,
+                                    format_args!(
+                                        "requesting columns ({}): [{}] for slots: {start_slot}..{}",
+                                        missing_column_indices.len(),
+                                        missing_column_indices.iter().join(", "),
+                                        start_slot + count,
+                                    ),
+                                );
 
-                        sync_batches.push(batch);
+                                match self.map_peer_custody_columns(
+                                    missing_column_indices,
+                                    &peers_to_sync,
+                                    None,
+                                ) {
+                                    Ok(peer_custody_columns_mapping) => {
+                                        for (peer_id, columns) in peer_custody_columns_mapping {
+                                            let batch = SyncBatch {
+                                                target: SyncTarget::DataColumnSidecar,
+                                                direction: SyncDirection::Back,
+                                                peer_id,
+                                                start_slot,
+                                                count,
+                                                response_received: false,
+                                                retry_count: 0,
+                                                // TODO(feature/fulu): handle error
+                                                data_columns: ContiguousList::try_from(columns)
+                                                    .map(Arc::new)
+                                                    .ok(),
+                                            };
+
+                                            self.log(
+                                                Level::Debug,
+                                                format_args!("back-sync batch built: {batch:?})"),
+                                            );
+                                            sync_batches.push(batch);
+                                        }
+                                    }
+                                    Err(_) => {
+                                        self.log(
+                                            Level::Debug,
+                                            "could not find available peers to request data column sidecars".to_owned(),
+                                        );
+
+                                        self.refresh_custodial_peers();
+                                    }
+                                }
+                            }
+                        } else {
+                            let batch = SyncBatch {
+                                target: SyncTarget::BlobSidecar,
+                                direction: SyncDirection::Back,
+                                peer_id: *next_peer,
+                                start_slot,
+                                count,
+                                response_received: false,
+                                retry_count: 0,
+                                data_columns: None,
+                            };
+
+                            self.log(
+                                Level::Debug,
+                                format_args!("back-sync batch built: {batch:?})"),
+                            );
+
+                            sync_batches.push(batch);
+                        }
                     }
                     None => break,
                 }
@@ -296,6 +401,8 @@ impl SyncManager {
                 count,
                 response_received: false,
                 retry_count: 0,
+                // TODO(feature/eip7594)
+                data_columns: None,
             };
 
             self.log(
@@ -321,13 +428,13 @@ impl SyncManager {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn build_forward_sync_batches<P: Preset>(
+    pub fn build_forward_sync_batches(
         &mut self,
         config: &Config,
         current_slot: Slot,
         local_head_slot: Slot,
         local_finalized_slot: Slot,
-    ) -> Result<Vec<SyncBatch>> {
+    ) -> Result<Vec<SyncBatch<P>>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(false) else {
             return Ok(vec![]);
         };
@@ -369,6 +476,12 @@ impl SyncManager {
                     self.sequential_redownloads = 0;
                     self.sync_from_finalized = true;
                     local_finalized_slot + 1
+                } else if config
+                    .phase_at_slot::<P>(local_head_slot)
+                    .is_peerdas_activated()
+                {
+                    // with PeerDAS, we can't afford re-download an epoch range before local head
+                    local_head_slot + 1
                 } else {
                     // If head slot has not changed since last sync,
                     // re-download everything from local head slot minus backtrack distance
@@ -422,6 +535,8 @@ impl SyncManager {
 
         let mut max_slot = local_head_slot;
         let blob_serve_range_slot = misc::blob_serve_range_slot::<P>(config, current_slot);
+        let data_column_serve_range_slot =
+            misc::data_column_serve_range_slot::<P>(config, current_slot);
 
         let mut sync_batches = vec![];
         for (peer_id, index) in Self::peer_sync_batch_assignments(&peers_to_sync)
@@ -434,27 +549,100 @@ impl SyncManager {
 
             max_slot = start_slot + count - 1;
 
-            if blob_serve_range_slot < max_slot {
+            if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
+                if data_column_serve_range_slot < max_slot {
+                    let missing_column_indices =
+                        self.missing_column_indices_by_range(start_slot, count);
+
+                    if !missing_column_indices.is_empty() {
+                        self.log(
+                            Level::Debug,
+                            format_args!(
+                                "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
+                                missing_column_indices.len(),
+                                missing_column_indices.iter().join(", "),
+                            ),
+                        );
+
+                        // TODO(peerdas-fulu): Distributes requested columns among the minimal set of peers,
+                        // selected peers should be checked prior the assignment to make sure those peers
+                        // can serve all of the requested columns.
+                        match self.map_peer_custody_columns(
+                            missing_column_indices,
+                            &peers_to_sync,
+                            None,
+                        ) {
+                            Ok(peer_custody_columns_mapping) => {
+                                for (peer_id, columns) in peer_custody_columns_mapping {
+                                    sync_batches.push(SyncBatch {
+                                        target: SyncTarget::DataColumnSidecar,
+                                        direction: SyncDirection::Forward,
+                                        peer_id,
+                                        start_slot,
+                                        count,
+                                        response_received: false,
+                                        retry_count: 0,
+                                        // TODO(feature/fulu): handle error case
+                                        data_columns: ContiguousList::try_from(columns)
+                                            .map(Arc::new)
+                                            .ok(),
+                                    });
+                                }
+                            }
+                            Err(_) => {
+                                self.log(
+                                    Level::Warn,
+                                    "could not find available peers to request data column sidecars".to_owned(),
+                                );
+
+                                self.refresh_custodial_peers();
+                            }
+                        }
+                    }
+                }
+
+                // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
                 sync_batches.push(SyncBatch {
-                    target: SyncTarget::BlobSidecar,
+                    target: SyncTarget::Block,
                     direction: SyncDirection::Forward,
                     peer_id,
                     start_slot,
                     count,
                     response_received: false,
                     retry_count: 0,
+                    data_columns: None,
+                });
+
+                // TODO(peerdas-fulu): review this max requests cap
+                if sync_batches.len() >= peers_to_sync.len() / 2 {
+                    break;
+                }
+            } else {
+                if blob_serve_range_slot < max_slot {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::BlobSidecar,
+                        direction: SyncDirection::Forward,
+                        peer_id,
+                        start_slot,
+                        count,
+                        response_received: false,
+                        retry_count: 0,
+                        data_columns: None,
+                    });
+                }
+
+                // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
+                sync_batches.push(SyncBatch {
+                    target: SyncTarget::Block,
+                    direction: SyncDirection::Forward,
+                    peer_id,
+                    start_slot,
+                    count,
+                    response_received: false,
+                    retry_count: 0,
+                    data_columns: None,
                 });
             }
-
-            sync_batches.push(SyncBatch {
-                target: SyncTarget::Block,
-                direction: SyncDirection::Forward,
-                peer_id,
-                start_slot,
-                count,
-                response_received: false,
-                retry_count: 0,
-            });
         }
 
         self.log(
@@ -470,6 +658,16 @@ impl SyncManager {
     pub fn ready_to_request_by_range(&mut self) -> bool {
         self.block_requests.ready_to_request_by_range()
             && self.blob_requests.ready_to_request_by_range()
+            && self.data_column_requests.ready_to_request_by_range()
+    }
+
+    pub fn ready_to_request_blob_by_root(
+        &mut self,
+        blob_identifier: &BlobIdentifier,
+        peer_id: Option<PeerId>,
+    ) -> bool {
+        self.blob_requests
+            .ready_to_request_by_root(blob_identifier, peer_id)
     }
 
     pub fn ready_to_request_block_by_root(
@@ -481,7 +679,20 @@ impl SyncManager {
             .ready_to_request_by_root(&block_root, peer_id)
     }
 
-    pub fn add_blob_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
+    pub fn ready_to_request_data_column_by_root(
+        &mut self,
+        data_column_identifier: &DataColumnIdentifier,
+        peer_id: Option<PeerId>,
+    ) -> bool {
+        self.data_column_requests
+            .ready_to_request_by_root(data_column_identifier, peer_id)
+    }
+
+    pub fn ready_to_batch_request_data_column_by_roots(&mut self) -> bool {
+        self.data_column_requests.request_by_root_count() == 0
+    }
+
+    pub fn add_blob_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch<P>) {
         self.log(
             Level::Debug,
             format_args!(
@@ -513,7 +724,11 @@ impl SyncManager {
             .collect_vec()
     }
 
-    pub fn add_block_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch) {
+    pub fn add_block_request_by_range(
+        &mut self,
+        app_request_id: AppRequestId,
+        batch: SyncBatch<P>,
+    ) {
         self.log(
             Level::Debug,
             format_args!(
@@ -541,6 +756,58 @@ impl SyncManager {
         self.block_requests.add_request_by_root(block_root, peer_id)
     }
 
+    pub fn add_data_columns_request_by_range(
+        &mut self,
+        app_request_id: AppRequestId,
+        batch: SyncBatch<P>,
+    ) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add data column request by range (app_request_id: {:?}, peer_id: {}, range: {:?}, \
+                retries: {}, columns: {:?})",
+                app_request_id,
+                batch.peer_id,
+                (batch.start_slot..(batch.start_slot + batch.count)),
+                batch.retry_count,
+                batch.data_columns.as_ref().map(AsRef::as_ref),
+            ),
+        );
+
+        self.data_column_requests
+            .add_request_by_range(app_request_id, batch)
+    }
+
+    pub fn add_data_columns_request_by_root(
+        &mut self,
+        data_columns_by_root: DataColumnsByRootIdentifier<P>,
+        peer_id: PeerId,
+    ) -> Option<DataColumnsByRootIdentifier<P>> {
+        let DataColumnsByRootIdentifier {
+            block_root,
+            columns,
+        } = data_columns_by_root;
+
+        let indices = columns
+            .into_iter()
+            .filter(|index| {
+                self.data_column_requests.add_request_by_root(
+                    DataColumnIdentifier {
+                        block_root,
+                        index: *index,
+                    },
+                    peer_id,
+                )
+            })
+            .collect_vec();
+
+        (!indices.is_empty()).then_some(DataColumnsByRootIdentifier {
+            block_root,
+            columns: ContiguousList::try_from(indices)
+                .expect("columns indices per block should be no more than NUMBER_OF_COLUMNS"),
+        })
+    }
+
     pub fn random_peer(&self, use_black_list: bool) -> Option<PeerId> {
         let chain_id = self.chain_to_sync(use_black_list)?;
 
@@ -548,6 +815,7 @@ impl SyncManager {
             .blob_requests
             .busy_peers()
             .chain(self.block_requests.busy_peers())
+            .chain(self.data_column_requests.busy_peers())
             .collect::<HashSet<PeerId>>();
 
         self.peers(use_black_list)
@@ -583,12 +851,12 @@ impl SyncManager {
             );
 
             if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
-                self.retry_batch(app_request_id, sync_batch, true);
+                self.retry_batch(app_request_id, sync_batch, self.random_peer(true));
             }
         }
     }
 
-    pub fn blocks_by_range_request_finished<P: Preset>(
+    pub fn blocks_by_range_request_finished(
         &mut self,
         controller: &RealController<P>,
         peer_id: PeerId,
@@ -620,7 +888,45 @@ impl SyncManager {
                     self.add_peer_to_back_sync_black_list(peer_id);
                 }
 
-                self.retry_batch(app_request_id, sync_batch, true);
+                self.retry_batch(app_request_id, sync_batch, self.random_peer(true));
+            }
+        }
+    }
+
+    pub fn data_columns_by_range_request_finished(
+        &mut self,
+        app_request_id: AppRequestId,
+        request_direction: Option<SyncDirection>,
+    ) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "request data columns by range finished (app_request_id: {app_request_id:?})"
+            ),
+        );
+
+        if let Some((mut sync_batch, _)) = self
+            .data_column_requests
+            .request_by_range_finished(app_request_id)
+        {
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "data column sidecars by range request stats: responses received: {}, count: {}, \
+                    direction {request_direction:?}, retries: {}",
+                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                ),
+            );
+
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+                // Retry no more than 3 times, remove the peer
+                if sync_batch.retry_count < 3 {
+                    sync_batch.retry_count += 1;
+                    let peer_id = sync_batch.peer_id;
+                    self.retry_batch(app_request_id, sync_batch, Some(peer_id));
+                } else {
+                    self.retry_batch(app_request_id, sync_batch, None);
+                }
             }
         }
     }
@@ -640,11 +946,7 @@ impl SyncManager {
         self.find_chain_to_sync(use_black_list).map(|chain_id| {
             let peers_to_sync = self.chain_peers_shuffled(&chain_id, use_black_list);
 
-            let busy_peers = self
-                .blob_requests
-                .busy_peers()
-                .chain(self.block_requests.busy_peers())
-                .collect::<HashSet<PeerId>>();
+            let busy_peers = self.busy_peers();
 
             let peers_to_sync = peers_to_sync
                 .iter()
@@ -739,7 +1041,7 @@ impl SyncManager {
         peers
             .iter()
             .filter_map(|peer_id| self.peers.get(peer_id))
-            .map(|status| status.head_slot)
+            .map(|status| status.head_slot())
             .max()
     }
 
@@ -749,21 +1051,203 @@ impl SyncManager {
             .copied()
     }
 
+    fn busy_peers(&self) -> HashSet<PeerId> {
+        self.blob_requests
+            .busy_peers()
+            .chain(self.block_requests.busy_peers())
+            .chain(self.data_column_requests.busy_peers())
+            .collect()
+    }
+
+    fn update_peer_columns_custody(&mut self, peer_id: PeerId) {
+        for column_index in &self.network_globals.sampling_columns() {
+            let custodial_peers = self.custodial_peers.entry(*column_index).or_default();
+            if self
+                .network_globals
+                .is_custody_peer_of(*column_index, &peer_id)
+            {
+                custodial_peers.insert(peer_id);
+            } else if custodial_peers.contains(&peer_id) {
+                custodial_peers.remove(&peer_id);
+            }
+        }
+    }
+
+    pub fn refresh_custodial_peers(&mut self) {
+        let custodial_peers = self
+            .network_globals
+            .sampling_columns()
+            .iter()
+            .map(|column_index| {
+                (
+                    *column_index,
+                    self.network_globals
+                        .custody_peers_for_column(*column_index)
+                        .into_iter()
+                        .collect(),
+                )
+            })
+            .collect();
+
+        self.custodial_peers = custodial_peers;
+    }
+
+    pub const fn is_local_head_not_progress(&self, local_head_slot: Slot) -> bool {
+        local_head_slot <= self.last_sync_head
+    }
+
+    #[expect(clippy::unwrap_or_default)]
+    pub fn missing_column_indices_by_root(
+        &self,
+        local_head_slot: Slot,
+    ) -> HashMap<H256, HashSet<ColumnIndex>> {
+        let sampling_count = self.network_globals.sampling_columns_count();
+        self.received_data_column_sidecars
+            .iter()
+            .filter_map(|entry| {
+                (*entry.value() > local_head_slot)
+                    .then_some((entry.key().block_root, entry.key().index))
+            })
+            .fold(HashMap::new(), |mut acc, (block_root, index)| {
+                acc.entry(block_root)
+                    .or_insert_with(HashSet::new)
+                    .insert(index);
+
+                acc
+            })
+            .into_iter()
+            .filter_map(|(block_root, indices)| {
+                (indices.len() != sampling_count).then(|| {
+                    let missing = self
+                        .network_globals
+                        .sampling_columns()
+                        .difference(&indices)
+                        .copied()
+                        .collect();
+
+                    (block_root, missing)
+                })
+            })
+            .collect()
+    }
+
+    pub fn missing_column_indices_by_range(
+        &self,
+        start_slot: Slot,
+        count: u64,
+    ) -> HashSet<ColumnIndex> {
+        let mut missing_indices = HashSet::new();
+
+        for slot in start_slot..start_slot.saturating_add(count) {
+            let received_indices = self
+                .received_data_column_sidecars
+                .iter()
+                .filter_map(|entry| (slot == *entry.value()).then_some(entry.key().index))
+                .collect::<HashSet<_>>();
+
+            missing_indices.extend(
+                self.network_globals
+                    .sampling_columns()
+                    .difference(&received_indices),
+            );
+        }
+
+        missing_indices
+    }
+
+    fn get_random_custodial_peer(
+        &self,
+        column_index: ColumnIndex,
+        request_from_peers: &[PeerId],
+        skip_peer: Option<PeerId>,
+    ) -> Option<PeerId> {
+        let mut custodial_peers = if let Some(peers) = self.custodial_peers.get(&column_index) {
+            peers.iter().copied().collect()
+        } else {
+            self.network_globals.custody_peers_for_column(column_index)
+        };
+
+        // Skip peer who failed to serve us in previous request
+        if let Some(bad_peer) = skip_peer {
+            custodial_peers.retain(|peer| *peer != bad_peer);
+        }
+
+        // Choose only within specified peers, e.g. non-busy peers to sync
+        custodial_peers
+            .into_iter()
+            .filter(|peer| request_from_peers.contains(peer))
+            .choose(&mut thread_rng())
+    }
+
+    pub fn map_peer_custody_columns(
+        &self,
+        column_indices: HashSet<ColumnIndex>,
+        request_from_peers: &[PeerId],
+        skip_peer: Option<PeerId>,
+    ) -> Result<HashMap<PeerId, Vec<ColumnIndex>>> {
+        let mut peer_columns_mapping: HashMap<PeerId, Vec<ColumnIndex>> = HashMap::new();
+
+        for column_index in column_indices {
+            let Some(custodial_peer) =
+                self.get_random_custodial_peer(column_index, request_from_peers, skip_peer)
+            else {
+                continue;
+            };
+
+            peer_columns_mapping
+                .entry(custodial_peer)
+                .or_default()
+                .push(column_index);
+        }
+
+        (!peer_columns_mapping.is_empty())
+            .then_some(peer_columns_mapping)
+            .ok_or_else(|| MapPeerCustodyError::NoAvailablePeers.into())
+    }
+
+    /// Get the most coverage peers which are available at the time of the request, and has the most custodial coverage among all
+    pub fn find_most_coverage_peers(&self, column_indices: &HashSet<ColumnIndex>) -> Vec<PeerId> {
+        let mut coverage_count: HashMap<&PeerId, usize> = HashMap::new();
+
+        let busy_peers = self.busy_peers();
+        for index in column_indices {
+            if let Some(peers) = self.custodial_peers.get(index) {
+                for peer in peers.iter().filter(|peer| !busy_peers.contains(peer)) {
+                    *coverage_count.entry(peer).or_default() += 1;
+                }
+            }
+        }
+
+        coverage_count
+            .into_iter()
+            .sorted_by_key(|a| core::cmp::Reverse(a.1))
+            .take(column_indices.len().saturating_div(10))
+            .map(|(peer, _)| *peer)
+            .collect_vec()
+    }
+
     pub fn expired_blob_range_batches(
         &mut self,
-    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
         self.blob_requests.expired_range_batches()
     }
 
     pub fn expired_block_range_batches(
         &mut self,
-    ) -> impl Iterator<Item = (SyncBatch, Instant)> + '_ {
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
         self.block_requests.expired_range_batches()
+    }
+
+    pub fn expired_data_column_range_batches(
+        &mut self,
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
+        self.data_column_requests.expired_range_batches()
     }
 
     pub fn cache_clear(&mut self) {
         self.blob_requests.cache_clear();
         self.block_requests.cache_clear();
+        self.data_column_requests.cache_clear();
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
@@ -780,11 +1264,18 @@ impl SyncManager {
         // TODO: Differentiate
         self.blob_requests.track_collection_metrics(metrics);
         self.block_requests.track_collection_metrics(metrics);
+        self.data_column_requests.track_collection_metrics(metrics);
     }
 }
 
+#[derive(Debug, Error)]
+enum MapPeerCustodyError {
+    #[error("No available peers")]
+    NoAvailablePeers,
+}
+
 #[cfg(test)]
-impl SyncManager {
+impl<P: Preset> SyncManager<P> {
     pub fn add_blobs_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.blob_requests.add_request_by_range(
             AppRequestId::Application(1),
@@ -796,6 +1287,7 @@ impl SyncManager {
                 count: 64,
                 retry_count: 0,
                 response_received: false,
+                data_columns: None,
             },
         );
     }
@@ -821,6 +1313,7 @@ impl SyncManager {
                 count: 64,
                 retry_count: 0,
                 response_received: false,
+                data_columns: None,
             },
         );
     }
@@ -829,17 +1322,69 @@ impl SyncManager {
         self.block_requests
             .add_request_by_root(H256::zero(), peer_id);
     }
+
+    pub fn add_data_columns_request_by_range_busy_peer(&mut self, peer_id: PeerId) {
+        self.data_column_requests.add_request_by_range(
+            AppRequestId::Application(3),
+            SyncBatch {
+                target: SyncTarget::DataColumnSidecar,
+                direction: SyncDirection::Back,
+                peer_id,
+                start_slot: 16,
+                count: 64,
+                retry_count: 0,
+                response_received: false,
+                data_columns: ContiguousList::try_from(vec![0]).map(Arc::new).ok(),
+            },
+        )
+    }
+
+    pub fn add_data_columns_request_by_root_busy_peer(&mut self, peer_id: PeerId) {
+        self.data_column_requests.add_request_by_root(
+            DataColumnIdentifier {
+                block_root: H256::zero(),
+                index: 0,
+            },
+            peer_id,
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use eth2_libp2p::{rpc::StatusMessageV1, NetworkConfig};
+    use slog::{o, Drain};
+    use std::sync::Arc;
+    use std_ext::ArcExt;
     use test_case::test_case;
     use types::{
+        config::Config,
         phase0::primitives::H32,
         preset::{Mainnet, Minimal},
     };
 
     use super::*;
+
+    pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+
+        if enabled {
+            slog::Logger::root(drain.filter_level(level).fuse(), o!())
+        } else {
+            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
+        }
+    }
+
+    fn build_sync_manager<P: Preset>(chain_config: Arc<Config>) -> SyncManager<P> {
+        let log = build_log(slog::Level::Debug, false);
+        let network_config = Arc::new(NetworkConfig::default());
+        let network_globals =
+            NetworkGlobals::new_test_globals(chain_config, vec![], &log, network_config);
+        let received_data_column_sidecars = Arc::new(DashMap::new());
+        SyncManager::new(network_globals.into(), 100, received_data_column_sidecars)
+    }
 
     // `SyncBatch.count` is either 2 (blocks & blobs) or 16 (blocks only) because the test cases use `Minimal`.
     // `Minimal::SlotsPerEpoch::U64` × `EPOCHS_PER_REQUEST` = 8 × 2 = 16.
@@ -853,6 +1398,7 @@ mod tests {
             (80, 16, SyncTarget::Block),
             (64, 16, SyncTarget::Block),
             (48, 16, SyncTarget::Block),
+            (32, 16, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -881,6 +1427,8 @@ mod tests {
             (56, 8, SyncTarget::Block),
             (48, 8, SyncTarget::BlobSidecar),
             (48, 8, SyncTarget::Block),
+            (40, 8, SyncTarget::BlobSidecar),
+            (40, 8, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -892,6 +1440,7 @@ mod tests {
             (40, 16, SyncTarget::Block),
             (24, 16, SyncTarget::Block),
             (8, 16, SyncTarget::Block),
+            (0, 16, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -903,6 +1452,7 @@ mod tests {
             (59, 1, SyncTarget::BlobSidecar),
             (52, 8, SyncTarget::Block),
             (36, 16, SyncTarget::Block),
+            (20, 16, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -916,23 +1466,27 @@ mod tests {
         ]
     )]
     fn build_back_sync_batches(
-        blob_serve_start_slot: Slot,
+        data_availability_serve_start_slot: Slot,
         head_slot: Slot,
         resulting_batches: impl IntoIterator<Item = (Slot, u64, SyncTarget)>,
     ) {
-        let peer_status = StatusMessage {
+        let mut config = Config::minimal().rapid_upgrade();
+        config.fulu_fork_epoch = 8;
+        let config = Arc::new(config);
+
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
             finalized_epoch: 0,
             head_root: H256::default(),
             head_slot,
-        };
+        });
 
-        let mut sync_manager = SyncManager::new(100);
+        let mut sync_manager = build_sync_manager::<Minimal>(config.clone_arc());
 
         // Add 10 valid peers.
         // This will indirectly test that half of them are used for back-syncing (5 batches).
-        for _ in 0..10 {
+        for _ in 0..12 {
             sync_manager.add_peer(PeerId::random(), peer_status);
         }
 
@@ -944,9 +1498,15 @@ mod tests {
         sync_manager.add_blobs_by_root_busy_peer(PeerId::random());
         sync_manager.add_blocks_by_range_busy_peer(PeerId::random());
         sync_manager.add_blocks_by_root_busy_peer(PeerId::random());
+        sync_manager.add_data_columns_request_by_range_busy_peer(PeerId::random());
+        sync_manager.add_data_columns_request_by_root_busy_peer(PeerId::random());
 
-        let batches =
-            sync_manager.build_back_sync_batches::<Minimal>(blob_serve_start_slot, head_slot, 0);
+        let batches = sync_manager.build_back_sync_batches(
+            &config,
+            data_availability_serve_start_slot,
+            head_slot,
+            0,
+        );
 
         itertools::assert_equal(
             batches
@@ -958,26 +1518,26 @@ mod tests {
 
     #[test]
     fn test_build_forward_sync_batches_when_head_progresses() -> Result<()> {
-        let config = Config::mainnet();
+        let config = Arc::new(Config::mainnet());
         let current_slot = 20_001;
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
         let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
 
-        let peer_status = StatusMessage {
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
             finalized_epoch: 248,
             head_root: H256::default(),
             head_slot: 20_000,
-        };
+        });
 
-        let mut sync_manager = SyncManager::new(100);
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 
         for i in 0..50 {
-            let batches = sync_manager.build_forward_sync_batches::<Mainnet>(
+            let batches = sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot + i,
@@ -1007,25 +1567,25 @@ mod tests {
 
     #[test]
     fn test_build_forward_sync_batches_when_head_does_not_progress() -> Result<()> {
-        let config = Config::mainnet();
+        let config = Arc::new(Config::mainnet());
         let current_slot = 20_001;
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
         let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
 
-        let peer_status = StatusMessage {
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
             finalized_root: H256::default(),
             finalized_epoch: 248,
             head_root: H256::default(),
             head_slot: 20_000,
-        };
+        });
 
-        let mut sync_manager = SyncManager::new(100);
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 
-        sync_manager.build_forward_sync_batches::<Mainnet>(
+        sync_manager.build_forward_sync_batches(
             &config,
             current_slot,
             local_head_slot,
@@ -1040,7 +1600,7 @@ mod tests {
         // From second to fifth retries try to download blocks from local head slot minus one epoch
 
         for _ in 0..4 {
-            sync_manager.build_forward_sync_batches::<Mainnet>(
+            sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot,
@@ -1059,7 +1619,7 @@ mod tests {
         let mut sync_range_to = 0;
 
         while sync_range_to < local_head_slot {
-            sync_manager.build_forward_sync_batches::<Mainnet>(
+            sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot,
@@ -1076,7 +1636,7 @@ mod tests {
 
         // Resume normal syncing behaviour
 
-        sync_manager.build_forward_sync_batches::<Mainnet>(
+        sync_manager.build_forward_sync_batches(
             &config,
             current_slot,
             local_head_slot,

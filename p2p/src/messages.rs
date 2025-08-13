@@ -13,10 +13,15 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::debug;
 use operation_pools::PoolRejectionReason;
 use serde::Serialize;
+use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        primitives::ColumnIndex,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -40,6 +45,7 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
+    DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, AppRequestId, RPCRequestType),
     RequestedBlock(
         Arc<SignedBeaconBlock<P>>,
@@ -47,13 +53,23 @@ pub enum P2pToSync<P: Preset> {
         AppRequestId,
         RPCRequestType,
     ),
+    RequestedDataColumnSidecar(
+        Arc<DataColumnSidecar<P>>,
+        PeerId,
+        AppRequestId,
+        RPCRequestType,
+    ),
     BlobsByRangeRequestFinished(AppRequestId),
     BlocksByRangeRequestFinished(PeerId, AppRequestId),
+    DataColumnsByRangeRequestFinished(AppRequestId),
     RequestFailed(PeerId),
     FinalizedCheckpoint(Checkpoint),
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
+    GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
+    DataColumnSidecarRejected(DataColumnIdentifier),
+    PeerCgcUpdated(PeerId),
     Stop,
 }
 
@@ -70,6 +86,7 @@ impl<P: Preset> P2pToSync<P> {
 pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
+    PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
@@ -119,17 +136,26 @@ impl SyncToMetrics {
     }
 }
 
-pub enum SyncToP2p {
+pub enum SyncToP2p<P: Preset> {
     ReportPeer(PeerId, PeerAction, ReportSource, PeerReportReason),
     RequestBlobsByRange(AppRequestId, PeerId, Slot, u64),
     RequestBlobsByRoot(AppRequestId, PeerId, Vec<BlobIdentifier>),
     RequestBlocksByRange(AppRequestId, PeerId, Slot, u64),
     RequestBlockByRoot(AppRequestId, PeerId, H256),
+    RequestDataColumnsByRange(
+        AppRequestId,
+        PeerId,
+        Slot,
+        u64,
+        Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
+    ),
+    RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnsByRootIdentifier<P>>),
     RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,
+    UpdateEarliestAvailableSlot(Slot),
 }
 
-impl SyncToP2p {
+impl<P: Preset> SyncToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug!("send to p2p failed because the receiver was dropped");
@@ -157,6 +183,7 @@ pub enum ValidatorToP2p<P: Preset> {
     Reject(GossipId, PoolRejectionReason),
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
+    PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
@@ -211,9 +238,11 @@ pub enum ServiceInboundMessage<P: Preset> {
     SubscribeNewForkTopics(Phase, ForkDigest),
     Unsubscribe(GossipTopic),
     UnsubscribeFromForkTopicsExcept(ForkDigest),
+    UpdateDataColumnSubnets(u64),
     UpdateEnrSubnet(Subnet, bool),
     UpdateFork(EnrForkId),
     UpdateGossipsubParameters(u64, Slot),
+    UpdateNextForkDigest(ForkDigest),
     Stop,
 }
 
@@ -237,11 +266,14 @@ impl<P: Preset> ServiceOutboundMessage<P> {
     }
 }
 
+#[expect(clippy::enum_variant_names)]
 #[derive(Serialize)]
 pub enum SubnetServiceToP2p {
     // Use `BTreeMap` to make serialization deterministic for snapshot testing.
     // `Vec` would work too and would be slightly faster.
     UpdateAttestationSubnets(AttestationSubnetActions),
+    UpdateDataColumnSubnets(u64),
+    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubnets(BTreeMap<SubnetId, SyncCommitteeSubnetAction>),
 }
 
@@ -256,6 +288,8 @@ impl SubnetServiceToP2p {
 pub enum ToSubnetService {
     SetRegisteredValidators(Vec<PublicKeyBytes>, Vec<ValidatorIndex>),
     UpdateBeaconCommitteeSubscriptions(Slot, Vec<BeaconCommitteeSubscription>, Sender<Result<()>>),
+    UpdateDataColumnSubnets(u64),
+    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubscriptions(Epoch, Vec<SyncCommitteeSubscription>),
 }
 
