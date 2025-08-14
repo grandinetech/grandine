@@ -1,6 +1,9 @@
 use bls::{PublicKeyBytes, SignatureBytes};
-use ssz::BitVector;
-use types::{altair::consts::SyncCommitteeSubnetCount, phase0::primitives::ValidatorIndex};
+use ssz::{BitVector, H256};
+use types::{
+    altair::consts::SyncCommitteeSubnetCount, combined::SignedBeaconBlock,
+    phase0::primitives::ValidatorIndex, preset::Preset,
+};
 
 #[expect(clippy::struct_field_names)]
 pub struct Aggregator {
@@ -14,4 +17,9 @@ pub struct SyncCommitteeMember {
     pub validator_index: ValidatorIndex,
     pub public_key: PublicKeyBytes,
     pub subnets: BitVector<SyncCommitteeSubnetCount>,
+}
+
+pub enum SignedBeaconBlockOrBlockRoot<P: Preset> {
+    Block(Box<SignedBeaconBlock<P>>),
+    Root(H256),
 }
