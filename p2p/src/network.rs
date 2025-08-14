@@ -1578,6 +1578,18 @@ impl<P: Preset> Network<P> {
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug!("received light client optimistic update as gossip");
             }
+            PubsubMessage::SignedInclusionList(inclusion_list) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["inclusion_list"]);
+                }
+
+                trace!(
+                    "received inclusion list as gossip: {inclusion_list:?} from {source}",
+                );
+
+                P2pToSync::GossipInclusionList(inclusion_list, source, GossipId { source, message_id })
+                    .send(&self.channels.p2p_to_sync_tx);
+            }
         }
     }
 
