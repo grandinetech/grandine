@@ -692,25 +692,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     }
                 }
 
-                let block = ValidatorBlindedBlock::BlindedBeaconBlock {
-                    blinded_block,
-                    execution_payload: Box::new(
-                        beacon_block
-                            .value
-                            .execution_payload()
-                            .expect("post-Bellatrix blocks should have execution payload"),
-                    ),
-                };
+                let block = ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block);
 
                 Ok(Some((
-                    WithBlobsAndMev::new(
-                        block,
-                        None,
-                        beacon_block.proofs,
-                        beacon_block.blobs,
-                        Some(builder_mev),
-                        None,
-                    ),
+                    WithBlobsAndMev::new(block, None, None, None, Some(builder_mev), None),
                     blinded_block_rewards,
                 )))
             }

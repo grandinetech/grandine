@@ -2481,13 +2481,9 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     // 'Uplift' validator block to signed beacon block for consensus reward calculation
     let signed_beacon_block = match validator_block.value.clone() {
         ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.with_zero_signature(),
-        ValidatorBlindedBlock::BlindedBeaconBlock {
-            blinded_block,
-            execution_payload,
-        } => blinded_block
-            .with_execution_payload(*execution_payload)
-            .map_err(AnyhowError::new)?
-            .with_zero_signature(),
+        ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
+            blinded_block.with_default_payload().with_zero_signature()
+        }
     };
 
     let consensus_block_value = block_rewards

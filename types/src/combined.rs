@@ -1043,6 +1043,23 @@ impl<P: Preset> BlindedBeaconBlock<P> {
         self
     }
 
+    pub fn with_default_payload(self) -> BeaconBlock<P> {
+        match self {
+            Self::Bellatrix(block) => block
+                .with_execution_payload(BellatrixExecutionPayload::default())
+                .into(),
+            Self::Capella(block) => block
+                .with_execution_payload(CapellaExecutionPayload::default())
+                .into(),
+            Self::Deneb(block) => block
+                .with_execution_payload(DenebExecutionPayload::default())
+                .into(),
+            Self::Electra(block) => block
+                .with_execution_payload(DenebExecutionPayload::default())
+                .into(),
+        }
+    }
+
     pub fn with_execution_payload(
         self,
         execution_payload: ExecutionPayload<P>,
