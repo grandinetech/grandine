@@ -82,7 +82,7 @@ use validator_statistics::ValidatorStatistics;
 
 use crate::{
     messages::{ApiToValidator, InternalMessage},
-    misc::{Aggregator, SyncCommitteeMember},
+    misc::{Aggregator, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
@@ -877,7 +877,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
-        let beacon_block = match validator_blinded_block {
+        let beacon_block_or_root = match validator_blinded_block {
             ValidatorBlindedBlock::BlindedBeaconBlock { blinded_block, .. } => {
                 let Some(signature) = slot_head
                     .sign_beacon_block(
@@ -898,53 +898,57 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     "Builder API should be present as it was used to query ExecutionPayloadHeader",
                 );
 
-                if self.chain_config.is_peerdas_scheduled() {
-                    if let Err(error) = builder_api
+                if self.chain_config.is_peerdas_scheduled()
+                    && builder_api
                         .post_blinded_block_post_fulu(
                             &self.chain_config,
                             self.controller.genesis_time(),
                             &signed_blinded_block,
                         )
                         .await
-                    {
-                        warn!("failed to post blinded block to the builder node: {error:?}");
-                    }
-
+                        .is_ok()
+                {
                     debug!("submitted blinded block to the builder node");
 
-                    return Ok(());
-                }
-
-                let WithBlobsAndMev {
-                    value: execution_payload,
-                    proofs,
-                    blobs,
-                    ..
-                } = match builder_api
-                    .post_blinded_block(
-                        &self.chain_config,
-                        self.controller.genesis_time(),
-                        &signed_blinded_block,
+                    SignedBeaconBlockOrBlockRoot::Root(
+                        signed_blinded_block.message().hash_tree_root(),
                     )
-                    .await
-                {
-                    Ok(response) => response,
-                    Err(error) => {
-                        warn!("failed to post blinded block to the builder node: {error:?}");
-                        return Ok(());
-                    }
-                };
+                } else {
+                    let WithBlobsAndMev {
+                        value: execution_payload,
+                        proofs,
+                        blobs,
+                        ..
+                    } = match builder_api
+                        .post_blinded_block(
+                            &self.chain_config,
+                            self.controller.genesis_time(),
+                            &signed_blinded_block,
+                        )
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(error) => {
+                            warn!("failed to post blinded block to the builder node: {error:?}");
+                            return Ok(());
+                        }
+                    };
 
-                block_proofs = proofs;
-                block_blobs = blobs;
+                    block_proofs = proofs;
+                    block_blobs = blobs;
 
-                debug!("received execution payload from the builder node: {execution_payload:?}");
+                    debug!(
+                        "received execution payload from the builder node: {execution_payload:?}"
+                    );
 
-                let (message, signature) = signed_blinded_block.split();
+                    let (message, signature) = signed_blinded_block.split();
 
-                message
-                    .with_execution_payload(execution_payload)?
-                    .with_signature(signature)
+                    SignedBeaconBlockOrBlockRoot::Block(Box::new(
+                        message
+                            .with_execution_payload(execution_payload)?
+                            .with_signature(signature),
+                    ))
+                }
             }
             ValidatorBlindedBlock::BeaconBlock(block) => {
                 match slot_head
@@ -957,80 +961,96 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     )
                     .await
                 {
-                    Some(signature) => block.with_signature(signature),
+                    Some(signature) => SignedBeaconBlockOrBlockRoot::Block(Box::new(
+                        block.with_signature(signature),
+                    )),
                     None => return Ok(()),
                 }
             }
         };
 
-        info!(
-            "validator {} proposing beacon block with root {:?} in slot {}",
-            proposer_index,
-            beacon_block.message().hash_tree_root(),
-            slot_head.slot(),
-        );
+        match beacon_block_or_root {
+            SignedBeaconBlockOrBlockRoot::Root(block_root) => info!(
+                "validator {} proposing beacon block with root {:?} in slot {} using builder",
+                proposer_index,
+                block_root,
+                slot_head.slot(),
+            ),
+            SignedBeaconBlockOrBlockRoot::Block(beacon_block) => {
+                info!(
+                    "validator {} proposing beacon block with root {:?} in slot {}",
+                    proposer_index,
+                    beacon_block.message().hash_tree_root(),
+                    slot_head.slot(),
+                );
 
-        debug!("beacon block: {beacon_block:?}");
+                debug!("beacon block: {beacon_block:?}");
 
-        let block = Arc::new(beacon_block);
+                let block = Arc::new(*beacon_block);
 
-        if let Some(blobs) = block_blobs {
-            if !blobs.is_empty() {
-                if self
-                    .chain_config
-                    .phase_at_slot::<P>(slot_head.slot())
-                    .is_peerdas_activated()
-                {
-                    let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                        blobs.as_ref(),
-                        block_proofs.unwrap_or_default().as_ref(),
-                        self.controller.store_config().kzg_backend,
-                    )?;
-                    for data_column_sidecar in eip_7594::construct_data_column_sidecars(
-                        &block,
-                        &cells_and_kzg_proofs,
-                        self.metrics.as_ref(),
-                    )? {
-                        let data_column_sidecar = Arc::new(data_column_sidecar);
-
+                if let Some(blobs) = block_blobs {
+                    if !blobs.is_empty() {
                         if self
-                            .controller
-                            .sampling_columns()
-                            .into_iter()
-                            .contains(&data_column_sidecar.index)
+                            .chain_config
+                            .phase_at_slot::<P>(slot_head.slot())
+                            .is_peerdas_activated()
                         {
-                            self.controller.on_own_data_column_sidecar(
-                                wait_group.clone(),
-                                data_column_sidecar.clone_arc(),
-                            );
+                            let cells_and_kzg_proofs =
+                                eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                    blobs.as_ref(),
+                                    block_proofs.unwrap_or_default().as_ref(),
+                                    self.controller.store_config().kzg_backend,
+                                )?;
+
+                            for data_column_sidecar in eip_7594::construct_data_column_sidecars(
+                                &block,
+                                &cells_and_kzg_proofs,
+                                self.metrics.as_ref(),
+                            )? {
+                                let data_column_sidecar = Arc::new(data_column_sidecar);
+
+                                if self
+                                    .controller
+                                    .sampling_columns()
+                                    .into_iter()
+                                    .contains(&data_column_sidecar.index)
+                                {
+                                    self.controller.on_own_data_column_sidecar(
+                                        wait_group.clone(),
+                                        data_column_sidecar.clone_arc(),
+                                    );
+                                }
+
+                                if !self.validator_config.withhold_data_columns_publishing {
+                                    ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                                        .send(&self.p2p_tx);
+                                }
+                            }
+                        } else {
+                            for blob_sidecar in misc::construct_blob_sidecars(
+                                &block,
+                                blobs.into_iter(),
+                                block_proofs.unwrap_or_default().into_iter(),
+                            )? {
+                                let blob_sidecar = Arc::new(blob_sidecar);
+
+                                self.controller.on_own_blob_sidecar(
+                                    wait_group.clone(),
+                                    blob_sidecar.clone_arc(),
+                                );
+
+                                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                            }
                         }
-
-                        if !self.validator_config.withhold_data_columns_publishing {
-                            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
-                                .send(&self.p2p_tx);
-                        }
-                    }
-                } else {
-                    for blob_sidecar in misc::construct_blob_sidecars(
-                        &block,
-                        blobs.into_iter(),
-                        block_proofs.unwrap_or_default().into_iter(),
-                    )? {
-                        let blob_sidecar = Arc::new(blob_sidecar);
-
-                        self.controller
-                            .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
-
-                        ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
                     }
                 }
+
+                self.controller
+                    .on_own_block(wait_group.clone(), block.clone_arc());
+
+                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
             }
         }
-
-        self.controller
-            .on_own_block(wait_group.clone(), block.clone_arc());
-
-        ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.validator_propose_successes.inc();

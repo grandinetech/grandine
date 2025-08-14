@@ -849,7 +849,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     blob_kzg_commitments: ContiguousList::default(),
                 },
             }),
-            Phase::Electra => {
+            Phase::Electra | Phase::Fulu => {
                 // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
                 let mut results: Vec<(
                     AttestationData,
@@ -901,101 +901,51 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 let attestations = ContiguousList::try_from_iter(attestations)?;
 
-                BeaconBlock::from(ElectraBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: ElectraBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_electra().await,
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                        execution_payload: DenebExecutionPayload::default(),
-                        bls_to_execution_changes,
-                        blob_kzg_commitments: ContiguousList::default(),
-                        execution_requests: ExecutionRequests::default(),
-                    },
-                })
-            }
-            Phase::Fulu => {
-                // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
-                let mut results: Vec<(
-                    AttestationData,
-                    HashSet<CommitteeIndex>,
-                    Vec<ElectraAttestation<P>>,
-                )> = Vec::new();
-
-                for (electra_attestation, committee_index) in
-                    attestations.into_iter().filter_map(|attestation| {
-                        let committee_index = attestation.data.index;
-
-                        match operation_pools::convert_to_electra_attestation(attestation) {
-                            Ok(electra_attestation) => Some((electra_attestation, committee_index)),
-                            Err(error) => {
-                                warn!("unable to convert to electra attestation: {error:?}");
-                                None
-                            }
-                        }
+                if self.beacon_state.phase() == Phase::Electra {
+                    BeaconBlock::from(ElectraBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body: ElectraBeaconBlockBody {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings,
+                            attester_slashings: self.prepare_attester_slashings_electra().await,
+                            attestations,
+                            deposits,
+                            voluntary_exits,
+                            sync_aggregate,
+                            execution_payload: DenebExecutionPayload::default(),
+                            bls_to_execution_changes,
+                            blob_kzg_commitments: ContiguousList::default(),
+                            execution_requests: ExecutionRequests::default(),
+                        },
                     })
-                {
-                    if let Some((_, indices, attestations)) =
-                        results.iter_mut().find(|(data, indices, _)| {
-                            *data == electra_attestation.data && !indices.contains(&committee_index)
-                        })
-                    {
-                        indices.insert(committee_index);
-                        attestations.push(electra_attestation);
-                    } else {
-                        results.push((
-                            electra_attestation.data,
-                            HashSet::from([committee_index]),
-                            vec![electra_attestation],
-                        ))
-                    }
+                } else {
+                    BeaconBlock::from(FuluBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body: FuluBeaconBlockBody {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings,
+                            attester_slashings: self.prepare_attester_slashings_electra().await,
+                            attestations,
+                            deposits,
+                            voluntary_exits,
+                            sync_aggregate,
+                            execution_payload: DenebExecutionPayload::default(),
+                            bls_to_execution_changes,
+                            blob_kzg_commitments: ContiguousList::default(),
+                            execution_requests: ExecutionRequests::default(),
+                        },
+                    })
                 }
-
-                let attestations = results
-                    .into_iter()
-                    .filter_map(|(_, _, attestations)| {
-                        match Self::compute_on_chain_aggregate(attestations.into_iter()) {
-                            Ok(electra_aggregate) => Some(electra_aggregate),
-                            Err(error) => {
-                                warn!("unable to compute on chain aggregate: {error:?}");
-                                None
-                            }
-                        }
-                    })
-                    .take(P::MaxAttestationsElectra::USIZE);
-
-                let attestations = ContiguousList::try_from_iter(attestations)?;
-
-                BeaconBlock::from(FuluBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: FuluBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_electra().await,
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                        execution_payload: DenebExecutionPayload::default(),
-                        bls_to_execution_changes,
-                        blob_kzg_commitments: ContiguousList::default(),
-                        execution_requests: ExecutionRequests::default(),
-                    },
-                })
             }
         }
         .pipe(Ok)
