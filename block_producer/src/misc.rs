@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use ssz::{Size, SszHash, SszSize, SszWrite, WriteError};
 use typenum::U1;
 use types::{
-    combined::{BeaconBlock, BlindedBeaconBlock, ExecutionPayload},
+    combined::{BeaconBlock, BlindedBeaconBlock},
     nonstandard::Phase,
     phase0::primitives::{ExecutionAddress, ValidatorIndex, H256},
     preset::Preset,
@@ -40,12 +40,7 @@ pub struct ProposerData {
 #[derive(Clone, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum ValidatorBlindedBlock<P: Preset> {
-    BlindedBeaconBlock {
-        #[serde(flatten)]
-        blinded_block: BlindedBeaconBlock<P>,
-        #[serde(skip)]
-        execution_payload: Box<ExecutionPayload<P>>,
-    },
+    BlindedBeaconBlock(BlindedBeaconBlock<P>),
     BeaconBlock(BeaconBlock<P>),
 }
 
@@ -61,7 +56,7 @@ impl<P: Preset> SszHash for ValidatorBlindedBlock<P> {
 
     fn hash_tree_root(&self) -> H256 {
         match self {
-            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.hash_tree_root(),
+            Self::BlindedBeaconBlock(blinded_block) => blinded_block.hash_tree_root(),
             Self::BeaconBlock(block) => block.hash_tree_root(),
         }
     }
@@ -70,7 +65,7 @@ impl<P: Preset> SszHash for ValidatorBlindedBlock<P> {
 impl<P: Preset> SszWrite for ValidatorBlindedBlock<P> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         match self {
-            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.write_variable(bytes),
+            Self::BlindedBeaconBlock(blinded_block) => blinded_block.write_variable(bytes),
             Self::BeaconBlock(block) => block.write_variable(bytes),
         }
     }
@@ -87,32 +82,24 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
             return Self::BeaconBlock(block);
         }
 
-        let execution_payload = block
-            .clone()
-            .execution_payload()
-            .expect("post-Bellatrix blocks should have execution payload");
-
         let blinded_block = block
             .try_into()
             .expect("post-Bellatrix block can be converted to a blinded block");
 
-        Self::BlindedBeaconBlock {
-            blinded_block,
-            execution_payload: Box::new(execution_payload),
-        }
+        Self::BlindedBeaconBlock(blinded_block)
     }
 
     #[must_use]
     pub const fn phase(&self) -> Phase {
         match self {
-            Self::BlindedBeaconBlock { blinded_block, .. } => blinded_block.phase(),
+            Self::BlindedBeaconBlock(blinded_block) => blinded_block.phase(),
             Self::BeaconBlock(block) => block.phase(),
         }
     }
 
     #[must_use]
     pub const fn is_blinded(&self) -> bool {
-        matches!(self, Self::BlindedBeaconBlock { .. })
+        matches!(self, Self::BlindedBeaconBlock(_))
     }
 }
 

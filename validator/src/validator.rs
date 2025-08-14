@@ -862,7 +862,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let beacon_block = match validator_blinded_block {
-            ValidatorBlindedBlock::BlindedBeaconBlock { blinded_block, .. } => {
+            ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
                 let Some(signature) = slot_head
                     .sign_beacon_block(
                         &self.signer,
