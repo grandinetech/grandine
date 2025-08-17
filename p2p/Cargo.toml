@@ -38,8 +38,6 @@ rand = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
-slog = { workspace = true }
-slog-stdlog = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }

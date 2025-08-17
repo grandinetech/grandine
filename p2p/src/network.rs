@@ -35,8 +35,6 @@ use logging::{debug_with_peers, error_with_peers, info_with_peers, trace_with_pe
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
-use slog::{o, Drain as _, Logger};
-use slog_stdlog::StdLog;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
@@ -153,7 +151,6 @@ impl<P: Preset> Network<P> {
         ));
 
         let enr_fork_id = Self::enr_fork_id(&controller, &fork_context, slot);
-        let logger = Logger::root(StdLog.fuse(), o!());
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(shutdown_tx);
 
@@ -170,7 +167,6 @@ impl<P: Preset> Network<P> {
             chain_config.clone_arc(),
             executor,
             context,
-            &logger,
         ))
         .await?;
 

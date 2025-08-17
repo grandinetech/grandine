@@ -425,10 +425,6 @@ serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
 sha2 = { version = '0.10', features = ['compress'] }
-slog = { version = '2', features = ['max_level_trace'] }
-slog-async = '2'
-slog-stdlog = '4'
-slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 static_assertions = '1'
