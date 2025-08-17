@@ -98,6 +98,11 @@ impl<P: Preset> Storage<P> {
     }
 
     #[expect(clippy::too_many_lines)]
+    // @audit-ok: Prioritizes local state over remote to prevent unnecessary network trust
+    // @audit Storage: No integrity checks on loaded state data
+    // ↳ Corrupted database could load invalid state as trusted anchor
+    // ↳ Missing state root verification against known checkpoints
+    // ↳ Review Round 3: CONFIRMED VULNERABLE - No state_root hash verification
     pub async fn load(
         &self,
         client: &Client,

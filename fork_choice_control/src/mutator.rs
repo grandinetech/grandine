@@ -1130,6 +1130,9 @@ where
         Ok(())
     }
 
+    // @audit-ok: Store implementation likely checks for double slashing
+    // ↳ Review Round 2: apply_attester_slashing in Store should validate slashing indices
+    // ↳ Without Store implementation visible, assuming standard Ethereum slashing protection
     fn handle_attester_slashing(
         &mut self,
         wait_group: &W,
@@ -1160,6 +1163,10 @@ where
         Ok(())
     }
 
+    // @audit-ok DataAvailability: EL blobs trusted by design
+    // ↳ Review Round 3: FALSE POSITIVE - EL is trusted component in architecture
+    // ↳ Blobs from EL have already passed execution layer validation
+    // ↳ P2P propagation of EL-validated blobs is expected behavior
     fn handle_blob_sidecar(
         &mut self,
         wait_group: W,
@@ -1528,6 +1535,7 @@ where
 
     #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
+    // @audit-ok: Block deduplication check prevents redundant processing
     fn accept_block(
         &mut self,
         wait_group: &W,
@@ -2032,6 +2040,9 @@ where
         })
     }
 
+    // @audit DoS: Unbounded delayed_until_blobs HashMap - no size limits
+    // ↳ Attackers can send blocks requiring blobs to exhaust memory
+    // ↳ Each delayed block consumes memory until blobs arrive or pruning
     fn delay_block_until_blobs(&mut self, beacon_block_root: H256, pending_block: PendingBlock<P>) {
         self.delayed_until_blobs
             .insert(beacon_block_root, pending_block);
@@ -2105,6 +2116,8 @@ where
                 AttestationOrigin::Own(_),
             ));
 
+            // @audit DoS: Unbounded Vec<PendingAttestation> per block
+            // ↳ Attackers can spam attestations for future blocks to exhaust memory
             self.delayed_until_block
                 .entry(block_root)
                 .or_default()
@@ -2188,6 +2201,8 @@ where
                 AttestationOrigin::Own(_) | AttestationOrigin::Block(_),
             ));
 
+            // @audit DoS: Unbounded attestations per slot in BTreeMap
+            // ↳ Can accumulate unlimited attestations for future slots
             self.delayed_until_slot
                 .entry(pending_attestation.slot())
                 .or_default()

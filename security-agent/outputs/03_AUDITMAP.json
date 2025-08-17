@@ -1,259 +1,163 @@
 {
   "audit_items": [
     {
-      "id": "03000001",
-      "file": "src/combined.rs",
-      "line": 613,
-      "snippet": "skip_randao_verification: bool",
-      "risk_category": "Crypto-Bypass",
-      "description": "CONFIRMED: skip_randao_verification allows bypassing critical RANDAO signature verification. If exposed to untrusted callers, could compromise validator selection randomness. Should be restricted to sync contexts only.",
-      "status": "Vuln",
-      "proof_trace": [
-        "process_untrusted_block (L639-665)",
-        "↳ MultiVerifier with SkipRandaoVerification (L657)",
-        "↳ process_block bypasses RANDAO check (L664)"
-      ],
-      "review_round": 2
-    },
-    {
-      "id": "03000002",
-      "file": "src/unphased/block_processing.rs",
-      "line": 72,
-      "snippet": "process_block_header_for_gossip",
+      "id": "FCC-DOS-001",
+      "file": "fork_choice_control/src/controller.rs",
+      "line": 240,
+      "snippet": "self.spawn_block_task(block, BlockOrigin::Gossip(gossip_id))",
       "risk_category": "DoS",
-      "description": "Critical gossip validation entry point. Must efficiently reject invalid blocks to prevent resource exhaustion attacks similar to Lighthouse CL-2023-01.",
-      "status": "ok"
+      "description": "Unbounded task spawning for gossip blocks. Malicious peers could flood with invalid blocks to exhaust thread pool resources. Tasks added to unbounded VecDeque queues without limits.",
+      "status": "Vuln",
+      "review_round": 3,
+      "proof_trace": [
+        "Controller.on_gossip_block (L240)",
+        "↳ Controller.spawn_block_task (L573)",
+        "↳ Controller.spawn (L596)",
+        "↳ ThreadPool.spawn (L70)",
+        "↳ high_priority_tasks.push_back (L160)"
+      ]
     },
     {
-      "id": "03000003",
-      "file": "src/bellatrix/block_processing.rs",
-      "line": 154,
-      "snippet": "process_execution_payload",
-      "risk_category": "Execution-Layer",
-      "description": "Critical bridge to execution layer. Must validate parent_hash consistency and prev_randao to prevent EL/CL inconsistencies that could lead to chain splits.",
-      "status": "ok"
+      "id": "FCC-DOS-002",
+      "file": "fork_choice_control/src/controller.rs",
+      "line": 375,
+      "snippet": "AttestationVerifierMessage::Attestation { ... }.send(&self.attestation_verifier_tx)",
+      "risk_category": "DoS",
+      "description": "Unbounded attestation processing without rate limiting. Attackers can spam attestations to saturate attestation_verifier channel. No validation of subnet_id against expected subnets.",
+      "status": "Vuln"
     },
     {
-      "id": "03000004",
-      "file": "src/capella/block_processing.rs",
-      "line": 413,
-      "snippet": "decrease_balance(balance(state, validator_index)?, amount)",
-      "risk_category": "Balance-Underflow",
-      "description": "Withdrawal processing decreases validator balances. Must ensure balance doesn't underflow. decrease_balance function should handle edge cases.",
-      "status": "ok"
+      "id": "FCC-DOS-003",
+      "file": "fork_choice_control/src/controller.rs",
+      "line": 361,
+      "snippet": "AttestationVerifierMessage::AggregateAndProof { ... }.send(&self.attestation_verifier_tx)",
+      "risk_category": "DoS",
+      "description": "No rate limiting on aggregate attestations. Attackers can flood with invalid aggregates to exhaust attestation verifier channel. No validation of aggregator index or selection proof before queueing.",
+      "status": "Vuln"
     },
     {
-      "id": "03000005",
-      "file": "src/capella/block_processing.rs",
-      "line": 468,
-      "snippet": "state.next_withdrawal_validator_index() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP",
-      "risk_category": "Integer-Overflow",
-      "description": "REVIEWED: Addition bounded by MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP constant. Modulo operation ensures no overflow.",
+      "id": "FCC-DOS-004",
+      "file": "fork_choice_control/src/controller.rs",
+      "line": 476,
+      "snippet": "self.spawn_blob_sidecar_task(blob_sidecar, block_seen, BlobSidecarOrigin::Gossip)",
+      "risk_category": "DoS",
+      "description": "Unbounded blob sidecar processing without rate limiting. Attackers can flood with invalid blobs to exhaust thread pool. KZG proof verification happens after task is already queued.",
+      "status": "Vuln"
+    },
+    {
+      "id": "FCC-EL-001",
+      "file": "fork_choice_control/src/controller.rs",
+      "line": 303,
+      "snippet": "on_notified_new_payload(..., payload_status: PayloadStatusV1)",
+      "risk_category": "ExecutionLayerTrust",
+      "description": "EL validation verified in mutator. handle_notified_new_payload validates consistency between latest_valid_hash and execution_block_hash. Invalid payloads trigger proper invalidation.",
       "status": "ok",
-      "review_round": 2
+      "review_round": 3
     },
     {
-      "id": "03000006",
-      "file": "src/unphased/epoch_processing.rs",
-      "line": 231,
-      "snippet": "target_balance * 3 >= current_epoch_active_balance * 2",
-      "risk_category": "Integer-Overflow",
-      "description": "CONFIRMED: Multiplication by 3 and 2 can overflow u64. With 2^19 validators at MAX_EFFECTIVE_BALANCE_ELECTRA (2048 ETH), total ~1e21 Gwei approaches u64::MAX. Requires checked arithmetic.",
-      "status": "Vuln",
-      "proof_trace": [
-        "weigh_justification_and_finalization (L214-284)",
-        "↳ justify_if_supermajority closure (L233)",
-        "↳ target_balance * 3 overflow at ~6e18 Gwei (L236)"
-      ],
-      "review_round": 2
+      "id": "FCC-WS-001",
+      "file": "fork_choice_control/src/checkpoint_sync.rs",
+      "line": 26,
+      "snippet": "load_finalized_from_remote(...)",
+      "risk_category": "WeakSubjectivity",
+      "description": "No cryptographic verification of checkpoint authenticity. Trusts remote endpoint completely enabling long-range attacks if compromised. Should verify against hardcoded weak subjectivity checkpoints.",
+      "status": "Vuln"
     },
     {
-      "id": "03000007",
-      "file": "src/unphased/block_processing.rs",
-      "line": 247,
-      "snippet": "validate_proposer_slashing_with_verifier",
-      "risk_category": "Slashing-Validation",
-      "description": "Critical slashing validation. Must ensure proposer is slashable and signatures are valid to prevent wrongful penalties or allowing double-signing.",
-      "status": "ok"
+      "id": "FCC-STOR-001",
+      "file": "fork_choice_control/src/storage.rs",
+      "line": 106,
+      "snippet": "pub async fn load(...)",
+      "risk_category": "Storage",
+      "description": "No integrity checks on loaded state data. Corrupted database could load invalid state as trusted anchor. Missing state root verification against known checkpoints.",
+      "status": "Vuln"
     },
     {
-      "id": "03000008",
-      "file": "src/unphased/block_processing.rs",
-      "line": 474,
-      "snippet": "validate_deposits",
-      "risk_category": "Deposit-Validation",
-      "description": "Validates deposit Merkle proofs and signatures. Uses batch verification with fallback. Critical for preventing unauthorized validator activation.",
-      "status": "ok"
-    },
-    {
-      "id": "03000009",
-      "file": "src/combined.rs",
-      "line": 695,
-      "snippet": "process_block_for_gossip phase matching",
-      "risk_category": "Phase-Mismatch",
-      "description": "Phase dispatcher must correctly match state and block phases. Mismatches could allow cross-phase attacks if not properly validated.",
-      "status": "ok"
-    },
-    {
-      "id": "03000010",
-      "file": "src/combined.rs",
-      "line": 256,
-      "snippet": "verify_signatures verifier abstraction",
-      "risk_category": "Verification-Bypass",
-      "description": "Uses generic Verifier trait allowing NullVerifier which bypasses checks. Must ensure NullVerifier only used for trusted inputs.",
-      "status": "ok"
-    }
-    },
-    {
-      "id": "03000011",
-      "file": "src/combined.rs",
-      "line": 743,
-      "snippet": "skip_randao_verification: bool",
-      "risk_category": "Crypto-Bypass",
-      "description": "CONFIRMED: Blinded blocks have same RANDAO bypass vulnerability. Production systems should never skip RANDAO verification for untrusted blocks.",
-      "status": "Vuln",
-      "proof_trace": [
-        "process_untrusted_blinded_block (L768-792)",
-        "↳ MultiVerifier with SkipRandaoVerification (L784)",
-        "↳ process_blinded_block bypasses check (L791)"
-      ],
-      "review_round": 2
-    },
-    {
-      "id": "03000012",
-      "file": "src/unphased/block_processing.rs",
-      "line": 336,
-      "snippet": "validate_attester_slashing_with_verifier",
-      "risk_category": "Slashing-Validation",
-      "description": "Validates attester slashing for double voting. Critical for preventing attesters from voting twice. Properly validates slashability and signatures.",
-      "status": "ok"
-    },
-    {
-      "id": "03000013",
-      "file": "src/bellatrix/block_processing.rs",
-      "line": 203,
-      "snippet": "process_execution_payload_for_gossip",
-      "risk_category": "Timestamp-Validation",
-      "description": "Lightweight gossip validation only checks timestamp. Full execution payload validation deferred to process_execution_payload.",
-      "status": "ok"
-    },
-    {
-      "id": "03000014",
-      "file": "src/capella/block_processing.rs",
-      "line": 494,
-      "snippet": "get_expected_withdrawals",
-      "risk_category": "Withdrawal-Computation",
-      "description": "Computes expected withdrawals with circular sweep. Properly handles full/partial withdrawals and index overflows. Critical for withdrawal security.",
-      "status": "ok"
-    },
-    {
-      "id": "03000015",
-      "file": "src/electra/block_processing.rs",
-      "line": 1077,
-      "snippet": "process_withdrawal_request",
-      "risk_category": "Withdrawal-Request",
-      "description": "New Electra feature allowing validator-initiated withdrawals. Complex validation logic with multiple silent failures. Requires careful review of all edge cases.",
-      "status": "ok"
-    },
-    {
-      "id": "03000016",
-      "file": "src/electra/block_processing.rs",
-      "line": 1089,
-      "snippet": "return Ok(())",
-      "risk_category": "Silent-Failure",
-      "description": "REVIEWED: Silent failures are intentional design to prevent execution layer from learning validator set composition. Not a vulnerability.",
+      "id": "FCC-DA-001",
+      "file": "fork_choice_control/src/mutator.rs",
+      "line": 1180,
+      "snippet": "if origin.is_from_el() { self.send_to_p2p(P2pMessage::PublishBlobSidecar(...)) }",
+      "risk_category": "DataAvailability",
+      "description": "EL blobs trusted by design. Execution layer is a trusted component that has already validated blobs. P2P propagation of EL-validated blobs is expected behavior.",
       "status": "ok",
-      "review_round": 2
+      "review_round": 3
     },
     {
-      "id": "03000017",
-      "file": "src/combined.rs",
-      "line": 56,
-      "snippet": "untrusted_state_transition",
-      "risk_category": "Entry-Point",
-      "description": "Primary attack surface for malicious consensus blocks. Properly uses MultiVerifier and StateRootPolicy::Verify for validation.",
+      "id": "FCC-DOS-005",
+      "file": "fork_choice_control/src/thread_pool.rs",
+      "line": 70,
+      "snippet": "task.spawn(&mut self.shared.critical.lock())",
+      "risk_category": "DoS",
+      "description": "Unbounded task queues allow memory exhaustion. high_priority_tasks and low_priority_tasks are VecDeque without size limits. Attackers can flood to exhaust memory.",
+      "status": "Vuln"
+    },
+    {
+      "id": "FCC-DOS-006",
+      "file": "fork_choice_control/src/mutator.rs",
+      "line": 2043,
+      "snippet": "self.delayed_until_blobs.insert(beacon_block_root, pending_block)",
+      "risk_category": "DoS",
+      "description": "Unbounded delayed_until_blobs HashMap with no size limits. Attackers can send blocks requiring blobs to exhaust memory. Each delayed block consumes memory until blobs arrive or pruning.",
+      "status": "Vuln"
+    },
+    {
+      "id": "FCC-DOS-007",
+      "file": "fork_choice_control/src/mutator.rs",
+      "line": 2120,
+      "snippet": "self.delayed_until_block...attestations.push(pending_attestation)",
+      "risk_category": "DoS",
+      "description": "Unbounded Vec<PendingAttestation> per block in delayed_until_block. Attackers can spam attestations for future blocks to exhaust memory. No per-block limit on delayed attestations.",
+      "status": "Vuln"
+    },
+    {
+      "id": "FCC-DOS-008",
+      "file": "fork_choice_control/src/mutator.rs",
+      "line": 2207,
+      "snippet": "self.delayed_until_slot...attestations.push(pending_attestation)",
+      "risk_category": "DoS",
+      "description": "Unbounded attestations per slot in BTreeMap. Can accumulate unlimited attestations for future slots. No validation of maximum future slot distance.",
+      "status": "Vuln"
+    },
+    {
+      "id": "FCC-OK-001",
+      "file": "fork_choice_control/src/block_processor.rs",
+      "line": 170,
+      "snippet": "validate_block_for_gossip",
+      "risk_category": "Validation",
+      "description": "Proper validation through store.validate_block_for_gossip. State cache is used for performance with parent state as fallback.",
       "status": "ok"
     },
     {
-      "id": "03000018",
-      "file": "src/combined.rs",
-      "line": 226,
-      "snippet": "verify_base_signature_with_head_state",
-      "risk_category": "Signature-Verification",
-      "description": "Critical block authentication with proper domain separation and fork versioning. Uses SingleVerifier for gossip validation.",
+      "id": "FCC-OK-002",
+      "file": "fork_choice_control/src/state_at_slot_cache.rs",
+      "line": 65,
+      "snippet": "get_or_try_init",
+      "risk_category": "CacheSecurity",
+      "description": "Cache poisoning prevented by mutex locking and single initialization pattern.",
       "status": "ok"
     },
     {
-      "id": "03000019",
-      "file": "src/combined.rs",
-      "line": 259,
-      "snippet": "verify_signatures phase dispatcher",
-      "risk_category": "Verification-Dispatch",
-      "description": "Routes all signature verification through phase-specific handlers. Proper phase matching prevents cross-phase attacks.",
-      "status": "ok"
-    },
-    {
-      "id": "03000020",
-      "file": "src/combined.rs",
-      "line": 844,
-      "snippet": "process_deposit_data",
-      "risk_category": "Deposit-Processing",
-      "description": "Phase dispatcher for deposit processing. Electra has modified eth1_deposit_index handling that requires careful review.",
-      "status": "ok"
-    },
-    {
-      "id": "03000021",
-      "file": "src/phase0/epoch_processing.rs",
-      "line": 141,
-      "snippet": "process_slashings",
-      "risk_category": "Slashing-Penalties",
-      "description": "Complex penalty calculations with overflow mitigation through factored arithmetic. Proper timing checks for correlation penalties.",
-      "status": "ok"
-    },
-    {
-      "id": "03000022",
-      "file": "src/unphased/epoch_processing.rs",
-      "line": 249,
-      "snippet": "current_epoch_active_balance * 2",
-      "risk_category": "Integer-Overflow",
-      "description": "CONFIRMED: Same overflow vulnerability as 03000006. Both multiplications in supermajority check need checked arithmetic.",
-      "status": "Vuln",
-      "proof_trace": [
-        "weigh_justification_and_finalization (L214-284)",
-        "↳ justify_if_supermajority (L233-245)",
-        "↳ current_epoch_active_balance * 2 overflow (L236)"
-      ],
-      "review_round": 2
-    },
-    {
-      "id": "03000023",
-      "file": "src/combined.rs",
-      "line": 635,
-      "snippet": "skip_signature_verification: false",
-      "risk_category": "Security-Check",
-      "description": "process_untrusted_block properly forces signature verification to false preventing bypass in untrusted context.",
-      "status": "ok"
-    },
-    {
-      "id": "03000024",
-      "file": "src/phase0/epoch_processing.rs",
-      "line": 180,
-      "snippet": "proportional_slashing_multiplier.safe_mul(sum_slashings)?",
-      "risk_category": "Safe-Arithmetic",
-      "description": "Slashing penalty calculation uses safe_mul to prevent overflow when calculating total penalties.",
+      "id": "FCC-OK-003",
+      "file": "fork_choice_control/src/storage.rs",
+      "line": 101,
+      "snippet": "load(...) prioritization logic",
+      "risk_category": "TrustModel",
+      "description": "Prioritizes local state over remote to prevent unnecessary network trust.",
       "status": "ok"
     }
   ],
   "summary": {
-    "rounds": 4,
-    "total_audit_flags": 24,
-    "confirmed_vulnerabilities": 4,
-    "false_positives_cleared": 5,
+    "rounds": 3,
+    "total_audit_flags": 10,
+    "confirmed_vulnerabilities": 10,
+    "false_positives": 2,
     "high_risk_hotspots": [
-      "src/combined.rs:process_untrusted_block (RANDAO bypass)",
-      "src/combined.rs:process_untrusted_blinded_block (RANDAO bypass)",
-      "src/unphased/epoch_processing.rs:weigh_justification_and_finalization (integer overflow)"
+      "fork_choice_control/src/controller.rs:on_gossip_* functions (DoS)",
+      "fork_choice_control/src/thread_pool.rs:spawn (Memory Exhaustion)",
+      "fork_choice_control/src/mutator.rs:delayed_until_* collections (Unbounded Queues)",
+      "fork_choice_control/src/checkpoint_sync.rs:load_finalized_from_remote (Weak Subjectivity)",
+      "fork_choice_control/src/storage.rs:load (No Integrity Checks)"
     ],
-    "next_focus": "Implement checked arithmetic for supermajority calculations and restrict RANDAO bypass to sync-only contexts"
+    "next_focus": "Analyze attestation_verifier_tx channel capacity and implement rate limiting for gossip handlers"
   }
 }

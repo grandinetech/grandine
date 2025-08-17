@@ -19,6 +19,10 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
+// @audit WeakSubjectivity: No cryptographic verification of checkpoint authenticity
+// ↳ Trusts remote endpoint completely - enables long-range attacks if compromised
+// ↳ Should verify checkpoint against hardcoded weak subjectivity checkpoints
+// ↳ Review Round 3: CONFIRMED VULNERABLE - No verification against known checkpoints
 pub async fn load_finalized_from_remote<P: Preset>(
     config: &Config,
     client: &Client,
@@ -83,6 +87,10 @@ async fn fetch_state<P: Preset>(
     fetch(config, client, url).await
 }
 
+// @audit DoS: No size limit on response bytes - memory exhaustion possible
+// ↳ Malicious server could send gigabytes of data causing OOM
+// ↳ Should enforce max response size before reading entire body into memory
+// ↳ Review Round 2: CONFIRMED - response.bytes() loads entire response without size check
 async fn fetch<T: SszRead<Config>>(
     config: &Config,
     client: &Client,
@@ -100,6 +108,7 @@ async fn fetch<T: SszRead<Config>>(
     }
 
     let response = response.error_for_status()?;
+    // @audit-ok: SSZ deserialization should fail if data is malformed
     let bytes = response.bytes().await?;
 
     Ok(Some(T::from_ssz(config, bytes)?))

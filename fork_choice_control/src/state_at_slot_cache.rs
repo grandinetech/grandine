@@ -61,6 +61,7 @@ impl<P: Preset> StateAtSlotCache<P> {
         Ok(())
     }
 
+    // @audit-ok: Cache poisoning prevented by mutex locking and single initialization
     pub fn get_or_try_init<F>(&self, slot: Slot, init: F) -> Result<Option<Arc<BeaconState<P>>>>
     where
         F: FnOnce() -> Result<Option<Arc<BeaconState<P>>>>,

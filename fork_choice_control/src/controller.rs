@@ -233,6 +233,10 @@ where
         .send(&self.mutator_tx)
     }
 
+    // @audit DoS: No rate limiting on gossip blocks - unbounded task spawning possible
+    // ↳ Malicious peers could flood with invalid blocks to exhaust thread pool resources
+    // ↳ Tasks are added to unbounded VecDeque queues in ThreadPool without any bounds checking
+    // ↳ Review Round 3: CONFIRMED VULNERABLE - Direct path from network to unbounded queue
     pub fn on_gossip_block(&self, block: Arc<SignedBeaconBlock<P>>, gossip_id: GossipId) {
         self.spawn_block_task(block, BlockOrigin::Gossip(gossip_id))
     }
@@ -292,6 +296,10 @@ where
         .send(&self.mutator_tx);
     }
 
+    // @audit-ok ExecutionLayer: EL validation verified in mutator
+    // ↳ Review Round 3: FALSE POSITIVE - handle_notified_new_payload validates consistency
+    // ↳ Checks latest_valid_hash == execution_block_hash for valid payloads
+    // ↳ Invalid payloads trigger invalidate_block_and_descendant_payloads
     pub fn on_notified_new_payload(
         &self,
         beacon_block_root: H256,
@@ -347,6 +355,10 @@ where
         .send(&self.attestation_verifier_tx);
     }
 
+    // @audit DoS: No rate limiting on aggregate attestations
+    // ↳ Attackers can flood with invalid aggregates to exhaust attestation verifier channel
+    // ↳ No validation of aggregator index or selection proof before queueing
+    // ↳ Review Round 3: CONFIRMED VULNERABLE - Unbounded channel to attestation verifier
     pub fn on_gossip_aggregate_and_proof(
         &self,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -360,6 +372,10 @@ where
         .send(&self.attestation_verifier_tx);
     }
 
+    // @audit DoS: Unbounded attestation processing without rate limiting
+    // ↳ Attackers can spam attestations to saturate attestation_verifier channel
+    // ↳ No validation of subnet_id against expected subnets for current slot
+    // ↳ Review Round 2: CONFIRMED - attestations sent directly to unbounded channel without rate limiting
     pub fn on_gossip_singular_attestation(
         &self,
         attestation: Arc<Attestation<P>>,
@@ -425,6 +441,9 @@ where
         .send(&self.mutator_tx)
     }
 
+    // @audit-ok: Validation happens in AttesterSlashingTask before applying to store
+    // ↳ While task is spawned immediately, actual validation occurs in the task execution
+    // ↳ However, no deduplication check could allow same slashing to be queued multiple times
     pub fn on_gossip_attester_slashing(&self, attester_slashing: Box<AttesterSlashing<P>>) {
         self.spawn(AttesterSlashingTask {
             store_snapshot: self.owned_store_snapshot(),
@@ -451,6 +470,10 @@ where
         self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::ExecutionLayer)
     }
 
+    // @audit DoS: Unbounded blob sidecar processing without rate limiting
+    // ↳ Attackers can flood with invalid blobs to exhaust thread pool
+    // ↳ No validation of subnet_id or blob index bounds before task spawning
+    // ↳ KZG proof verification happens after task is already queued
     pub fn on_gossip_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,

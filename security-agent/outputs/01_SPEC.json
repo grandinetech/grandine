@@ -1,0 +1,259 @@
+{
+  "metadata": {
+    "source_directory": "@fork_choice_control/",
+    "spec_generated_at": "2025-01-17T00:00:00Z",
+    "latest_tag_or_commit": "926a028",
+    "latest_release_date": "2025-01-16",
+    "schema_version": "1.0.0"
+  },
+  "architecture": {
+    "overview": "Fork choice control module for Ethereum consensus layer implementation that manages blockchain state transitions, block processing, attestation verification, and fork choice rule application. It provides parallel processing capabilities, state persistence, and integrates with execution engines for validating blocks.",
+    "components": [
+      {
+        "name": "Controller",
+        "type": "service",
+        "description": "Main orchestrator that coordinates parallel block and attestation processing, manages state snapshots, and handles communication between components via message passing",
+        "technology": ["Rust", "Arc-swap", "Tokio"],
+        "depends_on": ["BlockProcessor", "Storage", "ThreadPool", "Mutator", "StateCache"]
+      },
+      {
+        "name": "BlockProcessor",
+        "type": "library",
+        "description": "Validates and processes beacon blocks, performs state transitions, and manages block rewards calculation with caching support",
+        "technology": ["Rust"],
+        "depends_on": ["StateCache", "PubkeyCache", "ExecutionEngine"]
+      },
+      {
+        "name": "Storage",
+        "type": "db",
+        "description": "Persistent storage layer for finalized and unfinalized blocks, states, and blob sidecars with configurable archival and pruning modes",
+        "technology": ["Rust", "Database"],
+        "depends_on": ["Database", "PubkeyCache"]
+      },
+      {
+        "name": "Mutator",
+        "type": "service",
+        "description": "Background thread that applies mutations to the fork choice store, processes delayed objects, and maintains consistency",
+        "technology": ["Rust"],
+        "depends_on": ["Store", "EventChannels", "Storage"]
+      },
+      {
+        "name": "ThreadPool",
+        "type": "service",
+        "description": "Task scheduler for parallel processing of blocks, attestations, and other consensus operations with priority support",
+        "technology": ["Rust", "Crossbeam"],
+        "depends_on": []
+      },
+      {
+        "name": "AttestationVerifier",
+        "type": "service",
+        "description": "Validates attestations and aggregate proofs from validators and gossip network",
+        "technology": ["Rust"],
+        "depends_on": ["Store", "PubkeyCache"]
+      },
+      {
+        "name": "StateAtSlotCache",
+        "type": "library",
+        "description": "LRU cache for beacon states at specific slots to optimize state lookups",
+        "technology": ["Rust", "Cached"],
+        "depends_on": []
+      },
+      {
+        "name": "CheckpointSync",
+        "type": "library",
+        "description": "Fetches finalized checkpoints from remote beacon nodes for fast synchronization",
+        "technology": ["Rust", "Reqwest"],
+        "depends_on": []
+      }
+    ],
+    "data_flow_diagram": "flowchart TD\n    GN[Gossip Network] -->|blocks/attestations| C[Controller]\n    V[Validators] -->|attestations| C\n    C -->|spawn tasks| TP[ThreadPool]\n    TP -->|process| BP[BlockProcessor]\n    TP -->|verify| AV[AttestationVerifier]\n    BP -->|state transition| SC[StateCache]\n    AV -->|validated| M[Mutator]\n    BP -->|validated| M\n    M -->|update| S[Store]\n    M -->|persist| ST[Storage]\n    S -->|snapshot| C\n    EE[ExecutionEngine] <-->|validate payload| BP\n    CS[CheckpointSync] -->|initial state| ST"
+  },
+  "user_flows": [
+    {
+      "id": 1,
+      "title": "Process gossip block from network",
+      "actors": ["P2P Network", "Controller", "BlockProcessor", "Mutator", "Storage"],
+      "preconditions": ["Node is synchronized", "Block parent exists"],
+      "steps": [
+        "1. P2P network receives signed beacon block via gossip",
+        "2. Controller spawns block validation task with gossip ID",
+        "3. BlockProcessor validates block signature and state transition",
+        "4. Execution engine validates execution payload if post-merge",
+        "5. Mutator updates fork choice store with validated block",
+        "6. Storage persists block if on canonical chain",
+        "7. Event channels notify subscribers of new block"
+      ],
+      "postconditions": ["Block added to fork choice", "Head potentially updated"]
+    },
+    {
+      "id": 2,
+      "title": "Validator submits attestation",
+      "actors": ["Validator", "Controller", "AttestationVerifier", "Mutator"],
+      "preconditions": ["Validator has duties for slot", "Target block exists"],
+      "steps": [
+        "1. Validator creates attestation for head block",
+        "2. Controller receives attestation via validator API",
+        "3. AttestationVerifier validates signature and target",
+        "4. Mutator aggregates attestation with existing ones",
+        "5. Store updates validator balances for fork choice",
+        "6. P2P publishes attestation to subnet"
+      ],
+      "postconditions": ["Attestation recorded", "Fork choice weights updated"]
+    },
+    {
+      "id": 3,
+      "title": "Checkpoint sync initialization",
+      "actors": ["Node Operator", "CheckpointSync", "Storage", "Controller"],
+      "preconditions": ["Checkpoint sync URL configured", "No existing database"],
+      "steps": [
+        "1. Node starts with checkpoint sync URL parameter",
+        "2. CheckpointSync fetches finalized block from remote node",
+        "3. CheckpointSync fetches corresponding state",
+        "4. Storage initializes with checkpoint as anchor",
+        "5. Controller initializes fork choice with anchor",
+        "6. Node begins syncing forward from checkpoint"
+      ],
+      "postconditions": ["Node synchronized from checkpoint", "Fork choice initialized"]
+    },
+    {
+      "id": 4,
+      "title": "Fork choice head update on tick",
+      "actors": ["Clock", "Controller", "Mutator", "Store"],
+      "preconditions": ["Node is running", "New slot has started"],
+      "steps": [
+        "1. Clock service triggers slot tick event",
+        "2. Controller sends tick message to mutator",
+        "3. Mutator applies tick to update store time",
+        "4. Store recalculates fork choice based on new slot",
+        "5. Head block potentially changes based on attestations",
+        "6. Execution engine notified of fork choice update",
+        "7. Validator duties updated for new head"
+      ],
+      "postconditions": ["Fork choice updated for slot", "Head block determined"]
+    },
+    {
+      "id": 5,
+      "title": "Blob sidecar processing for data availability",
+      "actors": ["P2P Network", "Controller", "Storage"],
+      "preconditions": ["Deneb fork activated", "Block with blob commitments received"],
+      "steps": [
+        "1. P2P receives blob sidecar via gossip",
+        "2. Controller validates blob against commitment",
+        "3. Blob KZG proof verification performed",
+        "4. Storage persists blob if validation passes",
+        "5. Block marked as data-available when all blobs received",
+        "6. Pruning removes old blobs after finalization"
+      ],
+      "postconditions": ["Data availability satisfied", "Block fully validated"]
+    }
+  ],
+  "api_surface": {
+    "rest_endpoints": [],
+    "cli_commands": [],
+    "smart_contract_interfaces": [],
+    "rust_api": [
+      {"method": "Controller::new", "description": "Initialize fork choice controller with anchor state"},
+      {"method": "Controller::on_tick", "description": "Process slot tick for fork choice updates"},
+      {"method": "Controller::on_gossip_block", "description": "Handle block received from gossip network"},
+      {"method": "Controller::on_requested_block", "description": "Handle block received from sync request"},
+      {"method": "Controller::on_own_block", "description": "Process locally produced block"},
+      {"method": "Controller::on_api_block", "description": "Handle block submitted via API"},
+      {"method": "Controller::on_attestation", "description": "Process attestation from validator"},
+      {"method": "Controller::on_aggregate_and_proof", "description": "Handle aggregated attestation"},
+      {"method": "Controller::on_attester_slashing", "description": "Process attester slashing evidence"},
+      {"method": "Controller::on_blob_sidecar", "description": "Handle blob sidecar for data availability"},
+      {"method": "Controller::justified_checkpoint", "description": "Query current justified checkpoint"},
+      {"method": "Controller::finalized_checkpoint", "description": "Query current finalized checkpoint"},
+      {"method": "Controller::head", "description": "Get current head block of canonical chain"},
+      {"method": "Controller::state_at_slot", "description": "Retrieve beacon state at specific slot"},
+      {"method": "Controller::wait_for_tasks", "description": "Wait for ongoing processing tasks"},
+      {"method": "Storage::load", "description": "Load state from database or checkpoint sync"},
+      {"method": "Storage::save", "description": "Persist store state to database"},
+      {"method": "BlockProcessor::validate_block_for_gossip", "description": "Validate block for gossip propagation"},
+      {"method": "export_state_and_blocks", "description": "Export chain data for analysis"},
+      {"method": "replay_blocks", "description": "Replay blocks for testing or recovery"}
+    ]
+  },
+  "changelog": {
+    "latest_version": "current",
+    "since_previous": [
+      {"commit": "926a028", "date": "2025-01-16", "summary": "Merge from upstream develop branch"},
+      {"commit": "8edd98f", "date": "2025-01-16", "summary": "Update Tokio to version 1.47.1"},
+      {"commit": "a54c5ef", "date": "2025-01-16", "summary": "Fix rpc_blob_limits configuration"},
+      {"commit": "d4158ee", "date": "2025-01-16", "summary": "Fix wait for fully verified head for sync committee duties in local validator"}
+    ],
+    "breaking_changes": []
+  },
+  "security_requirements": [
+    {
+      "id": "SR-001",
+      "description": "Block state transitions must be validated before applying to prevent invalid state corruption",
+      "risk_category": "integrity",
+      "related_components": ["BlockProcessor", "Store"],
+      "references": ["State transition validation"]
+    },
+    {
+      "id": "SR-002",
+      "description": "Attestation signatures must be cryptographically verified to prevent forgery",
+      "risk_category": "authentication",
+      "related_components": ["AttestationVerifier", "PubkeyCache"],
+      "references": ["BLS signature verification"]
+    },
+    {
+      "id": "SR-003",
+      "description": "Fork choice computation must be deterministic and resistant to balancing attacks",
+      "risk_category": "consensus",
+      "related_components": ["Store", "Mutator"],
+      "references": ["LMD-GHOST fork choice"]
+    },
+    {
+      "id": "SR-004",
+      "description": "Execution payload validation must be performed through execution engine to prevent invalid transactions",
+      "risk_category": "integrity",
+      "related_components": ["BlockProcessor", "ExecutionEngine"],
+      "references": ["Engine API validation"]
+    },
+    {
+      "id": "SR-005",
+      "description": "Checkpoint sync must verify finalized checkpoint authenticity to prevent long-range attacks",
+      "risk_category": "authentication",
+      "related_components": ["CheckpointSync", "Storage"],
+      "references": ["Weak subjectivity checkpoints"]
+    },
+    {
+      "id": "SR-006",
+      "description": "Parallel processing must maintain consistency through proper synchronization to prevent race conditions",
+      "risk_category": "integrity",
+      "related_components": ["Controller", "ThreadPool", "Mutator"],
+      "references": ["Arc-swap atomic updates"]
+    },
+    {
+      "id": "SR-007",
+      "description": "Storage operations must be atomic to prevent partial writes and database corruption",
+      "risk_category": "availability",
+      "related_components": ["Storage", "Database"],
+      "references": ["Database transactions"]
+    },
+    {
+      "id": "SR-008",
+      "description": "Attester slashing evidence must be validated to prevent false slashing accusations",
+      "risk_category": "integrity",
+      "related_components": ["Controller", "Store"],
+      "references": ["Slashing conditions"]
+    },
+    {
+      "id": "SR-009",
+      "description": "Blob sidecar KZG proofs must be verified for data availability guarantees",
+      "risk_category": "availability",
+      "related_components": ["Controller", "Storage"],
+      "references": ["EIP-4844 KZG commitments"]
+    },
+    {
+      "id": "SR-010",
+      "description": "Message passing between components must handle channel failures gracefully to prevent deadlocks",
+      "risk_category": "availability",
+      "related_components": ["Controller", "Mutator", "AttestationVerifier"],
+      "references": ["Channel error handling"]
+    }
+  ]
+}

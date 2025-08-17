@@ -64,6 +64,9 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
         Ok(Self { shared })
     }
 
+    // @audit DoS: Unbounded task queues allow memory exhaustion
+    // ↳ high_priority_tasks and low_priority_tasks are VecDeque without size limits
+    // ↳ Attackers can flood with invalid blocks/attestations to exhaust memory
     pub fn spawn(&self, task: impl Spawn<P, E, W>) {
         task.spawn(&mut self.shared.critical.lock());
         self.shared.condvar.notify_one();

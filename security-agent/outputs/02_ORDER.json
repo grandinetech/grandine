@@ -1,351 +1,346 @@
 {
   "metadata": {
-    "target_folder": "transition_functions/",
+    "target_folder": "fork_choice_control/",
     "static_callgraph": "NONE",
     "spec_loaded": true,
-    "generated_at": "2025-01-06T12:00:00Z",
+    "generated_at": "2025-01-17T00:00:00Z",
     "schema_version": "1.0.0",
-    "review_rounds": 4
+    "review_rounds": 3
   },
   "audit_chunks": [
     {
-      "chunk_title": "🚪 External entry points — untrusted block & signature handlers",
-      "rationale": "Primary attack surface for malicious blocks and signatures from network",
+      "chunk_title": "🌐 External Network Entry Points - Gossip & P2P Handlers",
+      "rationale": "Primary untrusted input handlers from network peers. Critical attack surface for DoS, consensus attacks, and state corruption",
       "functions": [
-        {"name": "untrusted_state_transition", "file": "src/combined.rs", "line": 56, "review_count": 1},
-        {"name": "process_untrusted_block", "file": "src/combined.rs", "line": 623, "review_count": 1},
-        {"name": "process_block_for_gossip", "file": "src/combined.rs", "line": 703},
-        {"name": "process_untrusted_blinded_block", "file": "src/combined.rs", "line": 746, "review_count": 1},
-        {"name": "process_block_header_for_gossip", "file": "src/unphased/block_processing.rs", "line": 76},
-        {"name": "verify_base_signature_with_head_state", "file": "src/combined.rs", "line": 226, "review_count": 1}
+        {"name": "on_gossip_block", "file": "fork_choice_control/src/controller.rs", "line": 240},
+        {"name": "on_gossip_singular_attestation", "file": "fork_choice_control/src/controller.rs", "line": 379},
+        {"name": "on_gossip_aggregate_and_proof", "file": "fork_choice_control/src/controller.rs", "line": 362},
+        {"name": "on_gossip_blob_sidecar", "file": "fork_choice_control/src/controller.rs", "line": 477},
+        {"name": "on_gossip_attester_slashing", "file": "fork_choice_control/src/controller.rs", "line": 447},
+        {"name": "on_requested_block", "file": "fork_choice_control/src/controller.rs", "line": 244},
+        {"name": "on_requested_blob_sidecar", "file": "fork_choice_control/src/controller.rs", "line": 491},
+        {"name": "validate_block_for_gossip", "file": "fork_choice_control/src/block_processor.rs", "line": 170}
       ]
     },
     {
-      "chunk_title": "🔐 Cryptographic signature verification",
-      "rationale": "Critical authentication layer preventing unauthorized state changes",
+      "chunk_title": "🔌 Validator API Entry Points",
+      "rationale": "Semi-trusted input from validators and beacon API. Can be exploited for slashing attacks or consensus manipulation",
       "functions": [
-        {"name": "verify_signatures", "file": "src/combined.rs", "line": 259, "review_count": 1},
-        {"name": "validate_proposer_slashing_with_verifier", "file": "src/unphased/block_processing.rs", "line": 251},
-        {"name": "validate_attester_slashing_with_verifier", "file": "src/unphased/block_processing.rs", "line": 339},
-        {"name": "validate_attestation_with_verifier", "file": "src/unphased/block_processing.rs", "line": 409},
-        {"name": "validate_voluntary_exit_with_verifier", "file": "src/unphased/block_processing.rs", "line": 698},
-        {"name": "validate_bls_to_execution_change_with_verifier", "file": "src/capella/block_processing.rs", "line": 386},
-        {"name": "verify_sync_aggregate_signature", "file": "src/altair/block_processing.rs", "line": 592},
-        {"name": "is_valid_deposit_signature", "file": "src/electra/epoch_processing.rs", "line": 341}
+        {"name": "on_api_block", "file": "fork_choice_control/src/controller.rs", "line": 269},
+        {"name": "on_api_block_for_gossip", "file": "fork_choice_control/src/controller.rs", "line": 277},
+        {"name": "on_api_blob_sidecar", "file": "fork_choice_control/src/controller.rs", "line": 261},
+        {"name": "on_api_singular_attestation", "file": "fork_choice_control/src/controller.rs", "line": 332},
+        {"name": "on_api_singular_attestation_batch", "file": "fork_choice_control/src/controller.rs", "line": 348},
+        {"name": "on_api_aggregate_and_proof", "file": "fork_choice_control/src/controller.rs", "line": 319},
+        {"name": "on_own_block", "file": "fork_choice_control/src/controller.rs", "line": 248},
+        {"name": "on_own_blob_sidecar", "file": "fork_choice_control/src/controller.rs", "line": 252},
+        {"name": "on_own_attester_slashing", "file": "fork_choice_control/src/controller.rs", "line": 458}
       ]
     },
     {
-      "chunk_title": "⚠️ Slashing detection & punishment",
-      "rationale": "Protocol security enforcement through economic penalties",
+      "chunk_title": "🔄 Synchronization & Remote Loading",
+      "rationale": "Handles checkpoint sync and state loading from remote nodes. Vulnerable to long-range attacks if trust assumptions fail",
       "functions": [
-        {"name": "validate_proposer_slashing", "file": "src/unphased/block_processing.rs", "line": 233},
-        {"name": "validate_attester_slashing", "file": "src/unphased/block_processing.rs", "line": 322},
-        {"name": "process_proposer_slashing", "file": "src/phase0/block_processing.rs", "line": 241},
-        {"name": "process_attester_slashing", "file": "src/phase0/block_processing.rs", "line": 269},
-        {"name": "process_slashings", "file": "src/phase0/epoch_processing.rs", "line": 141, "review_count": 1},
-        {"name": "process_slashings_reset", "file": "src/unphased/epoch_processing.rs", "line": 182}
+        {"name": "load_finalized_from_remote", "file": "fork_choice_control/src/checkpoint_sync.rs", "line": 26},
+        {"name": "fetch_block", "file": "fork_choice_control/src/checkpoint_sync.rs", "line": 68},
+        {"name": "fetch_state", "file": "fork_choice_control/src/checkpoint_sync.rs", "line": 79},
+        {"name": "fetch", "file": "fork_choice_control/src/checkpoint_sync.rs", "line": 94},
+        {"name": "store_back_sync_blocks", "file": "fork_choice_control/src/controller.rs", "line": 517},
+        {"name": "store_back_sync_blob_sidecars", "file": "fork_choice_control/src/controller.rs", "line": 510},
+        {"name": "archive_back_sync_states", "file": "fork_choice_control/src/controller.rs", "line": 524}
       ]
     },
     {
-      "chunk_title": "💰 Deposit & withdrawal processing",
-      "rationale": "Financial operations handling ETH movements between layers",
+      "chunk_title": "⚡ Execution Engine Integration",
+      "rationale": "Critical trust boundary with execution layer. Improper validation leads to consensus split or invalid payload acceptance",
       "functions": [
-        {"name": "validate_deposits", "file": "src/unphased/block_processing.rs", "line": 490},
-        {"name": "verify_deposit_merkle_branch", "file": "src/unphased/block_processing.rs", "line": 642},
-        {"name": "process_deposit_data", "file": "src/combined.rs", "line": 844, "review_count": 1},
-        {"name": "apply_deposits", "file": "src/phase0/block_processing.rs", "line": 386},
-        {"name": "process_deposit_request", "file": "src/electra/block_processing.rs", "line": 1185},
-        {"name": "process_pending_deposits", "file": "src/electra/epoch_processing.rs", "line": 230},
-        {"name": "apply_pending_deposit", "file": "src/electra/epoch_processing.rs", "line": 314},
-        {"name": "process_withdrawals", "file": "src/capella/block_processing.rs", "line": 417},
-        {"name": "get_expected_withdrawals", "file": "src/capella/block_processing.rs", "line": 498},
-        {"name": "process_withdrawal_request", "file": "src/electra/block_processing.rs", "line": 1080},
-        {"name": "process_withdrawals_root", "file": "src/capella/blinded_block_processing.rs", "line": 122}
+        {"name": "on_notified_fork_choice_update", "file": "fork_choice_control/src/controller.rs", "line": 291},
+        {"name": "on_notified_new_payload", "file": "fork_choice_control/src/controller.rs", "line": 304},
+        {"name": "on_el_blob_sidecar", "file": "fork_choice_control/src/controller.rs", "line": 469},
+        {"name": "handle_notified_forkchoice_update_result", "file": "fork_choice_control/src/mutator.rs", "line": 1374},
+        {"name": "handle_notified_new_payload", "file": "fork_choice_control/src/mutator.rs", "line": 1393},
+        {"name": "notify_forkchoice_updated", "file": "fork_choice_control/src/mutator.rs", "line": 1996},
+        {"name": "request_blobs_from_execution_engine", "file": "fork_choice_control/src/mutator.rs", "line": 1986}
       ]
     },
     {
-      "chunk_title": "🔌 Execution layer integration",
-      "rationale": "Critical bridge between consensus and execution layers post-merge",
+      "chunk_title": "🔐 Block Validation & State Transitions",
+      "rationale": "Core consensus security - validates blocks and performs state transitions. Bugs here directly compromise chain integrity",
       "functions": [
-        {"name": "process_execution_payload", "file": "src/bellatrix/block_processing.rs", "line": 157},
-        {"name": "process_execution_payload_for_gossip", "file": "src/bellatrix/block_processing.rs", "line": 206},
-        {"name": "process_execution_payload", "file": "src/capella/block_processing.rs", "line": 165},
-        {"name": "process_execution_payload", "file": "src/deneb/block_processing.rs", "line": 161},
-        {"name": "process_execution_payload", "file": "src/electra/block_processing.rs", "line": 452},
-        {"name": "compute_source_address", "file": "src/electra/block_processing.rs", "line": 1372}
+        {"name": "process_untrusted_block_with_report", "file": "fork_choice_control/src/block_processor.rs", "line": 42},
+        {"name": "process_trusted_block_with_report", "file": "fork_choice_control/src/block_processor.rs", "line": 67},
+        {"name": "process_untrusted_blinded_block_with_report", "file": "fork_choice_control/src/block_processor.rs", "line": 90},
+        {"name": "process_trusted_blinded_block_with_report", "file": "fork_choice_control/src/block_processor.rs", "line": 115},
+        {"name": "perform_state_transition", "file": "fork_choice_control/src/block_processor.rs", "line": 139},
+        {"name": "validate_block", "file": "fork_choice_control/src/block_processor.rs", "line": 197},
+        {"name": "calculate_block_rewards", "file": "fork_choice_control/src/block_processor.rs", "line": 267},
+        {"name": "handle_block", "file": "fork_choice_control/src/mutator.rs", "line": 501},
+        {"name": "accept_block", "file": "fork_choice_control/src/mutator.rs", "line": 1538},
+        {"name": "reject_block", "file": "fork_choice_control/src/mutator.rs", "line": 1847}
       ]
     },
     {
-      "chunk_title": "📜 Attestation & voting validation",
-      "rationale": "Consensus participation validation preventing finality attacks",
+      "chunk_title": "🗳️ Attestation Processing & Aggregation",
+      "rationale": "Validates validator votes. Improper handling enables balancing attacks and fork choice manipulation",
       "functions": [
-        {"name": "validate_attestation", "file": "src/unphased/block_processing.rs", "line": 396},
-        {"name": "apply_attestation", "file": "src/phase0/block_processing.rs", "line": 299},
-        {"name": "apply_attestation", "file": "src/altair/block_processing.rs", "line": 319},
-        {"name": "apply_attestation", "file": "src/electra/block_processing.rs", "line": 702},
-        {"name": "validate_attestation_with_verifier", "file": "src/deneb/block_processing.rs", "line": 362},
-        {"name": "validate_attestation_with_verifier", "file": "src/electra/block_processing.rs", "line": 761},
-        {"name": "process_sync_aggregate", "file": "src/altair/block_processing.rs", "line": 527}
+        {"name": "on_singular_attestation", "file": "fork_choice_control/src/controller.rs", "line": 410},
+        {"name": "on_aggregate_and_proof", "file": "fork_choice_control/src/controller.rs", "line": 395},
+        {"name": "on_attestation_batch", "file": "fork_choice_control/src/controller.rs", "line": 432},
+        {"name": "on_aggregate_and_proof_batch", "file": "fork_choice_control/src/controller.rs", "line": 420},
+        {"name": "handle_attestation", "file": "fork_choice_control/src/mutator.rs", "line": 906},
+        {"name": "handle_attestation_batch", "file": "fork_choice_control/src/mutator.rs", "line": 1048},
+        {"name": "handle_aggregate_and_proof", "file": "fork_choice_control/src/mutator.rs", "line": 730},
+        {"name": "handle_aggregate_and_proof_batch", "file": "fork_choice_control/src/mutator.rs", "line": 893},
+        {"name": "handle_block_attestations", "file": "fork_choice_control/src/mutator.rs", "line": 1060},
+        {"name": "prevalidate_verifier_attestation", "file": "fork_choice_control/src/queries.rs", "line": 933},
+        {"name": "prevalidate_verifier_aggregate_and_proof", "file": "fork_choice_control/src/queries.rs", "line": 921}
       ]
     },
     {
-      "chunk_title": "⚖️ Finality & justification",
-      "rationale": "Core finality mechanism securing chain consensus",
+      "chunk_title": "🎯 Fork Choice & Head Selection",
+      "rationale": "Determines canonical chain. Critical for consensus - bugs lead to chain splits or stuck chains",
       "functions": [
-        {"name": "weigh_justification_and_finalization", "file": "src/unphased/epoch_processing.rs", "line": 217, "review_count": 1},
-        {"name": "process_justification_and_finalization", "file": "src/combined.rs", "line": 465},
-        {"name": "process_justification_and_finalization", "file": "src/phase0/epoch_processing.rs", "line": 125},
-        {"name": "process_justification_and_finalization", "file": "src/altair/epoch_processing.rs", "line": 151},
-        {"name": "should_process_justification_and_finalization", "file": "src/unphased/epoch_processing.rs", "line": 285}
+        {"name": "on_tick", "file": "fork_choice_control/src/controller.rs", "line": 211},
+        {"name": "handle_tick", "file": "fork_choice_control/src/mutator.rs", "line": 341},
+        {"name": "handle_potential_head_change", "file": "fork_choice_control/src/mutator.rs", "line": 1474},
+        {"name": "head", "file": "fork_choice_control/src/queries.rs", "line": 224},
+        {"name": "head_slot", "file": "fork_choice_control/src/queries.rs", "line": 236},
+        {"name": "head_block_root", "file": "fork_choice_control/src/queries.rs", "line": 241},
+        {"name": "head_block", "file": "fork_choice_control/src/queries.rs", "line": 253},
+        {"name": "head_state", "file": "fork_choice_control/src/queries.rs", "line": 265},
+        {"name": "fork_tips", "file": "fork_choice_control/src/queries.rs", "line": 178},
+        {"name": "fork_choice_context", "file": "fork_choice_control/src/queries.rs", "line": 193}
       ]
     },
     {
-      "chunk_title": "🔄 Core state transitions",
-      "rationale": "Central state machine coordinating all transition phases",
+      "chunk_title": "🛡️ Slashing & Penalty Processing",
+      "rationale": "Enforces protocol rules through penalties. Incorrect processing allows false slashing of honest validators",
       "functions": [
-        {"name": "custom_state_transition", "file": "src/combined.rs", "line": 119},
-        {"name": "state_transition", "file": "src/phase0/state_transition.rs", "line": 26},
-        {"name": "state_transition", "file": "src/altair/state_transition.rs", "line": 25},
-        {"name": "state_transition", "file": "src/bellatrix/state_transition.rs", "line": 29},
-        {"name": "state_transition", "file": "src/capella/state_transition.rs", "line": 30},
-        {"name": "state_transition", "file": "src/deneb/state_transition.rs", "line": 30},
-        {"name": "state_transition", "file": "src/electra/state_transition.rs", "line": 30},
-        {"name": "trusted_state_transition", "file": "src/combined.rs", "line": 76},
-        {"name": "state_transition_for_report", "file": "src/combined.rs", "line": 95}
+        {"name": "handle_attester_slashing", "file": "fork_choice_control/src/mutator.rs", "line": 1136},
+        {"name": "exibits_equivocation", "file": "fork_choice_control/src/queries.rs", "line": 370},
+        {"name": "send_attester_slashing_event", "file": "fork_choice_control/src/events.rs", "line": 162},
+        {"name": "send_attester_slashing_event_internal", "file": "fork_choice_control/src/events.rs", "line": 321},
+        {"name": "send_proposer_slashing_event", "file": "fork_choice_control/src/events.rs", "line": 284},
+        {"name": "send_proposer_slashing_event_internal", "file": "fork_choice_control/src/events.rs", "line": 468}
       ]
     },
     {
-      "chunk_title": "⏰ Slot & epoch processing",
-      "rationale": "Time-based state progression and epoch transitions",
+      "chunk_title": "📦 Blob Sidecar & Data Availability",
+      "rationale": "EIP-4844 data availability layer. Incorrect KZG verification enables data withholding attacks",
       "functions": [
-        {"name": "process_slots", "file": "src/combined.rs", "line": 302},
-        {"name": "process_slot", "file": "src/unphased/slot_processing.rs", "line": 31},
-        {"name": "process_slots", "file": "src/phase0/slot_processing.rs", "line": 13},
-        {"name": "process_slots", "file": "src/altair/slot_processing.rs", "line": 12},
-        {"name": "process_slots", "file": "src/bellatrix/slot_processing.rs", "line": 12},
-        {"name": "process_slots", "file": "src/capella/slot_processing.rs", "line": 12},
-        {"name": "process_slots", "file": "src/deneb/slot_processing.rs", "line": 12},
-        {"name": "process_slots", "file": "src/electra/slot_processing.rs", "line": 12}
+        {"name": "handle_blob_sidecar", "file": "fork_choice_control/src/mutator.rs", "line": 1169},
+        {"name": "accept_blob_sidecar", "file": "fork_choice_control/src/mutator.rs", "line": 1881},
+        {"name": "spawn_blob_sidecar_task", "file": "fork_choice_control/src/controller.rs", "line": 539},
+        {"name": "spawn_blob_sidecar_task_with_wait_group", "file": "fork_choice_control/src/controller.rs", "line": 553},
+        {"name": "validate_blob_sidecar_with_state", "file": "fork_choice_control/src/queries.rs", "line": 644},
+        {"name": "block_blob_availability", "file": "fork_choice_control/src/mutator.rs", "line": 2990},
+        {"name": "blob_sidecar_by_id", "file": "fork_choice_control/src/storage.rs", "line": 403},
+        {"name": "blob_sidecars_by_ids", "file": "fork_choice_control/src/queries.rs", "line": 463},
+        {"name": "blob_sidecars_by_range", "file": "fork_choice_control/src/queries.rs", "line": 486},
+        {"name": "cached_blob_sidecar_by_id", "file": "fork_choice_control/src/queries.rs", "line": 1009}
       ]
     },
     {
-      "chunk_title": "🏆 Rewards & penalties calculation",
-      "rationale": "Economic incentive calculations driving validator behavior",
+      "chunk_title": "✅ Checkpoint & Finalization Logic",
+      "rationale": "Ensures chain finality. Bugs enable long-range attacks or prevent finalization",
       "functions": [
-        {"name": "process_rewards_and_penalties", "file": "src/unphased/epoch_processing.rs", "line": 48},
-        {"name": "should_process_rewards_and_penalties", "file": "src/unphased/epoch_processing.rs", "line": 294},
-        {"name": "process_inactivity_updates", "file": "src/altair/epoch_processing.rs", "line": 167},
-        {"name": "should_process_inactivity_updates", "file": "src/altair/epoch_processing.rs", "line": 290},
-        {"name": "epoch_deltas", "file": "src/phase0/epoch_intermediates.rs", "line": 665},
-        {"name": "epoch_deltas", "file": "src/altair/epoch_intermediates.rs", "line": 239}
+        {"name": "justified_checkpoint", "file": "fork_choice_control/src/queries.rs", "line": 67},
+        {"name": "finalized_checkpoint", "file": "fork_choice_control/src/queries.rs", "line": 681},
+        {"name": "finalized_epoch", "file": "fork_choice_control/src/queries.rs", "line": 72},
+        {"name": "finalized_root", "file": "fork_choice_control/src/queries.rs", "line": 77},
+        {"name": "last_finalized_block_root", "file": "fork_choice_control/src/queries.rs", "line": 121},
+        {"name": "last_finalized_block", "file": "fork_choice_control/src/queries.rs", "line": 133},
+        {"name": "last_finalized_state", "file": "fork_choice_control/src/queries.rs", "line": 151},
+        {"name": "handle_checkpoint_state", "file": "fork_choice_control/src/mutator.rs", "line": 1302},
+        {"name": "checkpoint_state", "file": "fork_choice_control/src/queries.rs", "line": 169},
+        {"name": "notify_about_finalized_checkpoint", "file": "fork_choice_control/src/mutator.rs", "line": 1911},
+        {"name": "send_finalized_checkpoint_event", "file": "fork_choice_control/src/events.rs", "line": 222}
       ]
     },
     {
-      "chunk_title": "📋 Validator lifecycle management",
-      "rationale": "Validator activation, exit and registry management",
+      "chunk_title": "💾 Storage & Persistence Layer",
+      "rationale": "Database operations for chain state. Corruption or inconsistency leads to permanent chain damage",
       "functions": [
-        {"name": "process_registry_updates", "file": "src/unphased/epoch_processing.rs", "line": 68},
-        {"name": "process_registry_updates", "file": "src/deneb/epoch_processing.rs", "line": 141},
-        {"name": "process_registry_updates", "file": "src/electra/epoch_processing.rs", "line": 163},
-        {"name": "process_voluntary_exit", "file": "src/unphased/block_processing.rs", "line": 664},
-        {"name": "validate_voluntary_exit", "file": "src/unphased/block_processing.rs", "line": 683},
-        {"name": "process_voluntary_exit", "file": "src/electra/block_processing.rs", "line": 1020},
-        {"name": "validate_voluntary_exit", "file": "src/electra/block_processing.rs", "line": 1039},
-        {"name": "add_validator_to_registry", "file": "src/electra/block_processing.rs", "line": 897},
-        {"name": "process_consolidation_request", "file": "src/electra/block_processing.rs", "line": 1215},
-        {"name": "process_pending_consolidations", "file": "src/electra/epoch_processing.rs", "line": 366},
-        {"name": "is_valid_switch_to_compounding_request", "file": "src/electra/block_processing.rs", "line": 1325}
+        {"name": "load", "file": "fork_choice_control/src/storage.rs", "line": 106},
+        {"name": "save", "file": "fork_choice_control/src/storage.rs", "line": 1147},
+        {"name": "append", "file": "fork_choice_control/src/storage.rs", "line": 245},
+        {"name": "append_blob_sidecars", "file": "fork_choice_control/src/storage.rs", "line": 352},
+        {"name": "append_states", "file": "fork_choice_control/src/storage.rs", "line": 384},
+        {"name": "archive_finalized", "file": "fork_choice_control/src/mutator.rs", "line": 2663},
+        {"name": "prune_old_records", "file": "fork_choice_control/src/mutator.rs", "line": 2721},
+        {"name": "prune_old_blob_sidecars", "file": "fork_choice_control/src/storage.rs", "line": 412},
+        {"name": "prune_old_blocks_and_states", "file": "fork_choice_control/src/storage.rs", "line": 447},
+        {"name": "prune_unfinalized_blocks", "file": "fork_choice_control/src/storage.rs", "line": 509},
+        {"name": "store_back_sync_blob_sidecars", "file": "fork_choice_control/src/storage_back_sync.rs", "line": 138},
+        {"name": "store_back_sync_blocks", "file": "fork_choice_control/src/storage_back_sync.rs", "line": 146}
       ]
     },
     {
-      "chunk_title": "🎲 RANDAO & randomness",
-      "rationale": "Randomness generation for validator selection",
+      "chunk_title": "⏱️ State Caching & Optimization",
+      "rationale": "Performance-critical caches. Cache poisoning causes incorrect state lookups and consensus failures",
       "functions": [
-        {"name": "process_randao", "file": "src/unphased/block_processing.rs", "line": 165},
-        {"name": "process_randao_mixes_reset", "file": "src/unphased/epoch_processing.rs", "line": 189}
+        {"name": "state_at_slot", "file": "fork_choice_control/src/queries.rs", "line": 298},
+        {"name": "state_at_slot_cached", "file": "fork_choice_control/src/queries.rs", "line": 302},
+        {"name": "state_before_or_at_slot", "file": "fork_choice_control/src/queries.rs", "line": 339},
+        {"name": "get_or_try_init", "file": "fork_choice_control/src/state_at_slot_cache.rs", "line": 65},
+        {"name": "get", "file": "fork_choice_control/src/state_at_slot_cache.rs", "line": 84},
+        {"name": "flush", "file": "fork_choice_control/src/state_at_slot_cache.rs", "line": 58},
+        {"name": "preprocessed_state_at_current_slot", "file": "fork_choice_control/src/queries.rs", "line": 527},
+        {"name": "preprocessed_state_at_next_slot", "file": "fork_choice_control/src/queries.rs", "line": 535},
+        {"name": "initialize_preprocessed_state_cache", "file": "fork_choice_control/src/tasks.rs", "line": 546}
       ]
     },
     {
-      "chunk_title": "📊 Epoch processing orchestration",
-      "rationale": "High-level epoch transition coordination",
+      "chunk_title": "🔄 Message Passing & Channel Communication",
+      "rationale": "Inter-component messaging. Channel failures or race conditions lead to deadlocks or state inconsistency",
       "functions": [
-        {"name": "process_epoch", "file": "src/combined.rs", "line": 496},
-        {"name": "process_epoch", "file": "src/phase0/epoch_processing.rs", "line": 36},
-        {"name": "process_epoch", "file": "src/altair/epoch_processing.rs", "line": 42},
-        {"name": "process_epoch", "file": "src/bellatrix/epoch_processing.rs", "line": 25},
-        {"name": "process_epoch", "file": "src/capella/epoch_processing.rs", "line": 22},
-        {"name": "process_epoch", "file": "src/deneb/epoch_processing.rs", "line": 28},
-        {"name": "process_epoch", "file": "src/electra/epoch_processing.rs", "line": 48},
-        {"name": "epoch_report", "file": "src/combined.rs", "line": 511}
+        {"name": "send", "file": "fork_choice_control/src/messages.rs", "line": 59},
+        {"name": "send_to_attestation_verifier", "file": "fork_choice_control/src/mutator.rs", "line": 2816},
+        {"name": "send_to_p2p", "file": "fork_choice_control/src/mutator.rs", "line": 2822},
+        {"name": "send_to_pool", "file": "fork_choice_control/src/mutator.rs", "line": 2828},
+        {"name": "send_to_subnet_service", "file": "fork_choice_control/src/mutator.rs", "line": 2834},
+        {"name": "send_to_validator", "file": "fork_choice_control/src/mutator.rs", "line": 2840},
+        {"name": "run", "file": "fork_choice_control/src/mutator.rs", "line": 191}
       ]
     },
     {
-      "chunk_title": "📦 Block processing orchestration",
-      "rationale": "High-level block processing coordination across phases",
+      "chunk_title": "🧵 Task Scheduling & Thread Pool",
+      "rationale": "Parallel processing infrastructure. Improper synchronization causes race conditions and data corruption",
       "functions": [
-        {"name": "process_block", "file": "src/combined.rs", "line": 661},
-        {"name": "custom_process_block", "file": "src/phase0/block_processing.rs", "line": 98},
-        {"name": "custom_process_block", "file": "src/altair/block_processing.rs", "line": 114},
-        {"name": "custom_process_block", "file": "src/bellatrix/block_processing.rs", "line": 105},
-        {"name": "custom_process_block", "file": "src/capella/block_processing.rs", "line": 107},
-        {"name": "custom_process_block", "file": "src/deneb/block_processing.rs", "line": 111},
-        {"name": "custom_process_block", "file": "src/electra/block_processing.rs", "line": 151},
-        {"name": "process_blinded_block", "file": "src/combined.rs", "line": 782},
-        {"name": "process_trusted_block", "file": "src/combined.rs", "line": 644},
-        {"name": "process_trusted_blinded_block", "file": "src/combined.rs", "line": 765}
+        {"name": "spawn", "file": "fork_choice_control/src/controller.rs", "line": 596},
+        {"name": "spawn_block_task", "file": "fork_choice_control/src/controller.rs", "line": 573},
+        {"name": "spawn_block_task_with_wait_group", "file": "fork_choice_control/src/controller.rs", "line": 577},
+        {"name": "spawn", "file": "fork_choice_control/src/thread_pool.rs", "line": 70},
+        {"name": "run_worker", "file": "fork_choice_control/src/thread_pool.rs", "line": 230},
+        {"name": "run_and_handle_panics", "file": "fork_choice_control/src/tasks.rs", "line": 51},
+        {"name": "new", "file": "fork_choice_control/src/thread_pool.rs", "line": 49},
+        {"name": "task_counts", "file": "fork_choice_control/src/thread_pool.rs", "line": 75}
       ]
     },
     {
-      "chunk_title": "⚙️ Block operations processing",
-      "rationale": "Processing individual operations within blocks",
+      "chunk_title": "📊 Event Notification System",
+      "rationale": "Publishes consensus events. Event ordering issues or lost events disrupt dependent services",
       "functions": [
-        {"name": "process_operations", "file": "src/phase0/block_processing.rs", "line": 131},
-        {"name": "process_operations", "file": "src/altair/block_processing.rs", "line": 151},
-        {"name": "process_operations", "file": "src/bellatrix/block_processing.rs", "line": 228},
-        {"name": "process_operations", "file": "src/capella/block_processing.rs", "line": 223},
-        {"name": "process_operations", "file": "src/deneb/block_processing.rs", "line": 242},
-        {"name": "process_operations", "file": "src/electra/block_processing.rs", "line": 507},
-        {"name": "process_block_header", "file": "src/unphased/block_processing.rs", "line": 133},
-        {"name": "process_eth1_data", "file": "src/unphased/block_processing.rs", "line": 208}
+        {"name": "send_block_event", "file": "fork_choice_control/src/events.rs", "line": 174},
+        {"name": "send_attestation_event", "file": "fork_choice_control/src/events.rs", "line": 156},
+        {"name": "send_chain_reorg_event", "file": "fork_choice_control/src/events.rs", "line": 191},
+        {"name": "send_head_event", "file": "fork_choice_control/src/events.rs", "line": 237},
+        {"name": "send_payload_attributes_event", "file": "fork_choice_control/src/events.rs", "line": 261},
+        {"name": "notify_about_reorganization", "file": "fork_choice_control/src/mutator.rs", "line": 1943},
+        {"name": "send_contribution_and_proof_event", "file": "fork_choice_control/src/events.rs", "line": 211},
+        {"name": "send_voluntary_exit_event", "file": "fork_choice_control/src/events.rs", "line": 290},
+        {"name": "prune_after_finalization", "file": "fork_choice_control/src/events.rs", "line": 296}
       ]
     },
     {
-      "chunk_title": "📈 Effective balance updates",
-      "rationale": "Balance adjustments affecting voting power",
+      "chunk_title": "⏳ Delayed Processing & Queueing",
+      "rationale": "Handles objects arriving out of order. Unbounded queues risk memory exhaustion",
       "functions": [
-        {"name": "process_effective_balance_updates", "file": "src/unphased/epoch_processing.rs", "line": 152},
-        {"name": "process_effective_balance_updates", "file": "src/electra/epoch_processing.rs", "line": 416}
+        {"name": "delay_block_until_blobs", "file": "fork_choice_control/src/mutator.rs", "line": 2042},
+        {"name": "delay_block_until_parent", "file": "fork_choice_control/src/mutator.rs", "line": 2047},
+        {"name": "delay_block_until_slot", "file": "fork_choice_control/src/mutator.rs", "line": 2141},
+        {"name": "delay_attestation_until_block", "file": "fork_choice_control/src/mutator.rs", "line": 2088},
+        {"name": "delay_attestation_until_slot", "file": "fork_choice_control/src/mutator.rs", "line": 2178},
+        {"name": "delay_blob_sidecar_until_state", "file": "fork_choice_control/src/mutator.rs", "line": 2206},
+        {"name": "delay_blob_sidecar_until_parent", "file": "fork_choice_control/src/mutator.rs", "line": 2224},
+        {"name": "delay_blob_sidecar_until_slot", "file": "fork_choice_control/src/mutator.rs", "line": 2238},
+        {"name": "retry_delayed", "file": "fork_choice_control/src/mutator.rs", "line": 2277},
+        {"name": "prune_delayed_until_blobs", "file": "fork_choice_control/src/mutator.rs", "line": 2401},
+        {"name": "prune_delayed_until_block", "file": "fork_choice_control/src/mutator.rs", "line": 2427}
       ]
     },
     {
-      "chunk_title": "🔗 BLS to execution changes",
-      "rationale": "Credential changes for withdrawal addresses",
+      "chunk_title": "🔍 Query & State Inspection",
+      "rationale": "Read-only state access. While lower risk, incorrect queries can mislead validators",
       "functions": [
-        {"name": "process_bls_to_execution_change", "file": "src/capella/block_processing.rs", "line": 344},
-        {"name": "validate_bls_to_execution_change", "file": "src/capella/block_processing.rs", "line": 371}
+        {"name": "slot", "file": "fork_choice_control/src/queries.rs", "line": 57},
+        {"name": "phase", "file": "fork_choice_control/src/queries.rs", "line": 62},
+        {"name": "genesis_time", "file": "fork_choice_control/src/queries.rs", "line": 82},
+        {"name": "contains_block", "file": "fork_choice_control/src/queries.rs", "line": 407},
+        {"name": "block_by_root", "file": "fork_choice_control/src/queries.rs", "line": 411},
+        {"name": "block_by_slot", "file": "fork_choice_control/src/queries.rs", "line": 430},
+        {"name": "blocks_by_range", "file": "fork_choice_control/src/queries.rs", "line": 459},
+        {"name": "blocks_by_root", "file": "fork_choice_control/src/queries.rs", "line": 516},
+        {"name": "is_back_synced", "file": "fork_choice_control/src/queries.rs", "line": 277},
+        {"name": "is_forward_synced", "file": "fork_choice_control/src/queries.rs", "line": 282},
+        {"name": "is_optimistic", "file": "fork_choice_control/src/queries.rs", "line": 900},
+        {"name": "payload_status", "file": "fork_choice_control/src/queries.rs", "line": 756}
       ]
     },
     {
-      "chunk_title": "📜 Historical data management",
-      "rationale": "Managing historical roots and summaries",
+      "chunk_title": "⚙️ Initialization & Controller Setup",
+      "rationale": "System bootstrap and configuration. Misconfigurations during init lead to permanent vulnerabilities",
       "functions": [
-        {"name": "process_historical_roots_update", "file": "src/unphased/epoch_processing.rs", "line": 197},
-        {"name": "process_historical_summaries_update", "file": "src/capella/epoch_processing.rs", "line": 134},
-        {"name": "process_historical_summaries_update", "file": "src/deneb/epoch_processing.rs", "line": 216},
-        {"name": "process_historical_summaries_update", "file": "src/electra/epoch_processing.rs", "line": 448}
+        {"name": "new", "file": "fork_choice_control/src/controller.rs", "line": 97},
+        {"name": "new", "file": "fork_choice_control/src/mutator.rs", "line": 143},
+        {"name": "new", "file": "fork_choice_control/src/storage.rs", "line": 68},
+        {"name": "new", "file": "fork_choice_control/src/state_at_slot_cache.rs", "line": 49},
+        {"name": "new", "file": "fork_choice_control/src/events.rs", "line": 119},
+        {"name": "build", "file": "fork_choice_control/src/state_at_slot_cache.rs", "line": 44},
+        {"name": "chain_config", "file": "fork_choice_control/src/controller.rs", "line": 203}
       ]
     },
     {
-      "chunk_title": "🔄 Committee & participation updates",
-      "rationale": "Validator committee assignments and participation tracking",
+      "chunk_title": "🛠️ Utility & Helper Functions",
+      "rationale": "Supporting functions with lower attack surface but essential for correct operation",
       "functions": [
-        {"name": "process_participation_record_updates", "file": "src/phase0/epoch_processing.rs", "line": 194},
-        {"name": "process_participation_flag_updates", "file": "src/altair/epoch_processing.rs", "line": 267},
-        {"name": "process_sync_committee_updates", "file": "src/altair/epoch_processing.rs", "line": 275}
+        {"name": "calculate_dependent_roots", "file": "fork_choice_control/src/mutator.rs", "line": 2023},
+        {"name": "epoch_at_slot", "file": "fork_choice_control/src/storage.rs", "line": 878},
+        {"name": "dependent_root", "file": "fork_choice_control/src/queries.rs", "line": 611},
+        {"name": "attesting_balance", "file": "fork_choice_control/src/queries.rs", "line": 704},
+        {"name": "safe_execution_payload_hash", "file": "fork_choice_control/src/queries.rs", "line": 911},
+        {"name": "finalized_execution_payload_hash", "file": "fork_choice_control/src/queries.rs", "line": 916},
+        {"name": "nonempty_slots", "file": "fork_choice_control/src/queries.rs", "line": 842},
+        {"name": "snapshot", "file": "fork_choice_control/src/queries.rs", "line": 617}
       ]
     },
     {
-      "chunk_title": "📑 Phase-specific block processing",
-      "rationale": "Phase-specific block handlers implementing unique logic",
+      "chunk_title": "🧪 Testing & Export Tools",
+      "rationale": "Test utilities and export functions. Should be disabled in production to prevent information leakage",
       "functions": [
-        {"name": "process_block", "file": "src/phase0/block_processing.rs", "line": 51},
-        {"name": "process_block_for_gossip", "file": "src/phase0/block_processing.rs", "line": 78},
-        {"name": "process_block", "file": "src/altair/block_processing.rs", "line": 65},
-        {"name": "process_block_for_gossip", "file": "src/altair/block_processing.rs", "line": 92},
-        {"name": "process_block", "file": "src/bellatrix/block_processing.rs", "line": 51},
-        {"name": "process_block_for_gossip", "file": "src/bellatrix/block_processing.rs", "line": 79},
-        {"name": "process_block", "file": "src/capella/block_processing.rs", "line": 57},
-        {"name": "process_block_for_gossip", "file": "src/capella/block_processing.rs", "line": 85},
-        {"name": "process_block", "file": "src/deneb/block_processing.rs", "line": 56},
-        {"name": "process_block_for_gossip", "file": "src/deneb/block_processing.rs", "line": 84},
-        {"name": "process_block", "file": "src/electra/block_processing.rs", "line": 94},
-        {"name": "process_block_for_gossip", "file": "src/electra/block_processing.rs", "line": 122}
+        {"name": "export_state_and_blocks", "file": "fork_choice_control/src/storage_tool.rs", "line": 24},
+        {"name": "replay_blocks", "file": "fork_choice_control/src/storage_tool.rs", "line": 90},
+        {"name": "on_slot", "file": "fork_choice_control/src/specialized.rs", "line": 64},
+        {"name": "wait_for_tasks", "file": "fork_choice_control/src/specialized.rs", "line": 75}
       ]
     },
     {
-      "chunk_title": "🎯 Blinded block processing",
-      "rationale": "Processing blocks with hidden execution payloads",
+      "chunk_title": "🔚 Cleanup & Resource Management",
+      "rationale": "Handles graceful shutdown and resource cleanup. Improper cleanup can leak sensitive data or leave corrupted state",
       "functions": [
-        {"name": "custom_process_blinded_block", "file": "src/bellatrix/blinded_block_processing.rs", "line": 20},
-        {"name": "custom_process_blinded_block", "file": "src/capella/blinded_block_processing.rs", "line": 33},
-        {"name": "custom_process_blinded_block", "file": "src/deneb/blinded_block_processing.rs", "line": 22},
-        {"name": "custom_process_blinded_block", "file": "src/electra/blinded_block_processing.rs", "line": 35}
-      ]
-    },
-    {
-      "chunk_title": "📊 Validator statistics & reporting",
-      "rationale": "Performance metrics and validator statistics calculation",
-      "functions": [
-        {"name": "statistics", "file": "src/combined.rs", "line": 878},
-        {"name": "statistics", "file": "src/phase0/epoch_intermediates.rs", "line": 552},
-        {"name": "statistics", "file": "src/altair/epoch_intermediates.rs", "line": 174},
-        {"name": "epoch_report", "file": "src/phase0/epoch_processing.rs", "line": 73},
-        {"name": "epoch_report", "file": "src/altair/epoch_processing.rs", "line": 93},
-        {"name": "epoch_report", "file": "src/bellatrix/epoch_processing.rs", "line": 76},
-        {"name": "epoch_report", "file": "src/capella/epoch_processing.rs", "line": 76},
-        {"name": "epoch_report", "file": "src/deneb/epoch_processing.rs", "line": 83},
-        {"name": "epoch_report", "file": "src/electra/epoch_processing.rs", "line": 105}
-      ]
-    },
-    {
-      "chunk_title": "🔢 Signature counting",
-      "rationale": "Signature requirement calculation for verification",
-      "functions": [
-        {"name": "count_required_signatures", "file": "src/phase0/block_processing.rs", "line": 122},
-        {"name": "count_required_signatures", "file": "src/altair/block_processing.rs", "line": 147},
-        {"name": "count_required_signatures", "file": "src/bellatrix/state_transition.rs", "line": 228},
-        {"name": "count_required_signatures", "file": "src/capella/block_processing.rs", "line": 161},
-        {"name": "count_required_signatures", "file": "src/deneb/block_processing.rs", "line": 107},
-        {"name": "count_required_signatures", "file": "src/electra/block_processing.rs", "line": 147}
-      ]
-    },
-    {
-      "chunk_title": "🔄 ETH1 data processing",
-      "rationale": "Ethereum 1.x deposit contract interaction",
-      "functions": [
-        {"name": "process_eth1_data_reset", "file": "src/unphased/epoch_processing.rs", "line": 143}
-      ]
-    },
-    {
-      "chunk_title": "🛠️ Helper functions & utilities",
-      "rationale": "Supporting functions for state transition processing",
-      "functions": [
-        {"name": "process_slots_for_epoch_report", "file": "src/combined.rs", "line": 534},
-        {"name": "post_process_slots_for_epoch_report", "file": "src/combined.rs", "line": 553},
-        {"name": "verify_signatures", "file": "src/phase0/state_transition.rs", "line": 93},
-        {"name": "verify_signatures", "file": "src/altair/state_transition.rs", "line": 90},
-        {"name": "verify_signatures", "file": "src/bellatrix/state_transition.rs", "line": 94},
-        {"name": "verify_signatures", "file": "src/capella/state_transition.rs", "line": 96},
-        {"name": "verify_signatures", "file": "src/deneb/state_transition.rs", "line": 96},
-        {"name": "verify_signatures", "file": "src/electra/state_transition.rs", "line": 82}
+        {"name": "stop", "file": "fork_choice_control/src/controller.rs", "line": 600},
+        {"name": "join", "file": "fork_choice_control/src/controller.rs", "line": 679},
+        {"name": "handle_stop", "file": "fork_choice_control/src/mutator.rs", "line": 1505},
+        {"name": "persist_pubkey_cache", "file": "fork_choice_control/src/mutator.rs", "line": 2778},
+        {"name": "update_store_snapshot", "file": "fork_choice_control/src/mutator.rs", "line": 2790}
       ]
     }
   ],
   "top_attack_paths": [
     {
-      "entry_function": "untrusted_state_transition",
-      "sink_function": "weigh_justification_and_finalization",
-      "risk_reason": "Malicious block could manipulate justification bits to force invalid finality, causing chain split"
+      "entry_function": "on_gossip_block",
+      "sink_function": "accept_block",
+      "risk_reason": "Untrusted network block bypasses validation and corrupts fork choice store state"
     },
     {
-      "entry_function": "process_block_for_gossip",
-      "sink_function": "apply_deposits",
-      "risk_reason": "Invalid deposit processing could allow unauthorized validator activation or balance manipulation"
+      "entry_function": "on_gossip_aggregate_and_proof",
+      "sink_function": "handle_potential_head_change",
+      "risk_reason": "Malicious aggregated attestations manipulate fork choice weights to force invalid head selection"
     },
     {
-      "entry_function": "validate_attestation_with_verifier",
-      "sink_function": "process_rewards_and_penalties",
-      "risk_reason": "Forged attestations could manipulate reward calculations, draining honest validators"
+      "entry_function": "load_finalized_from_remote",
+      "sink_function": "load",
+      "risk_reason": "Malicious checkpoint during sync loads compromised state as trusted anchor enabling long-range attack"
     },
     {
-      "entry_function": "process_execution_payload",
-      "sink_function": "process_withdrawals",
-      "risk_reason": "Malicious execution payload could authorize invalid withdrawals from validator balances"
+      "entry_function": "on_notified_new_payload",
+      "sink_function": "notify_forkchoice_updated",
+      "risk_reason": "Invalid execution payload from compromised EL causes consensus layer to accept invalid state"
     },
     {
-      "entry_function": "validate_proposer_slashing_with_verifier",
-      "sink_function": "process_slashings",
-      "risk_reason": "False slashing evidence could wrongfully penalize honest validators"
+      "entry_function": "on_gossip_blob_sidecar",
+      "sink_function": "accept_blob_sidecar",
+      "risk_reason": "Invalid KZG proof verification allows data unavailable blocks to be marked as available"
     }
   ],
   "ordering_strategy": "Breadth-first from untrusted boundaries inward, guided by call-graph depth and STRIDE-like risk categories (S,T,R,I,D,E)."

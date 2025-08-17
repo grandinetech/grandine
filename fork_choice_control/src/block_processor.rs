@@ -166,6 +166,7 @@ impl<P: Preset> BlockProcessor<P> {
             .map(|(state, _)| state)
     }
 
+    // @audit-ok: Proper validation through store.validate_block_for_gossip
     pub fn validate_block_for_gossip(
         &self,
         store: &Store<P, Storage<P>>,
@@ -175,6 +176,8 @@ impl<P: Preset> BlockProcessor<P> {
             let block_slot = block.message().slot();
 
             // > Make a copy of the state to avoid mutability issues
+            // @audit-ok: State cache is used for performance, parent state used as fallback
+            // ↳ Review Round 2: Cache poisoning risk mitigated by fallback to parent.state(store)
             let state = self
                 .state_cache
                 .try_state_at_slot(&self.pubkey_cache, store, parent.block_root, block_slot)?
