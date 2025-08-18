@@ -48,7 +48,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    nonstandard::{RelativeEpoch, ValidationOutcome},
+    nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -507,7 +507,7 @@ where
         block_root: H256,
     ) -> Result<()> {
         match *result {
-            Ok(BlockAction::Accept(chain_link, attester_slashing_results)) => {
+            Ok(BlockAction::Accept(mut chain_link, attester_slashing_results)) => {
                 let block_root = chain_link.block_root;
                 let parent_root = chain_link.block.message().parent_root();
 
@@ -530,6 +530,10 @@ where
 
                                 self.update_store_snapshot();
                             }
+                        }
+
+                        if payload_status.status.is_valid() {
+                            chain_link.payload_status = PayloadStatus::Valid;
                         }
 
                         if payload_status.status.is_invalid() {
