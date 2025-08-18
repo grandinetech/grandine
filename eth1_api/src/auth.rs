@@ -20,8 +20,7 @@ use zeroize::Zeroizing;
 #[cfg(test)]
 use derive_more::Debug;
 
-const JWT_SECRET_SIZE_MIN_BYTES: usize = 32;
-const JWT_SECRET_SIZE_MAX_BYTES: usize = 1024; // Reasonable maximum size to prevent DoS attacks
+const JWT_SECRET_SIZE_BYTES: usize = 32; // Exactly 256 bits as per Ethereum execution API specification
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
@@ -161,7 +160,7 @@ impl Secret {
             .context(JwtSecretError::InvalidSecret)?;
 
         ensure!(
-            bytes.len() >= JWT_SECRET_SIZE_MIN_BYTES && bytes.len() <= JWT_SECRET_SIZE_MAX_BYTES,
+            bytes.len() == JWT_SECRET_SIZE_BYTES,
             JwtSecretError::IncorrectSize,
         );
 
@@ -174,7 +173,7 @@ impl Secret {
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 enum JwtSecretError {
-    #[error("JWT secret must be between {JWT_SECRET_SIZE_MIN_BYTES} and {JWT_SECRET_SIZE_MAX_BYTES} bytes")]
+    #[error("JWT secret must be exactly {JWT_SECRET_SIZE_BYTES} bytes (256 bits)")]
     IncorrectSize,
     #[error("failed to parse JWT secret")]
     InvalidSecret,
@@ -211,8 +210,8 @@ mod tests {
 
     #[test]
     fn test_large_jwt_secret_decoding() {
-        // Create a hex string that would decode to more than JWT_SECRET_SIZE_MAX_BYTES
-        let large_hex: String = "a".repeat(JWT_SECRET_SIZE_MAX_BYTES * 2 + 2); // Each byte is 2 hex chars
+        // Create a hex string that would decode to more than JWT_SECRET_SIZE_BYTES
+        let large_hex: String = "a".repeat(JWT_SECRET_SIZE_BYTES * 2 + 2); // Each byte is 2 hex chars
         let error = Secret::from_hex(large_hex.as_bytes())
             .expect_err("Secret::from_hex should fail")
             .downcast::<JwtSecretError>()
