@@ -66,7 +66,9 @@ use types::{
         AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
     },
-    nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
+    nonstandard::{
+        KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+    },
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
@@ -998,7 +1000,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             let cells_and_kzg_proofs =
                                 eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
                                     blobs.as_ref(),
-                                    block_proofs.unwrap_or_default().as_ref(),
+                                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
                                     self.controller.store_config().kzg_backend,
                                 )?;
 
@@ -1030,7 +1032,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             for blob_sidecar in misc::construct_blob_sidecars(
                                 &block,
                                 blobs.into_iter(),
-                                block_proofs.unwrap_or_default().into_iter(),
+                                block_proofs
+                                    .unwrap_or_else(KzgProofs::empty_deneb)
+                                    .into_iter(),
                             )? {
                                 let blob_sidecar = Arc::new(blob_sidecar);
 

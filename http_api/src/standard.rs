@@ -75,8 +75,8 @@ use types::{
         primitives::ColumnIndex,
     },
     nonstandard::{
-        BlockRewards, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev, WithStatus,
-        WEI_IN_GWEI,
+        BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev,
+        WithStatus, WEI_IN_GWEI,
     },
     phase0::{
         consts::{TargetAggregatorsPerCommittee, GENESIS_SLOT},
@@ -1263,8 +1263,8 @@ pub async fn publish_block<P: Preset, W: Wait>(
         .is_peerdas_activated()
     {
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-            blobs.as_ref(),
-            proofs.as_ref(),
+            blobs.unwrap_or_default().as_ref(),
+            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
             controller.store_config().kzg_backend,
         )?;
 
@@ -1289,8 +1289,8 @@ pub async fn publish_block<P: Preset, W: Wait>(
     } else {
         let blob_sidecars = misc::construct_blob_sidecars(
             &signed_beacon_block,
-            blobs.into_iter(),
-            proofs.into_iter(),
+            blobs.unwrap_or_default().into_iter(),
+            proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
         )?;
 
         publish_signed_block(
@@ -1344,7 +1344,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     {
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.unwrap_or_default().as_ref(),
-            proofs.unwrap_or_default().as_ref(),
+            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
             controller.store_config().kzg_backend,
         )?;
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
@@ -1364,7 +1364,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         let blob_sidecars = misc::construct_blob_sidecars(
             &signed_beacon_block,
             blobs.unwrap_or_default().into_iter(),
-            proofs.unwrap_or_default().into_iter(),
+            proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
         )?;
 
         publish_signed_block(
@@ -1412,7 +1412,7 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
     let blob_sidecars = misc::construct_blob_sidecars(
         &signed_beacon_block,
         blobs.unwrap_or_default().into_iter(),
-        proofs.unwrap_or_default().into_iter(),
+        proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
     )?;
 
     publish_signed_block_v2(
@@ -1445,8 +1445,8 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         .is_peerdas_activated()
     {
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-            blobs.as_ref(),
-            proofs.as_ref(),
+            blobs.unwrap_or_default().as_ref(),
+            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
             controller.store_config().kzg_backend,
         )?;
         let data_column_sidecars = eip_7594::construct_data_column_sidecars(
@@ -1466,8 +1466,8 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     } else {
         let blob_sidecars = misc::construct_blob_sidecars(
             &signed_beacon_block,
-            blobs.into_iter(),
-            proofs.into_iter(),
+            blobs.unwrap_or_default().into_iter(),
+            proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
         )?;
 
         publish_signed_block_v2(

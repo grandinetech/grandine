@@ -8,7 +8,7 @@ use crate::{
     capella::{consts::ExecutionPayloadIndex, containers::SignedBlsToExecutionChange},
     deneb::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
-        primitives::{KzgCommitment, KzgProof},
+        primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::{
         consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
@@ -187,4 +187,21 @@ pub struct MatrixEntry<P: Preset> {
     pub column_index: ColumnIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub row_index: RowIndex,
+}
+
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
+pub struct BlobsBundle<P: Preset> {
+    pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
+pub struct ExecutionPayloadAndBlobsBundle<P: Preset> {
+    pub execution_payload: ExecutionPayload<P>,
+    pub blobs_bundle: BlobsBundle<P>,
 }
