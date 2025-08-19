@@ -34,7 +34,7 @@ use types::{
             SignedBeaconBlock as DenebSignedBeaconBlock,
             SignedBlindedBeaconBlock as DenebSignedBlindedBeaconBlock,
         },
-        primitives::{Blob, KzgProofs},
+        primitives::{Blob, KzgProof},
     },
     electra::containers::{
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
@@ -45,7 +45,7 @@ use types::{
         SignedBeaconBlock as FuluSignedBeaconBlock,
         SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
     },
-    nonstandard::{Phase, WithBlobsAndMev},
+    nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
         consts::TargetAggregatorsPerCommittee,
         containers::{
@@ -91,15 +91,15 @@ impl SyncedStatus {
 
 pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
     SignedBeaconBlock<P>,
-    KzgProofs<P>,
-    ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>,
+    Option<KzgProofs<P>>,
+    Option<ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>>,
 );
 
 #[derive(Deserialize, Ssz)]
 #[serde(bound = "")]
 pub struct SignedDenebBlockWithBlobs<P: Preset> {
     pub signed_block: DenebSignedBeaconBlock<P>,
-    pub kzg_proofs: KzgProofs<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -107,7 +107,7 @@ pub struct SignedDenebBlockWithBlobs<P: Preset> {
 #[serde(bound = "")]
 pub struct SignedElectraBlockWithBlobs<P: Preset> {
     pub signed_block: ElectraSignedBeaconBlock<P>,
-    pub kzg_proofs: KzgProofs<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -115,7 +115,7 @@ pub struct SignedElectraBlockWithBlobs<P: Preset> {
 #[serde(bound = "")]
 pub struct SignedFuluBlockWithBlobs<P: Preset> {
     pub signed_block: FuluSignedBeaconBlock<P>,
-    pub kzg_proofs: KzgProofs<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -164,17 +164,17 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
             BeaconBlock::Capella(block) => Self::Other(block.into()),
             BeaconBlock::Deneb(block) => Self::WithBlobs(BlockWithBlobs {
                 block: block.into(),
-                kzg_proofs: proofs.unwrap_or_default(),
+                kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_deneb),
                 blobs: blobs.unwrap_or_default(),
             }),
             BeaconBlock::Electra(block) => Self::WithBlobs(BlockWithBlobs {
                 block: block.into(),
-                kzg_proofs: proofs.unwrap_or_default(),
+                kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_deneb),
                 blobs: blobs.unwrap_or_default(),
             }),
             BeaconBlock::Fulu(block) => Self::WithBlobs(BlockWithBlobs {
                 block: block.into(),
-                kzg_proofs: proofs.unwrap_or_default(),
+                kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
                 blobs: blobs.unwrap_or_default(),
             }),
         }
@@ -211,17 +211,17 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                 }
                 BeaconBlock::Deneb(block) => Self::WithBlobs(BlockWithBlobs {
                     block: ValidatorBlindedBlock::BeaconBlock(block.into()),
-                    kzg_proofs: proofs.unwrap_or_default(),
+                    kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_deneb),
                     blobs: blobs.unwrap_or_default(),
                 }),
                 BeaconBlock::Electra(block) => Self::WithBlobs(BlockWithBlobs {
                     block: ValidatorBlindedBlock::BeaconBlock(block.into()),
-                    kzg_proofs: proofs.unwrap_or_default(),
+                    kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_deneb),
                     blobs: blobs.unwrap_or_default(),
                 }),
                 BeaconBlock::Fulu(block) => Self::WithBlobs(BlockWithBlobs {
                     block: ValidatorBlindedBlock::BeaconBlock(block.into()),
-                    kzg_proofs: proofs.unwrap_or_default(),
+                    kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
                     blobs: blobs.unwrap_or_default(),
                 }),
             },
@@ -438,26 +438,10 @@ pub enum SignedAPIBlock<P: Preset> {
 impl<P: Preset> SignedAPIBlock<P> {
     pub fn split(self) -> SignedBeaconBlockWithBlobsAndProofs<P> {
         match self {
-            Self::Phase0(block) => (
-                block.into(),
-                ContiguousList::default(),
-                ContiguousList::default(),
-            ),
-            Self::Altair(block) => (
-                block.into(),
-                ContiguousList::default(),
-                ContiguousList::default(),
-            ),
-            Self::Bellatrix(block) => (
-                block.into(),
-                ContiguousList::default(),
-                ContiguousList::default(),
-            ),
-            Self::Capella(block) => (
-                block.into(),
-                ContiguousList::default(),
-                ContiguousList::default(),
-            ),
+            Self::Phase0(block) => (block.into(), None, None),
+            Self::Altair(block) => (block.into(), None, None),
+            Self::Bellatrix(block) => (block.into(), None, None),
+            Self::Capella(block) => (block.into(), None, None),
             Self::Deneb(block) => {
                 let SignedDenebBlockWithBlobs {
                     signed_block,
@@ -465,7 +449,11 @@ impl<P: Preset> SignedAPIBlock<P> {
                     blobs,
                 } = block;
 
-                (signed_block.into(), kzg_proofs, blobs)
+                (
+                    signed_block.into(),
+                    Some(KzgProofs::Deneb(kzg_proofs)),
+                    Some(blobs),
+                )
             }
             Self::Electra(block) => {
                 let SignedElectraBlockWithBlobs {
@@ -474,7 +462,11 @@ impl<P: Preset> SignedAPIBlock<P> {
                     blobs,
                 } = block;
 
-                (signed_block.into(), kzg_proofs, blobs)
+                (
+                    signed_block.into(),
+                    Some(KzgProofs::Deneb(kzg_proofs)),
+                    Some(blobs),
+                )
             }
             Self::Fulu(block) => {
                 let SignedFuluBlockWithBlobs {
@@ -483,7 +475,11 @@ impl<P: Preset> SignedAPIBlock<P> {
                     blobs,
                 } = block;
 
-                (signed_block.into(), kzg_proofs, blobs)
+                (
+                    signed_block.into(),
+                    Some(KzgProofs::Fulu(kzg_proofs)),
+                    Some(blobs),
+                )
             }
         }
     }

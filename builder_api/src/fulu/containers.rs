@@ -6,7 +6,10 @@ use bls::{PublicKeyBytes, SignatureBytes};
 use serde::Deserialize;
 use ssz::{ContiguousList, Ssz};
 use types::{
-    deneb::{containers::ExecutionPayloadHeader, primitives::KzgCommitment},
+    deneb::{
+        containers::{ExecutionPayload, ExecutionPayloadHeader},
+        primitives::{Blob, KzgCommitment, KzgProof},
+    },
     electra::containers::ExecutionRequests,
     phase0::primitives::Uint256,
     preset::Preset,
@@ -29,4 +32,21 @@ pub struct BuilderBid<P: Preset> {
 pub struct SignedBuilderBid<P: Preset> {
     pub message: BuilderBid<P>,
     pub signature: SignatureBytes,
+}
+
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
+pub struct BlobsBundle<P: Preset> {
+    pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+#[ssz(derive_write = false)]
+pub struct ExecutionPayloadAndBlobsBundle<P: Preset> {
+    pub execution_payload: ExecutionPayload<P>,
+    pub blobs_bundle: BlobsBundle<P>,
 }

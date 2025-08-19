@@ -8,7 +8,7 @@ use ssz::{ContiguousList, Ssz};
 use types::{
     deneb::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
-        primitives::{Blob, KzgCommitment, KzgProofs},
+        primitives::{Blob, KzgCommitment, KzgProof},
     },
     phase0::primitives::Uint256,
     preset::Preset,
@@ -37,7 +37,7 @@ pub struct SignedBuilderBid<P: Preset> {
 #[ssz(derive_write = false)]
 pub struct BlobsBundle<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub proofs: KzgProofs<P>,
+    pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 

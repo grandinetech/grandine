@@ -9,7 +9,7 @@ use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -22,7 +22,7 @@ use crate::{
     combined::{Attestation, BeaconState, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::{Blob, KzgCommitment, KzgProofs},
+        primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
     fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
@@ -295,6 +295,59 @@ impl PayloadStatus {
 pub struct TimedPowBlock {
     pub pow_block: PowBlock,
     pub timestamp: UnixSeconds,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum KzgProofs<P: Preset> {
+    Deneb(ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>),
+    Fulu(ContiguousList<KzgProof, P::MaxCellProofsPerBlock>),
+}
+
+impl<P: Preset> IntoIterator for KzgProofs<P> {
+    type Item = KzgProof;
+    type IntoIter = <Vec<KzgProof> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::Deneb(list) => list.into_iter(),
+            Self::Fulu(list) => list.into_iter(),
+        }
+    }
+}
+
+impl<P: Preset> AsRef<[KzgProof]> for KzgProofs<P> {
+    fn as_ref(&self) -> &[KzgProof] {
+        match self {
+            Self::Deneb(list) => list.as_ref(),
+            Self::Fulu(list) => list.as_ref(),
+        }
+    }
+}
+
+impl<P: Preset> SszSize for KzgProofs<P> {
+    const SIZE: Size = Size::Variable { minimum_size: 0 };
+}
+
+impl<P: Preset> SszWrite for KzgProofs<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Deneb(list) => list.write_variable(bytes),
+            Self::Fulu(list) => list.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> KzgProofs<P> {
+    #[must_use]
+    pub fn empty_deneb() -> Self {
+        Self::Deneb(ContiguousList::default())
+    }
+
+    #[must_use]
+    pub fn empty_fulu() -> Self {
+        Self::Fulu(ContiguousList::default())
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Constructor)]

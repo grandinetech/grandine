@@ -8,7 +8,7 @@ use types::{
     combined::{ExecutionPayload, ExecutionPayloadHeader},
     deneb::primitives::KzgCommitment,
     electra::containers::ExecutionRequests,
-    nonstandard::{Phase, WithBlobsAndMev},
+    nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::primitives::Uint256,
     preset::Preset,
 };
@@ -22,7 +22,11 @@ use crate::{
         SignedBuilderBid as DenebSignedBuilderBid,
     },
     electra::containers::SignedBuilderBid as ElectraSignedBuilderBid,
-    fulu::containers::SignedBuilderBid as FuluSignedBuilderBid,
+    fulu::containers::{
+        BlobsBundle as FuluBlobsBundle,
+        ExecutionPayloadAndBlobsBundle as FuluExecutionPayloadAndBlobsBundle,
+        SignedBuilderBid as FuluSignedBuilderBid,
+    },
 };
 
 #[derive(Debug, Deserialize)]
@@ -170,7 +174,7 @@ pub enum ExecutionPayloadAndBlobsBundle<P: Preset> {
     Capella(CapellaExecutionPayload<P>),
     Deneb(DenebExecutionPayloadAndBlobsBundle<P>),
     Electra(DenebExecutionPayloadAndBlobsBundle<P>),
-    Fulu(DenebExecutionPayloadAndBlobsBundle<P>),
+    Fulu(FuluExecutionPayloadAndBlobsBundle<P>),
 }
 
 impl<P: Preset> SszSize for ExecutionPayloadAndBlobsBundle<P> {
@@ -219,8 +223,7 @@ impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>
                 Self::with_default(execution_payload.into())
             }
             ExecutionPayloadAndBlobsBundle::Deneb(payload_with_blobs_bundle)
-            | ExecutionPayloadAndBlobsBundle::Electra(payload_with_blobs_bundle)
-            | ExecutionPayloadAndBlobsBundle::Fulu(payload_with_blobs_bundle) => {
+            | ExecutionPayloadAndBlobsBundle::Electra(payload_with_blobs_bundle) => {
                 let DenebExecutionPayloadAndBlobsBundle {
                     execution_payload,
                     blobs_bundle,
@@ -235,7 +238,28 @@ impl<P: Preset> From<ExecutionPayloadAndBlobsBundle<P>>
                 Self::new(
                     execution_payload.into(),
                     Some(commitments),
-                    Some(proofs),
+                    Some(KzgProofs::Deneb(proofs)),
+                    Some(blobs),
+                    None,
+                    None,
+                )
+            }
+            ExecutionPayloadAndBlobsBundle::Fulu(payload_with_blobs_bundle) => {
+                let FuluExecutionPayloadAndBlobsBundle {
+                    execution_payload,
+                    blobs_bundle,
+                } = payload_with_blobs_bundle;
+
+                let FuluBlobsBundle {
+                    commitments,
+                    proofs,
+                    blobs,
+                } = blobs_bundle;
+
+                Self::new(
+                    execution_payload.into(),
+                    Some(commitments),
+                    Some(KzgProofs::Fulu(proofs)),
                     Some(blobs),
                     None,
                     None,
