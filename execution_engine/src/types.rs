@@ -28,13 +28,13 @@ use types::{
     combined::{ExecutionPayload, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, ExecutionPayload as DenebExecutionPayload},
-        primitives::{Blob, KzgCommitment, KzgProof, KzgProofs},
+        primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
     fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
-    nonstandard::{Phase, WithBlobsAndMev},
+    nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{
@@ -411,15 +411,21 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
-// Merge `BlobsBundleV1` with `BlobsBundleV2` by using the same `proofs` max length
-//
-/// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
+/// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/cancun.md#blobsbundlev1)
+#[derive(Deserialize, Serialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct BlobsBundleV1<P: Preset> {
+    pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
 /// [`BlobsBundleV2`](https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#blobsbundlev2)
 #[derive(Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
-pub struct BlobsBundle<P: Preset> {
+pub struct BlobsBundleV2<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    pub proofs: KzgProofs<P>,
+    pub proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
@@ -513,7 +519,7 @@ pub struct EngineGetPayloadV3Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub block_value: Wei,
-    pub blobs_bundle: BlobsBundle<P>,
+    pub blobs_bundle: BlobsBundleV1<P>,
     pub should_override_builder: bool,
 }
 
@@ -528,7 +534,7 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
 
         let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
 
-        let BlobsBundle {
+        let BlobsBundleV1 {
             commitments,
             proofs,
             blobs,
@@ -537,7 +543,7 @@ impl<P: Preset> From<EngineGetPayloadV3Response<P>> for WithBlobsAndMev<Executio
         Self::new(
             execution_payload,
             Some(commitments),
-            Some(proofs),
+            Some(KzgProofs::Deneb(proofs)),
             Some(blobs),
             Some(block_value),
             None,
@@ -551,7 +557,7 @@ pub struct EngineGetPayloadV4Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub block_value: Wei,
-    pub blobs_bundle: BlobsBundle<P>,
+    pub blobs_bundle: BlobsBundleV1<P>,
     pub should_override_builder: bool,
     pub execution_requests: RawExecutionRequests<P>,
 }
@@ -568,7 +574,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
 
         let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
 
-        let BlobsBundle {
+        let BlobsBundleV1 {
             commitments,
             proofs,
             blobs,
@@ -577,7 +583,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
         Self::new(
             execution_payload,
             Some(commitments),
-            Some(proofs),
+            Some(KzgProofs::Deneb(proofs)),
             Some(blobs),
             Some(block_value),
             Some(execution_requests.into()),
@@ -591,7 +597,7 @@ pub struct EngineGetPayloadV5Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub block_value: Wei,
-    pub blobs_bundle: BlobsBundle<P>,
+    pub blobs_bundle: BlobsBundleV2<P>,
     pub should_override_builder: bool,
     pub execution_requests: RawExecutionRequests<P>,
 }
@@ -608,7 +614,7 @@ impl<P: Preset> From<EngineGetPayloadV5Response<P>> for WithBlobsAndMev<Executio
 
         let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
 
-        let BlobsBundle {
+        let BlobsBundleV2 {
             commitments,
             proofs,
             blobs,
@@ -617,7 +623,7 @@ impl<P: Preset> From<EngineGetPayloadV5Response<P>> for WithBlobsAndMev<Executio
         Self::new(
             execution_payload,
             Some(commitments),
-            Some(proofs),
+            Some(KzgProofs::Fulu(proofs)),
             Some(blobs),
             Some(block_value),
             Some(execution_requests.into()),
@@ -1510,7 +1516,7 @@ mod tests {
         WithBlobsAndMev::new(
             payload,
             Some(kzg_commitments),
-            Some(kzg_proofs),
+            Some(KzgProofs::Deneb(kzg_proofs)),
             Some(ContiguousList::default()),
             Some(Wei::MAX),
             None,
