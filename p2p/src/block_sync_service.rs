@@ -627,6 +627,16 @@ impl<P: Preset> BlockSyncService<P> {
 
             debug!("finishing back-sync: {:?}", back_sync.data());
 
+            if !back_sync.sync_mode().is_default() {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    let custody_groups_count = self
+                        .controller
+                        .chain_config()
+                        .custody_size::<P>(self.controller.sampling_columns_count() as u64);
+                    metrics.set_beacon_custody_groups_backfilled(custody_groups_count);
+                }
+            }
+
             if let Some(sync) = BackSync::load(&self.database)? {
                 self.back_sync = Some(sync);
                 self.try_to_spawn_back_sync_states_archiver()?;
