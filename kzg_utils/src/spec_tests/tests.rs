@@ -296,6 +296,7 @@ fn test_compute_cells(case: Case) {
     }
 }
 
+#[expect(clippy::print_stdout)]
 #[test_resources("consensus-spec-tests/tests/general/fulu/kzg/compute_cells_and_kzg_proofs/*/*")]
 fn test_compute_cells_and_kzg_proofs(case: Case) {
     let test: containers::compute_cells_and_kzg_proofs::Test = case.yaml("data");
@@ -319,6 +320,9 @@ fn test_compute_cells_and_kzg_proofs(case: Case) {
     for backend in available_backends() {
         match compute_cells_and_kzg_proofs::<Mainnet>(&blob, backend) {
             Ok((cells, proofs)) => {
+                println!(
+                    "proofs using {backend} backend from compute_cells_and_kzg_proofs: {proofs:?}"
+                );
                 assert_eq!(cells.into_iter().collect::<Vec<_>>(), expected_cells);
                 assert_eq!(proofs.into_iter().collect::<Vec<_>>(), expected_proofs);
             }
@@ -329,6 +333,7 @@ fn test_compute_cells_and_kzg_proofs(case: Case) {
     }
 }
 
+#[expect(clippy::print_stdout)]
 #[test_resources("consensus-spec-tests/tests/general/fulu/kzg/recover_cells_and_kzg_proofs/*/*")]
 fn test_recover_cells_and_kzg_proofs(case: Case) {
     let test: containers::recover_cells_and_kzg_proofs::Test = case.yaml("data");
@@ -362,6 +367,9 @@ fn test_recover_cells_and_kzg_proofs(case: Case) {
             recover_cells_and_kzg_proofs::<Mainnet>(cell_indices.clone(), cells.iter(), backend);
         match result {
             Ok((cells, proofs)) => {
+                println!(
+                    "proofs using {backend} backend from recover_cells_and_kzg_proofs: {proofs:?}"
+                );
                 assert_eq!(cells.into_iter().collect::<Vec<_>>(), expected_cells);
                 assert_eq!(proofs.into_iter().collect::<Vec<_>>(), expected_proofs);
             }
