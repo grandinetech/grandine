@@ -70,6 +70,7 @@ pub struct Metrics {
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
     pub data_column_sidecar_kzg_verification_batch: Histogram,
     beacon_custody_groups: IntGauge,
+    beacon_custody_groups_backfilled: IntGauge,
     pub engine_get_blobs_v2_requests_count: IntCounter,
     pub engine_get_blobs_v2_responses_count: IntCounter,
     pub engine_get_blobs_v2_request_time: Histogram,
@@ -363,6 +364,11 @@ impl Metrics {
             beacon_custody_groups: IntGauge::new(
                 "beacon_custody_groups",
                 "Total number of custody groups within a node"
+            )?,
+
+            beacon_custody_groups_backfilled: IntGauge::new(
+                "beacon_custody_groups_backfilled",
+                "Total number of custody groups backfilled by a node"
             )?,
 
             engine_get_blobs_v2_requests_count: IntCounter::new(
@@ -905,6 +911,7 @@ impl Metrics {
             self.data_column_sidecar_kzg_verification_batch.clone(),
         ))?;
         default_registry.register(Box::new(self.beacon_custody_groups.clone()))?;
+        default_registry.register(Box::new(self.beacon_custody_groups_backfilled.clone()))?;
         default_registry.register(Box::new(self.engine_get_blobs_v2_requests_count.clone()))?;
         default_registry.register(Box::new(self.engine_get_blobs_v2_responses_count.clone()))?;
         default_registry.register(Box::new(self.engine_get_blobs_v2_request_time.clone()))?;
@@ -1198,6 +1205,10 @@ impl Metrics {
 
     pub fn set_beacon_custody_groups(&self, group_count: u64) {
         self.beacon_custody_groups.set(group_count as i64);
+    }
+
+    pub fn set_beacon_custody_groups_backfilled(&self, backfilled: u64) {
+        self.beacon_custody_groups_backfilled.set(backfilled as i64);
     }
 
     // Extra Network stats
