@@ -94,7 +94,7 @@ pub fn get_custody_groups(
     Ok(custody_groups.into_iter().collect())
 }
 
-pub fn compute_columns_for_custody_group(
+pub fn compute_columns_for_custody_group<P: Preset>(
     custody_group: CustodyIndex,
     config: &Config,
 ) -> Result<impl Iterator<Item = ColumnIndex>> {
@@ -108,7 +108,7 @@ pub fn compute_columns_for_custody_group(
     );
 
     let mut columns = Vec::new();
-    for i in 0..config.columns_per_group() {
+    for i in 0..config.columns_per_group::<P>() {
         columns.push(ColumnIndex::from(
             number_of_custody_groups * i + custody_group,
         ));
@@ -118,25 +118,25 @@ pub fn compute_columns_for_custody_group(
     Ok(columns.into_iter())
 }
 
-pub fn compute_subnets_from_custody_group(
+pub fn compute_subnets_from_custody_group<P: Preset>(
     custody_group: CustodyIndex,
     config: &Config,
 ) -> Result<impl Iterator<Item = SubnetId> + '_> {
-    let subnets = compute_columns_for_custody_group(custody_group, config)?
+    let subnets = compute_columns_for_custody_group::<P>(custody_group, config)?
         .map(|column_index| misc::compute_subnet_for_data_column_sidecar(config, column_index))
         .unique();
 
     Ok(subnets)
 }
 
-pub fn compute_subnets_for_node(
+pub fn compute_subnets_for_node<P: Preset>(
     raw_node_id: [u8; 32],
     custody_group_count: u64,
     config: &Config,
 ) -> Result<HashSet<SubnetId>> {
     let mut subnets = HashSet::new();
     for custody_group in get_custody_groups(raw_node_id, custody_group_count, config)? {
-        let custody_group_subnets = compute_subnets_from_custody_group(custody_group, config)?;
+        let custody_group_subnets = compute_subnets_from_custody_group::<P>(custody_group, config)?;
 
         subnets.extend(custody_group_subnets);
     }
