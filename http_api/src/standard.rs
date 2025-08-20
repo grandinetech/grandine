@@ -1262,7 +1262,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
-        let _timer = metrics
+        let timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
@@ -1274,6 +1274,8 @@ pub async fn publish_block<P: Preset, W: Wait>(
 
         let data_column_sidecars =
             eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
+
+        prometheus_metrics::stop_and_record(timer);
 
         // this is a temporary measure until `/eth/v1/beacon/blocks` is removed as it is no longer
         // possible to deserialize `SignedApiBlock` without phase header correctly as the contents
@@ -1343,7 +1345,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
-        let _timer = metrics
+        let timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
@@ -1355,6 +1357,8 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
 
         let data_column_sidecars =
             eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
+
+        prometheus_metrics::stop_and_record(timer);
 
         publish_signed_block_with_data_column_sidecar(
             signed_beacon_block,
@@ -1447,7 +1451,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
-        let _timer = metrics
+        let timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
@@ -1459,6 +1463,8 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 
         let data_column_sidecars =
             eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
+
+        prometheus_metrics::stop_and_record(timer);
 
         publish_signed_block_v2_with_data_column_sidecar(
             Arc::new(signed_beacon_block),

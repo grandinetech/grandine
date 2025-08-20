@@ -267,6 +267,11 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                     Ok(blobs_and_proofs_opt) => {
                         prometheus_metrics::stop_and_record(request_timer);
 
+                        let timer = self
+                            .metrics
+                            .as_ref()
+                            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
                         if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
                             if blobs_and_proofs.len() == expected_blobs_count {
                                 if let Some(metrics) = self.metrics.as_ref() {
@@ -287,9 +292,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     .into_iter()
                                     .flat_map(IntoIterator::into_iter)
                                     .collect::<Vec<_>>();
-                                let timer = self.metrics.as_ref().map(|metrics| {
-                                    metrics.data_column_sidecar_computation.start_timer()
-                                });
 
                                 match eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
                                     &received_blobs,
