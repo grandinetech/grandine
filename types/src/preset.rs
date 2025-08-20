@@ -393,6 +393,8 @@ impl Preset for Minimal {
 
         // Deneb
         type FieldElementsPerBlob;
+        type MaxBlobCommitmentsPerBlock;
+        type KzgCommitmentInclusionProofDepth;
 
         // Electra
         type MaxAttestationsElectra;
@@ -422,10 +424,6 @@ impl Preset for Minimal {
 
     // Capella
     type MaxWithdrawalsPerPayload = U4;
-
-    // Deneb
-    type MaxBlobCommitmentsPerBlock = U32;
-    type KzgCommitmentInclusionProofDepth = U10;
 
     // Electra
     type PendingConsolidationsLimit = U64;
