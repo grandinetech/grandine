@@ -78,7 +78,6 @@ pub mod electra {
 
 pub mod fulu {
     pub mod beacon_state;
-    pub mod consts;
     pub mod containers;
     pub mod primitives;
 

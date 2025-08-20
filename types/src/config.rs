@@ -12,7 +12,6 @@ use typenum::Unsigned as _;
 
 use crate::{
     bellatrix::primitives::Difficulty,
-    fulu::consts::NumberOfColumns,
     nonstandard::{Phase, Toption},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -911,15 +910,15 @@ impl Config {
 
     /// Return the number of data column sidecar to download per slot.
     #[must_use]
-    pub fn sampling_column_count(&self, custody_group_count: u64) -> u64 {
+    pub fn sampling_column_count<P: Preset>(&self, custody_group_count: u64) -> u64 {
         let sampling_size = self.sampling_size_custody_groups(custody_group_count);
 
-        sampling_size.saturating_mul(self.columns_per_group())
+        sampling_size.saturating_mul(self.columns_per_group::<P>())
     }
 
     #[must_use]
-    pub const fn columns_per_group(&self) -> u64 {
-        NumberOfColumns::U64.saturating_div(self.number_of_custody_groups)
+    pub const fn columns_per_group<P: Preset>(&self) -> u64 {
+        P::NumberOfColumns::U64.saturating_div(self.number_of_custody_groups)
     }
 
     #[must_use]

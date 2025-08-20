@@ -2020,7 +2020,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .try_into()
             .expect("sampling size should be able to fit into u64");
         let current_custody_requirements =
-            current_sampling_size.saturating_div(self.chain_config.columns_per_group());
+            current_sampling_size.saturating_div(self.chain_config.columns_per_group::<P>());
         if validator_custody_requirement > current_custody_requirements
             || self.last_cgc_update_epoch.is_none()
         {
