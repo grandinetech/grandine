@@ -246,7 +246,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             if self.controller.is_forward_synced()
                 && !self.controller.store_config().disable_engine_getblobs
             {
-                let _request_timer = self
+                let request_timer = self
                     .metrics
                     .as_ref()
                     .map(|metrics| metrics.engine_get_blobs_v2_request_time.start_timer());
@@ -265,6 +265,8 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 let mut data_column_sidecars = vec![];
                 match self.api.get_blobs_v2::<P>(versioned_hashes).await {
                     Ok(blobs_and_proofs_opt) => {
+                        prometheus_metrics::stop_and_record(request_timer);
+
                         if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
                             if blobs_and_proofs.len() == expected_blobs_count {
                                 if let Some(metrics) = self.metrics.as_ref() {
@@ -285,6 +287,11 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     .into_iter()
                                     .flat_map(IntoIterator::into_iter)
                                     .collect::<Vec<_>>();
+
+                                let timer = self.metrics.as_ref().map(|metrics| {
+                                    metrics.data_column_sidecar_computation.start_timer()
+                                });
+
                                 match eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
                                     &received_blobs,
                                     &cells_proofs,
@@ -295,14 +302,15 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                             BlockOrDataColumnSidecar::Block(block) => eip_7594::construct_data_column_sidecars(
                                                 &block,
                                                 &cells_and_kzg_proofs,
-                                                self.metrics.as_ref(),
                                             ),
                                             BlockOrDataColumnSidecar::Sidecar(sidecar) => eip_7594::construct_data_column_sidecars_from_sidecar(
                                                 &sidecar,
                                                 &cells_and_kzg_proofs,
-                                                self.metrics.as_ref(),
                                             ),
                                         };
+
+                                        prometheus_metrics::stop_and_record(timer);
+
                                         match result {
                                             Ok(data_columns) => {
                                                 self.sidecars_construction_started

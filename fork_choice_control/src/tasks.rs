@@ -559,10 +559,6 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
             metrics,
         } = self;
 
-        let _columns_reconstruction_timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.columns_reconstruction_time.start_timer());
-
         let Ok(available_columns) = (0..P::NumberOfColumns::U64)
             .map(|index| {
                 let identifier = DataColumnIdentifier { block_root, index };
@@ -579,6 +575,10 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
         };
 
         if available_columns.len() * 2 >= P::NumberOfColumns::USIZE {
+            let _columns_reconstruction_timer = metrics
+                .as_ref()
+                .map(|metrics| metrics.columns_reconstruction_time.start_timer());
+
             let blob_count = available_columns
                 .first()
                 .expect("first data column sidecar must be available")
