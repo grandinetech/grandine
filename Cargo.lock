@@ -3462,7 +3462,7 @@ dependencies = [
 
 [[package]]
 name = "grandine_version"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "const_format",
  "git-version",
