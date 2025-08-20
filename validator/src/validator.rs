@@ -997,6 +997,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             .phase_at_slot::<P>(slot_head.slot())
                             .is_peerdas_activated()
                         {
+                            let timer = self.metrics.as_ref().map(|metrics| {
+                                metrics.data_column_sidecar_computation.start_timer()
+                            });
+
                             let cells_and_kzg_proofs =
                                 eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
                                     blobs.as_ref(),
@@ -1004,11 +1008,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     self.controller.store_config().kzg_backend,
                                 )?;
 
-                            for data_column_sidecar in eip_7594::construct_data_column_sidecars(
+                            let data_column_sidecars = eip_7594::construct_data_column_sidecars(
                                 &block,
                                 &cells_and_kzg_proofs,
-                                self.metrics.as_ref(),
-                            )? {
+                            )?;
+
+                            prometheus_metrics::stop_and_record(timer);
+
+                            for data_column_sidecar in data_column_sidecars {
                                 let data_column_sidecar = Arc::new(data_column_sidecar);
 
                                 if self
