@@ -1777,13 +1777,17 @@ where
             return Ok(());
         }
 
+        let timer = self
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
         let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
-        let mut data_column_sidecars = eip_7594::construct_data_column_sidecars(
-            &pending.block,
-            &cells_and_kzg_proofs,
-            self.metrics.as_ref(),
-        )?;
+        let mut data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(&pending.block, &cells_and_kzg_proofs)?;
+
+        prometheus_metrics::stop_and_record(timer);
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
         data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));

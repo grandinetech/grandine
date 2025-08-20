@@ -171,6 +171,13 @@ impl<P: Preset> Network<P> {
         let custody_group_count =
             chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
 
+        // Once set custody group count metric for supernode
+        if network_config.subscribe_all_data_column_subnets {
+            if let Some(metrics) = metrics.as_ref() {
+                metrics.set_beacon_custody_groups(custody_group_count);
+            }
+        }
+
         let context = Context {
             chain_config: chain_config.clone_arc(),
             config: network_config.clone_arc(),
