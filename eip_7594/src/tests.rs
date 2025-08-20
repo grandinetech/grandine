@@ -72,7 +72,7 @@ fn run_compute_columns_for_custody_group<P: Preset>(case: Case) {
     } = case.yaml("meta");
 
     let config = P::default_config().start_and_stay_in(Phase::Fulu);
-    let columns = compute_columns_for_custody_group(custody_group, &config)
+    let columns = compute_columns_for_custody_group::<P>(custody_group, &config)
         .expect("custody group must be valid");
 
     assert_eq!(columns.collect::<Vec<_>>(), result);
