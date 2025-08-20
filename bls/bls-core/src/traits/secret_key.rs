@@ -17,7 +17,7 @@ pub trait SecretKey<const N: usize>: Debug + PartialEq + Eq + Hash {
 #[expect(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! impl_secret_key {
-    ($trait:ty, $name:ident, $raw:ty, $skb:ty, $pk:ty, $sig:ty) => {
+    ($trait:ty, $name:ident, $raw:ty, $skb:ty, $pk:ty, $sig:ty, $to_bytes:expr) => {
         #[derive(derive_more::Debug)]
         // Inspired by `DebugSecret` from the `secrecy` crate.
         #[debug("[REDACTED]")]
@@ -37,7 +37,7 @@ macro_rules! impl_secret_key {
         impl PartialEq for $name {
             #[inline]
             fn eq(&self, other: &Self) -> bool {
-                self.as_raw().to_bytes() == other.as_raw().to_bytes()
+                ($to_bytes)(self.as_raw()) == ($to_bytes)(other.as_raw())
             }
         }
 
@@ -45,7 +45,7 @@ macro_rules! impl_secret_key {
 
         impl core::hash::Hash for $name {
             fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
-                self.as_raw().to_bytes().hash(hasher)
+                ($to_bytes)(self.as_raw()).hash(hasher)
             }
         }
 
