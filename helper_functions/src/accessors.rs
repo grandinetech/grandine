@@ -496,15 +496,27 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
 ) -> Result<ValidatorIndex> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
-    let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_PROPOSER);
 
-    // Cause a compilation error if a new variant is added to `RelativeEpoch`.
-    // Proposer selection is not reliable for epochs after the next one or in the distant past.
-    match relative_epoch {
-        RelativeEpoch::Previous | RelativeEpoch::Current | RelativeEpoch::Next => {}
+    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+        match relative_epoch {
+            RelativeEpoch::Current => {
+                return proposer_lookahead
+                    .get(slot % P::SlotsPerEpoch::U64)
+                    .copied()
+                    .map_err(Into::into);
+            }
+            RelativeEpoch::Next => {
+                return proposer_lookahead
+                    .get(P::SlotsPerEpoch::U64 + slot % P::SlotsPerEpoch::U64)
+                    .copied()
+                    .map_err(Into::into);
+            }
+            RelativeEpoch::Previous => {}
+        }
     }
 
     let indices = active_validator_indices_ordered(state, relative_epoch);
+    let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_PROPOSER);
     let seed = hashing::hash_256_64(seed, slot);
 
     misc::compute_proposer_index(config, state, indices, seed, epoch)
