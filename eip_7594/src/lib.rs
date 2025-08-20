@@ -294,12 +294,7 @@ fn get_data_column_sidecars<P: Preset>(
 pub fn construct_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-    metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
-    let _timer = metrics
-        .as_ref()
-        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
     let signed_block_header = signed_block.to_header();
     let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() else {
         return Ok(vec![]);
@@ -324,12 +319,7 @@ pub fn construct_data_column_sidecars<P: Preset>(
 pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-    metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<DataColumnSidecar<P>>> {
-    let _timer = metrics
-        .as_ref()
-        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
     let DataColumnSidecar {
         kzg_commitments,
         signed_block_header,

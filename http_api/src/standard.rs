@@ -1262,17 +1262,18 @@ pub async fn publish_block<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.unwrap_or_default().as_ref(),
             proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
             controller.store_config().kzg_backend,
         )?;
 
-        let data_column_sidecars = eip_7594::construct_data_column_sidecars(
-            &signed_beacon_block,
-            &cells_and_kzg_proofs,
-            metrics.as_ref(),
-        )?;
+        let data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
 
         // this is a temporary measure until `/eth/v1/beacon/blocks` is removed as it is no longer
         // possible to deserialize `SignedApiBlock` without phase header correctly as the contents
@@ -1342,16 +1343,18 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.unwrap_or_default().as_ref(),
             proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
             controller.store_config().kzg_backend,
         )?;
-        let data_column_sidecars = eip_7594::construct_data_column_sidecars(
-            &signed_beacon_block,
-            &cells_and_kzg_proofs,
-            metrics.as_ref(),
-        )?;
+
+        let data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
 
         publish_signed_block_with_data_column_sidecar(
             signed_beacon_block,
@@ -1444,16 +1447,18 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
         let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
             blobs.unwrap_or_default().as_ref(),
             proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
             controller.store_config().kzg_backend,
         )?;
-        let data_column_sidecars = eip_7594::construct_data_column_sidecars(
-            &signed_beacon_block,
-            &cells_and_kzg_proofs,
-            metrics.as_ref(),
-        )?;
+
+        let data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
 
         publish_signed_block_v2_with_data_column_sidecar(
             Arc::new(signed_beacon_block),
