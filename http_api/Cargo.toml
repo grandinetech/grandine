@@ -15,7 +15,6 @@ block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 byteorder = { workspace = true }
-dashmap = { workspace = true }
 derive_more = { workspace = true }
 enum-iterator = { workspace = true }
 eip_7594 = { workspace = true }
@@ -63,6 +62,7 @@ validator_statistics = { workspace = true }
 attestation_verifier = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
+dashmap = { workspace = true }
 database = { workspace = true }
 dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }

@@ -1381,7 +1381,7 @@ mod tests {
         let log = build_log(slog::Level::Debug, false);
         let network_config = Arc::new(NetworkConfig::default());
         let network_globals =
-            NetworkGlobals::new_test_globals(chain_config, vec![], &log, network_config);
+            NetworkGlobals::new_test_globals::<P>(chain_config, vec![], &log, network_config);
         let received_data_column_sidecars = Arc::new(DashMap::new());
         SyncManager::new(network_globals.into(), 100, received_data_column_sidecars)
     }

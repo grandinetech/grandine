@@ -947,7 +947,7 @@ impl<P: Preset> Network<P> {
 
         let mut sampling_columns = HashSet::new();
         for custody_index in &custody_groups {
-            let columns = compute_columns_for_custody_group(*custody_index, config)
+            let columns = compute_columns_for_custody_group::<P>(*custody_index, config)
                 .expect("should compute custody columns for node");
             sampling_columns.extend(columns);
         }
