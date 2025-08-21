@@ -552,6 +552,15 @@ where
         Ok(data_columns)
     }
 
+    pub fn data_column_sidecars_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+        self.data_column_sidecars_by_ids(
+            (0..P::NumberOfColumns::U64).map(|index| DataColumnIdentifier { block_root, index }),
+        )
+    }
+
     pub fn data_column_sidecars_by_range(
         &self,
         range: Range<Slot>,
@@ -563,7 +572,7 @@ where
         let data_column_ids = canonical_chain_blocks
             .iter()
             .filter_map(|BlockWithRoot { block, root }| {
-                block.message().body().post_deneb().map(|_| {
+                block.message().body().post_fulu().map(|_| {
                     columns.iter().copied().map(|index| DataColumnIdentifier {
                         index,
                         block_root: *root,

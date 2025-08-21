@@ -258,7 +258,7 @@ fn get_data_column_sidecars<P: Preset>(
     kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-) -> Result<Vec<DataColumnSidecar<P>>> {
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     let blob_count = kzg_commitments.len();
     ensure!(
         cells_and_kzg_proofs.len() == blob_count,
@@ -268,7 +268,7 @@ fn get_data_column_sidecars<P: Preset>(
         }
     );
 
-    let mut sidecars: Vec<DataColumnSidecar<P>> = Vec::new();
+    let mut sidecars = vec![];
     for column_index in 0..P::NumberOfColumns::USIZE {
         let column = ContiguousList::try_from_iter(
             (0..blob_count)
@@ -278,14 +278,17 @@ fn get_data_column_sidecars<P: Preset>(
             (0..blob_count).map(|row_index| cells_and_kzg_proofs[row_index].1[column_index]),
         )?;
 
-        sidecars.push(DataColumnSidecar {
-            index: ColumnIndex::try_from(column_index)?,
-            column,
-            kzg_commitments: kzg_commitments.clone(),
-            kzg_proofs,
-            signed_block_header,
-            kzg_commitments_inclusion_proof,
-        });
+        sidecars.push(
+            DataColumnSidecar {
+                index: ColumnIndex::try_from(column_index)?,
+                column,
+                kzg_commitments: kzg_commitments.clone(),
+                kzg_proofs,
+                signed_block_header,
+                kzg_commitments_inclusion_proof,
+            }
+            .into(),
+        );
     }
 
     Ok(sidecars)
@@ -294,7 +297,7 @@ fn get_data_column_sidecars<P: Preset>(
 pub fn construct_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-) -> Result<Vec<DataColumnSidecar<P>>> {
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     let signed_block_header = signed_block.to_header();
     let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() else {
         return Ok(vec![]);
@@ -319,7 +322,7 @@ pub fn construct_data_column_sidecars<P: Preset>(
 pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
-) -> Result<Vec<DataColumnSidecar<P>>> {
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     let DataColumnSidecar {
         kzg_commitments,
         signed_block_header,
