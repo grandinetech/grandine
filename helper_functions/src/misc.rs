@@ -2,8 +2,6 @@ use core::{
     num::NonZeroU64,
     ops::{Div as _, Range, Shr as _},
 };
-use std::collections::btree_map::BTreeMap;
-use std::sync::Arc;
 
 use anyhow::{ensure, Result};
 use arithmetic::{U64Ext as _, UsizeExt as _};
@@ -11,9 +9,8 @@ use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
 use itertools::{izip, Itertools as _};
 use sha2::{Digest as _, Sha256};
-use ssz::{BitVector, ByteVector, ContiguousVector, MerkleTree, SszHash};
+use ssz::{BitVector, ContiguousVector, MerkleTree, SszHash};
 use tap::{Pipe as _, TryConv as _};
-use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
@@ -732,48 +729,6 @@ pub fn construct_blob_sidecars<P: Preset>(
             )
         })
         .collect()
-}
-
-pub fn construct_blob_sidecars_from_data_column_sidecars<P: Preset>(
-    block: &SignedBeaconBlock<P>,
-    data_column_sidecars: impl IntoIterator<Item = Arc<DataColumnSidecar<P>>>,
-) -> Result<Vec<Arc<BlobSidecar<P>>>> {
-    let Some(body) = block.message().body().post_deneb() else {
-        return Ok(vec![]);
-    };
-
-    // TODO(peerdas-fulu): `iterools::chunk_by` behave incorrectly when has multiple blobs
-    let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
-    for matrix in data_column_sidecars
-        .into_iter()
-        .flat_map(|sidecar| compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
-    {
-        blobs_matrix_map
-            .entry(matrix.row_index)
-            .or_default()
-            .push(matrix);
-    }
-
-    let blobs = blobs_matrix_map
-        .into_values()
-        .map(|blob_matrix| {
-            ContiguousVector::try_from_iter(
-                blob_matrix
-                    .into_iter()
-                    .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
-            )
-            .map(ByteVector::from)
-            .map(Blob::<P>::from)
-            .map_err(Into::into)
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    construct_blob_sidecars(
-        block,
-        blobs,
-        vec![KzgProof::zero(); body.blob_kzg_commitments().len()],
-    )
-    .map(|blob_sidecars| blob_sidecars.into_iter().map(Arc::new).collect())
 }
 
 #[must_use]
