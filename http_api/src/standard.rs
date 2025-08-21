@@ -3,7 +3,10 @@
 //! [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
 
 use core::time::Duration;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use anyhow::{anyhow, ensure, Error as AnyhowError, Result};
 use axum::{
@@ -45,7 +48,7 @@ use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
-use ssz::{ContiguousList, DynamicList, Hc, Ssz, SszHash as _};
+use ssz::{ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::time::timeout;
@@ -68,10 +71,10 @@ use types::{
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::BlobIndex,
+        primitives::{Blob, BlobIndex, KzgProof},
     },
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
+        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
         primitives::ColumnIndex,
     },
     nonstandard::{
@@ -1178,6 +1181,7 @@ pub async fn blinded_block<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
 pub async fn blob_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
     EthQuery(query): EthQuery<BlobSidecarsQuery>,
@@ -1205,32 +1209,24 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         .collect::<Result<Vec<_>>>()?;
 
     let blob_sidecars = if version.is_peerdas_activated() {
-        let half_columns = P::NumberOfColumns::U64.saturating_div(2);
-        let column_identifiers = (0..half_columns)
-            .map(|index| DataColumnIdentifier { block_root, index })
-            .collect::<Vec<_>>();
-        let data_column_sidecars = controller.data_column_sidecars_by_ids(column_identifiers)?;
+        let data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
+        let blob_sidecars = construct_blob_sidecars_from_data_column_sidecars(
+            &controller,
+            &block,
+            data_column_sidecars,
+            metrics.as_ref(),
+        )?;
 
-        // TODO(peerdas-fulu): with validator custody, node should reconstruct with any 64 columns,
-        // then construct requested blobs, serve to the request
-        if data_column_sidecars.len() == P::NumberOfColumns::USIZE.saturating_div(2) {
-            let blob_sidecars = misc::construct_blob_sidecars_from_data_column_sidecars(
-                &block,
-                data_column_sidecars.into_iter(),
-            )?;
-
-            DynamicList::try_from_iter_with_maximum(
-                blob_sidecars.into_iter().filter(|blob_sidecar| {
-                    blob_identifiers.contains(&blob_sidecar.as_ref().into())
-                }),
-                usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
-            )
-            .map_err(AnyhowError::new)?
-        } else {
-            DynamicList::empty()
-        }
+        DynamicList::try_from_iter_with_maximum(
+            blob_sidecars
+                .into_iter()
+                .filter(|blob_sidecar| blob_identifiers.contains(&blob_sidecar.as_ref().into())),
+            usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+        )
+        .map_err(AnyhowError::new)?
     } else {
         let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
+
         DynamicList::try_from_iter_with_maximum(
             blob_sidecars.into_iter(),
             usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
@@ -3332,12 +3328,10 @@ fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
 // TODO(feature/fulu): merge with `publish_signed_block`
 async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
-    data_column_sidecars: Vec<DataColumnSidecar<P>>,
+    data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    let data_column_sidecars = data_column_sidecars.into_iter().map(Arc::new).collect_vec();
-
     submit_data_column_sidecars(controller.clone_arc(), &data_column_sidecars).await?;
 
     if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
@@ -3471,13 +3465,11 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
 // TODO(feature/fulu): merge with `publish_signed_block_v2`
 async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
-    data_column_sidecars: Vec<DataColumnSidecar<P>>,
+    data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     broadcast_validation: BroadcastValidation,
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    let data_column_sidecars = data_column_sidecars.into_iter().map(Arc::new).collect_vec();
-
     submit_data_column_sidecars(controller.clone_arc(), &data_column_sidecars).await?;
 
     if broadcast_validation == BroadcastValidation::Gossip {
@@ -3887,6 +3879,90 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
     }
 
     Ok(())
+}
+
+fn construct_blob_sidecars_from_data_column_sidecars<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    block: &SignedBeaconBlock<P>,
+    mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+    metrics: Option<&Arc<Metrics>>,
+) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+    let Some(body) = block.message().body().post_fulu() else {
+        return Ok(vec![]);
+    };
+
+    if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
+        return Ok(vec![]);
+    }
+
+    let half_columns = P::NumberOfColumns::U64.saturating_div(2);
+
+    if (0..half_columns).any(|index| {
+        data_column_sidecars
+            .iter()
+            .find(|sidecar| sidecar.index == index)
+            .is_none()
+    }) {
+        let partial_matrix = data_column_sidecars
+            .iter()
+            .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(sidecar))
+            .collect::<Vec<_>>();
+
+        let reconstruction_timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.columns_reconstruction_time.start_timer());
+
+        let full_matrix = eip_7594::recover_matrix(
+            &partial_matrix,
+            body.blob_kzg_commitments().len(),
+            controller.store_config().kzg_backend,
+        )?;
+
+        prometheus_metrics::stop_and_record(reconstruction_timer);
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
+        let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
+
+        data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(block, &cells_and_kzg_proofs)?;
+    }
+
+    // TODO(peerdas-fulu): `iterools::chunk_by` behave incorrectly when has multiple blobs
+    let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
+    for matrix in data_column_sidecars
+        .into_iter()
+        .take_while(|sidecar| (0..half_columns).contains(&sidecar.index))
+        .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
+    {
+        blobs_matrix_map
+            .entry(matrix.row_index)
+            .or_default()
+            .push(matrix);
+    }
+
+    let blobs = blobs_matrix_map
+        .into_values()
+        .map(|blob_matrix| {
+            ContiguousVector::try_from_iter(
+                blob_matrix
+                    .into_iter()
+                    .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
+            )
+            .map(ByteVector::from)
+            .map(Blob::<P>::from)
+            .map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    misc::construct_blob_sidecars(
+        block,
+        blobs,
+        vec![KzgProof::zero(); body.blob_kzg_commitments().len()],
+    )
+    .map(|blob_sidecars| blob_sidecars.into_iter().map(Arc::new).collect())
 }
 
 #[cfg(test)]

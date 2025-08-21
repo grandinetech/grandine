@@ -329,8 +329,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                                     };
                                                     self.received_data_column_sidecars
                                                         .insert(identifier, slot);
-                                                    data_column_sidecars
-                                                        .push(Arc::new(data_column_sidecar));
+                                                    data_column_sidecars.push(data_column_sidecar);
                                                 }
                                             }
                                             Err(error) => warn!(

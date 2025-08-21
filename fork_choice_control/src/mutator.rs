@@ -1794,7 +1794,6 @@ where
         );
 
         for data_column_sidecar in data_column_sidecars {
-            let data_column_sidecar = Arc::new(data_column_sidecar);
             if missing_indices.contains(&data_column_sidecar.index) {
                 self.accept_data_column_sidecar(wait_group, &data_column_sidecar);
 
@@ -3645,7 +3644,7 @@ where
         block: &SignedBeaconBlock<P>,
         pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
     ) -> BlockDataColumnAvailability {
-        let Some(body) = block.message().body().post_deneb() else {
+        let Some(body) = block.message().body().post_fulu() else {
             return BlockDataColumnAvailability::Irrelevant;
         };
 
