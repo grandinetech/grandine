@@ -3699,7 +3699,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Vec<ColumnIndex> {
         let block = block.message();
 
-        let Some(body) = block.body().post_deneb() else {
+        let Some(body) = block.body().post_fulu() else {
             return vec![];
         };
 

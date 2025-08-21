@@ -1016,8 +1016,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             prometheus_metrics::stop_and_record(timer);
 
                             for data_column_sidecar in data_column_sidecars {
-                                let data_column_sidecar = Arc::new(data_column_sidecar);
-
                                 if self
                                     .controller
                                     .sampling_columns()
