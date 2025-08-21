@@ -3900,7 +3900,8 @@ fn construct_blob_sidecars_from_data_column_sidecars<P: Preset, W: Wait>(
     if (0..half_columns).any(|index| {
         data_column_sidecars
             .iter()
-            .any(|sidecar| sidecar.index == index)
+            .find(|sidecar| sidecar.index == index)
+            .is_none()
     }) {
         let partial_matrix = data_column_sidecars
             .iter()
