@@ -21,3 +21,6 @@ ssz = { workspace = true }
 static_assertions = { workspace = true }
 typenum = { workspace = true }
 zeroize = { workspace = true }
+
+[target.'cfg(target_os = "zkvm")'.dependencies]
+rand_chacha = { workspace = true }

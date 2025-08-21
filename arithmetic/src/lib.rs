@@ -8,10 +8,6 @@
     clippy::wrong_self_convention,
     reason = "This is needlessly strict. See <https://github.com/rust-lang/rust-clippy/issues/6727>."
 )]
-#![expect(
-    clippy::return_self_not_must_use,
-    reason = "Conflicts with `#[must_use]` has no effect when applied to a provided trait method."
-)]
 
 use core::num::NonZeroU64;
 

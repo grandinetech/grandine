@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use either::Either;
-use eth2_libp2p::PeerId;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
+use libp2p_identity::PeerId;
 use log::debug;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},

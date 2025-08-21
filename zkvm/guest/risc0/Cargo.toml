@@ -1,0 +1,13 @@
+[package]
+name = 'zkvm_guest_risc0'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[build-dependencies]
+risc0-build = { workspace = true, features = ['unstable'] }
+
+[package.metadata.risc0]
+methods = ["guest"]
