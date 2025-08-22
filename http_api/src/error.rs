@@ -134,6 +134,8 @@ pub enum Error {
     StatePreCapella,
     #[error("state is pre-Electra")]
     StatePreElectra,
+    #[error("state is pre-Fulu")]
+    StatePreFulu,
     #[error("target state not found")]
     TargetStateNotFound,
     #[error(transparent)]
@@ -233,6 +235,7 @@ impl Error {
             | Self::SlotNotInEpoch
             | Self::StatePreCapella
             | Self::StatePreElectra
+            | Self::StatePreFulu
             | Self::UnableToPublishBlock => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
             Self::Internal(_)
