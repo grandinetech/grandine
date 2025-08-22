@@ -451,7 +451,7 @@ pub fn compute_timestamp_at_slot<P: Preset>(
     slot: Slot,
 ) -> UnixSeconds {
     let slots_since_genesis = slot - GENESIS_SLOT;
-    state.genesis_time() + slots_since_genesis * config.seconds_per_slot.get()
+    state.genesis_time() + slots_since_genesis * config.slot_duration_ms.as_secs()
 }
 
 #[must_use]

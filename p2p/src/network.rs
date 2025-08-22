@@ -829,7 +829,7 @@ impl<P: Preset> Network<P> {
                 let min_ttl = match expiration {
                     Some(expiration) => {
                         let time_diff = expiration.saturating_sub(current_slot)
-                            * chain_config.seconds_per_slot.get();
+                            * chain_config.slot_duration_ms.as_secs();
                         Instant::now().checked_add(Duration::from_secs(time_diff))
                     }
                     None => None,

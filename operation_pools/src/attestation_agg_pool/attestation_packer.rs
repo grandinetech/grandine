@@ -688,7 +688,7 @@ impl<P: Preset> AttestationPacker<P> {
         let (_, remaining_time) =
             clock::next_interval_with_remaining_time(&self.config, self.state.genesis_time())?;
         if self.ignore_deadline {
-            Ok(f64::value_from(self.config.seconds_per_slot.get())?)
+            Ok(f64::value_from(self.config.slot_duration_ms.as_secs())?)
         } else if self.deadline_reached() {
             Ok(0.0)
         } else {

@@ -554,45 +554,6 @@ mod spec_tests {
     }
 
     #[duplicate_item(
-        glob                                                                                                               function_name                           preset;
-        ["consensus-spec-tests/tests/mainnet/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitment_*"] [fulu_mainnet_beacon_block_body_proofs] [Mainnet];
-        ["consensus-spec-tests/tests/minimal/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitment_*"] [fulu_minimal_beacon_block_body_proofs] [Minimal];
-    )]
-    #[test_resources(glob)]
-    fn function_name(case: Case) {
-        let Proof {
-            leaf,
-            leaf_index,
-            branch,
-        } = case.yaml("proof");
-
-        // Unlike the name suggests, `leaf_index` is actually a generalized index.
-        // `is_valid_merkle_branch` expects an index that includes only leaves.
-        let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
-        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
-        // vs
-        // let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
-
-        let block_body = case.ssz_default::<FuluBeaconBlockBody<preset>>("object");
-
-        // > Check that `is_valid_merkle_branch` confirms `leaf` at `leaf_index` to verify
-        // > against `has_tree_root(state)` and `proof`.
-        assert!(is_valid_merkle_branch(
-            leaf,
-            branch.iter().copied(),
-            index_at_commitment_depth,
-            block_body.hash_tree_root(),
-        ));
-
-        // > If the implementation supports generating merkle proofs, check that the
-        // > self-generated proof matches the `proof` provided with the test.
-        let proof = misc::electra_kzg_commitment_inclusion_proof(&block_body, commitment_index)
-            .expect("inclusion proof should be constructed successfully");
-
-        assert_eq!(proof.as_slice(), branch);
-    }
-
-    #[duplicate_item(
         glob                                                                                                                function_name                                  preset;
         ["consensus-spec-tests/tests/mainnet/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [fulu_kzg_commitments_inclusion_proof_mainnet] [Mainnet];
         ["consensus-spec-tests/tests/minimal/fulu/merkle_proof/single_merkle_proof/BeaconBlockBody/blob_kzg_commitments_*"] [fulu_kzg_commitments_inclusion_proof_minimal] [Minimal];
