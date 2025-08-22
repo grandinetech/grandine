@@ -19,7 +19,7 @@ use ssz::{
 };
 use strum::{Display, EnumString};
 use typenum::{
-    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, Sum, True, Unsigned, B1, U1, U10, U1048576,
+    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, Sum, True, Unsigned, B1, U1, U1048576,
     U1073741824, U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144,
     U32, U4, U4096, U512, U64, U65536, U8, U8192,
 };
