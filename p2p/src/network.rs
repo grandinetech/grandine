@@ -460,6 +460,12 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
+                        ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count, backfill_custody_groups) => {
+                            self.update_data_column_subnets(custody_group_count, backfill_custody_groups);
+                        }
+                        ValidatorToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
+                        }
                     }
                 },
 
@@ -507,12 +513,6 @@ impl<P: Preset> Network<P> {
                     match message {
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
-                        }
-                        SubnetServiceToP2p::UpdateDataColumnSubnets(custody_group_count) => {
-                            self.update_data_column_subnets(custody_group_count);
-                        }
-                        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
-                            self.update_earliest_available_slot(slot);
                         }
                         SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions) => {
                             self.update_sync_committee_subnets(actions);
@@ -942,7 +942,7 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn update_data_column_subnets(&self, custody_group_count: u64) {
+    fn update_data_column_subnets(&self, custody_group_count: u64, backfill_custody_groups: bool) {
         ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count)
             .send(&self.network_to_service_tx);
 
@@ -957,6 +957,14 @@ impl<P: Preset> Network<P> {
             let columns = compute_columns_for_custody_group::<P>(*custody_index, config)
                 .expect("should compute custody columns for node");
             sampling_columns.extend(columns);
+        }
+
+        if backfill_custody_groups {
+            let current_sampling_columns = self.controller.sampling_columns();
+            let backfill_column_indices = &sampling_columns - &current_sampling_columns;
+
+            P2pToSync::RequestCustodyGroupBackfill(backfill_column_indices)
+                .send(&self.channels.p2p_to_sync_tx);
         }
 
         // TODO(peerdas-fulu): use `sampling_columns` from `network_globals` in

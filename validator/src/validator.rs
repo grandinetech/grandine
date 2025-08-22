@@ -2033,12 +2033,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 metrics.set_beacon_custody_groups(validator_custody_requirement);
             }
 
-            // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
-            ToSubnetService::UpdateDataColumnSubnets(validator_custody_requirement)
-                .send(&self.subnet_service_tx);
+            let backfill_custody_groups = self.validator_config.backfill_custody_groups;
 
-            ToSubnetService::UpdateEarliestAvailableSlot(current_slot)
-                .send(&self.subnet_service_tx);
+            // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
+            ValidatorToP2p::UpdateDataColumnSubnets(
+                validator_custody_requirement,
+                backfill_custody_groups,
+            )
+            .send(&self.p2p_tx);
+
+            ValidatorToP2p::UpdateEarliestAvailableSlot(current_slot).send(&self.p2p_tx);
         }
 
         self.last_cgc_update_epoch = Some(current_epoch);
