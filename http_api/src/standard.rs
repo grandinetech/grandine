@@ -3898,10 +3898,9 @@ fn construct_blob_sidecars_from_data_column_sidecars<P: Preset, W: Wait>(
     let half_columns = P::NumberOfColumns::U64.saturating_div(2);
 
     if (0..half_columns).any(|index| {
-        data_column_sidecars
+        !data_column_sidecars
             .iter()
-            .find(|sidecar| sidecar.index == index)
-            .is_none()
+            .any(|sidecar| sidecar.index == index)
     }) {
         let partial_matrix = data_column_sidecars
             .iter()
