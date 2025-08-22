@@ -171,6 +171,9 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
 
+    // EIP-7805 (Inclusion Lists)
+    type MaxInclusionListTransactions: MerkleElements<Transaction<Self>> + Eq + Debug + Send + Sync;
+
     // Derived type-level variables
     type MaxAttestersPerSlot: MerkleElements<ValidatorIndex>
         + MerkleBits
@@ -291,6 +294,9 @@ impl Preset for Mainnet {
     type PendingConsolidationsLimit = U262144;
     type PendingPartialWithdrawalsLimit = U134217728;
 
+    // EIP-7805 (Inclusion Lists)
+    type MaxInclusionListTransactions = U16;
+
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
 
@@ -355,6 +361,9 @@ impl Preset for Minimal {
         type MaxDepositRequestsPerPayload;
         type MaxWithdrawalRequestsPerPayload;
         type PendingDepositsLimit;
+
+        // EIP-7805 (Inclusion Lists)
+        type MaxInclusionListTransactions;
     }
 
     // Phase 0
@@ -454,6 +463,9 @@ impl Preset for Medalla {
         type PendingDepositsLimit;
         type PendingConsolidationsLimit;
         type PendingPartialWithdrawalsLimit;
+
+        // EIP-7805 (Inclusion Lists)
+        type MaxInclusionListTransactions;
 
         // Derived type-level variables
         type MaxAttestersPerSlot;
