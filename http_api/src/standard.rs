@@ -860,6 +860,29 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
         .into_response())
 }
 
+/// `GET /eth/v1/beacon/states/{state_id}/proposer_lookahead`
+pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = state.phase();
+    let proposer_lookahead = state.proposer_lookahead().ok_or(Error::StatePreFulu)?;
+
+    Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(version)
+        .into_response())
+}
+
 /// `GET /eth/v1/beacon/states/{state_id}/pending_consolidations`
 pub async fn state_pending_consolidations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
