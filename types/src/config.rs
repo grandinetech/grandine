@@ -1,4 +1,4 @@
-use core::{cmp::Ordering, num::NonZeroU64};
+use core::{cmp::Ordering, num::NonZeroU64, time::Duration};
 use std::{borrow::Cow, collections::BTreeMap};
 
 use derive_more::Constructor;
@@ -7,6 +7,7 @@ use hex_literal::hex;
 use nonzero_ext::nonzero;
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 use serde_utils::shared::Sortable;
+use serde_with::{As, DurationMilliSeconds};
 use thiserror::Error;
 use typenum::Unsigned as _;
 
@@ -82,10 +83,13 @@ pub struct Config {
     pub min_validator_withdrawability_delay: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub seconds_per_eth1_block: u64,
+    #[deprecated = "use `Config::slot_duration_ms` instead"]
     #[serde(with = "serde_utils::string_or_native")]
     pub seconds_per_slot: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub shard_committee_period: u64,
+    #[serde(with = "As::<DurationMilliSeconds<String>>")]
+    pub slot_duration_ms: Duration,
 
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
@@ -195,6 +199,10 @@ pub struct Config {
 }
 
 impl Default for Config {
+    #[expect(
+        deprecated,
+        reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
+    )]
     fn default() -> Self {
         Self {
             // Meta
@@ -231,6 +239,7 @@ impl Default for Config {
             seconds_per_eth1_block: 14,
             seconds_per_slot: nonzero!(12_u64),
             shard_committee_period: 256,
+            slot_duration_ms: Duration::from_millis(12000),
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
@@ -347,6 +356,10 @@ impl Config {
     /// [Minimal configuration](https://github.com/ethereum/consensus-specs/blob/aac851f860fa384916f62027b2dbe3318a354c5b/configs/minimal.yaml).
     #[must_use]
     pub fn minimal() -> Self {
+        #[expect(
+            deprecated,
+            reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
+        )]
         Self {
             // Meta
             config_name: Cow::Borrowed("minimal"),
@@ -370,6 +383,7 @@ impl Config {
             eth1_follow_distance: 16,
             seconds_per_slot: nonzero!(6_u64),
             shard_committee_period: 64,
+            slot_duration_ms: Duration::from_millis(6000),
 
             // Validator cycle
             churn_limit_quotient: nonzero!(32_u64),

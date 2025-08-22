@@ -2097,7 +2097,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let Some(state) = state_fn() else {
             // Delay data column validations until the state is available.
             // Alternatively, we could allow slot processing to obtain states for data column sidecar validations,
-            // however, that introduces oportunity for DoS attacks with fake data column sidecars.
+            // however, that introduces opportunity for DoS attacks with fake data column sidecars.
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
