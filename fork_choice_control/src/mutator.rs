@@ -2367,8 +2367,6 @@ where
         wait_group: &W,
         data_column_sidecar: &Arc<DataColumnSidecar<P>>,
     ) {
-        let old_head = self.store.head().clone();
-        let head_was_optimistic = old_head.is_optimistic();
         let block_root = data_column_sidecar
             .signed_block_header
             .message
@@ -2410,8 +2408,6 @@ where
                 metrics: self.metrics.clone(),
             });
         }
-
-        self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
 
     fn notify_about_finalized_checkpoint(&self) {
