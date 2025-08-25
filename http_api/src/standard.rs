@@ -1233,34 +1233,103 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 
     let blob_sidecars = if version.is_peerdas_activated() {
         let data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
-        let blob_sidecars = construct_blob_sidecars_from_data_column_sidecars(
+        let blobs = construct_blobs_from_data_column_sidecars(
             &controller,
             &block,
             data_column_sidecars,
             metrics.as_ref(),
         )?;
 
-        DynamicList::try_from_iter_with_maximum(
-            blob_sidecars
-                .into_iter()
-                .filter(|blob_sidecar| blob_identifiers.contains(&blob_sidecar.as_ref().into())),
-            usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
-        )
-        .map_err(AnyhowError::new)?
-    } else {
-        let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
+        let blob_count = blobs.len();
+        let blob_sidecars =
+            misc::construct_blob_sidecars(&block, blobs, vec![KzgProof::zero(); blob_count])?;
 
-        DynamicList::try_from_iter_with_maximum(
-            blob_sidecars.into_iter(),
-            usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
-        )
-        .map_err(AnyhowError::new)?
+        blob_sidecars
+            .into_iter()
+            .filter(|blob_sidecar| blob_identifiers.contains(&blob_sidecar.into()))
+            .map(Arc::new)
+            .collect::<Vec<_>>()
+    } else {
+        controller.blob_sidecars_by_ids(blob_identifiers)?
     };
+
+    let blob_sidecars = DynamicList::try_from_iter_with_maximum(
+        blob_sidecars.into_iter(),
+        usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+    )
+    .map_err(AnyhowError::new)?;
 
     Ok(EthResponse::json_or_ssz(blob_sidecars, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .version(version))
+}
+
+/// `GET /eth/v1/beacon/blobs/{block_id}`
+pub async fn blobs<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(block_id): EthPath<BlockId>,
+    EthQuery(query): EthQuery<BlobSidecarsQuery>,
+    headers: HeaderMap,
+) -> Result<EthResponse<DynamicList<Blob<P>>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: block,
+        status,
+        finalized,
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = block.phase();
+    let block_root = block.message().hash_tree_root();
+    let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
+    let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
+
+    let blobs = if version.is_peerdas_activated() {
+        let data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
+        let blobs = construct_blobs_from_data_column_sidecars(
+            &controller,
+            &block,
+            data_column_sidecars,
+            metrics.as_ref(),
+        )?;
+
+        if let Some(indices) = query.indices {
+            blobs
+                .into_iter()
+                .zip(0..)
+                .filter_map(|(blob, index)| indices.contains(&index).then_some(blob))
+                .collect::<Vec<_>>()
+        } else {
+            blobs
+        }
+    } else {
+        let blob_identifiers = query
+            .indices
+            .unwrap_or_else(|| (0..max_blobs_per_block).collect())
+            .into_iter()
+            .map(|index| {
+                ensure!(index < max_blobs_per_block, Error::InvalidBlobIndex(index));
+                Ok(BlobIdentifier { block_root, index })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
+
+        blob_sidecars
+            .into_iter()
+            .map(|blob_sidecar| blob_sidecar.blob.clone())
+            .collect()
+    };
+
+    let blobs = DynamicList::try_from_iter_with_maximum(
+        blobs.into_iter(),
+        usize::try_from(max_blobs_per_block).map_err(AnyhowError::new)?,
+    )
+    .map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(blobs, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized))
 }
 
 /// `POST /eth/v1/beacon/blocks`
@@ -3917,12 +3986,12 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
     Ok(())
 }
 
-fn construct_blob_sidecars_from_data_column_sidecars<P: Preset, W: Wait>(
+fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     block: &SignedBeaconBlock<P>,
     mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     metrics: Option<&Arc<Metrics>>,
-) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+) -> Result<Vec<Blob<P>>> {
     let Some(body) = block.message().body().post_fulu() else {
         return Ok(vec![]);
     };
@@ -3978,7 +4047,7 @@ fn construct_blob_sidecars_from_data_column_sidecars<P: Preset, W: Wait>(
             .push(matrix);
     }
 
-    let blobs = blobs_matrix_map
+    blobs_matrix_map
         .into_values()
         .map(|blob_matrix| {
             ContiguousVector::try_from_iter(
@@ -3990,14 +4059,7 @@ fn construct_blob_sidecars_from_data_column_sidecars<P: Preset, W: Wait>(
             .map(Blob::<P>::from)
             .map_err(Into::into)
         })
-        .collect::<Result<Vec<_>>>()?;
-
-    misc::construct_blob_sidecars(
-        block,
-        blobs,
-        vec![KzgProof::zero(); body.blob_kzg_commitments().len()],
-    )
-    .map(|blob_sidecars| blob_sidecars.into_iter().map(Arc::new).collect())
+        .collect::<Result<Vec<_>>>()
 }
 
 #[cfg(test)]
