@@ -1,13 +1,13 @@
-use core::{cmp::Ordering, num::NonZeroU64};
+use core::{cmp::Ordering, num::NonZeroU64, time::Duration};
 use std::{borrow::Cow, collections::BTreeMap};
 
+use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
 use nonzero_ext::nonzero;
-use serde::{
-    de::IgnoredAny,
-    {Deserialize, Serialize},
-};
+use serde::{de::IgnoredAny, Deserialize, Serialize};
+use serde_utils::shared::Sortable;
+use serde_with::{As, DurationMilliSeconds};
 use thiserror::Error;
 use typenum::Unsigned as _;
 
@@ -73,7 +73,8 @@ pub struct Config {
     pub electra_fork_epoch: Epoch,
     pub electra_fork_version: Version,
     #[serde(with = "serde_utils::string_or_native")]
-    pub eip7594_fork_epoch: Epoch,
+    pub fulu_fork_epoch: Epoch,
+    pub fulu_fork_version: Version,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -82,10 +83,13 @@ pub struct Config {
     pub min_validator_withdrawability_delay: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub seconds_per_eth1_block: u64,
+    #[deprecated = "use `Config::slot_duration_ms` instead"]
     #[serde(with = "serde_utils::string_or_native")]
     pub seconds_per_slot: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub shard_committee_period: u64,
+    #[serde(with = "As::<DurationMilliSeconds<String>>")]
+    pub slot_duration_ms: Duration,
 
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
@@ -149,11 +153,17 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub min_epochs_for_data_column_sidecars_requests: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub data_column_sidecar_subnet_count: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars_electra: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_request_blob_sidecars_fulu: u64,
+    #[serde(with = "serde_utils::sorted_list_asc_by_key")]
+    pub blob_schedule: Vec<BlobScheduleEntry>,
 
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
@@ -165,7 +175,13 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub custody_requirement: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub number_of_custody_groups: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub samples_per_slot: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_custody_requirement: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub balance_per_additional_custody_group: Gwei,
 
     #[serde(skip_serializing)]
     pub blacklisted_blocks: Vec<H256>,
@@ -183,6 +199,10 @@ pub struct Config {
 }
 
 impl Default for Config {
+    #[expect(
+        deprecated,
+        reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
+    )]
     fn default() -> Self {
         Self {
             // Meta
@@ -210,7 +230,8 @@ impl Default for Config {
             deneb_fork_version: H32(hex!("04000000")),
             electra_fork_epoch: FAR_FUTURE_EPOCH,
             electra_fork_version: H32(hex!("05000000")),
-            eip7594_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_version: H32(hex!("06000000")),
 
             // Time parameters
             eth1_follow_distance: 2048,
@@ -218,6 +239,7 @@ impl Default for Config {
             seconds_per_eth1_block: 14,
             seconds_per_slot: nonzero!(12_u64),
             shard_committee_period: 256,
+            slot_duration_ms: Duration::from_millis(12000),
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
@@ -254,9 +276,12 @@ impl Default for Config {
             min_epochs_for_blob_sidecars_requests: 4096,
             min_epochs_for_block_requests: 33024,
             blob_sidecar_subnet_count: nonzero!(6_u64),
-            data_column_sidecar_subnet_count: 64,
+            min_epochs_for_data_column_sidecars_requests: 4096,
+            data_column_sidecar_subnet_count: 128,
             max_request_blob_sidecars_electra: 1152,
             blob_sidecar_subnet_count_electra: nonzero!(9_u64),
+            max_request_blob_sidecars_fulu: 1536,
+            blob_schedule: vec![],
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -267,13 +292,31 @@ impl Default for Config {
 
             // Custody
             custody_requirement: 4,
-            samples_per_slot: 16,
+            number_of_custody_groups: 128,
+            samples_per_slot: 8,
+            validator_custody_requirement: 8,
+            balance_per_additional_custody_group: 32_000_000_000,
 
             blacklisted_blocks: vec![],
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
         }
+    }
+}
+
+#[derive(Constructor, Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct BlobScheduleEntry {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub epoch: Epoch,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_blobs_per_block: usize,
+}
+
+impl Sortable for BlobScheduleEntry {
+    fn key(&self) -> impl Ord {
+        self.epoch
     }
 }
 
@@ -313,6 +356,10 @@ impl Config {
     /// [Minimal configuration](https://github.com/ethereum/consensus-specs/blob/aac851f860fa384916f62027b2dbe3318a354c5b/configs/minimal.yaml).
     #[must_use]
     pub fn minimal() -> Self {
+        #[expect(
+            deprecated,
+            reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
+        )]
         Self {
             // Meta
             config_name: Cow::Borrowed("minimal"),
@@ -330,11 +377,13 @@ impl Config {
             capella_fork_version: H32(hex!("03000001")),
             deneb_fork_version: H32(hex!("04000001")),
             electra_fork_version: H32(hex!("05000001")),
+            fulu_fork_version: H32(hex!("06000001")),
 
             // Time parameters
             eth1_follow_distance: 16,
             seconds_per_slot: nonzero!(6_u64),
             shard_committee_period: 64,
+            slot_duration_ms: Duration::from_millis(6000),
 
             // Validator cycle
             churn_limit_quotient: nonzero!(32_u64),
@@ -734,7 +783,14 @@ impl Config {
             Phase::Capella => self.capella_fork_version,
             Phase::Deneb => self.deneb_fork_version,
             Phase::Electra => self.electra_fork_version,
+            Phase::Fulu => self.fulu_fork_version,
         }
+    }
+
+    #[must_use]
+    pub fn version_at_epoch(&self, epoch: Epoch) -> Version {
+        let phase = self.phase_at_epoch(epoch);
+        self.version(phase)
     }
 
     #[inline]
@@ -747,6 +803,7 @@ impl Config {
             Phase::Capella => self.capella_fork_epoch,
             Phase::Deneb => self.deneb_fork_epoch,
             Phase::Electra => self.electra_fork_epoch,
+            Phase::Fulu => self.fulu_fork_epoch,
         }
     }
 
@@ -788,13 +845,8 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn is_eip7594_fork(&self, epoch: Epoch) -> bool {
-        epoch >= self.eip7594_fork_epoch
-    }
-
-    #[must_use]
-    pub const fn is_eip7594_fork_epoch_set(&self) -> bool {
-        self.eip7594_fork_epoch != FAR_FUTURE_EPOCH
+    pub const fn is_peerdas_scheduled(&self) -> bool {
+        self.fulu_fork_epoch != FAR_FUTURE_EPOCH
     }
 
     #[must_use]
@@ -803,7 +855,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => {
                 self.max_request_blocks
             }
-            Phase::Deneb | Phase::Electra => self.max_request_blocks_deneb,
+            Phase::Deneb | Phase::Electra | Phase::Fulu => self.max_request_blocks_deneb,
         }
     }
 
@@ -813,7 +865,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 self.blob_sidecar_subnet_count
             }
-            Phase::Electra => self.blob_sidecar_subnet_count_electra,
+            Phase::Electra | Phase::Fulu => self.blob_sidecar_subnet_count_electra,
         }
     }
 
@@ -823,7 +875,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 self.max_request_blob_sidecars
             }
-            Phase::Electra => self.max_request_blob_sidecars_electra,
+            Phase::Electra | Phase::Fulu => self.max_request_blob_sidecars_electra,
         }
     }
 
@@ -848,6 +900,70 @@ impl Config {
         32_usize.checked_add(n)?.checked_add(n / 6)
     }
 
+    #[must_use]
+    pub fn max_blob_sideacar_subnet_count(&self) -> u64 {
+        self.blob_sidecar_subnet_count
+            .get()
+            .max(self.blob_sidecar_subnet_count_electra.get())
+    }
+
+    #[must_use]
+    pub const fn custody_group_count(&self, subscribe_all_data_column_subnets: bool) -> u64 {
+        if subscribe_all_data_column_subnets {
+            self.number_of_custody_groups
+        } else {
+            self.custody_requirement
+        }
+    }
+
+    /// Return the number of custody group to sample per slot.
+    #[must_use]
+    pub fn sampling_size_custody_groups(&self, custody_group_count: u64) -> u64 {
+        core::cmp::max(custody_group_count, self.samples_per_slot)
+    }
+
+    /// Return the number of data column sidecar to download per slot.
+    #[must_use]
+    pub fn sampling_column_count<P: Preset>(&self, custody_group_count: u64) -> u64 {
+        let sampling_size = self.sampling_size_custody_groups(custody_group_count);
+
+        sampling_size.saturating_mul(self.columns_per_group::<P>())
+    }
+
+    #[must_use]
+    pub const fn columns_per_group<P: Preset>(&self) -> u64 {
+        P::NumberOfColumns::U64.saturating_div(self.number_of_custody_groups)
+    }
+
+    #[must_use]
+    pub fn get_blob_schedule_entry(&self, epoch: Epoch) -> BlobScheduleEntry {
+        // There is no need to sort everytime the function called, `blob_schedule` has been sorted by
+        // `epoch` in descending order.
+        self.blob_schedule
+            .iter()
+            .rev()
+            .find_map(|entry| (epoch >= entry.epoch).then_some(entry.clone()))
+            .unwrap_or_else(|| {
+                BlobScheduleEntry::new(self.electra_fork_epoch, self.max_blobs_per_block_electra)
+            })
+    }
+
+    #[must_use]
+    pub fn max_blobs_per_block(&self, epoch: Epoch) -> u64 {
+        let phase = self.phase_at_epoch(epoch);
+        let max_blobs = match phase {
+            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
+                self.max_blobs_per_block
+            }
+            Phase::Electra => self.max_blobs_per_block_electra,
+            Phase::Fulu => self.get_blob_schedule_entry(epoch).max_blobs_per_block,
+        };
+
+        max_blobs
+            .try_into()
+            .expect("number of max blobs in block should fit in u64")
+    }
+
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
         enum_iterator::all().map(|phase| (phase, self.fork_slot::<P>(phase)))
     }
@@ -861,6 +977,7 @@ impl Config {
             self.capella_fork_epoch,
             self.deneb_fork_epoch,
             self.electra_fork_epoch,
+            self.fulu_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -875,6 +992,7 @@ impl Config {
             &mut self.capella_fork_epoch,
             &mut self.deneb_fork_epoch,
             &mut self.electra_fork_epoch,
+            &mut self.fulu_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -887,6 +1005,8 @@ pub enum Error {
     NameEmpty,
     #[error("configuration name contains illegal characters")]
     NameContainsIllegalCharacters,
+    #[error("blob schedule is not defined")]
+    BlobScheduleUndefined,
 }
 
 #[expect(

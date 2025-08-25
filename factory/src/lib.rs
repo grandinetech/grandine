@@ -45,6 +45,7 @@ use types::{
         Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock,
         BeaconBlockBody as ElectraBeaconBlockBody,
     },
+    fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
     phase0::{
         consts::GENESIS_SLOT,
@@ -405,7 +406,7 @@ pub fn execution_payload<P: Preset>(
             ..CapellaExecutionPayload::default()
         }
         .into(),
-        Phase::Deneb | Phase::Electra => DenebExecutionPayload {
+        Phase::Deneb | Phase::Electra | Phase::Fulu => DenebExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
@@ -558,6 +559,21 @@ fn block<P: Preset>(
                 deposits,
                 sync_aggregate,
                 ..ElectraBeaconBlockBody::default()
+            },
+        }),
+        Phase::Fulu => BeaconBlock::from(FuluBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            state_root: H256::zero(),
+            body: FuluBeaconBlockBody {
+                randao_reveal,
+                eth1_data,
+                graffiti,
+                attestations: electra_attestations.try_into()?,
+                deposits,
+                sync_aggregate,
+                ..FuluBeaconBlockBody::default()
             },
         }),
     }

@@ -9,7 +9,7 @@ use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -20,13 +20,12 @@ use crate::{
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
     combined::{Attestation, BeaconState, SignedBeaconBlock},
-    config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
-    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     electra::containers::ExecutionRequests,
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
     phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
@@ -61,21 +60,14 @@ pub enum Phase {
     Capella,
     Deneb,
     Electra,
+    Fulu,
 }
 
 impl Phase {
+    // Modify condition if we want to change the peerdas activation behaviour
     #[must_use]
-    pub fn max_blobs_per_block(self, config: &Config) -> u64 {
-        let max_blobs = match self {
-            Self::Phase0 | Self::Altair | Self::Bellatrix | Self::Capella | Self::Deneb => {
-                config.max_blobs_per_block
-            }
-            Self::Electra => config.max_blobs_per_block_electra,
-        };
-
-        max_blobs
-            .try_into()
-            .expect("number of max blobs in block should fit in u64")
+    pub fn is_peerdas_activated(self) -> bool {
+        self >= Self::Fulu
     }
 }
 
@@ -216,6 +208,23 @@ impl<P: Preset> From<Arc<BlobSidecar<P>>> for BlobSidecarWithId<P> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct DataColumnSidecarWithId<P: Preset> {
+    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    pub data_column_id: DataColumnIdentifier,
+}
+
+impl<P: Preset> From<Arc<DataColumnSidecar<P>>> for DataColumnSidecarWithId<P> {
+    fn from(data_column_sidecar: Arc<DataColumnSidecar<P>>) -> Self {
+        let data_column_id = data_column_sidecar.as_ref().into();
+
+        Self {
+            data_column_sidecar,
+            data_column_id,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub struct BlockRewards {
     pub total: Gwei,
@@ -223,12 +232,6 @@ pub struct BlockRewards {
     pub sync_aggregate: Gwei,
     pub proposer_slashings: Gwei,
     pub attester_slashings: Gwei,
-}
-
-#[derive(Clone, Debug)]
-pub struct DataColumnSidecarWithId<P: Preset> {
-    pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
-    pub data_column_id: DataColumnIdentifier,
 }
 
 #[derive(Clone, Copy)]
@@ -294,11 +297,64 @@ pub struct TimedPowBlock {
     pub timestamp: UnixSeconds,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum KzgProofs<P: Preset> {
+    Deneb(ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>),
+    Fulu(ContiguousList<KzgProof, P::MaxCellProofsPerBlock>),
+}
+
+impl<P: Preset> IntoIterator for KzgProofs<P> {
+    type Item = KzgProof;
+    type IntoIter = <Vec<KzgProof> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::Deneb(list) => list.into_iter(),
+            Self::Fulu(list) => list.into_iter(),
+        }
+    }
+}
+
+impl<P: Preset> AsRef<[KzgProof]> for KzgProofs<P> {
+    fn as_ref(&self) -> &[KzgProof] {
+        match self {
+            Self::Deneb(list) => list.as_ref(),
+            Self::Fulu(list) => list.as_ref(),
+        }
+    }
+}
+
+impl<P: Preset> SszSize for KzgProofs<P> {
+    const SIZE: Size = Size::Variable { minimum_size: 0 };
+}
+
+impl<P: Preset> SszWrite for KzgProofs<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Deneb(list) => list.write_variable(bytes),
+            Self::Fulu(list) => list.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> KzgProofs<P> {
+    #[must_use]
+    pub fn empty_deneb() -> Self {
+        Self::Deneb(ContiguousList::default())
+    }
+
+    #[must_use]
+    pub fn empty_fulu() -> Self {
+        Self::Fulu(ContiguousList::default())
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Constructor)]
 pub struct WithBlobsAndMev<T, P: Preset> {
     pub value: T,
     pub commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-    pub proofs: Option<ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>>,
+    pub proofs: Option<KzgProofs<P>>,
     pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
     pub mev: Option<Wei>,
     pub execution_requests: Option<ExecutionRequests<P>>,
@@ -547,6 +603,7 @@ mod tests {
             Phase::Capella,
             Phase::Deneb,
             Phase::Electra,
+            Phase::Fulu,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);

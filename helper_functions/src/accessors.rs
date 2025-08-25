@@ -389,7 +389,7 @@ fn get_seed_by_epoch<P: Preset>(
 ) -> H256 {
     let mix = get_randao_mix(
         state,
-        epoch + P::EpochsPerHistoricalVector::U64 - P::MIN_SEED_LOOKAHEAD - 1,
+        epoch + P::EpochsPerHistoricalVector::U64 - P::MinSeedLookahead::U64 - 1,
     );
 
     hashing::hash_32_64_256(domain_type.to_fixed_bytes(), epoch, mix)
@@ -456,7 +456,14 @@ pub fn get_beacon_proposer_index<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
 ) -> Result<ValidatorIndex> {
-    get_or_try_init_beacon_proposer_index(config, state, true)
+    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+        proposer_lookahead
+            .get(state.slot() % P::SlotsPerEpoch::U64)
+            .copied()
+            .map_err(Into::into)
+    } else {
+        get_or_try_init_beacon_proposer_index(config, state, true)
+    }
 }
 
 pub fn get_or_try_init_beacon_proposer_index<P: Preset>(
@@ -489,15 +496,27 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
 ) -> Result<ValidatorIndex> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
-    let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_PROPOSER);
 
-    // Cause a compilation error if a new variant is added to `RelativeEpoch`.
-    // Proposer selection is not reliable for epochs after the next one or in the distant past.
-    match relative_epoch {
-        RelativeEpoch::Previous | RelativeEpoch::Current | RelativeEpoch::Next => {}
+    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+        match relative_epoch {
+            RelativeEpoch::Current => {
+                return proposer_lookahead
+                    .get(slot % P::SlotsPerEpoch::U64)
+                    .copied()
+                    .map_err(Into::into);
+            }
+            RelativeEpoch::Next => {
+                return proposer_lookahead
+                    .get(P::SlotsPerEpoch::U64 + slot % P::SlotsPerEpoch::U64)
+                    .copied()
+                    .map_err(Into::into);
+            }
+            RelativeEpoch::Previous => {}
+        }
     }
 
     let indices = active_validator_indices_ordered(state, relative_epoch);
+    let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_PROPOSER);
     let seed = hashing::hash_256_64(seed, slot);
 
     misc::compute_proposer_index(config, state, indices, seed, epoch)
@@ -905,6 +924,23 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
         .filter(|withdrawal| withdrawal.validator_index == validator_index)
         .map(|withdrawal| withdrawal.amount)
         .sum()
+}
+
+pub fn get_beacon_proposer_indices<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    epoch: Epoch,
+) -> Result<Vec<ValidatorIndex>> {
+    let indices = get_active_validator_indices_by_epoch(state, epoch);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_PROPOSER);
+
+    misc::compute_proposer_indices(
+        config,
+        state,
+        epoch,
+        seed,
+        &PackedIndices::U64(indices.into_iter().collect()),
+    )
 }
 
 #[cfg(test)]

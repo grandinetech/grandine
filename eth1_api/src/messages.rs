@@ -1,12 +1,11 @@
-use std::sync::Arc;
-
 use eth2_libp2p::PeerId;
+use execution_engine::EngineGetBlobsParams;
 use futures::channel::mpsc::UnboundedSender;
 use log::debug;
 use serde::Serialize;
 use types::{
-    combined::SignedBeaconBlock, deneb::containers::BlobIdentifier, phase0::primitives::Slot,
-    preset::Preset,
+    deneb::containers::BlobIdentifier, fulu::containers::DataColumnsByRootIdentifier,
+    phase0::primitives::Slot, preset::Preset,
 };
 
 pub struct Eth1Metrics {
@@ -33,11 +32,7 @@ impl Eth1ApiToMetrics {
 }
 
 pub enum Eth1ApiToBlobFetcher<P: Preset> {
-    GetBlobs {
-        block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
-        peer_id: Option<PeerId>,
-    },
+    GetBlobs(EngineGetBlobsParams<P>),
     Stop,
 }
 
@@ -50,11 +45,12 @@ impl<P: Preset> Eth1ApiToBlobFetcher<P> {
 }
 
 #[derive(Serialize)]
-pub enum BlobFetcherToP2p {
+pub enum BlobFetcherToP2p<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
+    DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
 }
 
-impl BlobFetcherToP2p {
+impl<P: Preset> BlobFetcherToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug!("send to p2p failed because the receiver was dropped");

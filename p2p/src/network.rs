@@ -8,14 +8,16 @@ use std::{
 use anyhow::{bail, Result};
 use data_dumper::DataDumper;
 use dedicated_executor::DedicatedExecutor;
+use eip_7594::{compute_columns_for_custody_group, get_custody_groups};
 use enum_iterator::Sequence as _;
 use eth1_api::{BlobFetcherToP2p, RealController};
 use eth2_libp2p::{
     rpc::{
         methods::{
-            BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest, OldBlocksByRangeRequest,
+            BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
+            DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
         },
-        GoodbyeReason, InboundRequestId, RequestType, StatusMessage,
+        GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
     },
     service::{api_types::AppRequestId, Network as Service},
     types::{core_topics_to_subscribe, EnrForkId, ForkContext, GossipEncoding},
@@ -38,6 +40,7 @@ use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
 use slog::{o, Drain as _, Logger};
 use slog_stdlog::StdLog;
+use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
@@ -46,11 +49,15 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        primitives::ColumnIndex,
+    },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, ForkDigest, NodeId, Slot, SubnetId, H256},
+        primitives::{Epoch, NodeId, Slot, SubnetId, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -92,12 +99,12 @@ const OLD_PHASE_TOPICS_REMAIN_EPOCHS: u64 = 2;
 
 pub struct Channels<P: Preset> {
     pub api_to_p2p_rx: UnboundedReceiver<ApiToP2p<P>>,
-    pub blob_fetcher_to_p2p_rx: UnboundedReceiver<BlobFetcherToP2p>,
+    pub blob_fetcher_to_p2p_rx: UnboundedReceiver<BlobFetcherToP2p<P>>,
     pub fork_choice_to_p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     pub pool_to_p2p_rx: UnboundedReceiver<PoolToP2pMessage>,
     pub p2p_to_sync_tx: UnboundedSender<P2pToSync<P>>,
     pub p2p_to_validator_tx: UnboundedSender<P2pToValidator<P>>,
-    pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p>,
+    pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p<P>>,
     pub validator_to_p2p_rx: UnboundedReceiver<ValidatorToP2p<P>>,
     pub network_to_slasher_tx: Option<UnboundedSender<P2pToSlasher<P>>>,
     pub subnet_service_to_p2p_rx: UnboundedReceiver<SubnetServiceToP2p>,
@@ -123,6 +130,8 @@ pub struct Network<P: Preset> {
     #[expect(dead_code)]
     port_mappings: Option<PortMappings>,
     data_dumper: Arc<DataDumper>,
+    earliest_available_slot: Slot,
+    last_nfd_update_epoch: Option<Epoch>,
 }
 
 impl<P: Preset> Network<P> {
@@ -158,6 +167,17 @@ impl<P: Preset> Network<P> {
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
 
+        // TODO: get custody value from metadata
+        let custody_group_count =
+            chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
+
+        // Once set custody group count metric for supernode
+        if network_config.subscribe_all_data_column_subnets {
+            if let Some(metrics) = metrics.as_ref() {
+                metrics.set_beacon_custody_groups(custody_group_count);
+            }
+        }
+
         let context = Context {
             chain_config: chain_config.clone_arc(),
             config: network_config.clone_arc(),
@@ -171,6 +191,7 @@ impl<P: Preset> Network<P> {
             chain_config.clone_arc(),
             executor,
             context,
+            custody_group_count,
             &logger,
         ))
         .await?;
@@ -189,6 +210,8 @@ impl<P: Preset> Network<P> {
 
         run_network_service(service, network_to_service_rx, service_to_network_tx);
 
+        let earliest_available_slot = controller.anchor_block().message().slot();
+
         let network = Self {
             network_globals,
             controller,
@@ -203,6 +226,8 @@ impl<P: Preset> Network<P> {
             shutdown_rx,
             port_mappings,
             data_dumper,
+            earliest_available_slot,
+            last_nfd_update_epoch: None,
         };
 
         Ok(network)
@@ -237,6 +262,12 @@ impl<P: Preset> Network<P> {
                             P2pToSync::BlobsNeeded(identifiers, slot, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
+                        BlobFetcherToP2p::DataColumnsNeeded(data_columns_by_root, slot) => {
+                            debug!("data columns needed: {data_columns_by_root:?}");
+
+                            P2pToSync::DataColumnsNeeded(data_columns_by_root, slot)
+                                .send(&self.channels.p2p_to_sync_tx);
+                        }
                     }
                 },
 
@@ -248,6 +279,10 @@ impl<P: Preset> Network<P> {
                         },
                         ApiToP2p::PublishBlobSidecar(blob_sidecar) => {
                             self.publish_blob_sidecar(blob_sidecar);
+                            true
+                        },
+                        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
+                            self.publish_data_column_sidecar(data_column_sidecar);
                             true
                         },
                         ApiToP2p::PublishAggregateAndProof(aggregate_and_proof) => {
@@ -330,6 +365,9 @@ impl<P: Preset> Network<P> {
                         P2pMessage::PublishBlobSidecar(blob_sidecar) => {
                             self.publish_blob_sidecar(blob_sidecar);
                         },
+                        P2pMessage::PublishDataColumnSidecar(data_column_sidecar) => {
+                            self.publish_data_column_sidecar(data_column_sidecar);
+                        }
                         P2pMessage::PenalizePeer(peer_id, mutator_rejection_reason) => {
                             self.report_peer(
                                 peer_id,
@@ -339,12 +377,16 @@ impl<P: Preset> Network<P> {
                             );
                         }
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
-                            if let MutatorRejectionReason::InvalidBlobSidecar {
-                                blob_identifier,
-                            } = mutator_rejection_reason
-                            {
-                                P2pToSync::BlobSidecarRejected(blob_identifier)
-                                    .send(&self.channels.p2p_to_sync_tx)
+                            match mutator_rejection_reason {
+                                MutatorRejectionReason::InvalidBlobSidecar { blob_identifier } => {
+                                    P2pToSync::BlobSidecarRejected(blob_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
+                                MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } => {
+                                    P2pToSync::DataColumnSidecarRejected(data_column_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
+                                _ => {}
                             }
 
                             if let Some(gossip_id) = gossip_id {
@@ -403,6 +445,9 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishBlobSidecar(blob_sidecar) => {
                             self.publish_blob_sidecar(blob_sidecar);
                         }
+                        ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
+                            self.publish_data_column_sidecar(data_column_sidecar);
+                        }
                         ValidatorToP2p::PublishSingularAttestation(attestation, subnet_id) => {
                             self.publish_singular_attestation(attestation, subnet_id);
                         }
@@ -440,11 +485,20 @@ impl<P: Preset> Network<P> {
                         SyncToP2p::RequestBlockByRoot(request_id, peer_id, block_root) => {
                             self.request_block_by_root(request_id, peer_id, block_root);
                         }
+                        SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, identifiers) => {
+                            self.request_data_columns_by_root(request_id, peer_id, identifiers);
+                        }
+                        SyncToP2p::RequestDataColumnsByRange(request_id, peer_id, start_slot, count, columns) => {
+                            self.request_data_columns_by_range(request_id, peer_id, start_slot, count, columns);
+                        }
                         SyncToP2p::RequestPeerStatus(request_id, peer_id) => {
                             self.request_peer_status(request_id, peer_id);
                         }
                         SyncToP2p::SubscribeToCoreTopics => {
                             self.subscribe_to_core_topics();
+                        }
+                        SyncToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
                         }
                     }
                 },
@@ -453,6 +507,12 @@ impl<P: Preset> Network<P> {
                     match message {
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
+                        }
+                        SubnetServiceToP2p::UpdateDataColumnSubnets(custody_group_count) => {
+                            self.update_data_column_subnets(custody_group_count);
+                        }
+                        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
                         }
                         SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions) => {
                             self.update_sync_committee_subnets(actions);
@@ -471,50 +531,64 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
-    fn on_slot(&self, slot: Slot) {
+    fn on_slot(&mut self, slot: Slot) {
         P2pToSync::Slot(slot).send(&self.channels.p2p_to_sync_tx);
 
         let chain_config = self.controller.chain_config();
         let phase_by_slot = chain_config.phase_at_slot::<P>(slot);
-        let phase_by_state = self.fork_context.current_fork();
+        let phase_by_state = self.fork_context.current_fork_name();
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-        self.fork_context.update_current_fork(phase_by_slot);
+        let fork_digest_by_epoch = self.fork_context.context_bytes(epoch);
+        let fork_digest_by_state = self.fork_context.current_fork_digest();
 
-        if phase_by_slot != phase_by_state {
-            info!("switching from {phase_by_state} to {phase_by_slot}");
+        if fork_digest_by_state != fork_digest_by_epoch {
+            if phase_by_slot == phase_by_state {
+                info!("updating fork digest from {fork_digest_by_state} to {fork_digest_by_epoch}");
+            } else {
+                info!("switching from {phase_by_state} to {phase_by_slot}");
+            }
+            self.fork_context.update_current_fork();
 
             let new_enr_fork_id = Self::enr_fork_id(&self.controller, &self.fork_context, slot);
 
             ServiceInboundMessage::UpdateFork(new_enr_fork_id).send(&self.network_to_service_tx);
         }
 
+        // Update `nfd` field in `eth2` in ENR.
+        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
+            let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
+
+            if fork_digest_by_state != fork_digest_by_epoch || self.last_nfd_update_epoch.is_none()
+            {
+                ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
+                    .send(&self.network_to_service_tx);
+            }
+
+            self.last_nfd_update_epoch = Some(epoch);
+        }
+
         // Subscribe to the topics of the next phase.
-        if let Some(next_phase) = chain_config.next_phase_at_slot::<P>(slot) {
-            let next_phase_slot = chain_config
-                .fork_slot::<P>(next_phase)
-                .expect("Config::next_phase_at_slot ensures that the phase is enabled");
+        if let Some((next_phase, next_fork_digest, next_fork_epoch)) = self.fork_context.next_fork()
+        {
+            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(next_fork_epoch);
 
             if slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_phase_slot {
-                if let Some(fork_digest) = self.fork_context.to_context_bytes(next_phase) {
-                    info!("subscribing to new topics from {next_phase}");
+                info!("subscribing to new topics for {next_phase} with digest {next_fork_digest}");
 
-                    ServiceInboundMessage::SubscribeNewForkTopics(next_phase, fork_digest)
-                        .send(&self.network_to_service_tx);
-                }
+                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, next_fork_digest)
+                    .send(&self.network_to_service_tx);
             }
         }
 
         if Some(phase_by_slot) > Phase::first() && misc::is_epoch_start::<P>(slot) {
-            let epoch = misc::compute_epoch_at_slot::<P>(slot);
-
             // Unsubscribe from the topics of previous phases.
-            if chain_config.fork_epoch(phase_by_slot) + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
-                if let Some(fork_digest) = self.fork_context.to_context_bytes(phase_by_slot) {
-                    info!("unsubscribing from old topics");
+            if self.fork_context.current_fork_epoch() + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
+                info!("unsubscribing from old topics");
 
-                    ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
-                        .send(&self.network_to_service_tx);
-                }
+                let fork_digest = self.fork_context.current_fork_digest();
+                ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
+                    .send(&self.network_to_service_tx);
             }
         }
     }
@@ -541,13 +615,19 @@ impl<P: Preset> Network<P> {
             // > `current_fork_version` is the fork version at the node's current epoch defined \
             // > by the wall-clock time (not necessarily the epoch to which the node is sync)
             next_fork_version = chain_config.version(chain_config.phase_at_slot::<P>(slot));
+            // > Furthermore, the existing `next_fork_epoch` field under the `eth2` entry MUST be
+            // > set to the epoch of the next fork, whether a regular fork, _or a BPO fork_.
+            //
             // > If no future fork is planned,
             // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
-            next_fork_epoch = FAR_FUTURE_EPOCH;
+            next_fork_epoch = fork_context
+                .next_fork()
+                .map(|(_, _, fork_epoch)| fork_epoch)
+                .unwrap_or(FAR_FUTURE_EPOCH);
         }
 
         EnrForkId {
-            fork_digest: fork_digest(fork_context),
+            fork_digest: fork_context.current_fork_digest(),
             next_fork_version,
             next_fork_epoch,
         }
@@ -579,6 +659,24 @@ impl<P: Preset> Network<P> {
         self.publish(PubsubMessage::BlobSidecar(Box::new((
             subnet_id,
             blob_sidecar,
+        ))));
+    }
+
+    fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+        let subnet_id = misc::compute_subnet_for_data_column_sidecar(
+            self.controller.chain_config(),
+            data_column_sidecar.index,
+        );
+
+        let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+
+        debug!(
+            "publishing data column sidecar: {data_column_identifier:?}, subnet_id: {subnet_id}",
+        );
+
+        self.publish(PubsubMessage::DataColumnSidecar(Box::new((
+            subnet_id,
+            data_column_sidecar,
         ))));
     }
 
@@ -731,7 +829,7 @@ impl<P: Preset> Network<P> {
                 let min_ttl = match expiration {
                     Some(expiration) => {
                         let time_diff = expiration.saturating_sub(current_slot)
-                            * chain_config.seconds_per_slot.get();
+                            * chain_config.slot_duration_ms.as_secs();
                         Instant::now().checked_add(Duration::from_secs(time_diff))
                     }
                     None => None,
@@ -759,15 +857,13 @@ impl<P: Preset> Network<P> {
                 //                      > fork versioning at least
                 //                      > `EPOCHS_PER_RANDOM_SUBNET_SUBSCRIPTION` epochs in
                 //                      > advance of the fork.
-                if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                    ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
-                }
+                let topic = self.subnet_gossip_topic(subnet);
+                ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
             } else {
                 debug!("unsubscribing from attestation subnet {subnet_id}");
 
-                if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                    ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
-                }
+                let topic = self.subnet_gossip_topic(subnet);
+                ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
             }
         }
 
@@ -823,10 +919,9 @@ impl<P: Preset> Network<P> {
                     debug!("subscribing to sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
-                    if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                        ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
-                    }
+                    let topic = self.subnet_gossip_topic(subnet);
 
+                    ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, true)
                         .send(&self.network_to_service_tx);
                 }
@@ -837,15 +932,41 @@ impl<P: Preset> Network<P> {
                     debug!("unsubscribing from sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
-                    if let Some(topic) = self.subnet_gossip_topic(subnet) {
-                        ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
-                    }
+                    let topic = self.subnet_gossip_topic(subnet);
 
+                    ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, false)
                         .send(&self.network_to_service_tx);
                 }
             }
         }
+    }
+
+    fn update_data_column_subnets(&self, custody_group_count: u64) {
+        ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count)
+            .send(&self.network_to_service_tx);
+
+        let node_id = self.network_globals.local_enr().node_id().raw();
+        let config = self.controller.chain_config();
+        let sampling_size = config.sampling_size_custody_groups(custody_group_count);
+        let custody_groups = get_custody_groups(node_id, sampling_size, config)
+            .expect("should compute node custody groups");
+
+        let mut sampling_columns = HashSet::new();
+        for custody_index in &custody_groups {
+            let columns = compute_columns_for_custody_group::<P>(*custody_index, config)
+                .expect("should compute custody columns for node");
+            sampling_columns.extend(columns);
+        }
+
+        // TODO(peerdas-fulu): use `sampling_columns` from `network_globals` in
+        // `fork_choice_store`.
+        // Lastly, update `sampling_columns` in fork choice store
+        self.controller.on_store_sampling_columns(sampling_columns);
+    }
+
+    const fn update_earliest_available_slot(&mut self, slot: Slot) {
+        self.earliest_available_slot = slot;
     }
 
     fn handle_network_event(&self, network_event: NetworkEvent<P>) {
@@ -899,6 +1020,10 @@ impl<P: Preset> Network<P> {
                 debug!("libp2p listening on {multiaddr}");
             }
             NetworkEvent::ZeroListeners => debug!("libp2p has zero listeners"),
+            NetworkEvent::PeerUpdatedCustodyGroupCount(peer_id) => {
+                debug!("peer {peer_id} has updated their advertised custody group count");
+                P2pToSync::PeerCgcUpdated(peer_id).send(&self.channels.p2p_to_sync_tx);
+            }
         }
     }
 
@@ -920,13 +1045,12 @@ impl<P: Preset> Network<P> {
                 self.handle_blocks_by_root_request(peer_id, inbound_request_id, request);
                 Ok(())
             }
-            RequestType::DataColumnsByRange(_) => {
-                debug!("received DataColumnsByRange request (peer_id: {peer_id})");
+            RequestType::DataColumnsByRoot(request) => {
+                self.handle_data_columns_by_root_request(peer_id, inbound_request_id, request);
                 Ok(())
             }
-            RequestType::DataColumnsByRoot(_) => {
-                debug!("received DataColumnsByRoot request (peer_id: {peer_id})");
-                Ok(())
+            RequestType::DataColumnsByRange(request) => {
+                self.handle_data_columns_by_range_request(peer_id, inbound_request_id, request)
             }
             RequestType::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
@@ -1114,6 +1238,88 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
+    fn handle_data_columns_by_range_request(
+        &self,
+        peer_id: PeerId,
+        inbound_request_id: InboundRequestId,
+        request: DataColumnsByRangeRequest<P>,
+    ) -> Result<()> {
+        debug!("received DataColumnsByRange request (peer_id: {peer_id}, request: {request:?})");
+
+        let DataColumnsByRangeRequest {
+            start_slot,
+            count,
+            columns,
+        } = request;
+
+        // TODO(feature/eip-7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        let start_slot = start_slot.max(misc::compute_start_slot_at_epoch::<P>(
+            self.controller.chain_config().fulu_fork_epoch,
+        ));
+        let difference = count.min(MAX_FOR_DOS_PREVENTION);
+
+        let end_slot = start_slot
+            .checked_add(difference)
+            .ok_or(Error::EndSlotOverflow {
+                start_slot,
+                difference,
+            })?;
+
+        let controller = self.controller.clone_arc();
+        let network_to_service_tx = self.network_to_service_tx.clone();
+        let max_request_data_column_sidecars: usize = self
+            .controller
+            .chain_config()
+            .max_request_data_column_sidecars
+            .try_into()?;
+
+        self.dedicated_executor
+            .spawn(async move {
+                // > Clients MAY limit the number of data column sidecars in the response.
+                let mut data_column_sidecars = controller.data_column_sidecars_by_range(
+                    start_slot..end_slot,
+                    &columns,
+                    max_request_data_column_sidecars,
+                )?;
+
+                // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
+                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+
+                for data_column_sidecar in data_column_sidecars {
+                    let data_column_identifier: DataColumnIdentifier =
+                        data_column_sidecar.as_ref().into();
+
+                    debug!(
+                        "sending DataColumnsSidecarsByRange response chunk \
+                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        slot: {}, id: {data_column_identifier:?})",
+                        data_column_sidecar.slot(),
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        inbound_request_id,
+                        Box::new(Response::DataColumnsByRange(Some(data_column_sidecar))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+
+                debug!("terminating DataColumnsByRange response stream");
+
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    inbound_request_id,
+                    Box::new(Response::DataColumnsByRange(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
+
+        Ok(())
+    }
+
     fn handle_blobs_by_root_request(
         &self,
         peer_id: PeerId,
@@ -1216,6 +1422,69 @@ impl<P: Preset> Network<P> {
                     peer_id,
                     inbound_request_id,
                     Box::new(Response::BlocksByRoot(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
+    }
+
+    fn handle_data_columns_by_root_request(
+        &self,
+        peer_id: PeerId,
+        inbound_request_id: InboundRequestId,
+        request: DataColumnsByRootRequest<P>,
+    ) {
+        debug!("received DataColumnsByRoot request (peer_id: {peer_id}, request: {request:?})");
+
+        let DataColumnsByRootRequest { data_column_ids } = request;
+
+        let controller = self.controller.clone_arc();
+        let network_to_service_tx = self.network_to_service_tx.clone();
+
+        // TODO(feature/eip7549): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
+        let max_request_data_column_sidecars = self
+            .controller
+            .chain_config()
+            .max_request_data_column_sidecars;
+
+        self.dedicated_executor
+            .spawn(async move {
+                // > Clients MAY limit the number of blocks and sidecars in the response.
+                let data_column_ids = data_column_ids
+                    .into_iter()
+                    .flat_map(Into::<Vec<DataColumnIdentifier>>::into)
+                    .take(max_request_data_column_sidecars.try_into()?);
+
+                let data_column_sidecars =
+                    controller.data_column_sidecars_by_ids(data_column_ids)?;
+
+                for data_column_sidecar in data_column_sidecars {
+                    let data_column_identifier: DataColumnIdentifier =
+                        data_column_sidecar.as_ref().into();
+
+                    debug!(
+                        "sending DataColumnsSidecarsByRoot response chunk \
+                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        slot: {}, id: {data_column_identifier:?})",
+                        data_column_sidecar.slot(),
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        inbound_request_id,
+                        Box::new(Response::DataColumnsByRoot(Some(data_column_sidecar))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+
+                debug!("terminating DataColumnsByRoot response stream");
+
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    inbound_request_id,
+                    Box::new(Response::DataColumnsByRoot(None)),
                 )
                 .send(&network_to_service_tx);
 
@@ -1342,7 +1611,59 @@ impl<P: Preset> Network<P> {
                     app_request_id: {app_request_id:?}",
                 );
             }
-            Response::DataColumnsByRange(_) | Response::DataColumnsByRoot(_) => {}
+            Response::DataColumnsByRange(Some(data_column_sidecar)) => {
+                let data_column_identifier: DataColumnIdentifier =
+                    data_column_sidecar.as_ref().into();
+
+                debug!(
+                    "received DataColumnsByRange response chunk \
+                    (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
+                    slot: {}, id: {data_column_identifier:?})",
+                    data_column_sidecar.slot(),
+                );
+
+                P2pToSync::RequestedDataColumnSidecar(
+                    data_column_sidecar,
+                    peer_id,
+                    app_request_id,
+                    RPCRequestType::Range,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRange(None) => {
+                debug!(
+                    "peer {peer_id} terminated DataColumnsByRange response stream for \
+                    app_request_id: {app_request_id:?}"
+                );
+
+                P2pToSync::DataColumnsByRangeRequestFinished(app_request_id)
+                    .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRoot(Some(data_column_sidecar)) => {
+                let data_column_identifier: DataColumnIdentifier =
+                    data_column_sidecar.as_ref().into();
+
+                debug!(
+                    "received DataColumnsByRoot response chunk \
+                    (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
+                    slot: {}, id: {data_column_identifier:?})",
+                    data_column_sidecar.slot(),
+                );
+
+                P2pToSync::RequestedDataColumnSidecar(
+                    data_column_sidecar,
+                    peer_id,
+                    app_request_id,
+                    RPCRequestType::Root,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::DataColumnsByRoot(None) => {
+                debug!(
+                    "peer {peer_id} terminated DataColumnsByRoot response stream for \
+                    app_request_id: {app_request_id:?}"
+                );
+            }
             Response::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!("received LightClientBootstrap response chunk (peer_id: {peer_id})");
@@ -1403,7 +1724,27 @@ impl<P: Preset> Network<P> {
                 )
                 .send(&self.channels.p2p_to_sync_tx);
             }
-            PubsubMessage::DataColumnSidecar(_) => {}
+            PubsubMessage::DataColumnSidecar(data) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["data_column_sidecar"]);
+                }
+
+                let (subnet_id, data_column_sidecar) = *data;
+                let data_column_identifier: DataColumnIdentifier =
+                    data_column_sidecar.as_ref().into();
+
+                debug!(
+                    "received data column sidecar as gossip in subnet {subnet_id}: {data_column_identifier:?} \
+                    from {source}",
+                );
+
+                P2pToSync::GossipDataColumnSidecar(
+                    data_column_sidecar,
+                    subnet_id,
+                    GossipId { source, message_id },
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
             PubsubMessage::AggregateAndProofAttestation(aggregate_and_proof) => {
                 self.data_dumper
                     .dump_signed_aggregate_and_proof(aggregate_and_proof.clone_arc());
@@ -1595,17 +1936,18 @@ impl<P: Preset> Network<P> {
             self.controller.finalized_root()
         };
 
-        StatusMessage {
-            fork_digest: fork_digest(&self.fork_context),
+        StatusMessage::V2(StatusMessageV2 {
+            fork_digest: self.fork_context.current_fork_digest(),
             finalized_root,
             finalized_epoch,
             head_root: head.block_root,
             head_slot: head.slot(),
-        }
+            earliest_available_slot: self.earliest_available_slot,
+        })
     }
 
     fn check_status(&self, local: &StatusMessage, remote: StatusMessage, peer_id: PeerId) {
-        if local.fork_digest != remote.fork_digest {
+        if local.fork_digest() != remote.fork_digest() {
             debug!(
                 "local fork digest doesn't match remote fork digest \
                 (local: {local:?}, remote: {remote:?}, peer_id: {peer_id}); \
@@ -1625,28 +1967,29 @@ impl<P: Preset> Network<P> {
         }
 
         let info = SyncInfo {
-            head_slot: remote.head_slot,
-            head_root: remote.head_root,
-            finalized_epoch: remote.finalized_epoch,
-            finalized_root: remote.finalized_root,
+            head_slot: remote.head_slot(),
+            head_root: remote.head_root(),
+            finalized_epoch: remote.finalized_epoch(),
+            finalized_root: remote.finalized_root(),
+            earliest_available_slot: remote.earliest_available_slot(),
         };
 
         let (local_finalized_root_at_remote_finalized_epoch, sync_status) =
-            match local.finalized_epoch.cmp(&remote.finalized_epoch) {
+            match local.finalized_epoch().cmp(&remote.finalized_epoch()) {
                 Ordering::Less => (None, SyncStatus::Advanced { info }),
                 Ordering::Equal => {
                     let max_empty_slots = self.controller.store_config().max_empty_slots;
 
-                    let status = if remote.head_slot + max_empty_slots < local.head_slot {
+                    let status = if remote.head_slot() + max_empty_slots < local.head_slot() {
                         SyncStatus::Behind { info }
                     } else {
                         SyncStatus::Synced { info }
                     };
 
-                    (Some(local.finalized_root), status)
+                    (Some(local.finalized_root()), status)
                 }
                 Ordering::Greater => {
-                    let remote_finalized_slot = Self::start_of_epoch(remote.finalized_epoch);
+                    let remote_finalized_slot = Self::start_of_epoch(remote.finalized_epoch());
 
                     let finalized_root_at_slot = match self
                         .controller
@@ -1664,10 +2007,11 @@ impl<P: Preset> Network<P> {
             };
 
         if let Some(root) = local_finalized_root_at_remote_finalized_epoch {
-            if root != remote.finalized_root {
+            if root != remote.finalized_root() {
                 debug!(
                     "peer {peer_id} has different block finalized at epoch {} ({root:?} != {:?})",
-                    remote.finalized_epoch, remote.finalized_root,
+                    remote.finalized_epoch(),
+                    remote.finalized_root(),
                 );
 
                 P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
@@ -1681,13 +2025,14 @@ impl<P: Preset> Network<P> {
                 return;
             }
         } else if matches!(sync_status, SyncStatus::Behind { .. })
-            && local.finalized_root != H256::zero()
-            && remote.finalized_root != H256::zero()
+            && local.finalized_root() != H256::zero()
+            && remote.finalized_root() != H256::zero()
         {
             debug!(
                 "disconnecting peer {peer_id} due to missing historical data \
                  required to validate finalized root {:?} at epoch {}",
-                remote.finalized_root, remote.finalized_epoch,
+                remote.finalized_root(),
+                remote.finalized_epoch(),
             );
 
             P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
@@ -1786,6 +2131,56 @@ impl<P: Preset> Network<P> {
         self.request(peer_id, app_request_id, RequestType::BlocksByRoot(request));
     }
 
+    fn request_data_columns_by_range(
+        &self,
+        app_request_id: AppRequestId,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+        columns: Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
+    ) {
+        // TODO: is count capped in eth2_libp2p?
+        let request = DataColumnsByRangeRequest {
+            start_slot,
+            count,
+            columns,
+        };
+
+        debug!(
+            "sending DataColumnsByRange request (app_request_id: {app_request_id:?}, \
+            peer_id: {peer_id}, request: {request:?})",
+        );
+
+        self.request(
+            peer_id,
+            app_request_id,
+            RequestType::DataColumnsByRange(request),
+        );
+    }
+
+    fn request_data_columns_by_root(
+        &self,
+        app_request_id: AppRequestId,
+        peer_id: PeerId,
+        data_columns_by_root_identifiers: Vec<DataColumnsByRootIdentifier<P>>,
+    ) {
+        let request = DataColumnsByRootRequest::new(
+            self.controller.chain_config(),
+            data_columns_by_root_identifiers.into_iter(),
+        );
+
+        debug!(
+            "sending DataColumnSidecarsByRoot request (app_request_id: {app_request_id:?}, \
+            peer_id: {peer_id}, request: {request:?})",
+        );
+
+        self.request(
+            peer_id,
+            app_request_id,
+            RequestType::DataColumnsByRoot(request),
+        );
+    }
+
     fn subscribe_to_core_topics(&self) {
         // `subscribe_kind` locks `gossipsub_subscriptions` for writing.
         // Read current subscriptions before subscribing to avoid a deadlock.
@@ -1798,9 +2193,14 @@ impl<P: Preset> Network<P> {
             .cloned()
             .collect::<HashSet<_>>();
 
-        let current_phase = self.fork_context.current_fork();
+        let current_phase = self.fork_context.current_fork_name();
+        let core_topics = core_topics_to_subscribe(
+            self.controller.chain_config(),
+            current_phase,
+            &self.network_globals.as_topic_config(),
+        );
 
-        for kind in core_topics_to_subscribe(self.controller.chain_config(), current_phase)
+        for kind in core_topics
             .iter()
             .filter(|kind| !subscribed_topics.contains(kind))
             .cloned()
@@ -1848,12 +2248,10 @@ impl<P: Preset> Network<P> {
             .send(&self.network_to_service_tx);
     }
 
-    fn subnet_gossip_topic(&self, subnet: Subnet) -> Option<GossipTopic> {
-        let current_phase = self.fork_context.current_fork();
+    fn subnet_gossip_topic(&self, subnet: Subnet) -> GossipTopic {
+        let digest = self.fork_context.current_fork_digest();
 
-        self.fork_context
-            .to_context_bytes(current_phase)
-            .map(|digest| GossipTopic::new(subnet.into(), GossipEncoding::default(), digest))
+        GossipTopic::new(subnet.into(), GossipEncoding::default(), digest)
     }
 
     fn update_peer_count(&self) {
@@ -1879,12 +2277,6 @@ impl<P: Preset> Network<P> {
 enum Error {
     #[error("end slot overflowed ({start_slot} + {difference})")]
     EndSlotOverflow { start_slot: u64, difference: u64 },
-}
-
-fn fork_digest(fork_context: &ForkContext) -> ForkDigest {
-    fork_context
-        .to_context_bytes(fork_context.current_fork())
-        .expect("fork digest for current fork are added when fork context is created")
 }
 
 fn run_network_service<P: Preset>(
@@ -1957,6 +2349,10 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest) => {
                             service.unsubscribe_from_fork_topics_except(fork_digest);
                         }
+                        ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count) => {
+                            service.subscribe_new_data_column_subnets(custody_group_count);
+                            service.update_enr_cgc(custody_group_count);
+                        }
                         ServiceInboundMessage::UpdateEnrSubnet(subnet, advertise) => {
                             service.update_enr_subnet(subnet, advertise);
                         }
@@ -1971,6 +2367,9 @@ fn run_network_service<P: Preset>(
                             ) {
                                 warn!("unable to update gossipsub scoring parameters: {error:?}");
                             }
+                        }
+                        ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest) => {
+                            service.update_nfd(next_fork_digest);
                         }
                         ServiceInboundMessage::Stop => break,
                     }

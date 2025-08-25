@@ -68,6 +68,8 @@ struct NodeMetadata {
     seq_number: u64,
     attnets: EnrAttestationBitfield,
     syncnets: Option<EnrSyncCommitteeBitfield>,
+    #[serde(with = "serde_utils::string_or_native")]
+    custody_group_count: u64,
 }
 
 #[derive(PartialEq, Eq, Deserialize, Serialize)]
@@ -119,6 +121,7 @@ impl<P: Preset> Network<P> {
             seq_number: metadata.seq_number(),
             attnets: metadata.attnets(),
             syncnets: metadata.syncnets(),
+            custody_group_count: metadata.custody_group_count().unwrap_or(0),
         };
 
         NodeIdentity {

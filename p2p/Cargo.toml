@@ -17,6 +17,7 @@ database = { workspace = true }
 dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
 enum-iterator = { workspace = true }
+eip_7594 = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }
 features = { workspace = true }
@@ -52,4 +53,6 @@ types = { workspace = true }
 validator_statistics = { workspace = true }
 
 [dev-dependencies]
+slog-async = { workspace = true }
+slog-term = { workspace = true }
 test-case = { workspace = true }

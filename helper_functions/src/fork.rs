@@ -5,8 +5,10 @@ use anyhow::Result;
 use bls::{traits::SignatureBytes as _, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::PersistentList;
+use ssz::{PersistentList, PersistentVector};
 use std_ext::ArcExt as _;
+use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     altair::beacon_state::BeaconState as AltairBeaconState,
     bellatrix::{
@@ -26,6 +28,7 @@ use types::{
         beacon_state::BeaconState as ElectraBeaconState,
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
+    fulu::beacon_state::BeaconState as FuluBeaconState,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -34,6 +37,7 @@ use types::{
     },
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState as _},
+    ProposerLookahead,
 };
 
 use crate::{accessors, misc, mutators, phase0, predicates};
@@ -666,6 +670,135 @@ pub fn upgrade_to_electra<P: Preset>(
     Ok(post)
 }
 
+pub fn upgrade_to_fulu<P: Preset>(
+    config: &Config,
+    pre: ElectraBeaconState<P>,
+) -> Result<FuluBeaconState<P>> {
+    let epoch = accessors::get_current_epoch(&pre);
+
+    // > [New in Fulu:EIP7917]
+    let proposer_lookahead = initialize_proposer_lookahead(config, &pre)?;
+
+    let ElectraBeaconState {
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        validators,
+        balances,
+        randao_mixes,
+        slashings,
+        previous_epoch_participation,
+        current_epoch_participation,
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        inactivity_scores,
+        current_sync_committee,
+        next_sync_committee,
+        latest_execution_payload_header,
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        historical_summaries,
+        deposit_requests_start_index,
+        deposit_balance_to_consume,
+        exit_balance_to_consume,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume,
+        earliest_consolidation_epoch,
+        pending_deposits,
+        pending_partial_withdrawals,
+        pending_consolidations,
+        cache,
+    } = pre;
+
+    let fork = Fork {
+        previous_version: fork.current_version,
+        current_version: config.fulu_fork_version,
+        epoch,
+    };
+
+    Ok(FuluBeaconState {
+        // > Versioning
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        // > History
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        // > Eth1
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        // > Registry
+        validators,
+        balances,
+        // > Randomness
+        randao_mixes,
+        // > Slashings
+        slashings,
+        // > Participation
+        previous_epoch_participation,
+        current_epoch_participation,
+        // > Finality
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        // > Inactivity
+        inactivity_scores,
+        // > Sync
+        current_sync_committee,
+        next_sync_committee,
+        // > Execution-layer
+        latest_execution_payload_header,
+        // > Withdrawals
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        // > Deep history valid from Capella onwards
+        historical_summaries,
+        deposit_requests_start_index,
+        deposit_balance_to_consume,
+        exit_balance_to_consume,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume,
+        earliest_consolidation_epoch,
+        pending_deposits,
+        pending_partial_withdrawals,
+        pending_consolidations,
+        proposer_lookahead,
+        // Cache
+        cache,
+    })
+}
+
+fn initialize_proposer_lookahead<P: Preset>(
+    config: &Config,
+    state: &ElectraBeaconState<P>,
+) -> Result<ProposerLookahead<P>> {
+    let current_epoch = accessors::get_current_epoch(state);
+    let mut lookahead = vec![];
+
+    for i in 0..=P::MinSeedLookahead::U64 {
+        let indices =
+            accessors::get_beacon_proposer_indices(config, state, current_epoch.saturating_add(i))?;
+        lookahead.extend(indices);
+    }
+
+    PersistentVector::try_from_iter(lookahead).map_err(Into::into)
+}
+
 #[cfg(test)]
 mod spec_tests {
     use spec_test_utils::Case;
@@ -724,6 +857,16 @@ mod spec_tests {
         run_electra_case::<Minimal>(case);
     }
 
+    #[test_resources("consensus-spec-tests/tests/mainnet/fulu/fork/*/*/*")]
+    fn fulu_mainnet(case: Case) {
+        run_fulu_case::<Mainnet>(case);
+    }
+
+    #[test_resources("consensus-spec-tests/tests/minimal/fulu/fork/*/*/*")]
+    fn fulu_minimal(case: Case) {
+        run_fulu_case::<Minimal>(case);
+    }
+
     fn run_altair_case<P: Preset>(case: Case) {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
@@ -768,6 +911,16 @@ mod spec_tests {
 
         let actual_post = upgrade_to_electra::<P>(&P::default_config(), pre)
             .expect("upgrade from Deneb to Electra to should succeed");
+
+        assert_eq!(actual_post, expected_post);
+    }
+
+    fn run_fulu_case<P: Preset>(case: Case) {
+        let pre = case.ssz_default("pre");
+        let expected_post = case.ssz_default("post");
+
+        let actual_post = upgrade_to_fulu::<P>(&P::default_config(), pre)
+            .expect("upgrade from Electra to Fulu should succeed");
 
         assert_eq!(actual_post, expected_post);
     }
