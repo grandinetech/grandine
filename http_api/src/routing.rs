@@ -27,7 +27,7 @@ use crate::{
     gui, middleware,
     misc::SyncedStatus,
     standard::{
-        beacon_events, beacon_heads, beacon_state, blinded_block, blob_sidecars, block,
+        beacon_events, beacon_heads, beacon_state, blinded_block, blob_sidecars, blobs, block,
         block_attestations, block_attestations_v2, block_headers, block_id_headers, block_rewards,
         block_root, config_spec, debug_beacon_data_column_sidecars, debug_fork_choice,
         deposit_contract, expected_withdrawals, fork_schedule, genesis,
@@ -453,6 +453,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
             "/eth/v1/beacon/blob_sidecars/{block_id}",
             get(blob_sidecars),
         )
+        .route("/eth/v1/beacon/blobs/{block_id}", get(blobs))
         .route("/eth/v1/beacon/genesis", get(genesis))
         .merge(state_routes)
         .merge(header_routes)
