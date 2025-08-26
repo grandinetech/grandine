@@ -3164,7 +3164,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
         self.head().slot() + self.store_config.max_empty_slots >= self.slot()
-            && self.finished_initial_forward_sync
     }
 
     #[must_use]

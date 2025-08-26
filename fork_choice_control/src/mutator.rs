@@ -48,7 +48,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    nonstandard::{RelativeEpoch, ValidationOutcome},
+    nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -507,7 +507,7 @@ where
         block_root: H256,
     ) -> Result<()> {
         match *result {
-            Ok(BlockAction::Accept(chain_link, attester_slashing_results)) => {
+            Ok(BlockAction::Accept(mut chain_link, attester_slashing_results)) => {
                 let block_root = chain_link.block_root;
                 let parent_root = chain_link.block.message().parent_root();
 
@@ -530,6 +530,10 @@ where
 
                                 self.update_store_snapshot();
                             }
+                        }
+
+                        if payload_status.status.is_valid() {
+                            chain_link.payload_status = PayloadStatus::Valid;
                         }
 
                         if payload_status.status.is_invalid() {
@@ -1803,6 +1807,9 @@ where
                 self.send_to_p2p(P2pMessage::HeadState(state));
 
                 if new_head.is_valid() {
+                    self.event_channels
+                        .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
+
                     self.send_to_validator(ValidatorMessage::Head(
                         wait_group.clone(),
                         new_head.clone(),
@@ -1872,8 +1879,6 @@ where
     }
 
     fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: &Arc<BlobSidecar<P>>) {
-        let old_head = self.store.head().clone();
-        let head_was_optimistic = old_head.is_optimistic();
         let block_root = blob_sidecar.signed_block_header.message.hash_tree_root();
 
         self.store_mut()
@@ -1897,8 +1902,6 @@ where
                 metrics: self.metrics.clone(),
             });
         }
-
-        self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
     }
 
     fn notify_about_finalized_checkpoint(&self) {
@@ -1964,11 +1967,8 @@ where
         if new_head.is_valid() {
             // Do not send API events about optimistic blocks.
             // Vouch treats all head events as non-optimistic.
-            // Head event is duplicated if block import causes a reorg.
-            if !matches!(reorg_source, ReorgSource::Block) {
-                self.event_channels
-                    .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
-            }
+            self.event_channels
+                .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
 
             self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
         }

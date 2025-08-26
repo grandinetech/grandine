@@ -20,6 +20,7 @@ pub static METRICS: OnceCell<Arc<Metrics>> = OnceCell::new();
 #[derive(Debug)]
 pub struct Metrics {
     // Overview
+    beacon_clock_slot: IntGauge,
     live: IntGauge,
     pub metrics_requests_since_last_update: IntCounter,
 
@@ -193,6 +194,7 @@ impl Metrics {
     pub fn new() -> Result<Self> {
         Ok(Self {
             // Overview
+            beacon_clock_slot: IntGauge::new("beacon_clock_slot", "Beacon clock slot")?,
             live: IntGauge::new("IS_LIVE", "Grandine status")?,
 
             metrics_requests_since_last_update: IntCounter::new(
@@ -767,6 +769,7 @@ impl Metrics {
     pub fn register_with_default_metrics(&self) -> Result<()> {
         let default_registry = prometheus::default_registry();
 
+        default_registry.register(Box::new(self.beacon_clock_slot.clone()))?;
         default_registry.register(Box::new(self.live.clone()))?;
         default_registry.register(Box::new(self.cores.clone()))?;
         default_registry.register(Box::new(self.disk_usage.clone()))?;
@@ -931,6 +934,10 @@ impl Metrics {
     }
 
     // Overview
+    pub fn set_beacon_clock_slot(&self, slot: Slot) {
+        self.beacon_clock_slot.set(slot as i64);
+    }
+
     pub fn set_live(&self) {
         self.live.set(1)
     }

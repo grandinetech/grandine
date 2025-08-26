@@ -222,6 +222,10 @@ where
             self.spawn(StateAtSlotCacheFlushTask {
                 state_at_slot_cache: self.state_at_slot_cache.clone_arc(),
             });
+
+            if let Some(metrics) = self.metrics.as_ref() {
+                metrics.set_beacon_clock_slot(tick.slot);
+            }
         }
     }
 
