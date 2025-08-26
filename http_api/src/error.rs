@@ -17,7 +17,9 @@ use ssz::{ReadError, H256};
 use thiserror::Error;
 use tokio::task::JoinError;
 use types::{
-    deneb::primitives::BlobIndex, fulu::primitives::ColumnIndex, phase0::primitives::Slot,
+    deneb::primitives::{BlobIndex, VersionedHash},
+    fulu::primitives::ColumnIndex,
+    phase0::primitives::Slot,
 };
 
 #[derive(Debug, Error)]
@@ -150,6 +152,8 @@ pub enum Error {
     UnableToProduceBlindedBlock,
     #[error("validator not found")]
     ValidatorNotFound,
+    #[error("versioned hash not in block: {versioned_hash:?}")]
+    VersionedHashNotInBlock { versioned_hash: VersionedHash },
     // TODO(Grandine Team): Some API clients do not set `validator_index`.
     //                      See <https://github.com/attestantio/vouch/issues/75>.
     // #[error("validator not in committee: {validator_index}")]
@@ -236,7 +240,8 @@ impl Error {
             | Self::StatePreCapella
             | Self::StatePreElectra
             | Self::StatePreFulu
-            | Self::UnableToPublishBlock => StatusCode::BAD_REQUEST,
+            | Self::UnableToPublishBlock
+            | Self::VersionedHashNotInBlock { .. } => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
             Self::Internal(_)
             | Self::Canceled(_)
