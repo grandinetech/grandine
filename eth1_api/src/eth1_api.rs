@@ -21,13 +21,7 @@ use static_assertions::const_assert_eq;
 use std_ext::CopyExt;
 use thiserror::Error;
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams},
-    config::Config,
-    deneb::primitives::VersionedHash,
-    nonstandard::{Phase, WithBlobsAndMev},
-    phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
-    preset::Preset,
-    redacting_url::RedactingUrl,
+    combined::{ExecutionPayload, ExecutionPayloadParams}, config::Config, deneb::primitives::VersionedHash, eip7805::InclusionListTransactions, nonstandard::{Phase, WithBlobsAndMev}, phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber}, preset::Preset, redacting_url::RedactingUrl
 };
 use web3::{
     api::{Eth, Namespace as _},
@@ -63,6 +57,8 @@ pub const ENGINE_NEW_PAYLOAD_V1: &str = "engine_newPayloadV1";
 pub const ENGINE_NEW_PAYLOAD_V2: &str = "engine_newPayloadV2";
 pub const ENGINE_NEW_PAYLOAD_V3: &str = "engine_newPayloadV3";
 pub const ENGINE_NEW_PAYLOAD_V4: &str = "engine_newPayloadV4";
+pub const ENGINE_GET_INCLUSION_LIST_V1: &str = "engine_getInclusionListV1";
+
 
 pub const CAPABILITIES: &[&str] = &[
     ENGINE_FORKCHOICE_UPDATED_V1,
@@ -78,6 +74,7 @@ pub const CAPABILITIES: &[&str] = &[
     ENGINE_NEW_PAYLOAD_V2,
     ENGINE_NEW_PAYLOAD_V3,
     ENGINE_NEW_PAYLOAD_V4,
+    ENGINE_GET_INCLUSION_LIST_V1,
 ];
 
 #[expect(clippy::struct_field_names)]
@@ -504,6 +501,17 @@ impl Eth1Api {
                 .map(|with_client_info| with_client_info.map(Into::into))
             }
         }
+    }
+
+    pub async fn get_inclusion_list<P: Preset>(&self,parent_hash: H256) -> Result<Vec<String>> {
+        self.execute(
+            ENGINE_GET_INCLUSION_LIST_V1,
+            vec![serde_json::to_value(parent_hash)?],
+            None,
+            Some(ENGINE_GET_INCLUSION_LIST_V1),
+        )
+        .await
+        .map(WithClientVersions::result)
     }
 
     async fn execute<T: DeserializeOwned + Send>(
