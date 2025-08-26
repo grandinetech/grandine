@@ -41,7 +41,7 @@ jobs:
           --no-install-recommends -yq \
           libgmp-dev \
           llvm
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         submodules: true
         lfs: true
