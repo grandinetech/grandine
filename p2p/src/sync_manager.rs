@@ -348,7 +348,6 @@ impl<P: Preset> SyncManager<P> {
                                                 count,
                                                 response_received: false,
                                                 retry_count: 0,
-                                                // TODO(feature/fulu): handle error
                                                 data_columns: ContiguousList::try_from_iter(
                                                     columns.into_iter(),
                                                 )
@@ -590,7 +589,6 @@ impl<P: Preset> SyncManager<P> {
                                         count,
                                         response_received: false,
                                         retry_count: 0,
-                                        // TODO(feature/fulu): handle error case
                                         data_columns: ContiguousList::try_from_iter(
                                             columns.into_iter(),
                                         )
