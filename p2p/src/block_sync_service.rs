@@ -757,7 +757,6 @@ impl<P: Preset> BlockSyncService<P> {
                                     );
 
                                     for (peer_id, columns) in peer_custody_columns_mapping {
-                                        // TODO(feature/fulu): catch error here
                                         let columns = ContiguousList::try_from(columns.clone())
                                             .map(Arc::new)
                                             .expect("data columns should be able to parse");

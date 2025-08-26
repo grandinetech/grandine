@@ -579,12 +579,6 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
                 .as_ref()
                 .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
-            let blob_count = available_columns
-                .first()
-                .expect("first data column sidecar must be available")
-                .column
-                .len();
-
             let partial_matrix = available_columns
                 .into_iter()
                 .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar))
@@ -594,7 +588,6 @@ impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
 
             match eip_7594::recover_matrix(
                 &partial_matrix,
-                blob_count,
                 store_snapshot.store_config().kzg_backend,
             ) {
                 Ok(full_matrix) => {

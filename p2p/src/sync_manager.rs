@@ -346,7 +346,6 @@ impl<P: Preset> SyncManager<P> {
                                                 count,
                                                 response_received: false,
                                                 retry_count: 0,
-                                                // TODO(feature/fulu): handle error
                                                 data_columns: ContiguousList::try_from(columns)
                                                     .map(Arc::new)
                                                     .ok(),
@@ -582,7 +581,6 @@ impl<P: Preset> SyncManager<P> {
                                         count,
                                         response_received: false,
                                         retry_count: 0,
-                                        // TODO(feature/fulu): handle error case
                                         data_columns: ContiguousList::try_from(columns)
                                             .map(Arc::new)
                                             .ok(),
