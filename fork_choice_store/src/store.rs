@@ -2318,11 +2318,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.blob_cache.on_slot(new_tick.slot);
-        // TODO(peerdas-fulu): NEED REVIEW!
-        //
-        // While syncing, cached data column sidecars often got pruned whenever it struggle to get
-        // all its sampling columns on time, because it is required to have all sampling columns to
-        // spawn persisting task. As a result, it missed persisting those pruned data column sidecars.
         self.data_column_cache.on_slot(new_tick.slot);
         self.prune_state_cache(true);
 
@@ -2964,10 +2959,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|slot, _| finalized_slot <= *slot);
         self.requested_blobs_from_el
             .retain(|_, slot| finalized_slot <= *slot);
-        // TODO(feature/eip-7594): NEED REVIEW!
-        //
-        // Data columns must be stored for much longer period than finalization.
-        // However, that should be done in persistence layer.
         self.data_column_cache.prune_finalized(finalized_slot);
         self.prune_checkpoint_states();
         self.prune_state_cache(false);
