@@ -2174,22 +2174,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         }
 
-        if !origin.is_from_el() {
-            // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
-            ensure!(
-                verify_sidecar_inclusion_proof(&data_column_sidecar, metrics),
-                Error::DataColumnSidecarInvalidInclusionProof {
-                    data_column_sidecar
-                }
-            );
+        // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
+        ensure!(
+            verify_sidecar_inclusion_proof(&data_column_sidecar, metrics),
+            Error::DataColumnSidecarInvalidInclusionProof {
+                data_column_sidecar
+            }
+        );
 
-            // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
-                    data_column_sidecar: data_column_sidecar.clone_arc(),
-                    error,
-                })?;
-        }
+        // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
+        verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics).map_err(
+            |error| Error::DataColumnSidecarInvalidKzgProofs {
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
+            },
+        )?;
 
         if !origin.is_from_back_sync() {
             // [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the current shuffling
