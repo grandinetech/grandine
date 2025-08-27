@@ -759,7 +759,7 @@ impl<P: Preset> BlockSyncService<P> {
                                         let columns =
                                             ContiguousList::try_from_iter(columns.into_iter())
                                                 .map(Arc::new)
-                                                .expect("data columns should be able to parse");
+                                                .expect("column indices must not be more than NUMBER_OF_COLUMNS");
 
                                         let batch = SyncBatch {
                                             target: batch.target,
