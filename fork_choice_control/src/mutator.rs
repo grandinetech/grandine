@@ -869,10 +869,13 @@ where
                     metrics.register_mutator_aggregate_and_proof(&["rejected"]);
                 }
 
+                let downcasted_error = error.downcast_ref::<Error<P>>();
+
                 if matches!(
-                    error.downcast_ref::<Error<P>>(),
+                    downcasted_error,
                     Some(Error::AggregatorNotInCommittee { .. }),
-                ) {
+                ) || matches!(downcasted_error, Some(Error::ValidatorNotAggregator { .. }))
+                {
                     debug!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
                 } else {
                     warn!("aggregate and proof rejected (error: {error}, origin: {origin:?})");
