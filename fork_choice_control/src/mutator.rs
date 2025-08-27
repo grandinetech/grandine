@@ -2393,13 +2393,7 @@ where
         self.event_channels
             .send_data_column_sidecar_event(block_root, data_column_sidecar);
 
-        // TODO(peerdas-fulu): We can't keep data column sidecars on cache for too long, and we
-        // also can't spawn persist task everytime data column accepted, doing either would bloat the memory usage.
-        // So we need a way to periodically persist cached data column sidecars into disk
-        // without got pruned whenever `data_column_cache.on_slot()` function called.
-        if !self.storage.prune_storage_enabled()
-            && accepted_data_columns == self.store.sampling_columns_count()
-        {
+        if !self.storage.prune_storage_enabled() {
             self.spawn(PersistDataColumnSidecarsTask {
                 store_snapshot: self.owned_store(),
                 storage: self.storage.clone_arc(),
