@@ -348,6 +348,9 @@ impl<P: Preset> SyncManager<P> {
                                                 retry_count: 0,
                                                 data_columns: ContiguousList::try_from(columns)
                                                     .map(Arc::new)
+                                                    .inspect_err(|e| self.log(
+                                                        Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
+                                                    ))
                                                     .ok(),
                                             };
 
@@ -583,6 +586,9 @@ impl<P: Preset> SyncManager<P> {
                                         retry_count: 0,
                                         data_columns: ContiguousList::try_from(columns)
                                             .map(Arc::new)
+                                            .inspect_err(|e| self.log(
+                                                Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
+                                            ))
                                             .ok(),
                                     });
                                 }
@@ -799,10 +805,12 @@ impl<P: Preset> SyncManager<P> {
             })
             .collect_vec();
 
+        // `indices` is filtered from the previous `DataColumnsByRootIdentifier` request, which
+        // limit by the type
         (!indices.is_empty()).then_some(DataColumnsByRootIdentifier {
             block_root,
             columns: ContiguousList::try_from(indices)
-                .expect("columns indices per block should be no more than NUMBER_OF_COLUMNS"),
+                .expect("column indices must not be more than NUMBER_OF_COLUMNS, it is filtered from the previous value"),
         })
     }
 
