@@ -93,6 +93,7 @@ use crate::{
             ValidatorIndex,
         },
     },
+    eip7805::InclusionListTransactions,
     preset::{Mainnet, Preset},
     traits::{
         BeaconBlock as _, BeaconState as _, ExecutionPayload as ExecutionPayloadTrait,
@@ -1226,6 +1227,7 @@ pub enum ExecutionPayloadParams<P: Preset> {
         versioned_hashes: Vec<VersionedHash>,
         parent_beacon_block_root: H256,
         execution_requests: ExecutionRequests<P>,
+        inclusion_list: InclusionListTransactions<P>,
     },
 }
 

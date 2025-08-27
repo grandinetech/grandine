@@ -21,7 +21,7 @@ use static_assertions::const_assert_eq;
 use std_ext::CopyExt;
 use thiserror::Error;
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams}, config::Config, deneb::primitives::VersionedHash, eip7805::InclusionListTransactions, nonstandard::{Phase, WithBlobsAndMev}, phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber}, preset::Preset, redacting_url::RedactingUrl
+    combined::{ExecutionPayload, ExecutionPayloadParams}, config::Config, deneb::primitives::VersionedHash,eip7805::{InclusionList, InclusionListTransactions}, nonstandard::{Phase, WithBlobsAndMev}, phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber}, preset::Preset, redacting_url::RedactingUrl
 };
 use web3::{
     api::{Eth, Namespace as _},
@@ -308,6 +308,7 @@ impl Eth1Api {
                     versioned_hashes,
                     parent_beacon_block_root,
                     execution_requests,
+                    inclusion_list,
                 }),
             ) => {
                 let payload_v3 = ExecutionPayloadV3::from(payload);
@@ -318,6 +319,7 @@ impl Eth1Api {
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
                     serde_json::to_value(raw_execution_requests)?,
+                    serde_json::to_value(inclusion_list)?,
                 ];
 
                 self.execute(
@@ -512,6 +514,10 @@ impl Eth1Api {
         )
         .await
         .map(WithClientVersions::result)
+    }
+
+    pub async fn update_payload_with_inclusion_list(&self,inclusion_list: InclusionList<p>){
+        
     }
 
     async fn execute<T: DeserializeOwned + Send>(
