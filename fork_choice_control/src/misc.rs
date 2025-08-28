@@ -233,6 +233,7 @@ pub enum ReorgSource {
     Tick,
 }
 
+#[derive(Debug)]
 pub enum BlockDataColumnAvailability {
     Complete,
     CompleteWithReconstruction,
