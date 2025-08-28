@@ -177,7 +177,12 @@ impl<P: Preset> BlockProcessor<P> {
             // > Make a copy of the state to avoid mutability issues
             let state = self
                 .state_cache
-                .try_state_at_slot(&self.pubkey_cache, store, parent.block_root, block_slot)?
+                .try_state_at_slot_for_block_sync(
+                    &self.pubkey_cache,
+                    store,
+                    parent.block_root,
+                    block_slot,
+                )?
                 .unwrap_or_else(|| parent.state(store));
 
             combined::process_block_for_gossip(

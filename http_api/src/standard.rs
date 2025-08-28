@@ -2090,16 +2090,29 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-    let WithStatus {
-        value: state,
-        status,
-        // `duties` responses are not supposed to contain a `finalized` field.
-        finalized: _,
-    } = state_id::state(
-        &StateId::Slot(start_slot),
-        &controller,
-        &anchor_checkpoint_provider,
-    )?;
+    let head = controller.head();
+    let head_epoch = misc::compute_epoch_at_slot::<P>(head.value.slot());
+
+    let (state, status) = if epoch >= head_epoch {
+        let block_root = controller.head().value.block_root;
+        // `state_id::state` allows only a limited range of empty slots to be processed
+        let state = controller.preprocessed_state_for_block_production(block_root, start_slot)?;
+
+        (state, head.status)
+    } else {
+        let WithStatus {
+            value: state,
+            status,
+            // `duties` responses are not supposed to contain a `finalized` field.
+            finalized: _,
+        } = state_id::state(
+            &StateId::Slot(start_slot),
+            &controller,
+            &anchor_checkpoint_provider,
+        )?;
+
+        (state, status)
+    };
 
     let dependent_root = controller.dependent_root(&state, epoch)?;
 
