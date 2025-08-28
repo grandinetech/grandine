@@ -379,17 +379,26 @@ pub fn try_recover_cells_and_kzg_proofs<P: Preset>(
 pub fn construct_cells_and_kzg_proofs<P: Preset>(
     full_matrix: Vec<MatrixEntry<P>>,
 ) -> Result<Vec<CellsAndKzgProofs<P>>> {
-    let mut result = BTreeMap::new();
-    for (row_index, matrixes) in &full_matrix.into_iter().chunk_by(|matrix| matrix.row_index) {
-        let (cells, proofs): (Vec<_>, Vec<_>) = matrixes
-            .map(|matrix| (matrix.cell, matrix.kzg_proof))
-            .unzip();
-        let cells = ContiguousVector::try_from_iter(cells.into_iter())?;
-        let proofs = ContiguousVector::try_from_iter(proofs.into_iter())?;
-        result.insert(row_index, (cells, proofs));
+    // Group and sort the matrix entries by blob index
+    let mut full_matrix_map = BTreeMap::new();
+    for matrix in full_matrix {
+        full_matrix_map
+            .entry(matrix.row_index)
+            .or_insert(Vec::new())
+            .push(matrix);
     }
 
-    Ok(result.into_values().collect())
+    let mut result = Vec::new();
+    for entries in full_matrix_map.into_values() {
+        let (cells, proofs): (Vec<_>, Vec<_>) =
+            entries.into_iter().map(|e| (e.cell, e.kzg_proof)).unzip();
+
+        let cells = ContiguousVector::try_from_iter(cells.into_iter())?;
+        let proofs = ContiguousVector::try_from_iter(proofs.into_iter())?;
+        result.push((cells, proofs));
+    }
+
+    Ok(result)
 }
 
 pub fn get_validator_custody_requirement<P: Preset>(
