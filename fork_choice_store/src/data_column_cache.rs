@@ -9,8 +9,6 @@ use types::{
     preset::Preset,
 };
 
-const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
-
 #[derive(Clone, Default)]
 pub struct DataColumnCache<P: Preset> {
     data_columns: HashMap<DataColumnIdentifier, (Arc<DataColumnSidecar<P>>, Slot, bool)>,
@@ -66,15 +64,9 @@ impl<P: Preset> DataColumnCache<P> {
         }
     }
 
-    pub fn on_slot(&mut self, slot: Slot) {
-        self.data_columns.retain(|_, (_, data_column_slot, _)| {
-            *data_column_slot + DATA_COLUMN_RETAIN_DURATION_IN_SLOTS >= slot
-        });
-    }
-
-    pub fn prune_finalized(&mut self, finalized_slot: Slot) {
+    pub fn prune(&mut self, prune_slot: Slot) {
         self.data_columns
-            .retain(|_, (_, slot, _)| finalized_slot <= *slot);
+            .retain(|_, (_, slot, _)| prune_slot <= *slot);
     }
 
     pub fn size(&self) -> usize {

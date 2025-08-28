@@ -90,6 +90,8 @@ use crate::{
     wait::Wait,
 };
 
+const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
+
 #[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     pubkey_cache: Arc<PubkeyCache>,
@@ -287,10 +289,12 @@ where
                 MutatorMessage::FinishedPersistingDataColumnSidecars {
                     wait_group,
                     persisted_data_column_ids,
+                    slot,
                 } => {
                     self.handle_finish_persisting_data_column_sidecars(
                         wait_group,
                         persisted_data_column_ids,
+                        slot,
                     );
                 }
                 MutatorMessage::PreprocessedBeaconState { state } => {
@@ -476,8 +480,23 @@ where
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
 
-            self.event_channels
-                .prune_after_finalization(self.store.finalized_slot());
+            let finalized_slot = self.store.finalized_slot();
+
+            self.event_channels.prune_after_finalization(finalized_slot);
+
+            if self.store.head().block.phase().is_peerdas_activated() {
+                self.try_spawn_persist_data_columns_task(finalized_slot, wait_group.clone());
+            }
+        } else if changes.is_slot_updated()
+            && self.store.head().block.phase().is_peerdas_activated()
+        {
+            self.try_spawn_persist_data_columns_task(
+                self.store
+                    .head()
+                    .slot()
+                    .saturating_sub(DATA_COLUMN_RETAIN_DURATION_IN_SLOTS),
+                wait_group.clone(),
+            )
         }
 
         self.update_store_snapshot();
@@ -547,6 +566,21 @@ where
         }
 
         drop(wait_group);
+    }
+
+    fn try_spawn_persist_data_columns_task(&mut self, slot: Slot, wait_group: W) {
+        if self.storage.prune_storage_enabled() {
+            return self.store_mut().prune_data_columns(slot);
+        }
+
+        self.spawn(PersistDataColumnSidecarsTask {
+            slot,
+            store_snapshot: self.owned_store(),
+            storage: self.storage.clone_arc(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            metrics: self.metrics.clone(),
+        });
     }
 
     #[expect(clippy::too_many_lines)]
@@ -638,6 +672,13 @@ where
                             .iter()
                             .flat_map(|delayed| delayed.data_column_sidecars.iter())
                             .map(|pending| pending.data_column_sidecar.as_ref()),
+                    );
+
+                    info!(
+                        "availablility for block: {} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
+                        pending_block.block.message().hash_tree_root(),
+                        pending_block.origin,
+                        pending_block.block.message().slot(),
                     );
 
                     match block_data_column_availability {
@@ -1719,27 +1760,30 @@ where
 
     fn handle_finish_persisting_data_column_sidecars(
         &mut self,
-        wait_group: W,
+        _wait_group: W,
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
+        slot: Slot,
     ) {
         self.store_mut()
             .mark_persisted_data_columns(persisted_data_column_ids);
 
+        self.store_mut().prune_data_columns(slot);
+
         self.update_store_snapshot();
 
-        if self.store.has_unpersisted_data_column_sidecars()
-            && (self.store.is_forward_synced()
-                || self.store.unpersisted_data_column_sidecars().count()
-                    >= P::NumberOfColumns::USIZE)
-        {
-            self.spawn(PersistDataColumnSidecarsTask {
-                store_snapshot: self.owned_store(),
-                storage: self.storage.clone_arc(),
-                mutator_tx: self.owned_mutator_tx(),
-                wait_group,
-                metrics: self.metrics.clone(),
-            });
-        }
+        // if self.store.has_unpersisted_data_column_sidecars()
+        //     && (self.store.is_forward_synced()
+        //         || self.store.unpersisted_data_column_sidecars().count()
+        //             >= P::NumberOfColumns::USIZE)
+        // {
+        //     self.spawn(PersistDataColumnSidecarsTask {
+        //         store_snapshot: self.owned_store(),
+        //         storage: self.storage.clone_arc(),
+        //         mutator_tx: self.owned_mutator_tx(),
+        //         wait_group,
+        //         metrics: self.metrics.clone(),
+        //     });
+        // }
     }
 
     fn handle_reconstructing_data_column_sidecars(
@@ -2192,8 +2236,13 @@ where
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
 
-            self.event_channels
-                .prune_after_finalization(self.store.finalized_slot());
+            let finalized_slot = self.store.finalized_slot();
+
+            self.event_channels.prune_after_finalization(finalized_slot);
+
+            if block.phase().is_peerdas_activated() {
+                self.try_spawn_persist_data_columns_task(finalized_slot, wait_group.clone());
+            }
         }
 
         // Call `Store::apply_attester_slashing` after `Store::archive_finalized` to reduce the
@@ -2393,15 +2442,15 @@ where
         self.event_channels
             .send_data_column_sidecar_event(block_root, data_column_sidecar);
 
-        if !self.storage.prune_storage_enabled() {
-            self.spawn(PersistDataColumnSidecarsTask {
-                store_snapshot: self.owned_store(),
-                storage: self.storage.clone_arc(),
-                mutator_tx: self.owned_mutator_tx(),
-                wait_group: wait_group.clone(),
-                metrics: self.metrics.clone(),
-            });
-        }
+        // if !self.storage.prune_storage_enabled() {
+        //     self.spawn(PersistDataColumnSidecarsTask {
+        //         store_snapshot: self.owned_store(),
+        //         storage: self.storage.clone_arc(),
+        //         mutator_tx: self.owned_mutator_tx(),
+        //         wait_group: wait_group.clone(),
+        //         metrics: self.metrics.clone(),
+        //     });
+        // }
     }
 
     fn notify_about_finalized_checkpoint(&self) {

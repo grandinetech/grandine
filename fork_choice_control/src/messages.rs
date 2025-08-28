@@ -143,6 +143,7 @@ pub enum MutatorMessage<P: Preset, W> {
     FinishedPersistingDataColumnSidecars {
         wait_group: W,
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
+        slot: Slot,
     },
     PreprocessedBeaconState {
         state: Arc<BeaconState<P>>,
