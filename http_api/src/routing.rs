@@ -210,8 +210,8 @@ pub struct TestState<P: Preset> {
 
 pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
     gui_routes()
-        .merge(eth_v1_beacon_routes(state.clone()))
-        .merge(eth_v2_beacon_routes(state.clone()))
+        .merge(eth_v1_beacon_routes())
+        .merge(eth_v2_beacon_routes())
         .merge(eth_v1_builder_routes())
         .merge(eth_v1_config_routes())
         .merge(eth_v1_debug_routes())
@@ -219,8 +219,9 @@ pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
         .route("/eth/v1/events", get(beacon_events))
         .merge(eth_v1_node_routes())
         .merge(eth_v1_validator_routes(state.clone()))
+        .merge(eth_v1_validator_routes_no_sync_check())
         .merge(eth_v2_validator_routes(state.clone()))
-        .merge(eth_v3_validator_routes(state.clone()))
+        .merge(eth_v3_validator_routes_no_sync_check())
         .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
@@ -312,7 +313,7 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
 //                      `PATCH /features` requires special attention because it's more dangerous.
 
 #[expect(clippy::too_many_lines)]
-fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<NormalState<P, W>> {
+fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     let state_routes = Router::new()
         .route("/eth/v1/beacon/states/{state_id}/root", get(state_root))
         .route("/eth/v1/beacon/states/{state_id}/fork", get(state_fork))
@@ -372,13 +373,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
             "/eth/v1/beacon/blocks/{block_id}/attestations",
             get(block_attestations),
         )
-        .route(
-            "/eth/v1/beacon/blocks",
-            post(publish_block).route_layer(axum::middleware::map_request_with_state(
-                state.clone(),
-                middleware::is_synced,
-            )),
-        );
+        .route("/eth/v1/beacon/blocks", post(publish_block));
 
     let block_v2_routes = Router::new().route(
         "/eth/v2/beacon/blocks/{block_id}/attestations",
@@ -436,13 +431,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
             "/eth/v1/beacon/blinded_blocks/{block_id}",
             get(blinded_block),
         )
-        .route(
-            "/eth/v1/beacon/blinded_blocks",
-            post(publish_blinded_block).route_layer(axum::middleware::map_request_with_state(
-                state,
-                middleware::is_synced,
-            )),
-        )
+        .route("/eth/v1/beacon/blinded_blocks", post(publish_blinded_block))
         .route(
             "/eth/v1/beacon/blob_sidecars/{block_id}",
             get(blob_sidecars),
@@ -457,22 +446,13 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<
         .merge(reward_routes)
 }
 
-fn eth_v2_beacon_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router<NormalState<P, W>> {
+fn eth_v2_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     Router::new()
         .route("/eth/v2/beacon/blocks/{block_id}", get(block))
-        .route(
-            "/eth/v2/beacon/blocks",
-            post(publish_block_v2).route_layer(axum::middleware::map_request_with_state(
-                state.clone(),
-                middleware::is_synced,
-            )),
-        )
+        .route("/eth/v2/beacon/blocks", post(publish_block_v2))
         .route(
             "/eth/v2/beacon/blinded_blocks",
-            post(publish_blinded_block_v2).route_layer(axum::middleware::map_request_with_state(
-                state,
-                middleware::is_synced,
-            )),
+            post(publish_blinded_block_v2),
         )
 }
 
@@ -520,10 +500,6 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             post(validator_attester_duties),
         )
         .route(
-            "/eth/v1/validator/duties/proposer/{epoch}",
-            get(validator_proposer_duties),
-        )
-        .route(
             "/eth/v1/validator/duties/sync/{epoch}",
             post(validator_sync_committee_duties),
         )
@@ -560,10 +536,6 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             post(validator_publish_contributions_and_proofs),
         )
         .route(
-            "/eth/v1/validator/prepare_beacon_proposer",
-            post(validator_prepare_beacon_proposer),
-        )
-        .route(
             "/eth/v1/validator/register_validator",
             post(validator_register_validator),
         )
@@ -585,6 +557,18 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
         ))
 }
 
+fn eth_v1_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
+    Router::new()
+        .route(
+            "/eth/v1/validator/duties/proposer/{epoch}",
+            get(validator_proposer_duties),
+        )
+        .route(
+            "/eth/v1/validator/prepare_beacon_proposer",
+            post(validator_prepare_beacon_proposer),
+        )
+}
+
 fn eth_v2_validator_routes<P: Preset, W: Wait>(
     state: NormalState<P, W>,
 ) -> Router<NormalState<P, W>> {
@@ -604,15 +588,8 @@ fn eth_v2_validator_routes<P: Preset, W: Wait>(
         ))
 }
 
-fn eth_v3_validator_routes<P: Preset, W: Wait>(
-    state: NormalState<P, W>,
-) -> Router<NormalState<P, W>> {
-    Router::new()
-        .route("/eth/v3/validator/blocks/{slot}", get(validator_block_v3))
-        .layer(axum::middleware::map_request_with_state(
-            state,
-            middleware::is_synced,
-        ))
+fn eth_v3_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
+    Router::new().route("/eth/v3/validator/blocks/{slot}", get(validator_block_v3))
 }
 
 #[cfg(test)]
