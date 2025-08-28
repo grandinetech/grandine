@@ -72,18 +72,29 @@ pub enum PhaseHeaderError {
     MissingEthConsensusVersionHeader,
 }
 
+pub fn try_extract_phase_from_headers(
+    headers: &HeaderMap<HeaderValue>,
+) -> Result<Option<Phase>, PhaseHeaderError> {
+    headers
+        .get(ETH_CONSENSUS_VERSION)
+        .map(|header| {
+            header
+                .to_str()
+                .map_err(AnyhowError::msg)
+                .map_err(PhaseHeaderError::InvalidEthConsensusVersionHeader)
+        })
+        .transpose()?
+        .map(str::parse)
+        .transpose()
+        .map_err(AnyhowError::msg)
+        .map_err(PhaseHeaderError::InvalidEthConsensusVersionHeader)
+}
+
 pub fn extract_phase_from_headers(
     headers: &HeaderMap<HeaderValue>,
 ) -> Result<Phase, PhaseHeaderError> {
-    let phase = headers
-        .get(ETH_CONSENSUS_VERSION)
-        .ok_or(PhaseHeaderError::MissingEthConsensusVersionHeader)?
-        .to_str()
-        .map_err(AnyhowError::msg)
-        .map_err(PhaseHeaderError::InvalidEthConsensusVersionHeader)?
-        .parse()
-        .map_err(AnyhowError::msg)
-        .map_err(PhaseHeaderError::InvalidEthConsensusVersionHeader)?;
+    let phase = try_extract_phase_from_headers(headers)?
+        .ok_or(PhaseHeaderError::MissingEthConsensusVersionHeader)?;
 
     Ok(phase)
 }

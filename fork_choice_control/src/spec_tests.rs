@@ -11,10 +11,12 @@ use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use test_generator::test_resources;
+use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
     config::Config,
     deneb::primitives::{Blob, KzgProof},
+    fulu::containers::DataColumnSidecar,
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -38,6 +40,7 @@ enum Step {
     Block {
         block: PathBuf,
         blobs: Option<PathBuf>,
+        columns: Option<Vec<PathBuf>>,
         proofs: Option<Vec<KzgProof>>,
         #[serde(default = "serde_aux::field_attributes::bool_true")]
         valid: bool,
@@ -135,6 +138,17 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/withholding/*/*"]        [electra_minimal_withholding]        [Minimal] [Electra];
     ["consensus-spec-tests/tests/mainnet/electra/sync/*/*/*"]                         [electra_sync_mainnet]               [Mainnet] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/sync/*/*/*"]                         [electra_sync_minimal]               [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/ex_ante/*/*"]               [fulu_mainnet_ex_ante]               [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/get_head/*/*"]              [fulu_mainnet_get_head]              [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/on_block/*/*"]              [fulu_mainnet_on_block]              [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/deposit_with_reorg/*/*"]    [fulu_deposit_with_reorg_minimal]    [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/ex_ante/*/*"]               [fulu_minimal_ex_ante]               [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/get_head/*/*"]              [fulu_minimal_get_head]              [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/on_block/*/*"]              [fulu_minimal_on_block]              [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/reorg/*/*"]                 [fulu_minimal_reorg]                 [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/withholding/*/*"]           [fulu_minimal_withholding]           [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/sync/*/*/*"]                            [fulu_sync_mainnet]                  [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/sync/*/*/*"]                            [fulu_sync_minimal]                  [Minimal] [Fulu];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case) {
@@ -182,6 +196,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
             Step::Block {
                 block,
                 blobs,
+                columns,
                 proofs,
                 valid,
             } => {
@@ -190,19 +205,36 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
 
                 let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
 
-                let blobs = blobs
-                    .map(|path| case.ssz_default::<BlobBundle<P>>(path))
-                    .into_iter()
-                    .flatten();
+                let mut data_column_sidecar_count = 0;
+                if block.phase().is_peerdas_activated() {
+                    if let Some(paths) = columns {
+                        let data_column_sidecars = paths
+                            .into_iter()
+                            .map(|path| case.ssz_default::<DataColumnSidecar<P>>(path));
 
-                let proofs = proofs.into_iter().flatten();
+                        for data_column_sidecar in data_column_sidecars {
+                            data_column_sidecar_count += 1;
+                            context.on_data_column_sidecar(data_column_sidecar);
+                        }
+                    }
+                } else {
+                    let blobs = blobs
+                        .map(|path| case.ssz_default::<BlobBundle<P>>(path))
+                        .into_iter()
+                        .flatten();
+                    let proofs = proofs.into_iter().flatten();
 
-                // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
-                //                      Consider mocking `retrieve_blobs_and_proofs`
-                //                      from `consensus-specs` using something like
-                //                      `TestExecutionEngine`.
-                let blob_sidecars = misc::construct_blob_sidecars(&block, blobs, proofs)
-                    .expect("blob sidecars should be constructed successfully");
+                    // TODO(feature/deneb): Constructing proofs and sidecars is unnecessary.
+                    //                      Consider mocking `retrieve_blobs_and_proofs`
+                    //                      from `consensus-specs` using something like
+                    //                      `TestExecutionEngine`.
+                    let blob_sidecars = misc::construct_blob_sidecars(&block, blobs, proofs)
+                        .expect("blob sidecars should be constructed successfully");
+
+                    for blob_sidecar in blob_sidecars {
+                        context.on_blob_sidecar(blob_sidecar);
+                    }
+                }
 
                 let expected_blob_count = block
                     .message()
@@ -211,10 +243,6 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
                     .map(|contiguous_list| contiguous_list.len())
                     .unwrap_or_default();
-
-                for blob_sidecar in blob_sidecars {
-                    context.on_blob_sidecar(blob_sidecar);
-                }
 
                 let beacon_block_root = block.message().hash_tree_root();
 
@@ -231,7 +259,15 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 }
 
                 if !valid && expected_blob_count > 0 {
-                    context.on_block_with_missing_blobs(&block, expected_blob_count);
+                    // If half of data column sidecars are available, we can reconstruct the rest
+                    // and consider the block valid
+                    if block.phase().is_peerdas_activated()
+                        && data_column_sidecar_count * 2 >= P::NumberOfColumns::USIZE
+                    {
+                        context.on_block_with_reconstructing_data_columns(&block);
+                    } else {
+                        context.on_block_with_missing_blobs(&block, expected_blob_count);
+                    }
                 } else if valid {
                     context.on_valid_block(&block);
                 } else {
@@ -268,7 +304,9 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     | Phase::Bellatrix
                     | Phase::Capella
                     | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
-                    Phase::Electra => AttesterSlashing::Electra(case.ssz(config, file_name)),
+                    Phase::Electra | Phase::Fulu => {
+                        AttesterSlashing::Electra(case.ssz(config, file_name))
+                    }
                 };
 
                 context.on_attester_slashing(attester_slashing);

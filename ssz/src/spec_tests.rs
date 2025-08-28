@@ -6,7 +6,10 @@ use spec_test_utils::Case;
 use ssz_derive::Ssz;
 use static_assertions::assert_not_impl_any;
 use test_generator::test_resources;
-use typenum::{U0, U1, U1024, U128, U16, U2, U256, U3, U31, U32, U4, U5, U512, U513, U6, U8, U9};
+use typenum::{
+    U0, U1, U1024, U128, U15, U16, U17, U2, U256, U3, U31, U32, U33, U4, U5, U511, U512, U513, U6,
+    U7, U8, U9,
+};
 
 use crate::{
     bit_list::BitList,
@@ -172,9 +175,17 @@ mod valid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_3_*"]                      [bitlist_3]                [BitList<U3>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_4_*"]                      [bitlist_4]                [BitList<U4>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_5_*"]                      [bitlist_5]                [BitList<U5>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_6_*"]                      [bitlist_6]                [BitList<U6>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_7_*"]                      [bitlist_7]                [BitList<U7>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_8_*"]                      [bitlist_8]                [BitList<U8>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_9_*"]                      [bitlist_9]                [BitList<U9>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_15_*"]                     [bitlist_15]               [BitList<U15>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_16_*"]                     [bitlist_16]               [BitList<U16>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_17_*"]                     [bitlist_17]               [BitList<U17>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_31_*"]                     [bitlist_31]               [BitList<U31>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_32_*"]                     [bitlist_32]               [BitList<U32>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_33_*"]                     [bitlist_33]               [BitList<U33>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_511_*"]                    [bitlist_511]              [BitList<U511>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_512_*"]                    [bitlist_512]              [BitList<U512>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_513_*"]                    [bitlist_513]              [BitList<U513>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_1_*"]                    [bitvector_1]              [BitVector<U1>];
@@ -182,9 +193,17 @@ mod valid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_3_*"]                    [bitvector_3]              [BitVector<U3>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_4_*"]                    [bitvector_4]              [BitVector<U4>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_5_*"]                    [bitvector_5]              [BitVector<U5>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_6_*"]                    [bitvector_6]              [BitVector<U6>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_7_*"]                    [bitvector_7]              [BitVector<U7>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_8_*"]                    [bitvector_8]              [BitVector<U8>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_9_*"]                    [bitvector_9]              [BitVector<U9>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_15_*"]                   [bitvector_15]             [BitVector<U15>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_16_*"]                   [bitvector_16]             [BitVector<U16>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_17_*"]                   [bitvector_17]             [BitVector<U17>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_31_*"]                   [bitvector_31]             [BitVector<U31>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_32_*"]                   [bitvector_32]             [BitVector<U32>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_33_*"]                   [bitvector_33]             [BitVector<U33>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_511_*"]                  [bitvector_511]            [BitVector<U511>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_512_*"]                  [bitvector_512]            [BitVector<U512>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_513_*"]                  [bitvector_513]            [BitVector<U513>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/boolean/valid/*"]                          [boolean]                  [bool];
@@ -287,6 +306,8 @@ mod invalid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_3_*"]                      [bitlist_3]                [BitList<U3>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_4_*"]                      [bitlist_4]                [BitList<U4>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_5_*"]                      [bitlist_5]                [BitList<U5>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_6_*"]                      [bitlist_6]                [BitList<U6>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_7_*"]                      [bitlist_7]                [BitList<U7>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_8_*"]                      [bitlist_8]                [BitList<U8>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_32_*"]                     [bitlist_32]               [BitList<U32>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_512_*"]                    [bitlist_512]              [BitList<U512>];

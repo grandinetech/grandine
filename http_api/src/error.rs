@@ -16,7 +16,9 @@ use serde::{Serialize, Serializer};
 use ssz::{ReadError, H256};
 use thiserror::Error;
 use tokio::task::JoinError;
-use types::{deneb::primitives::BlobIndex, phase0::primitives::Slot};
+use types::{
+    deneb::primitives::BlobIndex, fulu::primitives::ColumnIndex, phase0::primitives::Slot,
+};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -77,12 +79,16 @@ pub enum Error {
     InvalidBytesBody(#[source] BytesRejection),
     #[error("invalid ssz bytes")]
     InvalidSszBody(#[source] ReadError),
+    #[error("invalid column index {0}")]
+    InvalidColumnIndex(ColumnIndex),
     #[error("invalid contribution and proofs")]
     InvalidContributionAndProofs(Vec<IndexedError>),
     #[error("invalid epoch")]
     InvalidEpoch(#[source] AnyhowError),
     #[error("invalid JSON body")]
     InvalidJsonBody(#[source] JsonRejection),
+    #[error("invalid JSON body")]
+    InvalidJsonValue(#[source] serde_json::Error),
     #[error("invalid peer ID")]
     InvalidPeerId(#[source] AnyhowError),
     #[error(
@@ -128,6 +134,8 @@ pub enum Error {
     StatePreCapella,
     #[error("state is pre-Electra")]
     StatePreElectra,
+    #[error("state is pre-Fulu")]
+    StatePreFulu,
     #[error("target state not found")]
     TargetStateNotFound,
     #[error(transparent)]
@@ -207,9 +215,11 @@ impl Error {
             | Self::InvalidBlock(_)
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
+            | Self::InvalidColumnIndex(_)
             | Self::InvalidRequestConsensusHeader(_)
             | Self::InvalidContributionAndProofs(_)
             | Self::InvalidEpoch(_)
+            | Self::InvalidJsonValue(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidProposerSlashing(_)
@@ -225,6 +235,7 @@ impl Error {
             | Self::SlotNotInEpoch
             | Self::StatePreCapella
             | Self::StatePreElectra
+            | Self::StatePreFulu
             | Self::UnableToPublishBlock => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
             Self::Internal(_)

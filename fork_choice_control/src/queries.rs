@@ -7,7 +7,7 @@ use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
-    StateCacheProcessor, Store,
+    DataColumnSidecarAction, DataColumnSidecarOrigin, StateCacheProcessor, Store,
 };
 use helper_functions::misc;
 use itertools::Itertools as _;
@@ -15,9 +15,14 @@ use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -319,7 +324,7 @@ where
 
         let store_epoch = store.current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
-        let max_allowed_epoch = store_epoch + P::MIN_SEED_LOOKAHEAD;
+        let max_allowed_epoch = store_epoch + P::MinSeedLookahead::U64;
 
         // If it is the last slot of an epoch,
         // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
@@ -524,6 +529,62 @@ where
             .collect()
     }
 
+    pub fn data_column_sidecars_by_ids(
+        &self,
+        data_column_ids: impl IntoIterator<Item = DataColumnIdentifier> + Send,
+    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+        let snapshot = self.snapshot();
+        let storage = self.storage();
+
+        let data_columns = data_column_ids
+            .into_iter()
+            .map(
+                |data_column_id| match snapshot.cached_data_column_sidecar_by_id(data_column_id) {
+                    Some(data_column_sidecar) => Ok(Some(data_column_sidecar)),
+                    None => storage.data_column_sidecar_by_id(data_column_id),
+                },
+            )
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect_vec();
+
+        Ok(data_columns)
+    }
+
+    pub fn data_column_sidecars_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+        self.data_column_sidecars_by_ids(
+            (0..P::NumberOfColumns::U64).map(|index| DataColumnIdentifier { block_root, index }),
+        )
+    }
+
+    pub fn data_column_sidecars_by_range(
+        &self,
+        range: Range<Slot>,
+        columns: &[ColumnIndex],
+        max_request_data_column_sidecars: usize,
+    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+        let canonical_chain_blocks = self.blocks_by_range(range)?;
+
+        let data_column_ids = canonical_chain_blocks
+            .iter()
+            .filter_map(|BlockWithRoot { block, root }| {
+                block.message().body().post_fulu().map(|_| {
+                    columns.iter().copied().map(|index| DataColumnIdentifier {
+                        index,
+                        block_root: *root,
+                    })
+                })
+            })
+            .flatten()
+            .take(max_request_data_column_sidecars);
+
+        self.data_column_sidecars_by_ids(data_column_ids)
+    }
+
     pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();
@@ -579,7 +640,7 @@ where
     ) -> Result<WithStatus<Arc<BeaconState<P>>>> {
         let store = self.store_snapshot();
         let store_epoch = store.current_epoch();
-        let max_allowed_epoch = store_epoch + P::MIN_SEED_LOOKAHEAD;
+        let max_allowed_epoch = store_epoch + P::MinSeedLookahead::U64;
 
         // If it is the last slot of an epoch,
         // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
@@ -627,8 +688,9 @@ where
         self.store_snapshot().min_checked_block_availability_epoch()
     }
 
-    pub fn min_checked_data_availability_epoch(&self) -> Epoch {
-        self.store_snapshot().min_checked_data_availability_epoch()
+    pub fn min_checked_data_availability_epoch(&self, slot: Slot) -> Epoch {
+        self.store_snapshot()
+            .min_checked_data_availability_epoch(slot)
     }
 
     #[must_use]
@@ -656,6 +718,25 @@ where
             parent_fn,
             state_fn,
         )
+    }
+
+    pub fn validate_data_column_sidecar_with_state(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+        origin: &DataColumnSidecarOrigin,
+        parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+    ) -> Result<DataColumnSidecarAction<P>> {
+        self.store_snapshot()
+            .validate_data_column_sidecar_with_state(
+                data_column_sidecar,
+                block_seen,
+                origin,
+                parent_fn,
+                state_fn,
+                None,
+            )
     }
 }
 
@@ -1011,6 +1092,15 @@ impl<P: Preset> Snapshot<'_, P> {
         blob_id: BlobIdentifier,
     ) -> Option<Arc<BlobSidecar<P>>> {
         self.store_snapshot.cached_blob_sidecar_by_id(blob_id)
+    }
+
+    #[must_use]
+    pub(crate) fn cached_data_column_sidecar_by_id(
+        &self,
+        data_column_id: DataColumnIdentifier,
+    ) -> Option<Arc<DataColumnSidecar<P>>> {
+        self.store_snapshot
+            .cached_data_column_sidecar_by_id(data_column_id)
     }
 }
 

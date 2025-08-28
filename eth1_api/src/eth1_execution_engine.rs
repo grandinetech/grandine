@@ -3,17 +3,16 @@ use std::sync::Arc;
 use anyhow::Result;
 use derive_more::Constructor;
 use either::Either;
-use eth2_libp2p::PeerId;
 use execution_engine::{
-    ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId, PayloadStatusV1,
+    EngineGetBlobsParams, ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId,
+    PayloadStatusV1,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use log::{info, warn};
 use tokio::runtime::{Builder, Handle};
 use types::{
-    combined::{ExecutionPayload, ExecutionPayloadParams, SignedBeaconBlock},
+    combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
-    deneb::containers::BlobIdentifier,
     nonstandard::{Phase, TimedPowBlock, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
@@ -40,18 +39,8 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
         ExecutionServiceMessage::ExchangeCapabilities.send(&self.execution_service_tx);
     }
 
-    fn get_blobs(
-        &self,
-        block: Arc<SignedBeaconBlock<P>>,
-        blob_identifiers: Vec<BlobIdentifier>,
-        peer_id: Option<PeerId>,
-    ) {
-        ExecutionServiceMessage::GetBlobs {
-            block,
-            blob_identifiers,
-            peer_id,
-        }
-        .send(&self.execution_service_tx);
+    fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
+        ExecutionServiceMessage::GetBlobs(params).send(&self.execution_service_tx);
     }
 
     fn notify_forkchoice_updated(

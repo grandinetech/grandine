@@ -81,8 +81,8 @@ pub use crate::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-        ChainLink, DataAvailabilityPolicy, PartialBlockAction, PayloadAction, Storage,
-        ValidAttestation,
+        ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
+        PartialBlockAction, PayloadAction, Storage, ValidAttestation,
     },
     segment::Segment,
     state_cache_processor::{Error as StateCacheError, StateCacheProcessor},
@@ -92,6 +92,7 @@ pub use crate::{
 };
 
 mod blob_cache;
+mod data_column_cache;
 mod error;
 mod misc;
 mod segment;

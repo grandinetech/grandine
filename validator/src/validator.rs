@@ -3,6 +3,7 @@
 use core::{error::Error as StdError, time::Duration};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    path::Path,
     sync::Arc,
     time::SystemTime,
 };
@@ -65,14 +66,16 @@ use types::{
         AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
     },
-    nonstandard::{OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
+    nonstandard::{
+        KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+    },
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
         },
-        primitives::{Epoch, Slot, H256},
+        primitives::{Epoch, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
@@ -81,7 +84,7 @@ use validator_statistics::ValidatorStatistics;
 
 use crate::{
     messages::{ApiToValidator, InternalMessage},
-    misc::{Aggregator, SyncCommitteeMember},
+    misc::{Aggregator, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
@@ -158,6 +161,8 @@ pub struct Validator<P: Preset, W: Wait> {
     internal_rx: UnboundedReceiver<InternalMessage>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
+    subscribe_to_all_data_column_subnets: bool,
+    last_cgc_update_epoch: Option<Epoch>,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -178,6 +183,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         metrics: Option<Arc<Metrics>>,
         validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P, W>,
+        _network_dir: Option<&Path>,
+        subscribe_to_all_data_column_subnets: bool,
     ) -> Self {
         let Channels {
             api_to_validator_rx,
@@ -232,6 +239,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             internal_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
+            subscribe_to_all_data_column_subnets,
+            last_cgc_update_epoch: None,
         }
     }
 
@@ -572,6 +581,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.register_validators(current_epoch).await;
         }
 
+        if self.last_cgc_update_epoch != Some(current_epoch)
+            && !self.subscribe_to_all_data_column_subnets
+            && self.chain_config.is_peerdas_scheduled()
+            && !self.signer.load().no_keys()
+        {
+            self.handle_custody_requirements_update(slot);
+        }
+
         self.track_collection_metrics().await;
 
         let slot_head = if no_validators {
@@ -735,6 +752,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
+    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
         if slot_head.slot() == GENESIS_SLOT {
@@ -861,7 +879,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
-        let beacon_block = match validator_blinded_block {
+        let beacon_block_or_root = match validator_blinded_block {
             ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
                 let Some(signature) = slot_head
                     .sign_beacon_block(
@@ -882,36 +900,57 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     "Builder API should be present as it was used to query ExecutionPayloadHeader",
                 );
 
-                let WithBlobsAndMev {
-                    value: execution_payload,
-                    proofs,
-                    blobs,
-                    ..
-                } = match builder_api
-                    .post_blinded_block(
-                        &self.chain_config,
-                        self.controller.genesis_time(),
-                        &signed_blinded_block,
-                    )
-                    .await
+                if self.chain_config.is_peerdas_scheduled()
+                    && builder_api
+                        .post_blinded_block_post_fulu(
+                            &self.chain_config,
+                            self.controller.genesis_time(),
+                            &signed_blinded_block,
+                        )
+                        .await
+                        .is_ok()
                 {
-                    Ok(response) => response,
-                    Err(error) => {
-                        warn!("failed to post blinded block to the builder node: {error:?}");
-                        return Ok(());
-                    }
-                };
+                    debug!("submitted blinded block to the builder node");
 
-                block_proofs = proofs;
-                block_blobs = blobs;
+                    SignedBeaconBlockOrBlockRoot::Root(
+                        signed_blinded_block.message().hash_tree_root(),
+                    )
+                } else {
+                    let WithBlobsAndMev {
+                        value: execution_payload,
+                        proofs,
+                        blobs,
+                        ..
+                    } = match builder_api
+                        .post_blinded_block(
+                            &self.chain_config,
+                            self.controller.genesis_time(),
+                            &signed_blinded_block,
+                        )
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(error) => {
+                            warn!("failed to post blinded block to the builder node: {error:?}");
+                            return Ok(());
+                        }
+                    };
 
-                debug!("received execution payload from the builder node: {execution_payload:?}");
+                    block_proofs = proofs;
+                    block_blobs = blobs;
 
-                let (message, signature) = signed_blinded_block.split();
+                    debug!(
+                        "received execution payload from the builder node: {execution_payload:?}"
+                    );
 
-                message
-                    .with_execution_payload(execution_payload)?
-                    .with_signature(signature)
+                    let (message, signature) = signed_blinded_block.split();
+
+                    SignedBeaconBlockOrBlockRoot::Block(Box::new(
+                        message
+                            .with_execution_payload(execution_payload)?
+                            .with_signature(signature),
+                    ))
+                }
             }
             ValidatorBlindedBlock::BeaconBlock(block) => {
                 match slot_head
@@ -924,40 +963,103 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     )
                     .await
                 {
-                    Some(signature) => block.with_signature(signature),
+                    Some(signature) => SignedBeaconBlockOrBlockRoot::Block(Box::new(
+                        block.with_signature(signature),
+                    )),
                     None => return Ok(()),
                 }
             }
         };
 
-        info!(
-            "validator {} proposing beacon block with root {:?} in slot {}",
-            proposer_index,
-            beacon_block.message().hash_tree_root(),
-            slot_head.slot(),
-        );
+        match beacon_block_or_root {
+            SignedBeaconBlockOrBlockRoot::Root(block_root) => info!(
+                "validator {} proposing beacon block with root {:?} in slot {} using builder",
+                proposer_index,
+                block_root,
+                slot_head.slot(),
+            ),
+            SignedBeaconBlockOrBlockRoot::Block(beacon_block) => {
+                info!(
+                    "validator {} proposing beacon block with root {:?} in slot {}",
+                    proposer_index,
+                    beacon_block.message().hash_tree_root(),
+                    slot_head.slot(),
+                );
 
-        debug!("beacon block: {beacon_block:?}");
+                debug!("beacon block: {beacon_block:?}");
 
-        let block = Arc::new(beacon_block);
+                let block = Arc::new(*beacon_block);
 
-        for blob_sidecar in misc::construct_blob_sidecars(
-            &block,
-            block_blobs.unwrap_or_default().into_iter(),
-            block_proofs.unwrap_or_default().into_iter(),
-        )? {
-            let blob_sidecar = Arc::new(blob_sidecar);
+                if let Some(blobs) = block_blobs {
+                    if !blobs.is_empty() {
+                        if self
+                            .chain_config
+                            .phase_at_slot::<P>(slot_head.slot())
+                            .is_peerdas_activated()
+                        {
+                            let timer = self.metrics.as_ref().map(|metrics| {
+                                metrics.data_column_sidecar_computation.start_timer()
+                            });
 
-            self.controller
-                .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+                            let cells_and_kzg_proofs =
+                                eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                    blobs.as_ref(),
+                                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
+                                    self.controller.store_config().kzg_backend,
+                                )?;
 
-            ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                            let data_column_sidecars = eip_7594::construct_data_column_sidecars(
+                                &block,
+                                &cells_and_kzg_proofs,
+                            )?;
+
+                            prometheus_metrics::stop_and_record(timer);
+
+                            for data_column_sidecar in data_column_sidecars {
+                                if self
+                                    .controller
+                                    .sampling_columns()
+                                    .into_iter()
+                                    .contains(&data_column_sidecar.index)
+                                {
+                                    self.controller.on_own_data_column_sidecar(
+                                        wait_group.clone(),
+                                        data_column_sidecar.clone_arc(),
+                                    );
+                                }
+
+                                if !self.validator_config.withhold_data_columns_publishing {
+                                    ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                                        .send(&self.p2p_tx);
+                                }
+                            }
+                        } else {
+                            for blob_sidecar in misc::construct_blob_sidecars(
+                                &block,
+                                blobs.into_iter(),
+                                block_proofs
+                                    .unwrap_or_else(KzgProofs::empty_deneb)
+                                    .into_iter(),
+                            )? {
+                                let blob_sidecar = Arc::new(blob_sidecar);
+
+                                self.controller.on_own_blob_sidecar(
+                                    wait_group.clone(),
+                                    blob_sidecar.clone_arc(),
+                                );
+
+                                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+                            }
+                        }
+                    }
+                }
+
+                self.controller
+                    .on_own_block(wait_group.clone(), block.clone_arc());
+
+                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
+            }
         }
-
-        self.controller
-            .on_own_block(wait_group.clone(), block.clone_arc());
-
-        ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.validator_propose_successes.inc();
@@ -1445,6 +1547,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.signer.load().keys().copied().collect::<HashSet<_>>()
     }
 
+    fn own_validator_indices(&self, state: &BeaconState<P>) -> HashSet<ValidatorIndex> {
+        self.own_public_keys()
+            .into_iter()
+            .filter_map(|public_key| accessors::index_of_public_key(state, &public_key))
+            .collect()
+    }
+
     #[expect(clippy::too_many_lines)]
     async fn own_singular_attestations(
         &self,
@@ -1898,6 +2007,41 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         self.update_beacon_committee_subscriptions(wait_group.clone(), beacon_state.clone_arc());
         self.update_sync_committee_subscriptions(&beacon_state);
+    }
+
+    fn handle_custody_requirements_update(&mut self, current_slot: Slot) {
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+        let last_finalized_state = self.controller.last_finalized_state().value;
+        let own_validator_indices = self.own_validator_indices(&last_finalized_state);
+        let validator_custody_requirement = eip_7594::get_validator_custody_requirement(
+            &last_finalized_state,
+            &own_validator_indices,
+            &self.chain_config,
+        );
+
+        let current_sampling_size: u64 = self
+            .controller
+            .sampling_columns_count()
+            .try_into()
+            .expect("sampling size should be able to fit into u64");
+        let current_custody_requirements =
+            current_sampling_size.saturating_div(self.chain_config.columns_per_group::<P>());
+        if validator_custody_requirement > current_custody_requirements
+            || self.last_cgc_update_epoch.is_none()
+        {
+            if let Some(metrics) = self.metrics.as_ref() {
+                metrics.set_beacon_custody_groups(validator_custody_requirement);
+            }
+
+            // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
+            ToSubnetService::UpdateDataColumnSubnets(validator_custody_requirement)
+                .send(&self.subnet_service_tx);
+
+            ToSubnetService::UpdateEarliestAvailableSlot(current_slot)
+                .send(&self.subnet_service_tx);
+        }
+
+        self.last_cgc_update_epoch = Some(current_epoch);
     }
 
     async fn handle_external_contributions_and_proofs(

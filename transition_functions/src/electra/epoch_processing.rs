@@ -227,7 +227,7 @@ fn process_registry_updates<P: Preset>(
     Ok(())
 }
 
-fn process_pending_deposits<P: Preset>(
+pub fn process_pending_deposits<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
@@ -363,7 +363,7 @@ fn is_valid_deposit_signature(
         .is_ok()
 }
 
-fn process_pending_consolidations<P: Preset>(
+pub fn process_pending_consolidations<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
     let next_epoch = get_current_epoch(state) + 1;
@@ -461,7 +461,7 @@ fn process_historical_summaries_update<P: Preset>(state: &mut ElectraBeaconState
     Ok(())
 }
 
-fn process_slashings<P: Preset, S: SlashingPenalties>(
+pub fn process_slashings<P: Preset, S: SlashingPenalties>(
     state: &mut impl BeaconState<P>,
     summaries: impl IntoIterator<Item = AltairValidatorSummary>,
 ) -> S {

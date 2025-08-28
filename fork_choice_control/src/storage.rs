@@ -23,7 +23,11 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    nonstandard::{BlobSidecarWithId, FinalizedCheckpoint},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
+    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Epoch, Slot, H256},
@@ -540,6 +544,85 @@ impl<P: Preset> Storage<P> {
         }
 
         Ok(slots)
+    }
+
+    pub(crate) fn append_data_column_sidecars(
+        &self,
+        data_column_sidecars: impl IntoIterator<Item = DataColumnSidecarWithId<P>>,
+    ) -> Result<Vec<DataColumnIdentifier>> {
+        let mut batch = vec![];
+        let mut persisted_data_column_ids = vec![];
+
+        for data_column_sidecar_with_id in data_column_sidecars {
+            let DataColumnSidecarWithId {
+                data_column_sidecar,
+                data_column_id,
+            } = data_column_sidecar_with_id;
+
+            let DataColumnIdentifier { block_root, index } = data_column_id;
+
+            let slot = data_column_sidecar.signed_block_header.message.slot;
+
+            batch.push(serialize(
+                DataColumnSidecarByColumnId(block_root, index),
+                data_column_sidecar,
+            )?);
+
+            batch.push(serialize(
+                SlotColumnId(slot, block_root, index),
+                data_column_id,
+            )?);
+
+            persisted_data_column_ids.push(data_column_id);
+        }
+
+        self.database.put_batch(batch)?;
+
+        Ok(persisted_data_column_ids)
+    }
+
+    pub(crate) fn data_column_sidecar_by_id(
+        &self,
+        data_column_id: DataColumnIdentifier,
+    ) -> Result<Option<Arc<DataColumnSidecar<P>>>> {
+        let DataColumnIdentifier { block_root, index } = data_column_id;
+
+        self.get(DataColumnSidecarByColumnId(block_root, index))
+    }
+
+    pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
+        let mut columns_to_remove: Vec<DataColumnIdentifier> = vec![];
+        let mut keys_to_remove = vec![];
+
+        let results = self
+            .database
+            .iterator_descending(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
+
+        for result in results {
+            let (key_bytes, value_bytes) = result?;
+
+            if !SlotColumnId::has_prefix(&key_bytes) {
+                break;
+            }
+
+            // Deserialize-serialize DataColumnIdentifier as an additional measure
+            // to prevent other types of data getting accidentally deleted.
+            columns_to_remove.push(DataColumnIdentifier::from_ssz_default(value_bytes)?);
+            keys_to_remove.push(key_bytes.into_owned());
+        }
+
+        for column_id in columns_to_remove {
+            let DataColumnIdentifier { block_root, index } = column_id;
+            let key = DataColumnSidecarByColumnId(block_root, index).to_string();
+
+            self.database.delete(key)?;
+        }
+
+        for key in keys_to_remove {
+            self.database.delete(key)?;
+        }
+
+        Ok(())
     }
 
     pub(crate) fn checkpoint_state_slot(&self) -> Result<Option<Slot>> {
@@ -1114,6 +1197,27 @@ pub struct SlotBlobId(pub Slot, pub H256, pub BlobIndex);
 
 impl PrefixableKey for SlotBlobId {
     const PREFIX: &'static str = "i";
+}
+
+#[derive(Display)]
+#[display("{}{_0:x}{_1}", Self::PREFIX)]
+pub struct DataColumnSidecarByColumnId(pub H256, pub ColumnIndex);
+
+impl PrefixableKey for DataColumnSidecarByColumnId {
+    const PREFIX: &'static str = "d";
+
+    #[cfg(test)]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
+}
+
+#[derive(Display)]
+#[display("{}{_0:020}{_1:x}{_2}", Self::PREFIX)]
+pub struct SlotColumnId(pub Slot, pub H256, pub ColumnIndex);
+
+impl PrefixableKey for SlotColumnId {
+    const PREFIX: &'static str = "c";
 }
 
 #[derive(Debug, Error)]

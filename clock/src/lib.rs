@@ -320,9 +320,9 @@ fn next_tick_with_instant<I: InstantLike, S: SystemTimeLike>(
     } else {
         let tick_duration = tick_duration(config);
         let genesis_to_now = unix_epoch_to_now - unix_epoch_to_genesis;
-        let slots_since_genesis = genesis_to_now.as_secs() / config.seconds_per_slot;
+        let slots_since_genesis = genesis_to_now.as_secs() / config.slot_duration_ms.as_secs();
         let genesis_to_current_slot =
-            Duration::from_secs(slots_since_genesis * config.seconds_per_slot.get());
+            Duration::from_secs(slots_since_genesis * config.slot_duration_ms.as_secs());
         let current_slot_to_now = genesis_to_now - genesis_to_current_slot;
 
         next_tick = Tick::start_of_slot(GENESIS_SLOT + slots_since_genesis);
@@ -359,8 +359,10 @@ fn tick_duration(config: &Config) -> Duration {
     slot_duration / ticks_per_slot_u32
 }
 
+// TODO: Remove this function and update all usages throughout the app to work with slot duration
+//       in ms (instead of seconds) once `Config::seconds_per_slot` is removed from the Config.
 const fn slot_duration(config: &Config) -> Duration {
-    Duration::from_secs(config.seconds_per_slot.get())
+    config.slot_duration_ms
 }
 
 #[cfg(test)]
@@ -616,8 +618,8 @@ mod tests {
     }
 
     #[test_case(nonzero!(3_u64) => Duration::from_millis(250))]
-    #[test_case(Config::minimal().seconds_per_slot => Duration::from_millis(500))]
-    #[test_case(Config::mainnet().seconds_per_slot => Duration::from_secs(1))]
+    #[test_case(NonZeroU64::new(Config::minimal().slot_duration_ms.as_secs()).expect("Config::minimal slot_duration_ms is nonzero") => Duration::from_millis(500))]
+    #[test_case(NonZeroU64::new(Config::mainnet().slot_duration_ms.as_secs()).expect("Config::mainnet slot_duration_ms is nonzero") => Duration::from_secs(1))]
     #[test_case(nonzero!(18_u64) => Duration::from_millis(1500))]
     fn tick_duration_with_seconds_per_slot(seconds_per_slot: NonZeroU64) -> Duration {
         let config = config_with_seconds_per_slot(seconds_per_slot);
@@ -658,8 +660,13 @@ mod tests {
     }
 
     fn config_with_seconds_per_slot(seconds_per_slot: NonZeroU64) -> Config {
+        #[expect(
+            deprecated,
+            reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
+        )]
         Config {
             seconds_per_slot,
+            slot_duration_ms: Duration::from_secs(seconds_per_slot.get()),
             ..Config::default()
         }
     }

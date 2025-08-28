@@ -70,6 +70,7 @@ use types::{
         BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
         ExecutionRequests,
     },
+    fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
@@ -460,6 +461,12 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 state,
                 exit,
             ),
+            BeaconState::Fulu(state) => electra::validate_voluntary_exit(
+                &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
+                state,
+                exit,
+            ),
         };
 
         let outcome = match result {
@@ -827,7 +834,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     blob_kzg_commitments: ContiguousList::default(),
                 },
             }),
-            Phase::Electra => {
+            Phase::Electra | Phase::Fulu => {
                 // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
                 let mut results: Vec<(
                     AttestationData,
@@ -879,27 +886,51 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 let attestations = ContiguousList::try_from_iter(attestations)?;
 
-                BeaconBlock::from(ElectraBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body: ElectraBeaconBlockBody {
-                        randao_reveal,
-                        eth1_data,
-                        graffiti,
-                        proposer_slashings,
-                        attester_slashings: self.prepare_attester_slashings_electra().await,
-                        attestations,
-                        deposits,
-                        voluntary_exits,
-                        sync_aggregate,
-                        execution_payload: DenebExecutionPayload::default(),
-                        bls_to_execution_changes,
-                        blob_kzg_commitments: ContiguousList::default(),
-                        execution_requests: ExecutionRequests::default(),
-                    },
-                })
+                if self.beacon_state.phase() == Phase::Electra {
+                    BeaconBlock::from(ElectraBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body: ElectraBeaconBlockBody {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings,
+                            attester_slashings: self.prepare_attester_slashings_electra().await,
+                            attestations,
+                            deposits,
+                            voluntary_exits,
+                            sync_aggregate,
+                            execution_payload: DenebExecutionPayload::default(),
+                            bls_to_execution_changes,
+                            blob_kzg_commitments: ContiguousList::default(),
+                            execution_requests: ExecutionRequests::default(),
+                        },
+                    })
+                } else {
+                    BeaconBlock::from(FuluBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body: FuluBeaconBlockBody {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings,
+                            attester_slashings: self.prepare_attester_slashings_electra().await,
+                            attestations,
+                            deposits,
+                            voluntary_exits,
+                            sync_aggregate,
+                            execution_payload: DenebExecutionPayload::default(),
+                            bls_to_execution_changes,
+                            blob_kzg_commitments: ContiguousList::default(),
+                            execution_requests: ExecutionRequests::default(),
+                        },
+                    })
+                }
             }
         }
         .pipe(Ok)
@@ -1473,6 +1504,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
                 PayloadAttributes::Electra(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
+            }
+            BeaconState::Fulu(state) => {
+                let (withdrawals, _) = electra::get_expected_withdrawals(state)?;
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
+                PayloadAttributes::Fulu(PayloadAttributesV3 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,

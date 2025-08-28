@@ -30,6 +30,10 @@ mod electra {
     pub mod containers;
 }
 
+mod fulu {
+    pub mod containers;
+}
+
 mod api;
 mod config;
 mod signing;

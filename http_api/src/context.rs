@@ -6,6 +6,7 @@ use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use clock::Tick;
+use dashmap::DashMap;
 use database::Database;
 use dedicated_executor::DedicatedExecutor;
 use deposit_tree::DepositTree;
@@ -167,6 +168,8 @@ impl<P: Preset> Context<P> {
 
         let event_channels = Arc::new(EventChannels::default());
 
+        let sidecars_construction_started = Arc::new(DashMap::new());
+
         let (controller, mutator_handle) = Controller::new(
             chain_config,
             pubkey_cache,
@@ -187,6 +190,7 @@ impl<P: Preset> Context<P> {
             core::iter::empty(),
             true,
             [].into(),
+            sidecars_construction_started,
         )?;
 
         for block in extra_blocks {
@@ -307,6 +311,10 @@ impl<P: Preset> Context<P> {
             validator_to_slasher_tx: None,
         };
 
+        let mut network_config = NetworkConfig::default();
+        network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
+        let network_config = Arc::new(network_config);
+
         let validator = Validator::new(
             validator_config.clone_arc(),
             block_producer.clone_arc(),
@@ -322,11 +330,9 @@ impl<P: Preset> Context<P> {
             None,
             None,
             validator_channels,
+            network_config.network_dir.as_deref(),
+            network_config.subscribe_all_data_column_subnets,
         );
-
-        let mut network_config = NetworkConfig::default();
-        network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
-        let network_config = Arc::new(network_config);
 
         let subnet_service = SubnetService::new(
             attestation_agg_pool.clone_arc(),

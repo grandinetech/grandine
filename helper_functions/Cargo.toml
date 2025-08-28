@@ -24,6 +24,7 @@ pubkey_cache = { workspace = true }
 rayon = { workspace = true }
 rc-box = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 shuffling = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
