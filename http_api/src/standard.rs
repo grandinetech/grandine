@@ -2318,7 +2318,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     }
 
     let block_root = controller.head().value.block_root;
-    let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
+    let beacon_state = controller.preprocessed_state_for_block_production(block_root, slot)?;
 
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
@@ -2384,7 +2384,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
     }
 
     let block_root = controller.head().value.block_root;
-    let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
+    let beacon_state = controller.preprocessed_state_for_block_production(block_root, slot)?;
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
 
     let block_build_context = block_producer.new_build_context(
@@ -2433,7 +2433,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     }
 
     let block_root = controller.head().value.block_root;
-    let beacon_state = controller.preprocessed_state_post_block(block_root, slot)?;
+    let beacon_state = controller.preprocessed_state_for_block_production(block_root, slot)?;
 
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
