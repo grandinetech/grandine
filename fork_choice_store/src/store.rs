@@ -2318,7 +2318,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.blob_cache.on_slot(new_tick.slot);
-        self.data_column_cache.on_slot(new_tick.slot);
+        // self.data_column_cache.on_slot(new_tick.slot);
         self.prune_state_cache(true);
 
         let changes = if self.reorganized(old_head_segment_id) {
@@ -2959,7 +2959,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|slot, _| finalized_slot <= *slot);
         self.requested_blobs_from_el
             .retain(|_, slot| finalized_slot <= *slot);
-        self.data_column_cache.prune_finalized(finalized_slot);
+        // self.data_column_cache.prune_finalized(finalized_slot);
         self.prune_checkpoint_states();
         self.prune_state_cache(false);
         self.aggregate_and_proof_supersets
@@ -3782,6 +3782,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) {
         self.data_column_cache
             .mark_persisted_data_columns(persisted_data_column_ids);
+    }
+
+    pub fn prune_data_columns(&mut self, slot: Slot) {
+        self.data_column_cache.prune(slot);
     }
 
     pub fn unpersisted_data_column_sidecars(

@@ -499,6 +499,7 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
 }
 
 pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
+    pub slot: Slot,
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub storage: Arc<Storage<P>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
@@ -509,8 +510,9 @@ pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
 impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
     fn run(self) {
         let Self {
-            store_snapshot,
+            slot,
             storage,
+            store_snapshot,
             mutator_tx,
             wait_group,
             metrics,
@@ -529,6 +531,7 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
                 MutatorMessage::FinishedPersistingDataColumnSidecars {
                     wait_group,
                     persisted_data_column_ids,
+                    slot,
                 }
                 .send(&mutator_tx);
             }
