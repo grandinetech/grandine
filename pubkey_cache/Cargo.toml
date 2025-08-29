@@ -12,10 +12,14 @@ bls = { workspace = true }
 dashmap = { workspace = true }
 database = { workspace = true }
 log = { workspace = true }
-prometheus_metrics = { workspace = true }
+ssz = { workspace = true }
 std_ext = { workspace = true }
-tynm = { workspace = true }
+typenum = { workspace = true }
 types = { workspace = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+prometheus_metrics = { workspace = true }
+tynm = { workspace = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }

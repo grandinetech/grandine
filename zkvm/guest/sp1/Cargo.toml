@@ -1,0 +1,22 @@
+[package]
+name = 'zkvm_guest_sp1'
+edition = '2021'
+authors = ["Grandine <info@grandine.io>"]
+
+[workspace]
+
+[dependencies]
+anyhow = '1'
+bls = { path = '../../../bls', features = ['zkcrypto'] }
+enum-iterator = '2'
+pubkey_cache = { path = '../../../pubkey_cache' }
+sp1-zkvm = { version = '5.2.1', features = ['embedded'] }
+ssz = { path = '../../../ssz' }
+transition_functions = { path = '../../../transition_functions' }
+types = { path = '../../../types' }
+
+[patch.crates-io]
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0' }
+
+[patch.'https://github.com/zkcrypto/bls12_381.git']
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
