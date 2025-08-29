@@ -47,6 +47,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 transition_functions = { workspace = true }
+try_from_iterator = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }

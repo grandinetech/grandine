@@ -24,6 +24,7 @@ use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
 use ssz::ContiguousList;
 use thiserror::Error;
+use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -64,6 +65,7 @@ const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN: Duration = Duration::from_secs(12);
 const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
+const MAX_COLUMNS_ASSIGNED_PER_PEER: usize = 32;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum SyncTarget {
@@ -100,7 +102,7 @@ pub struct SyncManager<P: Preset> {
     back_sync_black_list: LruCache<PeerId, ()>,
     network_globals: Arc<NetworkGlobals>,
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
-    custodial_peers: HashMap<ColumnIndex, HashSet<PeerId>>,
+    peers_custodial: HashMap<PeerId, HashSet<ColumnIndex>>,
 }
 
 impl<P: Preset> SyncManager<P> {
@@ -125,7 +127,7 @@ impl<P: Preset> SyncManager<P> {
             ),
             network_globals,
             received_data_column_sidecars,
-            custodial_peers: HashMap::new(),
+            peers_custodial: HashMap::new(),
         }
     }
 
@@ -176,7 +178,7 @@ impl<P: Preset> SyncManager<P> {
         );
 
         self.peers.insert(peer_id, status);
-        self.refresh_custodial_peers();
+        self.update_peer_columns_custody(peer_id);
     }
 
     pub fn add_peer_to_back_sync_black_list(&mut self, peer_id: PeerId) {
@@ -199,7 +201,7 @@ impl<P: Preset> SyncManager<P> {
 
         self.peers.remove(peer_id);
         self.back_sync_black_list.pop(peer_id);
-        self.refresh_custodial_peers();
+        self.peers_custodial.remove(peer_id);
 
         self.block_requests
             .remove_peer(peer_id)
@@ -280,6 +282,7 @@ impl<P: Preset> SyncManager<P> {
         let Some(peers_to_sync) = self.find_peers_to_sync(true) else {
             return vec![];
         };
+        let mut peers_to_request = peers_to_sync.clone();
 
         // Use half of the available peers for back-sync batches.
         let max_sync_batches = peers_to_sync.len() / 2;
@@ -333,8 +336,7 @@ impl<P: Preset> SyncManager<P> {
 
                                 match self.map_peer_custody_columns(
                                     missing_column_indices,
-                                    &peers_to_sync,
-                                    None,
+                                    &mut peers_to_request,
                                 ) {
                                     Ok(peer_custody_columns_mapping) => {
                                         for (peer_id, columns) in peer_custody_columns_mapping {
@@ -347,9 +349,11 @@ impl<P: Preset> SyncManager<P> {
                                                 response_received: false,
                                                 retry_count: 0,
                                                 // TODO(feature/fulu): handle error
-                                                data_columns: ContiguousList::try_from(columns)
-                                                    .map(Arc::new)
-                                                    .ok(),
+                                                data_columns: ContiguousList::try_from_iter(
+                                                    columns.into_iter(),
+                                                )
+                                                .map(Arc::new)
+                                                .ok(),
                                             };
 
                                             self.log(
@@ -359,13 +363,11 @@ impl<P: Preset> SyncManager<P> {
                                             sync_batches.push(batch);
                                         }
                                     }
-                                    Err(_) => {
+                                    Err(error) => {
                                         self.log(
                                             Level::Debug,
-                                            "could not find available peers to request data column sidecars".to_owned(),
+                                            format_args!("build_back_sync_batches: {error:?}"),
                                         );
-
-                                        self.refresh_custodial_peers();
                                     }
                                 }
                             }
@@ -538,6 +540,7 @@ impl<P: Preset> SyncManager<P> {
         let data_column_serve_range_slot =
             misc::data_column_serve_range_slot::<P>(config, current_slot);
 
+        let mut peers_to_request = peers_to_sync.clone();
         let mut sync_batches = vec![];
         for (peer_id, index) in Self::peer_sync_batch_assignments(&peers_to_sync)
             .zip(0..)
@@ -564,14 +567,9 @@ impl<P: Preset> SyncManager<P> {
                             ),
                         );
 
-                        // TODO(peerdas-fulu): Distributes requested columns among the minimal set of peers,
-                        // selected peers should be checked prior the assignment to make sure those peers
-                        // can serve all of the requested columns.
-                        match self.map_peer_custody_columns(
-                            missing_column_indices,
-                            &peers_to_sync,
-                            None,
-                        ) {
+                        match self
+                            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
+                        {
                             Ok(peer_custody_columns_mapping) => {
                                 for (peer_id, columns) in peer_custody_columns_mapping {
                                     sync_batches.push(SyncBatch {
@@ -583,19 +581,19 @@ impl<P: Preset> SyncManager<P> {
                                         response_received: false,
                                         retry_count: 0,
                                         // TODO(feature/fulu): handle error case
-                                        data_columns: ContiguousList::try_from(columns)
-                                            .map(Arc::new)
-                                            .ok(),
+                                        data_columns: ContiguousList::try_from_iter(
+                                            columns.into_iter(),
+                                        )
+                                        .map(Arc::new)
+                                        .ok(),
                                     });
                                 }
                             }
-                            Err(_) => {
+                            Err(error) => {
                                 self.log(
-                                    Level::Warn,
-                                    "could not find available peers to request data column sidecars".to_owned(),
+                                    Level::Debug,
+                                    format_args!("build_forward_sync_batches: {error:?}"),
                                 );
-
-                                self.refresh_custodial_peers();
                             }
                         }
                     }
@@ -613,8 +611,7 @@ impl<P: Preset> SyncManager<P> {
                     data_columns: None,
                 });
 
-                // TODO(peerdas-fulu): review this max requests cap
-                if sync_batches.len() >= peers_to_sync.len() / 2 {
+                if peers_to_request.is_empty() {
                     break;
                 }
             } else {
@@ -686,10 +683,6 @@ impl<P: Preset> SyncManager<P> {
     ) -> bool {
         self.data_column_requests
             .ready_to_request_by_root(data_column_identifier, peer_id)
-    }
-
-    pub fn ready_to_batch_request_data_column_by_roots(&mut self) -> bool {
-        self.data_column_requests.request_by_root_count() == 0
     }
 
     pub fn add_blob_request_by_range(&mut self, app_request_id: AppRequestId, batch: SyncBatch<P>) {
@@ -942,6 +935,15 @@ impl<P: Preset> SyncManager<P> {
         );
     }
 
+    pub fn find_available_custodial_peers(&self) -> Vec<PeerId> {
+        let busy_peers = self.busy_peers();
+
+        self.peers_custodial
+            .iter()
+            .filter_map(|(peer_id, _)| (!busy_peers.contains(peer_id)).then_some(*peer_id))
+            .collect()
+    }
+
     fn find_peers_to_sync(&mut self, use_black_list: bool) -> Option<Vec<PeerId>> {
         self.find_chain_to_sync(use_black_list).map(|chain_id| {
             let peers_to_sync = self.chain_peers_shuffled(&chain_id, use_black_list);
@@ -1060,36 +1062,19 @@ impl<P: Preset> SyncManager<P> {
     }
 
     fn update_peer_columns_custody(&mut self, peer_id: PeerId) {
-        for column_index in &self.network_globals.sampling_columns() {
-            let custodial_peers = self.custodial_peers.entry(*column_index).or_default();
-            if self
-                .network_globals
-                .is_custody_peer_of(*column_index, &peer_id)
-            {
-                custodial_peers.insert(peer_id);
-            } else if custodial_peers.contains(&peer_id) {
-                custodial_peers.remove(&peer_id);
-            }
-        }
-    }
-
-    pub fn refresh_custodial_peers(&mut self) {
-        let custodial_peers = self
-            .network_globals
-            .sampling_columns()
-            .iter()
-            .map(|column_index| {
-                (
-                    *column_index,
-                    self.network_globals
-                        .custody_peers_for_column(*column_index)
-                        .into_iter()
-                        .collect(),
-                )
+        let custody_columns = (0..P::NumberOfColumns::U64)
+            .filter(|column_index| {
+                self.network_globals
+                    .is_custody_peer_of(*column_index, &peer_id)
             })
             .collect();
 
-        self.custodial_peers = custodial_peers;
+        self.log(
+            Level::Debug,
+            format_args!("peer custody columns (peer: {peer_id}, columns: {custody_columns:?})"),
+        );
+
+        self.peers_custodial.insert(peer_id, custody_columns);
     }
 
     pub const fn is_local_head_not_progress(&self, local_head_slot: Slot) -> bool {
@@ -1102,10 +1087,13 @@ impl<P: Preset> SyncManager<P> {
         local_head_slot: Slot,
     ) -> HashMap<H256, HashSet<ColumnIndex>> {
         let sampling_count = self.network_globals.sampling_columns_count();
+        let max_slot_ahead = 512 / sampling_count as u64;
+
         self.received_data_column_sidecars
             .iter()
             .filter_map(|entry| {
-                (*entry.value() > local_head_slot)
+                (*entry.value() > local_head_slot
+                    && *entry.value() < local_head_slot + max_slot_ahead)
                     .then_some((entry.key().block_root, entry.key().index))
             })
             .fold(HashMap::new(), |mut acc, (block_root, index)| {
@@ -1155,75 +1143,56 @@ impl<P: Preset> SyncManager<P> {
         missing_indices
     }
 
-    fn get_random_custodial_peer(
-        &self,
-        column_index: ColumnIndex,
-        request_from_peers: &[PeerId],
-        skip_peer: Option<PeerId>,
-    ) -> Option<PeerId> {
-        let mut custodial_peers = if let Some(peers) = self.custodial_peers.get(&column_index) {
-            peers.iter().copied().collect()
-        } else {
-            self.network_globals.custody_peers_for_column(column_index)
-        };
-
-        // Skip peer who failed to serve us in previous request
-        if let Some(bad_peer) = skip_peer {
-            custodial_peers.retain(|peer| *peer != bad_peer);
-        }
-
-        // Choose only within specified peers, e.g. non-busy peers to sync
-        custodial_peers
-            .into_iter()
-            .filter(|peer| request_from_peers.contains(peer))
-            .choose(&mut thread_rng())
-    }
-
     pub fn map_peer_custody_columns(
         &self,
-        column_indices: HashSet<ColumnIndex>,
-        request_from_peers: &[PeerId],
-        skip_peer: Option<PeerId>,
-    ) -> Result<HashMap<PeerId, Vec<ColumnIndex>>> {
-        let mut peer_columns_mapping: HashMap<PeerId, Vec<ColumnIndex>> = HashMap::new();
-
-        for column_index in column_indices {
-            let Some(custodial_peer) =
-                self.get_random_custodial_peer(column_index, request_from_peers, skip_peer)
-            else {
-                continue;
-            };
-
-            peer_columns_mapping
-                .entry(custodial_peer)
-                .or_default()
-                .push(column_index);
+        mut column_indices: HashSet<ColumnIndex>,
+        peers_to_request: &mut Vec<PeerId>,
+    ) -> Result<HashMap<PeerId, HashSet<ColumnIndex>>> {
+        if column_indices.is_empty() {
+            return Ok(HashMap::new());
         }
 
-        (!peer_columns_mapping.is_empty())
-            .then_some(peer_columns_mapping)
-            .ok_or_else(|| MapPeerCustodyError::NoAvailablePeers.into())
-    }
+        if self.peers_custodial.is_empty() || peers_to_request.is_empty() {
+            return Err(MapPeerCustodyError::NoAvailablePeers.into());
+        }
 
-    /// Get the most coverage peers which are available at the time of the request, and has the most custodial coverage among all
-    pub fn find_most_coverage_peers(&self, column_indices: &HashSet<ColumnIndex>) -> Vec<PeerId> {
-        let mut coverage_count: HashMap<&PeerId, usize> = HashMap::new();
+        let mut peer_columns_mapping = HashMap::new();
+        while !column_indices.is_empty() {
+            // Find peer covering most remaining columns
+            match self
+                .peers_custodial
+                .iter()
+                .filter(|(peer, _)| {
+                    peers_to_request.contains(*peer) && !peer_columns_mapping.contains_key(*peer)
+                })
+                .max_by_key(|(_, columns)| columns.intersection(&column_indices).count())
+            {
+                Some((peer, columns)) => {
+                    let covered_by_peer = columns
+                        .intersection(&column_indices)
+                        .take(MAX_COLUMNS_ASSIGNED_PER_PEER)
+                        .copied()
+                        .collect::<HashSet<_>>();
 
-        let busy_peers = self.busy_peers();
-        for index in column_indices {
-            if let Some(peers) = self.custodial_peers.get(index) {
-                for peer in peers.iter().filter(|peer| !busy_peers.contains(peer)) {
-                    *coverage_count.entry(peer).or_default() += 1;
+                    if covered_by_peer.is_empty() {
+                        break;
+                    }
+
+                    column_indices.retain(|col| !covered_by_peer.contains(col));
+                    peer_columns_mapping.insert(*peer, covered_by_peer);
                 }
+                None => break,
             }
         }
 
-        coverage_count
-            .into_iter()
-            .sorted_by_key(|a| core::cmp::Reverse(a.1))
-            .take(column_indices.len().saturating_div(10))
-            .map(|(peer, _)| *peer)
-            .collect_vec()
+        if peer_columns_mapping.is_empty() {
+            return Err(MapPeerCustodyError::NoAvailablePeers.into());
+        }
+
+        // Remove assigned peers from
+        peers_to_request.retain(|peer| !peer_columns_mapping.contains_key(peer));
+
+        Ok(peer_columns_mapping)
     }
 
     pub fn expired_blob_range_batches(
@@ -1270,7 +1239,7 @@ impl<P: Preset> SyncManager<P> {
 
 #[derive(Debug, Error)]
 enum MapPeerCustodyError {
-    #[error("No available peers")]
+    #[error("could not find available peers to request data column sidecars")]
     NoAvailablePeers,
 }
 
