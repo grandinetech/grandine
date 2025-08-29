@@ -153,12 +153,6 @@ impl<K: Hash + Eq + Clone, P: Preset> RangeAndRootRequests<K, P> {
             .count()
     }
 
-    pub fn request_by_root_count(&mut self) -> usize {
-        self.requests_by_root.flush();
-
-        self.requests_by_root.cache_size()
-    }
-
     pub fn request_by_range_finished(
         &mut self,
         app_request_id: AppRequestId,
