@@ -4,7 +4,7 @@
 
 use core::time::Duration;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
 
@@ -71,7 +71,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::{Blob, BlobIndex, KzgProof},
+        primitives::{Blob, BlobIndex, KzgProof, VersionedHash},
     },
     fulu::{
         containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
@@ -93,7 +93,9 @@ use types::{
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
-    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
+    traits::{
+        BeaconBlock as _, BeaconState as _, PostDenebBeaconBlockBody, SignedBeaconBlock as _,
+    },
 };
 use validator::{ApiToValidator, ValidatorConfig};
 
@@ -119,6 +121,12 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct BlobSidecarsQuery {
     indices: Option<Vec<BlobIndex>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlobsQuery {
+    versioned_hashes: Option<Vec<VersionedHash>>,
 }
 
 #[derive(Deserialize)]
@@ -1271,7 +1279,7 @@ pub async fn blobs<P: Preset, W: Wait>(
     State(metrics): State<Option<Arc<Metrics>>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
-    EthQuery(query): EthQuery<BlobSidecarsQuery>,
+    EthQuery(query): EthQuery<BlobsQuery>,
     headers: HeaderMap,
 ) -> Result<EthResponse<DynamicList<Blob<P>>, (), JsonOrSsz>, Error> {
     let WithStatus {
@@ -1285,6 +1293,40 @@ pub async fn blobs<P: Preset, W: Wait>(
     let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
+    let mut requested_indices = None;
+
+    if let Some(versioned_hashes) = query.versioned_hashes {
+        let Some(kzg_commitments) = block
+            .message()
+            .body()
+            .post_deneb()
+            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+        else {
+            return Ok(EthResponse::json_or_ssz(DynamicList::empty(), &headers)?
+                .execution_optimistic(status.is_optimistic())
+                .finalized(finalized));
+        };
+
+        let block_versioned_hashes = kzg_commitments
+            .iter()
+            .copied()
+            .map(misc::kzg_commitment_to_versioned_hash)
+            .collect::<Vec<_>>();
+
+        let mut indices = BTreeSet::new();
+
+        for versioned_hash in versioned_hashes {
+            let index = block_versioned_hashes
+                .iter()
+                .position(|block_versioned_hash| *block_versioned_hash == versioned_hash)
+                .ok_or(Error::VersionedHashNotInBlock { versioned_hash })?;
+
+            indices.insert(u64::try_from(index).expect("position should fit in u64"));
+        }
+
+        requested_indices = Some(indices);
+    }
+
     let blobs = if version.is_peerdas_activated() {
         let data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
         let blobs = construct_blobs_from_data_column_sidecars(
@@ -1294,7 +1336,7 @@ pub async fn blobs<P: Preset, W: Wait>(
             metrics.as_ref(),
         )?;
 
-        if let Some(indices) = query.indices {
+        if let Some(indices) = requested_indices {
             blobs
                 .into_iter()
                 .zip(0..)
@@ -1304,18 +1346,14 @@ pub async fn blobs<P: Preset, W: Wait>(
             blobs
         }
     } else {
-        let blob_identifiers = query
-            .indices
+        let blob_identifiers = requested_indices
             .unwrap_or_else(|| (0..max_blobs_per_block).collect())
             .into_iter()
-            .map(|index| {
-                ensure!(index < max_blobs_per_block, Error::InvalidBlobIndex(index));
-                Ok(BlobIdentifier { block_root, index })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let blob_sidecars = controller.blob_sidecars_by_ids(blob_identifiers)?;
+            .map(|index| BlobIdentifier { block_root, index })
+            .collect::<Vec<_>>();
 
-        blob_sidecars
+        controller
+            .blob_sidecars_by_ids(blob_identifiers)?
             .into_iter()
             .map(|blob_sidecar| blob_sidecar.blob.clone())
             .collect()
