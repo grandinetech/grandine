@@ -226,30 +226,27 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     )
 }
 
-/**
- * Recover the full, flattened sequence of matrix entries.
- *
- * This helper demonstrates how to apply ``recover_cells_and_kzg_proofs``.
- */
 pub fn recover_matrix<P: Preset>(
     partial_matrix: &[MatrixEntry<P>],
-    blob_count: usize,
     backend: KzgBackend,
 ) -> Result<Vec<MatrixEntry<P>>> {
-    // TODO(peerdas-fulu): group once by row_index
-    // let cells_indices_and_cells = partial_matrix
-    //     .iter()
-    //     .chunk_by(|matrix| matrix.row_index)
-    //     .into_iter()
-    //     .map(|(row_index, entries)| {
-    //         (
-    //             row_index,
-    //             entries.map(|e| (e.column_index, &e.cell)).unzip(),
-    //         )
-    //     })
-    //     .collect::<BTreeMap<_, (Vec<_>, Vec<_>)>>();
+    let mut partial_matrix_map = BTreeMap::new();
+    for matrix in partial_matrix {
+        partial_matrix_map
+            .entry(matrix.row_index)
+            .or_insert(Vec::new())
+            .push(matrix);
+    }
 
-    try_recover_cells_and_kzg_proofs::<P>(partial_matrix, blob_count as u64, backend)
+    partial_matrix_map
+        .into_par_iter()
+        .map(|(_, entries)| {
+            let (cell_indices, cells): (Vec<_>, Vec<_>) =
+                entries.iter().map(|e| (e.column_index, &e.cell)).unzip();
+
+            recover_cells_and_kzg_proofs::<P>(cell_indices, cells, backend)
+        })
+        .collect::<Result<Vec<_>>>()
         .map(construct_full_matrix)
 }
 
@@ -354,24 +351,6 @@ pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
                     .map(|proofs| (cells, proofs))
                     .map_err(Into::into)
             })
-        })
-        .collect::<Result<Vec<_>>>()
-}
-
-pub fn try_recover_cells_and_kzg_proofs<P: Preset>(
-    partial_matrix: &[MatrixEntry<P>],
-    blob_count: u64,
-    backend: KzgBackend,
-) -> Result<Vec<CellsAndKzgProofs<P>>> {
-    (0..blob_count)
-        .into_par_iter()
-        .map(|blob_index| {
-            let (cell_indices, cells): (Vec<_>, Vec<_>) = partial_matrix
-                .iter()
-                .filter_map(|e| (e.row_index == blob_index).then_some((e.column_index, &e.cell)))
-                .unzip();
-
-            recover_cells_and_kzg_proofs::<P>(cell_indices, cells, backend)
         })
         .collect::<Result<Vec<_>>>()
 }

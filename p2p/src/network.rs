@@ -167,7 +167,7 @@ impl<P: Preset> Network<P> {
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
 
-        // TODO: get custody value from metadata
+        // TODO(peerdas-fulu): get custody value from metadata
         let custody_group_count =
             chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
 

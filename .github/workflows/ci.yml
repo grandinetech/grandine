@@ -12,6 +12,11 @@ jobs:
             backend: arkworks,blst,constantine,mcl
           - os: windows-latest
             backend: arkworks,constantine,zkcrypto
+            default_kzg_backend: arkworks
+            test_kzg_backends: |
+              set KZG_BACKEND=constantine
+              cargo test --release --no-default-features --features arkworks,constantine,zkcrypto -- kzg
+              cargo test --release --no-default-features --features zkcrypto -- kzg
           - os: macos-latest
             backend: arkworks,blst,mcl
 
@@ -61,6 +66,11 @@ jobs:
     - name: Run tests
       if: runner.os != 'Macos'
       run: cargo test --release --no-default-features --features ${{ matrix.backend }} -- --nocapture
+      env:
+        KZG_BACKEND: ${{ matrix.default_kzg_backend }}
+    - name: Run other kzg backend tests
+      if: matrix.test_kzg_backends != ''
+      run: ${{ matrix.test_kzg_backends }}
     - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb

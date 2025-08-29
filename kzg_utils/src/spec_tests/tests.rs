@@ -18,18 +18,29 @@ use crate::{
 };
 
 fn available_backends() -> impl Iterator<Item = KzgBackend> {
-    let backends = [
-        #[cfg(feature = "arkworks")]
-        KzgBackend::Arkworks,
-        #[cfg(feature = "blst")]
-        KzgBackend::Blst,
-        #[cfg(feature = "constantine")]
-        KzgBackend::Constantine,
-        #[cfg(feature = "mcl")]
-        KzgBackend::Mcl,
-        #[cfg(feature = "zkcrypto")]
-        KzgBackend::Zkcrypto,
-    ];
+    let backends = if let Some(single_backend) =
+        std::env::var_os("KZG_BACKEND").and_then(|v| (!v.is_empty()).then_some(v))
+    {
+        let single_backend: KzgBackend = single_backend
+            .to_string_lossy()
+            .parse()
+            .expect("unknown backend");
+
+        vec![single_backend]
+    } else {
+        vec![
+            #[cfg(feature = "arkworks")]
+            KzgBackend::Arkworks,
+            #[cfg(feature = "blst")]
+            KzgBackend::Blst,
+            #[cfg(feature = "constantine")]
+            KzgBackend::Constantine,
+            #[cfg(feature = "mcl")]
+            KzgBackend::Mcl,
+            #[cfg(feature = "zkcrypto")]
+            KzgBackend::Zkcrypto,
+        ]
+    };
 
     assert_ne!(
         backends.len(),
@@ -287,16 +298,22 @@ fn test_compute_cells(case: Case) {
     for backend in available_backends() {
         match compute_cells::<Mainnet>(&blob, backend) {
             Ok(cells) => {
-                assert_eq!(cells.into_iter().collect::<Vec<_>>(), expected_cells);
+                assert_eq!(
+                    cells.into_iter().collect::<Vec<_>>(),
+                    expected_cells,
+                    "outputs do not match (backend: {backend})"
+                );
             }
             Err(_) => {
-                assert!(test.output.is_none());
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
             }
         }
     }
 }
 
-#[expect(clippy::print_stdout)]
 #[test_resources("consensus-spec-tests/tests/general/fulu/kzg/compute_cells_and_kzg_proofs/*/*")]
 fn test_compute_cells_and_kzg_proofs(case: Case) {
     let test: containers::compute_cells_and_kzg_proofs::Test = case.yaml("data");
@@ -320,20 +337,27 @@ fn test_compute_cells_and_kzg_proofs(case: Case) {
     for backend in available_backends() {
         match compute_cells_and_kzg_proofs::<Mainnet>(&blob, backend) {
             Ok((cells, proofs)) => {
-                println!(
-                    "proofs using {backend} backend from compute_cells_and_kzg_proofs: {proofs:?}"
+                assert_eq!(
+                    cells.into_iter().collect::<Vec<_>>(),
+                    expected_cells,
+                    "output cells do not match (backend: {backend})"
                 );
-                assert_eq!(cells.into_iter().collect::<Vec<_>>(), expected_cells);
-                assert_eq!(proofs.into_iter().collect::<Vec<_>>(), expected_proofs);
+                assert_eq!(
+                    proofs.into_iter().collect::<Vec<_>>(),
+                    expected_proofs,
+                    "output proofs do not match (backend: {backend})"
+                );
             }
             Err(_) => {
-                assert!(test.output.is_none());
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
             }
         }
     }
 }
 
-#[expect(clippy::print_stdout)]
 #[test_resources("consensus-spec-tests/tests/general/fulu/kzg/recover_cells_and_kzg_proofs/*/*")]
 fn test_recover_cells_and_kzg_proofs(case: Case) {
     let test: containers::recover_cells_and_kzg_proofs::Test = case.yaml("data");
@@ -367,14 +391,22 @@ fn test_recover_cells_and_kzg_proofs(case: Case) {
             recover_cells_and_kzg_proofs::<Mainnet>(cell_indices.clone(), cells.iter(), backend);
         match result {
             Ok((cells, proofs)) => {
-                println!(
-                    "proofs using {backend} backend from recover_cells_and_kzg_proofs: {proofs:?}"
+                assert_eq!(
+                    cells.into_iter().collect::<Vec<_>>(),
+                    expected_cells,
+                    "output cells do not match (backend: {backend})"
                 );
-                assert_eq!(cells.into_iter().collect::<Vec<_>>(), expected_cells);
-                assert_eq!(proofs.into_iter().collect::<Vec<_>>(), expected_proofs);
+                assert_eq!(
+                    proofs.into_iter().collect::<Vec<_>>(),
+                    expected_proofs,
+                    "output proofs do not match (backend: {backend})"
+                );
             }
             Err(_) => {
-                assert!(test.output.is_none());
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
             }
         }
     }
@@ -436,10 +468,16 @@ fn test_verify_cell_kzg_proof_batch(case: Case) {
         ) {
             Ok(output) => {
                 let expected_output = test.output.expect("test output should exist");
-                assert_eq!(output, expected_output);
+                assert_eq!(
+                    output, expected_output,
+                    "outputs do not match (backend: {backend})"
+                );
             }
             Err(_) => {
-                assert!(test.output.is_none());
+                assert!(
+                    test.output.is_none(),
+                    "test output should not exist (backend {backend})"
+                );
             }
         }
     }
