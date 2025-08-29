@@ -675,7 +675,7 @@ where
                     );
 
                     info!(
-                        "availability for block: {} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
+                        "availability for block: {:?} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
                         pending_block.block.message().hash_tree_root(),
                         pending_block.origin,
                         pending_block.block.message().slot(),
@@ -1524,12 +1524,10 @@ where
                         .message
                         .hash_tree_root();
 
-                    if self.store.is_forward_synced()
-                        && !matches!(
-                            origin,
-                            DataColumnSidecarOrigin::Own | DataColumnSidecarOrigin::ExecutionLayer
-                        )
-                        && !self.store.has_requested_blobs_from_el(&block_root)
+                    if !matches!(
+                        origin,
+                        DataColumnSidecarOrigin::Own | DataColumnSidecarOrigin::ExecutionLayer
+                    ) && !self.store.has_requested_blobs_from_el(&block_root)
                         && !self.store.is_sidecars_construction_started(&block_root)
                     {
                         self.store_mut()
@@ -1545,6 +1543,7 @@ where
                                 index: *index,
                             })
                             .collect::<Vec<_>>();
+
                         self.request_blobs_from_execution_engine(
                             EngineGetBlobsV2Params {
                                 block_or_sidecar: data_column_sidecar.clone_arc().into(),
@@ -1553,6 +1552,7 @@ where
                             .into(),
                         )
                     }
+
                     let (gossip_id, sender) = origin.split();
 
                     if let Some(gossip_id) = gossip_id {
@@ -2411,8 +2411,7 @@ where
 
         let slot = data_column_sidecar.slot();
         let accepted_data_columns = self.store.accepted_data_column_sidecars_at_slot(slot);
-        let should_retry_block = self.store.is_forward_synced()
-            || accepted_data_columns * 3 >= self.store.sampling_columns_count() * 2;
+        let should_retry_block = accepted_data_columns * 2 >= self.store.sampling_columns_count();
 
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
