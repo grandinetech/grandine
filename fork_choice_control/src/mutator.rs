@@ -3686,9 +3686,7 @@ where
             .sampling_columns_count()
             .saturating_sub(missing_indices.len());
 
-        if self.store.is_forward_synced()
-            && available_columns_count * 2 >= P::NumberOfColumns::USIZE
-        {
+        if available_columns_count * 2 >= P::NumberOfColumns::USIZE {
             return BlockDataColumnAvailability::CompleteWithReconstruction;
         }
 
