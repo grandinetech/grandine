@@ -32,6 +32,7 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
+use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -648,6 +649,8 @@ impl<P: Preset> BlockSyncService<P> {
 
     #[expect(clippy::too_many_lines)]
     pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
+        let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
+
         for batch in batches {
             let SyncBatch {
                 target,
@@ -740,13 +743,9 @@ impl<P: Preset> BlockSyncService<P> {
                                 missing_column_indices.iter().join(", "),
                             );
 
-                            let peers_to_request = self
-                                .sync_manager
-                                .find_most_coverage_peers(&missing_column_indices);
                             match self.sync_manager.map_peer_custody_columns(
                                 missing_column_indices,
-                                &peers_to_request,
-                                Some(peer_id),
+                                &mut peers_to_request,
                             ) {
                                 Ok(peer_custody_columns_mapping) => {
                                     debug!(
@@ -758,9 +757,10 @@ impl<P: Preset> BlockSyncService<P> {
 
                                     for (peer_id, columns) in peer_custody_columns_mapping {
                                         // TODO(feature/fulu): catch error here
-                                        let columns = ContiguousList::try_from(columns.clone())
-                                            .map(Arc::new)
-                                            .expect("data columns should be able to parse");
+                                        let columns =
+                                            ContiguousList::try_from_iter(columns.into_iter())
+                                                .map(Arc::new)
+                                                .expect("data columns should be able to parse");
 
                                         let batch = SyncBatch {
                                             target: batch.target,
@@ -787,13 +787,10 @@ impl<P: Preset> BlockSyncService<P> {
                                         request_id = self.request_id()?;
                                     }
                                 }
-                                Err(_) => {
-                                    warn!(
-                                        "could not find available peers to request data column sidecars",
-                                    );
+                                Err(error) => {
+                                    debug!("retry_sync_batches: {error:?}");
 
                                     self.sync_manager.retry_batch(request_id, batch, None);
-                                    self.sync_manager.refresh_custodial_peers();
                                 }
                             }
                         }
@@ -845,13 +842,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         // Batch request data columns by root for missing columns if any
-        if self
-            .sync_manager
-            .ready_to_batch_request_data_column_by_roots()
-        {
-            self.batch_request_missing_data_columns()?;
-        }
-        // check if the bach request has been finished, then proceed with the new sync batch round
+        self.batch_request_missing_data_columns()?;
 
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();
@@ -1105,10 +1096,10 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
-        let peers_to_request = self.sync_manager.find_most_coverage_peers(&missing_indices);
+        let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
         match self
             .sync_manager
-            .map_peer_custody_columns(missing_indices, &peers_to_request, None)
+            .map_peer_custody_columns(missing_indices, &mut peers_to_request)
         {
             Ok(peer_custody_columns_mapping) => {
                 for (peer_id, column_indices) in peer_custody_columns_mapping {
@@ -1116,7 +1107,7 @@ impl<P: Preset> BlockSyncService<P> {
 
                     let data_columns_by_root = DataColumnsByRootIdentifier {
                         block_root,
-                        columns: ContiguousList::try_from(column_indices)
+                        columns: ContiguousList::try_from_iter(column_indices.into_iter())
                             .expect("column indices must not be more than NUMBER_OF_COLUMNS"),
                     };
 
@@ -1135,11 +1126,7 @@ impl<P: Preset> BlockSyncService<P> {
                     }
                 }
             }
-            Err(_) => {
-                warn!("could not find available peers to request column sidecars");
-
-                self.sync_manager.refresh_custodial_peers();
-            }
+            Err(error) => debug!("request_needed_data_columns: {error:?}"),
         }
 
         Ok(())
@@ -1164,21 +1151,18 @@ impl<P: Preset> BlockSyncService<P> {
                 acc
             });
 
-        // Early return if no missing columns found
+        // Early return if no missing columns
         if missing_column_by_indices.is_empty() {
             return Ok(());
         }
 
         // Find the best peer coverage for these missing columns
         let missing_column_indices = missing_column_by_indices.keys().copied().collect();
-        let peers_to_request = self
+        let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
+        match self
             .sync_manager
-            .find_most_coverage_peers(&missing_column_indices);
-        match self.sync_manager.map_peer_custody_columns(
-            missing_column_indices,
-            &peers_to_request,
-            None,
-        ) {
+            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
+        {
             Ok(peer_custody_columns_mapping) => {
                 for (peer_id, column_indices) in peer_custody_columns_mapping {
                     let request_id = self.request_id()?;
@@ -1222,11 +1206,7 @@ impl<P: Preset> BlockSyncService<P> {
                     }
                 }
             }
-            Err(_) => {
-                warn!("could not find available peers to request column sidecars");
-
-                self.sync_manager.refresh_custodial_peers();
-            }
+            Err(error) => debug!("batch_request_missing_data_columns: {error:?}"),
         }
 
         Ok(())
