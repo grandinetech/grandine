@@ -2318,7 +2318,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.blob_cache.on_slot(new_tick.slot);
-        // self.data_column_cache.on_slot(new_tick.slot);
         self.prune_state_cache(true);
 
         let changes = if self.reorganized(old_head_segment_id) {
@@ -2959,7 +2958,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|slot, _| finalized_slot <= *slot);
         self.requested_blobs_from_el
             .retain(|_, slot| finalized_slot <= *slot);
-        // self.data_column_cache.prune_finalized(finalized_slot);
         self.prune_checkpoint_states();
         self.prune_state_cache(false);
         self.aggregate_and_proof_supersets
@@ -3771,11 +3769,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.state_cache.clone_arc()
     }
 
-    pub fn has_unpersisted_data_column_sidecars(&self) -> bool {
-        self.data_column_cache
-            .has_unpersisted_data_column_sidecars()
-    }
-
     pub fn mark_persisted_data_columns(
         &mut self,
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
@@ -3786,6 +3779,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn prune_data_columns(&mut self, slot: Slot) {
         self.data_column_cache.prune(slot);
+    }
+
+    pub fn prune_persisted_data_columns(&mut self, slot: Slot) {
+        self.data_column_cache.prune_persisted(slot);
     }
 
     pub fn unpersisted_data_column_sidecars(
@@ -3902,6 +3899,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             &type_name,
             "checkpoint_states",
             self.checkpoint_states.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "unpersisted_data_columns",
+            self.unpersisted_data_column_sidecars().count(),
         );
 
         metrics.set_collection_length(

@@ -675,7 +675,7 @@ where
                     );
 
                     info!(
-                        "availablility for block: {} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
+                        "availability for block: {} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
                         pending_block.block.message().hash_tree_root(),
                         pending_block.origin,
                         pending_block.block.message().slot(),
@@ -1767,23 +1767,9 @@ where
         self.store_mut()
             .mark_persisted_data_columns(persisted_data_column_ids);
 
-        self.store_mut().prune_data_columns(slot);
+        self.store_mut().prune_persisted_data_columns(slot);
 
         self.update_store_snapshot();
-
-        // if self.store.has_unpersisted_data_column_sidecars()
-        //     && (self.store.is_forward_synced()
-        //         || self.store.unpersisted_data_column_sidecars().count()
-        //             >= P::NumberOfColumns::USIZE)
-        // {
-        //     self.spawn(PersistDataColumnSidecarsTask {
-        //         store_snapshot: self.owned_store(),
-        //         storage: self.storage.clone_arc(),
-        //         mutator_tx: self.owned_mutator_tx(),
-        //         wait_group,
-        //         metrics: self.metrics.clone(),
-        //     });
-        // }
     }
 
     fn handle_reconstructing_data_column_sidecars(
@@ -2441,16 +2427,6 @@ where
 
         self.event_channels
             .send_data_column_sidecar_event(block_root, data_column_sidecar);
-
-        // if !self.storage.prune_storage_enabled() {
-        //     self.spawn(PersistDataColumnSidecarsTask {
-        //         store_snapshot: self.owned_store(),
-        //         storage: self.storage.clone_arc(),
-        //         mutator_tx: self.owned_mutator_tx(),
-        //         wait_group: wait_group.clone(),
-        //         metrics: self.metrics.clone(),
-        //     });
-        // }
     }
 
     fn notify_about_finalized_checkpoint(&self) {
