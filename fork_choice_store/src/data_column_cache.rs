@@ -39,12 +39,6 @@ impl<P: Preset> DataColumnCache<P> {
         Some(self.data_columns.get(&data_column_id)?.0.clone_arc())
     }
 
-    pub fn has_unpersisted_data_column_sidecars(&self) -> bool {
-        self.data_columns
-            .iter()
-            .any(|(_, (_, _, persisted))| !persisted)
-    }
-
     pub fn insert(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         let slot = data_column_sidecar.signed_block_header.message.slot;
         let identifier = data_column_sidecar.as_ref().into();
@@ -67,6 +61,11 @@ impl<P: Preset> DataColumnCache<P> {
     pub fn prune(&mut self, prune_slot: Slot) {
         self.data_columns
             .retain(|_, (_, slot, _)| prune_slot <= *slot);
+    }
+
+    pub fn prune_persisted(&mut self, prune_slot: Slot) {
+        self.data_columns
+            .retain(|_, (_, slot, persisted)| !*persisted || prune_slot <= *slot);
     }
 
     pub fn size(&self) -> usize {
