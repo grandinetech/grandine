@@ -3663,7 +3663,7 @@ where
     fn block_data_column_availability<'column>(
         &self,
         block: &SignedBeaconBlock<P>,
-        pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
+        mut pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
     ) -> BlockDataColumnAvailability {
         let Some(body) = block.message().body().post_fulu() else {
             return BlockDataColumnAvailability::Irrelevant;
@@ -3675,15 +3675,12 @@ where
             return BlockDataColumnAvailability::Complete;
         }
 
-        let pending_columns_indices = pending_data_columns_for_block
-            .filter_map(|data_column_sidecar| {
-                (missing_indices.contains(&data_column_sidecar.index)
-                    && data_column_sidecar.kzg_commitments == *body.blob_kzg_commitments())
-                .then_some(data_column_sidecar.index)
-            })
-            .collect_vec();
+        let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
+            missing_indices.contains(&data_column_sidecar.index)
+                && data_column_sidecar.kzg_commitments == *body.blob_kzg_commitments()
+        });
 
-        if !pending_columns_indices.is_empty() {
+        if any_pending_columns {
             return BlockDataColumnAvailability::AnyPending;
         }
 
