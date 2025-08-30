@@ -887,6 +887,8 @@ pub struct ElectraPreset {
     pending_partial_withdrawals_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     whistleblower_reward_quotient_electra: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_inclusion_list_transactions: u16,
 }
 
 impl ElectraPreset {
@@ -908,6 +910,7 @@ impl ElectraPreset {
             pending_consolidations_limit: P::PendingConsolidationsLimit::U64,
             pending_partial_withdrawals_limit: P::PendingPartialWithdrawalsLimit::U64,
             whistleblower_reward_quotient_electra: P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,
+            max_inclusion_list_transactions: P::MaxInclusionListTransactions::U16,
         }
     }
 }
