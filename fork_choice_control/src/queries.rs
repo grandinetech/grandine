@@ -551,12 +551,41 @@ where
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
+        self.preprocessed_state_post_block_with_cached_state(block_root, slot, || {
+            self.state_cache().try_state_at_slot(
+                self.pubkey_cache(),
+                &self.store_snapshot(),
+                block_root,
+                slot,
+            )
+        })
+    }
+
+    // Modified `preprocessed_state_post_block` method to be used for block production.
+    pub fn preprocessed_state_for_block_production(
+        &self,
+        block_root: H256,
+        slot: Slot,
+    ) -> Result<Arc<BeaconState<P>>> {
+        self.preprocessed_state_post_block_with_cached_state(block_root, slot, || {
+            self.state_cache().try_state_at_slot_for_block_sync(
+                self.pubkey_cache(),
+                &self.store_snapshot(),
+                block_root,
+                slot,
+            )
+        })
+    }
+
+    pub fn preprocessed_state_post_block_with_cached_state(
+        &self,
+        block_root: H256,
+        slot: Slot,
+        cached_state: impl FnOnce() -> Result<Option<Arc<BeaconState<P>>>>,
+    ) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
 
-        if let Some(state) =
-            self.state_cache()
-                .try_state_at_slot(self.pubkey_cache(), &store, block_root, slot)?
-        {
+        if let Some(state) = cached_state()? {
             return Ok(state);
         }
 
