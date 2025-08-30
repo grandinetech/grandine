@@ -18,6 +18,7 @@ use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::Phase,
     phase0::primitives::{ExecutionBlockHash, H256},
+    eip7805::InclusionListTransactions,
     preset::Preset,
 };
 
@@ -139,6 +140,22 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                         }
                     }
                 }
+                ExecutionServiceMessage::GetInclusionList { parent_hash, sender } => {
+                    let response = self.get_inclusion_list(parent_hash).await;
+
+                    if let Err(error) = response {
+                        warn!("engine_getInclusionList call failed: {error}");
+                    }
+
+                    if let Some(sender) = sender {
+                        if let Err(message) = sender.send(response) {
+                            warn!(
+                                "sending engine_getInclusionList result \
+                                failed because the receiver was dropped: {message:?}"
+                            );
+                        }
+                    }
+                }
                 ExecutionServiceMessage::Stop => {
                     Eth1ApiToBlobFetcher::Stop.send(&self.blob_fetcher_tx);
 
@@ -233,6 +250,15 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                   response: {response:?})",
             );
         }
+
+        Ok(response)
+    }
+
+    async fn get_inclusion_list(
+        &self,
+        parent_hash: ExecutionBlockHash,
+    ) -> Result<InclusionListTransactions<P>> {
+        let response = self.api.get_inclusion_list(parent_hash).await?;
 
         Ok(response)
     }

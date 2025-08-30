@@ -505,15 +505,16 @@ impl Eth1Api {
         }
     }
 
-    pub async fn get_inclusion_list<P: Preset>(&self,parent_hash: H256) -> Result<Vec<String>> {
-        self.execute(
+    pub async fn get_inclusion_list<P: Preset>(&self,parent_hash: H256) -> Result<InclusionListTransactions<P>> {
+        let raw_transaction_result =self.execute(
             ENGINE_GET_INCLUSION_LIST_V1,
             vec![serde_json::to_value(parent_hash)?],
             None,
             Some(ENGINE_GET_INCLUSION_LIST_V1),
         )
         .await
-        .map(WithClientVersions::result)
+        .map(WithClientVersions::result);
+    
     }
 
     pub async fn update_payload_with_inclusion_list(&self,inclusion_list: InclusionList<p>){
