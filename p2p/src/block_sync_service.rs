@@ -458,6 +458,14 @@ impl<P: Preset> BlockSyncService<P> {
                             self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
                         }
+                        P2pToSync::GossipInclusionList(signed_inclusion_list, peer_id, gossip_id) => {
+                             debug!(
+                                "received gossip inclusion list (slot: {}, validator_index: {})", 
+                                signed_inclusion_list.message.slot,
+                                signed_inclusion_list.message.validator_index
+                            );
+                            self.controller.on_gossip_inclusion_list(signed_inclusion_list, gossip_id);
+                        }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
                             // Grandine should not dismiss newer valid blob sidecars with the same blob identifier

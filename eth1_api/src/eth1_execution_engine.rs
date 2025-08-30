@@ -140,6 +140,18 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
         }
     }
 
+    fn get_inclusion_list(
+            &self,
+            parent_hash: ExecutionBlockHash,
+            sender: Option<Sender<Result<types::eip7805::InclusionListTransactions<P>>>>,
+        ) -> Result<()> {
+        ExecutionServiceMessage::GetInclusionList {
+            parent_hash,
+            sender,
+        }
+        .send(&self.execution_service_tx);
+    }
+
     fn stop(&self) {
         ExecutionServiceMessage::Stop.send(&self.execution_service_tx);
     }

@@ -573,6 +573,17 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
+pub struct EngineGetInclusionListResponse<P: Preset> {
+    pub inclusion_list: InclusionListTransactions<P>,
+}
+impl<P: Preset> From<EngineGetInclusionListResponse<P>> for InclusionListTransactions<P> {
+    fn from(response: EngineGetInclusionListResponse<P>) -> Self {
+        response.inclusion_list
+    }
+}
+
+
+
 #[derive(Clone, Serialize)]
 #[serde(untagged, bound = "")]
 pub enum PayloadAttributes<P: Preset> {
@@ -929,6 +940,8 @@ pub struct BlobAndProofV1<P: Preset> {
     pub blob: Blob<P>,
     pub proof: KzgProof,
 }
+
+
 
 #[cfg(test)]
 mod tests {

@@ -10,6 +10,7 @@ use types::{
     deneb::containers::BlobIdentifier,
     nonstandard::Phase,
     phase0::primitives::{ExecutionBlockHash, H256},
+    eip7805::InclusionListTransactions,
     preset::Preset,
 };
 
@@ -34,6 +35,10 @@ pub enum ExecutionServiceMessage<P: Preset> {
         payload: Box<ExecutionPayload<P>>,
         params: Option<ExecutionPayloadParams<P>>,
         sender: Option<Sender<Result<PayloadStatusV1>>>,
+    },
+    GetInclusionList {
+        parent_hash: ExecutionBlockHash,
+        sender: Sender<Result<InclusionListTransactions<P>>>,
     },
     Stop,
 }

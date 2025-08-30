@@ -13,6 +13,7 @@ use types::{
     deneb::containers::BlobIdentifier,
     nonstandard::{Phase, TimedPowBlock},
     phase0::primitives::{ExecutionBlockHash, H256},
+    eip7805::InclusionListTransactions,
     preset::Preset,
 };
 
@@ -58,6 +59,13 @@ pub trait ExecutionEngine<P: Preset> {
 
     /// [`get_pow_block`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/fork-choice.md#get_pow_block)
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock>;
+    
+    /// [`engine_getInclusionListV1`]
+    fn get_inclusion_list(
+        &self,
+        parent_hash: ExecutionBlockHash,
+        sender: Option<Sender<Result<InclusionListTransactions<P>>>>,
+    ) -> Result<()>;
 
     fn stop(&self);
 }
@@ -111,6 +119,14 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
 
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         (*self).pow_block(block_hash)
+    }
+
+    fn get_inclusion_list(
+        &self,
+        parent_hash: ExecutionBlockHash,
+        sender: Option<Sender<Result<InclusionListTransactions<P>>>>,
+    ) -> Result<()> {
+        (*self).get_inclusion_list(parent_hash, sender)
     }
 
     fn stop(&self) {
@@ -168,6 +184,14 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
 
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         self.as_ref().pow_block(block_hash)
+    }
+
+    fn get_inclusion_list(
+        &self,
+        parent_hash: ExecutionBlockHash,
+        sender: Option<Sender<Result<InclusionListTransactions<P>>>>,
+    ) -> Result<()> {
+        self.as_ref().get_inclusion_list(parent_hash, sender)
     }
 
     fn stop(&self) {
@@ -238,6 +262,16 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
             .pow_block(block_hash)
     }
 
+    fn get_inclusion_list(
+        &self,
+        parent_hash: ExecutionBlockHash,
+        sender: Option<Sender<Result<InclusionListTransactions<P>>>>,
+    ) -> Result<()> {
+        self.lock()
+            .expect("execution engine mutex is poisoned")
+            .get_inclusion_list(parent_hash, sender)
+    }
+
     fn stop(&self) {
         self.lock()
             .expect("execution engine mutex is poisoned")
@@ -287,6 +321,19 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
 
     fn pow_block(&self, _block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         None
+    }
+
+    fn get_inclusion_list(
+        &self,
+        _parent_hash: ExecutionBlockHash,
+        _sender: Option<Sender<Result<InclusionListTransactions<P>>>>,
+    ) -> Result<()> {
+        // Return empty inclusion list for null engine
+        if let Some(sender) = _sender {
+            let empty_list = InclusionListTransactions::default();
+            let _ = sender.send(Ok(empty_list));
+        }
+        Ok(())
     }
 
     fn stop(&self) {}
@@ -347,6 +394,13 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
 
     fn pow_block(&self, block_hash: ExecutionBlockHash) -> Option<TimedPowBlock> {
         self.pow_blocks.get(&block_hash).copied()
+    }
+
+    fn get_inclusion_list(
+        &self,
+        parent_hash: ExecutionBlockHash,
+        sender: Option<Sender<Result<InclusionListTransactions<P>>>>,
+    ) -> Result<()> {
     }
 
     fn stop(&self) {}
