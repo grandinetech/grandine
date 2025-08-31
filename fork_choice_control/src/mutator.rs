@@ -2414,7 +2414,11 @@ where
 
         let slot = data_column_sidecar.slot();
         let accepted_data_columns = self.store.accepted_data_column_sidecars_at_slot(slot);
-        let should_retry_block = accepted_data_columns * 2 >= self.store.sampling_columns_count();
+        let should_retry_block = if self.store.is_sidecars_construction_started(&block_root) {
+            accepted_data_columns == self.store.sampling_columns_count()
+        } else {
+            accepted_data_columns * 2 >= self.store.sampling_columns_count()
+        };
 
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
