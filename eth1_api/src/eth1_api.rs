@@ -43,6 +43,7 @@ const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
 const ENGINE_GET_BLOBS_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
+pub const ENGINE_GET_INCLUSION_LIST_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub const ENGINE_FORKCHOICE_UPDATED_V1: &str = "engine_forkchoiceUpdatedV1";
 pub const ENGINE_FORKCHOICE_UPDATED_V2: &str = "engine_forkchoiceUpdatedV2";
@@ -505,21 +506,22 @@ impl Eth1Api {
         }
     }
 
-    pub async fn get_inclusion_list<P: Preset>(&self,parent_hash: H256) -> Result<InclusionListTransactions<P>> {
-        let raw_transaction_result =self.execute(
+    pub async fn get_inclusion_list<P: Preset>(&self,parent_hash: H256) -> Result<WithClientVersions<InclusionListTransactions<P>>> {
+        
+        let params = vec![serde_json::to_value(parent_hash)?];
+         self.execute::<EngineGetInclusionListV1Response<P>>(
             ENGINE_GET_INCLUSION_LIST_V1,
-            vec![serde_json::to_value(parent_hash)?],
-            None,
+            params,
+            Some(ENGINE_GET_INCLUSION_LIST_TIMEOUT),
             Some(ENGINE_GET_INCLUSION_LIST_V1),
         )
         .await
-        .map(WithClientVersions::result);
-    
+        .map(|with_client_info| {
+        with_client_info.map(|response_struct| response_struct.transactions)
+    })
+
     }
 
-    pub async fn update_payload_with_inclusion_list(&self,inclusion_list: InclusionList<p>){
-        
-    }
 
     async fn execute<T: DeserializeOwned + Send>(
         &self,

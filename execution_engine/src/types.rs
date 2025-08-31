@@ -26,6 +26,7 @@ use types::{
         containers::ExecutionPayload as DenebExecutionPayload,
         primitives::{Blob, KzgCommitment, KzgProof},
     },
+    eip7805::InclusionListTransactions,
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
@@ -34,6 +35,7 @@ use types::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, UnixSeconds,
         ValidatorIndex, H256,
     },
+    eip7805::InclusionListTransactions,
     preset::Preset,
 };
 
@@ -573,14 +575,12 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-pub struct EngineGetInclusionListResponse<P: Preset> {
-    pub inclusion_list: InclusionListTransactions<P>,
+#[derive(Deserialize)] 
+#[serde(bound = "", rename_all = "camelCase")] 
+pub struct EngineGetInclusionListV1Response<P: Preset> {
+    pub transactions: InclusionListTransactions<P>,
 }
-impl<P: Preset> From<EngineGetInclusionListResponse<P>> for InclusionListTransactions<P> {
-    fn from(response: EngineGetInclusionListResponse<P>) -> Self {
-        response.inclusion_list
-    }
-}
+
 
 
 
