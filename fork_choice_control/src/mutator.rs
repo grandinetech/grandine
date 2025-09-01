@@ -2411,7 +2411,13 @@ where
 
         let slot = data_column_sidecar.slot();
         let accepted_data_columns = self.store.accepted_data_column_sidecars_at_slot(slot);
-        let should_retry_block = if self.store.is_sidecars_construction_started(&block_root) {
+
+        // There is no data columns by each root request, while syncing we batch by root requests
+        // to respective custodial peers in `p2p/src/block_sync_service.rs::batch_request_missing_data_columns` method
+        let should_retry_block = if self.store.is_sidecars_construction_started(&block_root)
+            || (!self.store.is_forward_synced()
+                && self.store.sampling_columns_count() * 2 < P::NumberOfColumns::USIZE)
+        {
             accepted_data_columns == self.store.sampling_columns_count()
         } else {
             accepted_data_columns * 2 >= self.store.sampling_columns_count()
