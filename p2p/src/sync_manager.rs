@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use eth1_api::RealController;
 use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, NetworkGlobals, PeerId};
 use helper_functions::misc;
-use itertools::Itertools;
+use itertools::Itertools as _;
 use log::{log, Level};
 use lru::LruCache;
 use prometheus_metrics::Metrics;
@@ -1162,11 +1162,23 @@ impl<P: Preset> SyncManager<P> {
             match self
                 .peers_custodial
                 .iter()
-                .filter(|(peer, _)| {
-                    peers_to_request.contains(*peer) && !peer_columns_mapping.contains_key(*peer)
+                .filter(|(peer, columns)| {
+                    peers_to_request.contains(*peer)
+                        && !columns.is_disjoint(&column_indices)
+                        && !peer_columns_mapping.contains_key(*peer)
                 })
-                .max_by_key(|(_, columns)| columns.intersection(&column_indices).count())
-            {
+                .min_by(|(_, columns_a), (_, columns_b)| {
+                    let total_custody_a = columns_a.len();
+                    let total_custody_b = columns_b.len();
+                    let coverage_a = columns_a.intersection(&column_indices).count();
+                    let coverage_b = columns_b.intersection(&column_indices).count();
+
+                    // Prioritize peers with fewer total custody columns first, then maximize coverage
+                    match total_custody_a.cmp(&total_custody_b) {
+                        core::cmp::Ordering::Equal => coverage_b.cmp(&coverage_a),
+                        other => other,
+                    }
+                }) {
                 Some((peer, columns)) => {
                     let covered_by_peer = columns
                         .intersection(&column_indices)
@@ -1618,5 +1630,439 @@ mod tests {
         assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
 
         Ok(())
+    }
+
+    // Helper function to create a test SyncManager with custom custodial peers
+    fn create_test_sync_manager_with_custody(
+        peers_custodial: HashMap<PeerId, HashSet<ColumnIndex>>,
+    ) -> SyncManager<Minimal> {
+        let log = build_log(slog::Level::Debug, false);
+        let chain_config = Arc::new(Config::minimal().rapid_upgrade());
+        let network_config = Arc::new(NetworkConfig::default());
+        let network_globals =
+            NetworkGlobals::new_test_globals::<Minimal>(chain_config, vec![], &log, network_config);
+        let received_data_column_sidecars = Arc::new(DashMap::new());
+        let mut sync_manager =
+            SyncManager::new(network_globals.into(), 100, received_data_column_sidecars);
+        sync_manager.peers_custodial = peers_custodial;
+        sync_manager
+    }
+
+    #[test]
+    fn test_prioritizes_peers_with_fewer_custody_columns() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+        let peer3 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // peer1 has 5 columns (heavy load)
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 4]));
+        // peer2 has 2 columns (light load)
+        peers_custodial.insert(peer2, HashSet::from([5, 6]));
+        // peer3 has 1 column (lightest load)
+        peers_custodial.insert(peer3, HashSet::from([7]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2, peer3];
+        let column_indices = HashSet::from([0, 5, 7]); // Each peer can serve one of these
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Should assign to peer3 first (lightest), then peer2, then peer1
+        assert_eq!(result.len(), 3);
+        assert!(result[&peer3].contains(&7)); // Lightest peer gets assigned
+        assert!(result[&peer2].contains(&5)); // Second lightest
+        assert!(result[&peer1].contains(&0)); // Heaviest peer gets assigned last
+    }
+
+    #[test]
+    fn test_maximizes_coverage_within_same_load_tier() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // Both peers have same number of total columns (3 each)
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2]));
+        peers_custodial.insert(peer2, HashSet::from([2, 3, 4])); // peer2 can cover 2 of requested columns
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2];
+        let column_indices = HashSet::from([2, 3]); // peer2 can cover both, peer1 can cover only one
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // peer2 should be selected as it can cover more columns despite same total load
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&peer2));
+        assert_eq!(result[&peer2], HashSet::from([2, 3]));
+    }
+
+    #[test]
+    fn test_respects_max_columns_per_peer() {
+        let peer1 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // peer1 can custody many columns
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1];
+        let column_indices = HashSet::from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]); // Request all columns
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Should not assign more than MAX_COLUMNS_ASSIGNED_PER_PEER
+        assert_eq!(result.len(), 1);
+        assert!(result[&peer1].len() <= MAX_COLUMNS_ASSIGNED_PER_PEER);
+    }
+
+    #[test]
+    fn test_empty_column_indices_returns_empty_map() {
+        let peer1 = PeerId::random();
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1];
+        let column_indices = HashSet::new(); // Empty request
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_no_available_peers_returns_error() {
+        let sync_manager = create_test_sync_manager_with_custody(HashMap::new());
+        let mut peers_to_request = vec![];
+        let column_indices = HashSet::from([0, 1, 2]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect_err("no peers to request");
+
+        assert!(matches!(
+            result.downcast_ref(),
+            Some(MapPeerCustodyError::NoAvailablePeers)
+        ));
+    }
+
+    #[test]
+    fn test_no_peers_can_serve_requested_columns() {
+        let peer1 = PeerId::random();
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2])); // peer1 can't serve column 5
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1];
+        let column_indices = HashSet::from([5, 6, 7]); // Columns peer1 can't serve
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect_err("no available custodial peers to request");
+
+        assert!(matches!(
+            result.downcast_ref(),
+            Some(MapPeerCustodyError::NoAvailablePeers)
+        ));
+    }
+
+    #[test]
+    fn test_removes_assigned_peers_from_request_list() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+        let peer3 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0]));
+        peers_custodial.insert(peer2, HashSet::from([1]));
+        peers_custodial.insert(peer3, HashSet::from([2, 3, 4])); // peer3 not needed
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2, peer3];
+        let column_indices = HashSet::from([0, 1]); // Only need peer1 and peer2
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // peer1 and peer2 should be assigned and removed from peers_to_request
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key(&peer1));
+        assert!(result.contains_key(&peer2));
+
+        // Only peer3 should remain in peers_to_request
+        assert_eq!(peers_to_request, vec![peer3]);
+    }
+
+    #[test]
+    fn test_complex_load_balancing_scenario() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+        let peer3 = PeerId::random();
+        let peer4 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // peer1: heavy load (8 columns), can serve columns [0, 1, 2, 3]
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 10, 11, 12, 13]));
+        // peer2: medium load (4 columns), can serve columns [1, 2, 4, 5]
+        peers_custodial.insert(peer2, HashSet::from([1, 2, 4, 5]));
+        // peer3: light load (2 columns), can serve columns [2, 6]
+        peers_custodial.insert(peer3, HashSet::from([2, 6]));
+        // peer4: lightest load (1 column), can serve column [7]
+        peers_custodial.insert(peer4, HashSet::from([7]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2, peer3, peer4];
+        let column_indices = HashSet::from([0, 1, 2, 4, 6, 7]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices.clone(), &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Verify that lighter-loaded peers get assigned first
+        // peer4 (1 column) should get column 7
+        assert!(result[&peer4].contains(&7));
+
+        // peer3 (2 columns) should get column 6 or 2
+        assert!(result[&peer3].contains(&6) || result[&peer3].contains(&2));
+
+        // peer2 (4 columns) should get some of the remaining columns
+        assert!(result.contains_key(&peer2));
+
+        // Verify all requested columns are assigned
+        let all_assigned_columns: HashSet<ColumnIndex> = result
+            .values()
+            .flat_map(|columns| columns.iter())
+            .copied()
+            .collect();
+
+        // All requested columns should be covered
+        assert!(column_indices.is_subset(&all_assigned_columns));
+    }
+
+    #[test]
+    fn test_peer_not_in_request_list_is_ignored() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1])); // peer1 can serve but not in request list
+        peers_custodial.insert(peer2, HashSet::from([0, 2])); // peer2 is in request list
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer2]; // Only peer2 is allowed
+        let column_indices = HashSet::from([0, 1, 2]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Only peer2 should be assigned (peer1 ignored despite being able to serve)
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&peer2));
+        assert!(!result.contains_key(&peer1));
+    }
+
+    #[test]
+    fn test_already_assigned_peer_is_skipped() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1]));
+        peers_custodial.insert(peer2, HashSet::from([1, 2]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2];
+        let column_indices = HashSet::from([0, 1, 2]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices.clone(), &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Each peer should only be assigned once, even if they could serve multiple columns
+        let assigned_peers: HashSet<PeerId> = result.keys().copied().collect();
+        assert_eq!(assigned_peers.len(), result.len()); // No duplicate peer assignments
+
+        // Verify all columns are assigned
+        let all_assigned_columns: HashSet<ColumnIndex> = result
+            .values()
+            .flat_map(|columns| columns.iter())
+            .copied()
+            .collect();
+        assert_eq!(all_assigned_columns, column_indices);
+    }
+
+    #[test]
+    fn test_equal_load_peers_prefer_better_coverage() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // Both peers have same total load (3 columns each)
+        peers_custodial.insert(peer1, HashSet::from([0, 10, 11])); // Can serve 1 requested column
+        peers_custodial.insert(peer2, HashSet::from([1, 2, 12])); // Can serve 2 requested columns
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2];
+        let column_indices = HashSet::from([0, 1, 2]); // peer2 has better coverage
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // peer2 should be selected first due to better coverage (same load)
+        assert!(result.contains_key(&peer2));
+        assert_eq!(result[&peer2], HashSet::from([1, 2]));
+    }
+
+    #[test]
+    fn test_distributes_load_across_multiple_peers() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+        let peer3 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // Graduated loads: 1, 2, 3 columns respectively
+        peers_custodial.insert(peer1, HashSet::from([0])); // 1 column
+        peers_custodial.insert(peer2, HashSet::from([1, 2])); // 2 columns
+        peers_custodial.insert(peer3, HashSet::from([3, 4, 5])); // 3 columns
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2, peer3];
+        let column_indices = HashSet::from([0, 1, 3]); // Each peer can serve one
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // All three peers should get assigned (peer1 first, then peer2, then peer3)
+        assert_eq!(result.len(), 3);
+        assert!(result[&peer1].contains(&0)); // Lightest load gets assigned first
+        assert!(result[&peer2].contains(&1)); // Second lightest
+        assert!(result[&peer3].contains(&3)); // Heaviest load gets assigned last
+    }
+
+    #[test]
+    fn test_handles_overlapping_custody_efficiently() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        // peer1: light load, overlapping custody
+        peers_custodial.insert(peer1, HashSet::from([0, 1])); // 2 columns
+                                                              // peer2: heavy load, overlapping custody
+        peers_custodial.insert(peer2, HashSet::from([0, 1, 2, 3, 4, 5])); // 6 columns
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2];
+        let column_indices = HashSet::from([0, 1]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // peer1 should be selected due to lighter load, even though both can serve the columns
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&peer1));
+        assert_eq!(result[&peer1], HashSet::from([0, 1]));
+    }
+
+    #[test]
+    fn test_sequential_assignment_maintains_load_balance() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+        let peer3 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 10])); // 4 columns
+        peers_custodial.insert(peer2, HashSet::from([3, 4, 11, 12])); // 4 columns
+        peers_custodial.insert(peer3, HashSet::from([5, 6, 7, 8, 9, 13, 14, 15])); // 8 columns
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2, peer3];
+        let column_indices = HashSet::from([0, 3, 5, 1, 4, 6]); // Multiple rounds of assignment
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Should distribute across multiple peers, with lighter-loaded peers getting priority
+        // peer1 and peer2 (4 columns each) should be preferred over peer3 (8 columns)
+        let peer1_columns = result.get(&peer1).map(HashSet::len).unwrap_or(0);
+        let peer2_columns = result.get(&peer2).map(HashSet::len).unwrap_or(0);
+        let peer3_columns = result.get(&peer3).map(HashSet::len).unwrap_or(0);
+
+        // Lighter loaded peers should get assignments first
+        assert!(peer1_columns > 0 || peer2_columns > 0); // At least one of the lighter peers gets assigned
+
+        // If peer3 gets assigned, it should be after peer1 and peer2 are considered
+        if peer3_columns > 0 {
+            // This indicates peer3 was needed, which is fine
+            assert!(peer1_columns > 0 || peer2_columns > 0);
+        }
+    }
+
+    #[test]
+    fn test_partial_assignment_when_some_columns_cannot_be_served() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1])); // Can serve 2 requested columns
+        peers_custodial.insert(peer2, HashSet::from([2])); // Can serve 1 requested column
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1, peer2];
+        let column_indices = HashSet::from([0, 1, 2, 99]); // Column 99 cannot be served
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Should successfully assign the columns that can be served
+        assert!(!result.is_empty());
+
+        let all_assigned_columns: HashSet<ColumnIndex> = result
+            .values()
+            .flat_map(|columns| columns.iter())
+            .copied()
+            .collect();
+
+        // Should contain the servable columns but not column 99
+        assert!(all_assigned_columns.contains(&0));
+        assert!(all_assigned_columns.contains(&1));
+        assert!(all_assigned_columns.contains(&2));
+        assert!(!all_assigned_columns.contains(&99));
+    }
+
+    #[test]
+    fn test_single_peer_gets_multiple_columns_when_alone() {
+        let peer1 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 4]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let mut peers_to_request = vec![peer1];
+        let column_indices = HashSet::from([0, 1, 2]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        // Single peer should get all requested columns it can serve
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[&peer1], HashSet::from([0, 1, 2]));
+        assert!(peers_to_request.is_empty()); // Peer should be removed from request list
     }
 }
