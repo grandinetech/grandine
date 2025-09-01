@@ -368,6 +368,8 @@ impl<P: Preset> SyncManager<P> {
                                             Level::Debug,
                                             format_args!("build_back_sync_batches: {error:?}"),
                                         );
+
+                                        break;
                                     }
                                 }
                             }
@@ -496,6 +498,14 @@ impl<P: Preset> SyncManager<P> {
             }
         };
 
+        if config
+            .phase_at_slot::<P>(sync_start_slot)
+            .is_peerdas_activated()
+            && self.peers_custodial.is_empty()
+        {
+            return Ok(vec![]);
+        }
+
         self.log(
             Level::Debug,
             format_args!(
@@ -594,6 +604,8 @@ impl<P: Preset> SyncManager<P> {
                                     Level::Debug,
                                     format_args!("build_forward_sync_batches: {error:?}"),
                                 );
+
+                                break;
                             }
                         }
                     }
@@ -610,10 +622,6 @@ impl<P: Preset> SyncManager<P> {
                     retry_count: 0,
                     data_columns: None,
                 });
-
-                if peers_to_request.is_empty() {
-                    break;
-                }
             } else {
                 if blob_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
