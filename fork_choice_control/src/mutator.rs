@@ -1527,10 +1527,12 @@ where
                         .message
                         .hash_tree_root();
 
-                    if !matches!(
-                        origin,
-                        DataColumnSidecarOrigin::Own | DataColumnSidecarOrigin::ExecutionLayer
-                    ) && !self.store.has_requested_blobs_from_el(&block_root)
+                    if self.store.is_forward_synced()
+                        && !matches!(
+                            origin,
+                            DataColumnSidecarOrigin::Own | DataColumnSidecarOrigin::ExecutionLayer
+                        )
+                        && !self.store.has_requested_blobs_from_el(&block_root)
                         && !self.store.is_sidecars_construction_started(&block_root)
                     {
                         self.store_mut()
