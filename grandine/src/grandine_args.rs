@@ -417,10 +417,15 @@ struct BeaconNodeOptions {
     #[clap(long)]
     blacklisted_blocks: Vec<H256>,
 
-    // Disable `engine_getBlobs` integration, use purely gossip and p2p requests.
-    // Use for testing purpose
+    /// Disable `engine_getBlobs` integration, use purely gossip and p2p requests.
+    /// Use for testing purpose
     #[clap(long)]
     disable_engine_getblobs: bool,
+
+    /// Enable reconstruction while syncing the chain
+    /// [default: disabled]
+    #[clap(long)]
+    sync_with_reconstruction: bool,
 }
 
 #[expect(
@@ -998,6 +1003,7 @@ impl GrandineArgs {
             kzg_backend,
             blacklisted_blocks,
             disable_engine_getblobs,
+            sync_with_reconstruction,
         } = beacon_node_options;
 
         // let SlasherOptions {
@@ -1402,6 +1408,7 @@ impl GrandineArgs {
             report_validator_performance,
             withhold_data_columns_publishing,
             disable_engine_getblobs,
+            sync_with_reconstruction,
         })
     }
 

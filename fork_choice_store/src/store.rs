@@ -84,14 +84,10 @@ use crate::{
     AttestationOrigin,
 };
 
-type AcceptedDataColumnSidecarMapping<P> = HashMap<
-    (Slot, ValidatorIndex, ColumnIndex),
-    HashMap<H256, ContiguousList<KzgCommitment, <P as Preset>::MaxBlobCommitmentsPerBlock>>,
->;
-
 /// [`Store`] from the Fork Choice specification.
 ///
 /// [`Store`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#store
+#[expect(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct Store<P: Preset, S: Storage<P>> {
     chain_config: Arc<ChainConfig>,
@@ -223,7 +219,10 @@ pub struct Store<P: Preset, S: Storage<P>> {
     aggregate_and_proof_supersets: Arc<AggregateAndProofSupersets<P>>,
     accepted_blob_sidecars:
         HashMap<(Slot, ValidatorIndex, BlobIndex), HashMap<H256, KzgCommitment>>,
-    accepted_data_column_sidecars: AcceptedDataColumnSidecarMapping<P>,
+    accepted_data_column_sidecars: HashMap<
+        (Slot, ValidatorIndex, ColumnIndex),
+        HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
+    >,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
