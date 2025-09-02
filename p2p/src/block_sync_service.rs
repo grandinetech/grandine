@@ -37,10 +37,7 @@ use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
-        primitives::ColumnIndex,
-    },
+    fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
     phase0::primitives::{Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -736,62 +733,61 @@ impl<P: Preset> BlockSyncService<P> {
                             .copied()
                             .collect::<HashSet<_>>();
 
-                        if !missing_column_indices.is_empty() {
-                            debug!(
-                                "requesting columns ({}): [{}] at start slot: {start_slot}",
-                                missing_column_indices.len(),
-                                missing_column_indices.iter().join(", "),
-                            );
+                        if missing_column_indices.is_empty() {
+                            continue;
+                        }
 
-                            match self.sync_manager.map_peer_custody_columns(
-                                missing_column_indices,
-                                &mut peers_to_request,
-                            ) {
-                                Ok(peer_custody_columns_mapping) => {
-                                    debug!(
-                                        "retrying batch {batch:?}, request_ids: {:?}, mappings: {:?}, new peers: [{:?}]",
-                                        request_id..request_id,
-                                        peer_custody_columns_mapping.len(),
-                                        peer_custody_columns_mapping.keys(),
-                                    );
+                        debug!(
+                            "requesting columns ({}): [{}] at start slot: {start_slot}",
+                            missing_column_indices.len(),
+                            missing_column_indices.iter().join(", "),
+                        );
 
-                                    for (peer_id, columns) in peer_custody_columns_mapping {
-                                        let columns =
-                                            ContiguousList::try_from_iter(columns.into_iter())
-                                                .map(Arc::new)
-                                                .expect("column indices must not be more than NUMBER_OF_COLUMNS");
+                        let peer_custody_columns_mapping = match self
+                            .sync_manager
+                            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
+                        {
+                            Ok(mapping) => mapping,
+                            Err(error) => {
+                                debug!("retry_sync_batches: {error:?}");
 
-                                        let batch = SyncBatch {
-                                            target: batch.target,
-                                            direction: batch.direction,
-                                            peer_id,
-                                            start_slot: batch.start_slot,
-                                            count: batch.count,
-                                            retry_count: batch.retry_count + 1,
-                                            response_received: batch.response_received,
-                                            data_columns: Some(columns.clone_arc()),
-                                        };
-
-                                        SyncToP2p::RequestDataColumnsByRange(
-                                            request_id, peer_id, start_slot, count, columns,
-                                        )
-                                        .send(&self.sync_to_p2p_tx);
-
-                                        self.sync_manager.retry_batch(
-                                            request_id,
-                                            batch,
-                                            Some(peer_id),
-                                        );
-
-                                        request_id = self.request_id()?;
-                                    }
-                                }
-                                Err(error) => {
-                                    debug!("retry_sync_batches: {error:?}");
-
-                                    self.sync_manager.retry_batch(request_id, batch, None);
-                                }
+                                self.sync_manager.retry_batch(request_id, batch, None);
+                                continue;
                             }
+                        };
+
+                        debug!(
+                            "retrying batch {batch:?}, request_ids: {:?}, mappings: {:?}, new peers: [{:?}]",
+                            request_id..request_id,
+                            peer_custody_columns_mapping.len(),
+                            peer_custody_columns_mapping.keys(),
+                        );
+
+                        for (peer_id, columns) in peer_custody_columns_mapping {
+                            let columns = ContiguousList::try_from_iter(columns.into_iter())
+                                .map(Arc::new)
+                                .expect("column indices must not be more than NUMBER_OF_COLUMNS");
+
+                            let batch = SyncBatch {
+                                target: batch.target,
+                                direction: batch.direction,
+                                peer_id,
+                                start_slot: batch.start_slot,
+                                count: batch.count,
+                                retry_count: batch.retry_count + 1,
+                                response_received: batch.response_received,
+                                data_columns: Some(columns.clone_arc()),
+                            };
+
+                            SyncToP2p::RequestDataColumnsByRange(
+                                request_id, peer_id, start_slot, count, columns,
+                            )
+                            .send(&self.sync_to_p2p_tx);
+
+                            self.sync_manager
+                                .retry_batch(request_id, batch, Some(peer_id));
+
+                            request_id = self.request_id()?;
                         }
                     }
                 }
@@ -1096,36 +1092,39 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
-        match self
+        let peer_custody_columns_mapping = match self
             .sync_manager
             .map_peer_custody_columns(missing_indices, &mut peers_to_request)
         {
-            Ok(peer_custody_columns_mapping) => {
-                for (peer_id, column_indices) in peer_custody_columns_mapping {
-                    let request_id = self.request_id()?;
-
-                    let data_columns_by_root = DataColumnsByRootIdentifier {
-                        block_root,
-                        columns: ContiguousList::try_from_iter(column_indices.into_iter())
-                            .expect("column indices must not be more than NUMBER_OF_COLUMNS"),
-                    };
-
-                    if let Some(data_columns_by_root) = self
-                        .sync_manager
-                        .add_data_columns_request_by_root(data_columns_by_root, peer_id)
-                    {
-                        debug!("add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})");
-
-                        SyncToP2p::RequestDataColumnsByRoot(
-                            request_id,
-                            peer_id,
-                            vec![data_columns_by_root],
-                        )
-                        .send(&self.sync_to_p2p_tx);
-                    }
-                }
+            Ok(mapping) => mapping,
+            Err(error) => {
+                debug!("request_needed_data_columns: {error:?}");
+                return Ok(());
             }
-            Err(error) => debug!("request_needed_data_columns: {error:?}"),
+        };
+
+        for (peer_id, column_indices) in peer_custody_columns_mapping {
+            let request_id = self.request_id()?;
+
+            let data_columns_by_root = DataColumnsByRootIdentifier {
+                block_root,
+                columns: ContiguousList::try_from_iter(column_indices.into_iter())
+                    .expect("column indices must not be more than NUMBER_OF_COLUMNS"),
+            };
+
+            if let Some(data_columns_by_root) = self
+                .sync_manager
+                .add_data_columns_request_by_root(data_columns_by_root, peer_id)
+            {
+                debug!("add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})");
+
+                SyncToP2p::RequestDataColumnsByRoot(
+                    request_id,
+                    peer_id,
+                    vec![data_columns_by_root],
+                )
+                .send(&self.sync_to_p2p_tx);
+            }
         }
 
         Ok(())
@@ -1158,54 +1157,56 @@ impl<P: Preset> BlockSyncService<P> {
         // Find the best peer coverage for these missing columns
         let missing_column_indices = missing_column_by_indices.keys().copied().collect();
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
-        match self
+        let peer_custody_columns_mapping = match self
             .sync_manager
             .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
         {
-            Ok(peer_custody_columns_mapping) => {
-                for (peer_id, column_indices) in peer_custody_columns_mapping {
-                    let request_id = self.request_id()?;
-                    let mut column_indices_by_root: HashMap<H256, Vec<ColumnIndex>> =
-                        HashMap::new();
-                    for index in column_indices {
-                        if let Some(block_roots) = missing_column_by_indices.get(&index) {
-                            block_roots.iter().for_each(|block_root| {
-                                column_indices_by_root
-                                    .entry(*block_root)
-                                    .or_default()
-                                    .push(index);
-                            })
-                        }
-                    }
+            Ok(mapping) => mapping,
+            Err(error) => {
+                debug!("batch_request_missing_data_columns: {error:?}");
+                return Ok(());
+            }
+        };
 
-                    let by_roots_request = column_indices_by_root
-                        .into_iter()
-                        .filter_map(|(block_root, column_indices)| {
-                            let data_columns_by_root = DataColumnsByRootIdentifier {
-                                block_root,
-                                columns: ContiguousList::try_from(column_indices).expect(
-                                    "column indices must not be more than NUMBER_OF_COLUMNS",
-                                ),
-                            };
+        for (peer_id, column_indices) in peer_custody_columns_mapping {
+            let request_id = self.request_id()?;
 
-                            self.sync_manager
-                                .add_data_columns_request_by_root(data_columns_by_root, peer_id)
-                        })
-                        .collect::<Vec<_>>();
-
-                    if !by_roots_request.is_empty() {
-                        debug!(
-                            "sending batched DataColumnsByRoot request to {peer_id}: {} blocks, {} total columns",
-                            by_roots_request.len(),
-                            by_roots_request.iter().map(|r| r.columns.len()).sum::<usize>()
-                        );
-
-                        SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, by_roots_request)
-                            .send(&self.sync_to_p2p_tx);
-                    }
+            let mut column_indices_by_root = HashMap::new();
+            for index in column_indices {
+                if let Some(block_roots) = missing_column_by_indices.get(&index) {
+                    block_roots.iter().for_each(|block_root| {
+                        column_indices_by_root
+                            .entry(*block_root)
+                            .or_insert_with(Vec::new)
+                            .push(index);
+                    })
                 }
             }
-            Err(error) => debug!("batch_request_missing_data_columns: {error:?}"),
+
+            let by_roots_request = column_indices_by_root
+                .into_iter()
+                .filter_map(|(block_root, column_indices)| {
+                    let data_columns_by_root = DataColumnsByRootIdentifier {
+                        block_root,
+                        columns: ContiguousList::try_from(column_indices)
+                            .expect("column indices must not be more than NUMBER_OF_COLUMNS"),
+                    };
+
+                    self.sync_manager
+                        .add_data_columns_request_by_root(data_columns_by_root, peer_id)
+                })
+                .collect::<Vec<_>>();
+
+            if !by_roots_request.is_empty() {
+                debug!(
+                    "sending batched DataColumnsByRoot request to {peer_id}: {} blocks, {} total columns",
+                    by_roots_request.len(),
+                    by_roots_request.iter().map(|r| r.columns.len()).sum::<usize>()
+                );
+
+                SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, by_roots_request)
+                    .send(&self.sync_to_p2p_tx);
+            }
         }
 
         Ok(())

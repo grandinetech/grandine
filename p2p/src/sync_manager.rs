@@ -334,37 +334,12 @@ impl<P: Preset> SyncManager<P> {
                                     ),
                                 );
 
-                                match self.map_peer_custody_columns(
-                                    missing_column_indices,
-                                    &mut peers_to_request,
-                                ) {
-                                    Ok(peer_custody_columns_mapping) => {
-                                        for (peer_id, columns) in peer_custody_columns_mapping {
-                                            let batch = SyncBatch {
-                                                target: SyncTarget::DataColumnSidecar,
-                                                direction: SyncDirection::Back,
-                                                peer_id,
-                                                start_slot,
-                                                count,
-                                                response_received: false,
-                                                retry_count: 0,
-                                                data_columns: ContiguousList::try_from_iter(
-                                                    columns.into_iter(),
-                                                )
-                                                .map(Arc::new)
-                                                .inspect_err(|e| self.log(
-                                                    Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
-                                                ))
-                                                .ok(),
-                                            };
-
-                                            self.log(
-                                                Level::Debug,
-                                                format_args!("back-sync batch built: {batch:?})"),
-                                            );
-                                            sync_batches.push(batch);
-                                        }
-                                    }
+                                let peer_custody_columns_mapping = match self
+                                    .map_peer_custody_columns(
+                                        missing_column_indices,
+                                        &mut peers_to_request,
+                                    ) {
+                                    Ok(mapping) => mapping,
                                     Err(error) => {
                                         self.log(
                                             Level::Debug,
@@ -373,6 +348,32 @@ impl<P: Preset> SyncManager<P> {
 
                                         break;
                                     }
+                                };
+
+                                for (peer_id, columns) in peer_custody_columns_mapping {
+                                    let batch = SyncBatch {
+                                        target: SyncTarget::DataColumnSidecar,
+                                        direction: SyncDirection::Back,
+                                        peer_id,
+                                        start_slot,
+                                        count,
+                                        response_received: false,
+                                        retry_count: 0,
+                                        data_columns: ContiguousList::try_from_iter(
+                                            columns.into_iter(),
+                                        )
+                                        .map(Arc::new)
+                                        .inspect_err(|e| self.log(
+                                            Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
+                                        ))
+                                        .ok()
+                                    };
+
+                                    self.log(
+                                        Level::Debug,
+                                        format_args!("back-sync batch built: {batch:?})"),
+                                    );
+                                    sync_batches.push(batch);
                                 }
                             }
                         } else {
@@ -564,85 +565,61 @@ impl<P: Preset> SyncManager<P> {
 
             max_slot = start_slot + count - 1;
 
-            if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
-                if data_column_serve_range_slot < max_slot {
-                    let missing_column_indices =
-                        self.missing_column_indices_by_range(start_slot, count);
+            if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
+                && data_column_serve_range_slot < max_slot
+            {
+                let missing_column_indices =
+                    self.missing_column_indices_by_range(start_slot, count);
 
-                    if !missing_column_indices.is_empty() {
-                        self.log(
-                            Level::Debug,
-                            format_args!(
-                                "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
-                                missing_column_indices.len(),
-                                missing_column_indices.iter().join(", "),
-                            ),
-                        );
-
-                        match self
-                            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
-                        {
-                            Ok(peer_custody_columns_mapping) => {
-                                for (peer_id, columns) in peer_custody_columns_mapping {
-                                    sync_batches.push(SyncBatch {
-                                        target: SyncTarget::DataColumnSidecar,
-                                        direction: SyncDirection::Forward,
-                                        peer_id,
-                                        start_slot,
-                                        count,
-                                        response_received: false,
-                                        retry_count: 0,
-                                        data_columns: ContiguousList::try_from_iter(
-                                            columns.into_iter(),
-                                        )
-                                        .map(Arc::new)
-                                        .inspect_err(|e| self.log(
-                                            Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
-                                        ))
-                                        .ok(),
-                                    });
-                                }
-                            }
-                            Err(error) => {
-                                self.log(
-                                    Level::Debug,
-                                    format_args!("build_forward_sync_batches: {error:?}"),
-                                );
-
-                                break;
-                            }
-                        }
-                    }
+                if missing_column_indices.is_empty() {
+                    continue;
                 }
 
-                // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
-                sync_batches.push(SyncBatch {
-                    target: SyncTarget::Block,
-                    direction: SyncDirection::Forward,
-                    peer_id,
-                    start_slot,
-                    count,
-                    response_received: false,
-                    retry_count: 0,
-                    data_columns: None,
-                });
-            } else {
-                if blob_serve_range_slot < max_slot {
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
+                        missing_column_indices.len(),
+                        missing_column_indices.iter().join(", "),
+                    ),
+                );
+
+                let peer_custody_columns_mapping = match self
+                    .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
+                {
+                    Ok(mapping) => mapping,
+                    Err(error) => {
+                        self.log(
+                            Level::Debug,
+                            format_args!("build_forward_sync_batches: {error:?}"),
+                        );
+
+                        break;
+                    }
+                };
+
+                for (peer_id, columns) in peer_custody_columns_mapping {
                     sync_batches.push(SyncBatch {
-                        target: SyncTarget::BlobSidecar,
+                        target: SyncTarget::DataColumnSidecar,
                         direction: SyncDirection::Forward,
                         peer_id,
                         start_slot,
                         count,
                         response_received: false,
                         retry_count: 0,
-                        data_columns: None,
+                        data_columns: ContiguousList::try_from_iter(
+                            columns.into_iter(),
+                        )
+                        .map(Arc::new)
+                        .inspect_err(|e| self.log(
+                            Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
+                        ))
+                        .ok(),
                     });
                 }
-
-                // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
+            } else if blob_serve_range_slot < max_slot {
                 sync_batches.push(SyncBatch {
-                    target: SyncTarget::Block,
+                    target: SyncTarget::BlobSidecar,
                     direction: SyncDirection::Forward,
                     peer_id,
                     start_slot,
@@ -652,6 +629,18 @@ impl<P: Preset> SyncManager<P> {
                     data_columns: None,
                 });
             }
+
+            // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
+            sync_batches.push(SyncBatch {
+                target: SyncTarget::Block,
+                direction: SyncDirection::Forward,
+                peer_id,
+                start_slot,
+                count,
+                response_received: false,
+                retry_count: 0,
+                data_columns: None,
+            });
         }
 
         self.log(
@@ -1145,7 +1134,7 @@ impl<P: Preset> SyncManager<P> {
                 .received_data_column_sidecars
                 .iter()
                 .filter_map(|entry| (slot == *entry.value()).then_some(entry.key().index))
-                .collect::<HashSet<_>>();
+                .collect();
 
             missing_indices.extend(
                 self.network_globals
