@@ -129,11 +129,7 @@ pub struct Config {
     pub max_payload_size: usize,
     pub message_domain_valid_snappy: DomainType,
     #[serde(with = "serde_utils::string_or_native")]
-    pub resp_timeout: u64,
-    #[serde(with = "serde_utils::string_or_native")]
     pub subnets_per_node: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub ttfb_timeout: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_blobs_per_block: usize,
     #[serde(with = "serde_utils::string_or_native")]
@@ -264,9 +260,7 @@ impl Default for Config {
             epochs_per_subnet_subscription: nonzero!(256_u64),
             max_payload_size: 10_485_760,
             message_domain_valid_snappy: H32(hex!("01000000")),
-            resp_timeout: 10,
             subnets_per_node: 2,
-            ttfb_timeout: 5,
             max_blobs_per_block: 6,
             max_blobs_per_block_electra: 9,
             max_request_blocks: 1024,
