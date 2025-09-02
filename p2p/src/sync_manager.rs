@@ -64,7 +64,7 @@ const EPOCHS_PER_REQUEST: u64 = if cfg!(test) {
 const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN: Duration = Duration::from_secs(12);
-const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 5;
+const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 10;
 const MAX_COLUMNS_ASSIGNED_PER_PEER: usize = 32;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -476,20 +476,16 @@ impl<P: Preset> SyncManager<P> {
                 redownloads_increased = true;
 
                 if self.sequential_redownloads >= SEQUENTIAL_REDOWNLOADS_TILL_RESET {
-                    // Redownload failed 5 times, time to redownload blocks from last finalized slot
+                    // Redownload failed `SEQUENTIAL_REDOWNLOADS_TILL_RESET` times, time to redownload blocks from last finalized slot
                     self.sequential_redownloads = 0;
                     self.sync_from_finalized = true;
                     local_finalized_slot + 1
-                } else if config
-                    .phase_at_slot::<P>(local_head_slot)
-                    .is_peerdas_activated()
-                {
-                    // with PeerDAS, we can't afford re-download an epoch range before local head
-                    local_head_slot + 1
-                } else {
-                    // If head slot has not changed since last sync,
+                } else if self.sequential_redownloads > SEQUENTIAL_REDOWNLOADS_TILL_RESET / 2 {
+                    // If head slot has not changed more than `SEQUENTIAL_REDOWNLOADS_TILL_RESET / 2` times,
                     // re-download everything from local head slot minus backtrack distance
                     local_head_slot.saturating_sub(P::SlotsPerEpoch::U64) + 1
+                } else {
+                    local_head_slot + 1
                 }
             } else {
                 // Resume download from last sync batch end slot
@@ -1581,14 +1577,25 @@ mod tests {
             local_finalized_slot,
         )?;
 
-        let sync_range_from = local_head_slot + 1;
-        let sync_range_to = sync_range_from + slots_per_request - 1;
+        // From first to sixth retry try to download blocks from local head slot
 
-        assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
+        for _ in 0..5 {
+            sync_manager.build_forward_sync_batches(
+                &config,
+                current_slot,
+                local_head_slot,
+                local_finalized_slot,
+            )?;
 
-        // From second to fifth retries try to download blocks from local head slot minus one epoch
+            let sync_range_from = local_head_slot + 1;
+            let sync_range_to = sync_range_from + slots_per_request - 1;
 
-        for _ in 0..4 {
+            assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
+        }
+
+        // From sixth to tenth retry try to download blocks from local head slot minus one epoch
+
+        for _ in 6..10 {
             sync_manager.build_forward_sync_batches(
                 &config,
                 current_slot,
@@ -1632,7 +1639,7 @@ mod tests {
             local_finalized_slot,
         )?;
 
-        let sync_range_from = local_head_slot - 32 + 1;
+        let sync_range_from = local_head_slot + 1;
         let sync_range_to = sync_range_from + slots_per_request - 1;
 
         assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
