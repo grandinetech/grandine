@@ -20,6 +20,8 @@ IGNORED_GLOBS = %w[
   tests/*/gloas/*/*/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/{progressive_bitlist,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/containers/{valid,invalid}/{ProgressiveBitsStruct,ProgressiveTestStruct}_*/*.{ssz_snappy,yaml}
+  tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
+  tests/general/fulu/kzg/compute_verify_cell_kzg_proof_batch_challenge/*/*/*.{ssz_snappy,yaml}
   tests/diagnostics_obj.json{,.lock}
 ].map! { |glob| File.join(SUBMODULE, glob) }
 
