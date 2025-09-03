@@ -278,6 +278,7 @@ impl<P: Preset> SyncManager<P> {
         data_availability_serve_range_slot: Slot,
         mut current_back_sync_slot: Slot,
         low_slot: Slot,
+        sampling_columns: &HashSet<ColumnIndex>,
     ) -> Vec<SyncBatch<P>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(true) else {
             return vec![];
@@ -320,8 +321,11 @@ impl<P: Preset> SyncManager<P> {
                         }
 
                         if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
-                            let missing_column_indices =
-                                self.missing_column_indices_by_range(start_slot, count);
+                            let missing_column_indices = self.missing_column_indices_by_range(
+                                sampling_columns,
+                                start_slot,
+                                count,
+                            );
 
                             if !missing_column_indices.is_empty() {
                                 self.log(
@@ -441,6 +445,7 @@ impl<P: Preset> SyncManager<P> {
         current_slot: Slot,
         local_head_slot: Slot,
         local_finalized_slot: Slot,
+        sampling_columns: &HashSet<ColumnIndex>,
     ) -> Result<Vec<SyncBatch<P>>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(false) else {
             return Ok(vec![]);
@@ -565,7 +570,7 @@ impl<P: Preset> SyncManager<P> {
                 && data_column_serve_range_slot < max_slot
             {
                 let missing_column_indices =
-                    self.missing_column_indices_by_range(start_slot, count);
+                    self.missing_column_indices_by_range(sampling_columns, start_slot, count);
 
                 if missing_column_indices.is_empty() {
                     continue;
@@ -1079,9 +1084,10 @@ impl<P: Preset> SyncManager<P> {
     #[expect(clippy::unwrap_or_default)]
     pub fn missing_column_indices_by_root(
         &self,
+        controller: &RealController<P>,
         local_head_slot: Slot,
     ) -> HashMap<H256, HashSet<ColumnIndex>> {
-        let sampling_count = self.network_globals.sampling_columns_count();
+        let sampling_count = controller.sampling_columns_count();
         let max_slot_ahead = 512 / sampling_count as u64;
 
         self.received_data_column_sidecars
@@ -1101,8 +1107,7 @@ impl<P: Preset> SyncManager<P> {
             .into_iter()
             .filter_map(|(block_root, indices)| {
                 (indices.len() != sampling_count).then(|| {
-                    let missing = self
-                        .network_globals
+                    let missing = controller
                         .sampling_columns()
                         .difference(&indices)
                         .copied()
@@ -1116,6 +1121,7 @@ impl<P: Preset> SyncManager<P> {
 
     pub fn missing_column_indices_by_range(
         &self,
+        sampling_columns: &HashSet<ColumnIndex>,
         start_slot: Slot,
         count: u64,
     ) -> HashSet<ColumnIndex> {
@@ -1128,11 +1134,7 @@ impl<P: Preset> SyncManager<P> {
                 .filter_map(|entry| (slot == *entry.value()).then_some(entry.key().index))
                 .collect();
 
-            missing_indices.extend(
-                self.network_globals
-                    .sampling_columns()
-                    .difference(&received_indices),
-            );
+            missing_indices.extend(sampling_columns.difference(&received_indices));
         }
 
         missing_indices
@@ -1449,6 +1451,7 @@ mod tests {
         let mut config = Config::minimal().rapid_upgrade();
         config.fulu_fork_epoch = 8;
         let config = Arc::new(config);
+        let sampling_columns = HashSet::new();
 
         let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
@@ -1482,6 +1485,7 @@ mod tests {
             data_availability_serve_start_slot,
             head_slot,
             0,
+            &sampling_columns,
         );
 
         itertools::assert_equal(
@@ -1499,6 +1503,7 @@ mod tests {
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
         let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
+        let sampling_columns = HashSet::new();
 
         let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
@@ -1518,6 +1523,7 @@ mod tests {
                 current_slot,
                 local_head_slot + i,
                 local_finalized_slot,
+                &sampling_columns,
             )?;
 
             let sync_range_from = local_head_slot + slots_per_request * i + 1;
@@ -1548,6 +1554,7 @@ mod tests {
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
         let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
+        let sampling_columns = HashSet::new();
 
         let peer_status = StatusMessage::V1(StatusMessageV1 {
             fork_digest: H32::default(),
@@ -1566,6 +1573,7 @@ mod tests {
             current_slot,
             local_head_slot,
             local_finalized_slot,
+            &sampling_columns,
         )?;
 
         // From first to sixth retry try to download blocks from local head slot
@@ -1576,6 +1584,7 @@ mod tests {
                 current_slot,
                 local_head_slot,
                 local_finalized_slot,
+                &sampling_columns,
             )?;
 
             let sync_range_from = local_head_slot + 1;
@@ -1592,6 +1601,7 @@ mod tests {
                 current_slot,
                 local_head_slot,
                 local_finalized_slot,
+                &sampling_columns,
             )?;
 
             let sync_range_from = local_head_slot - 32 + 1;
@@ -1611,6 +1621,7 @@ mod tests {
                 current_slot,
                 local_head_slot,
                 local_finalized_slot,
+                &sampling_columns,
             )?;
 
             let sync_range_from = local_finalized_slot + slots_per_request * i + 1;
@@ -1628,6 +1639,7 @@ mod tests {
             current_slot,
             local_head_slot,
             local_finalized_slot,
+            &sampling_columns,
         )?;
 
         let sync_range_from = local_head_slot + 1;
