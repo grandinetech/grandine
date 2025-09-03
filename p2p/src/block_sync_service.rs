@@ -842,7 +842,9 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         // Batch request data columns by root for missing columns if any
-        self.batch_request_missing_data_columns()?;
+        if !self.is_forward_synced {
+            self.batch_request_missing_data_columns()?;
+        }
 
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();
