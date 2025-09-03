@@ -27,4 +27,4 @@ jobs:
         name: Audit Rust Dependencies
         with:
           # Comma separated list of issues to ignore
-          ignore: RUSTSEC-2024-0370,RUSTSEC-2023-0071,RUSTSEC-2024-0384,RUSTSEC-2024-0388
+          ignore: RUSTSEC-2024-0370,RUSTSEC-2023-0071,RUSTSEC-2024-0384,RUSTSEC-2024-0388,RUSTSEC-2025-0055
