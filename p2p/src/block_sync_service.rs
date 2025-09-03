@@ -646,6 +646,7 @@ impl<P: Preset> BlockSyncService<P> {
     #[expect(clippy::too_many_lines)]
     pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
+        let sampling_columns = self.controller.sampling_columns();
 
         for batch in batches {
             let SyncBatch {
@@ -723,9 +724,11 @@ impl<P: Preset> BlockSyncService<P> {
                 SyncTarget::DataColumnSidecar => {
                     if let Some(ref data_columns) = batch.data_columns {
                         let mut request_id = self.request_id()?;
-                        let missing_indices = self
-                            .sync_manager
-                            .missing_column_indices_by_range(start_slot, count);
+                        let missing_indices = self.sync_manager.missing_column_indices_by_range(
+                            &sampling_columns,
+                            start_slot,
+                            count,
+                        );
                         let missing_column_indices = data_columns
                             .iter()
                             .filter(|index| missing_indices.contains(index))
@@ -844,6 +847,7 @@ impl<P: Preset> BlockSyncService<P> {
         let head_slot = snapshot.head_slot();
         let local_finalized_slot =
             misc::compute_start_slot_at_epoch::<P>(snapshot.finalized_epoch());
+        let sampling_columns = self.controller.sampling_columns();
 
         self.set_forward_synced(snapshot.is_forward_synced())?;
 
@@ -860,6 +864,7 @@ impl<P: Preset> BlockSyncService<P> {
                     self.slot,
                     head_slot,
                     local_finalized_slot,
+                    &sampling_columns,
                 )?
             }
             SyncDirection::Back => {
@@ -887,6 +892,7 @@ impl<P: Preset> BlockSyncService<P> {
                             back_sync.current_slot(),
                             // download one extra block for parent validation
                             back_sync.low_slot_with_parent(),
+                            &sampling_columns,
                         )
                     })
                     .unwrap_or_default()
@@ -1127,7 +1133,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         let missing_column_by_indices = self
             .sync_manager
-            .missing_column_indices_by_root(head_slot)
+            .missing_column_indices_by_root(&self.controller, head_slot)
             .into_iter()
             .filter(|(block_root, _)| !self.controller.contains_block(*block_root))
             .fold(HashMap::new(), |mut acc, (block_root, indices)| {

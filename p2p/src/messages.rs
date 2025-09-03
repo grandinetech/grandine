@@ -239,6 +239,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     Unsubscribe(GossipTopic),
     UnsubscribeFromForkTopicsExcept(ForkDigest),
     UpdateDataColumnSubnets(u64),
+    UpdateEnrCgc(u64),
     UpdateEnrSubnet(Subnet, bool),
     UpdateFork(EnrForkId),
     UpdateGossipsubParameters(u64, Slot),

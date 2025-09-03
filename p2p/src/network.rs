@@ -48,6 +48,7 @@ use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
         containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
@@ -203,6 +204,13 @@ impl<P: Preset> Network<P> {
                 Ok(mappings) => port_mappings = Some(mappings),
                 Err(error) => warn!("error while initializing UPnP: {error}"),
             }
+        }
+
+        if chain_config.is_peerdas_scheduled() {
+            let node_id = network_globals.local_enr().node_id().raw();
+            let sampling_size = chain_config.sampling_size_custody_groups(custody_group_count);
+
+            Self::update_sampling_columns(&controller, node_id, sampling_size, chain_config)?;
         }
 
         let (network_to_service_tx, network_to_service_rx) = futures::channel::mpsc::unbounded();
@@ -943,26 +951,35 @@ impl<P: Preset> Network<P> {
     }
 
     fn update_data_column_subnets(&self, custody_group_count: u64) {
-        ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count)
-            .send(&self.network_to_service_tx);
+        ServiceInboundMessage::UpdateEnrCgc(custody_group_count).send(&self.network_to_service_tx);
 
         let node_id = self.network_globals.local_enr().node_id().raw();
         let config = self.controller.chain_config();
         let sampling_size = config.sampling_size_custody_groups(custody_group_count);
-        let custody_groups = get_custody_groups(node_id, sampling_size, config)
-            .expect("should compute node custody groups");
+
+        ServiceInboundMessage::UpdateDataColumnSubnets(sampling_size)
+            .send(&self.network_to_service_tx);
+
+        Self::update_sampling_columns(&self.controller, node_id, sampling_size, config)
+            .expect("should compute node custody groups and columns");
+    }
+
+    fn update_sampling_columns(
+        controller: &RealController<P>,
+        raw_node_id: [u8; 32],
+        sampling_size: u64,
+        chain_config: &Config,
+    ) -> Result<()> {
+        let custody_groups = get_custody_groups(raw_node_id, sampling_size, chain_config)?;
 
         let mut sampling_columns = HashSet::new();
-        for custody_index in &custody_groups {
-            let columns = compute_columns_for_custody_group::<P>(*custody_index, config)
-                .expect("should compute custody columns for node");
+        for custody_index in custody_groups {
+            let columns = compute_columns_for_custody_group::<P>(custody_index, chain_config)?;
             sampling_columns.extend(columns);
         }
+        controller.on_store_sampling_columns(sampling_columns);
 
-        // TODO(peerdas-fulu): use `sampling_columns` from `network_globals` in
-        // `fork_choice_store`.
-        // Lastly, update `sampling_columns` in fork choice store
-        self.controller.on_store_sampling_columns(sampling_columns);
+        Ok(())
     }
 
     const fn update_earliest_available_slot(&mut self, slot: Slot) {
@@ -2349,8 +2366,10 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest) => {
                             service.unsubscribe_from_fork_topics_except(fork_digest);
                         }
-                        ServiceInboundMessage::UpdateDataColumnSubnets(custody_group_count) => {
-                            service.subscribe_new_data_column_subnets(custody_group_count);
+                        ServiceInboundMessage::UpdateDataColumnSubnets(sampling_size) => {
+                            service.subscribe_new_data_column_subnets(sampling_size);
+                        }
+                        ServiceInboundMessage::UpdateEnrCgc(custody_group_count) => {
                             service.update_enr_cgc(custody_group_count);
                         }
                         ServiceInboundMessage::UpdateEnrSubnet(subnet, advertise) => {
