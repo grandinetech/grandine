@@ -2431,8 +2431,8 @@ where
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
         if should_retry_block {
-            if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
-                self.retry_block(wait_group.clone(), pending_block);
+            if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
+                self.retry_block(wait_group.clone(), pending_block.clone());
             }
         }
 
