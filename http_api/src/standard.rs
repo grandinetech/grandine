@@ -4017,10 +4017,6 @@ fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
     mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<Blob<P>>> {
-    let Some(body) = block.message().body().post_fulu() else {
-        return Ok(vec![]);
-    };
-
     if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
         return Ok(vec![]);
     }
@@ -4041,11 +4037,8 @@ fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
             .as_ref()
             .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
-        let full_matrix = eip_7594::recover_matrix(
-            &partial_matrix,
-            body.blob_kzg_commitments().len(),
-            controller.store_config().kzg_backend,
-        )?;
+        let full_matrix =
+            eip_7594::recover_matrix(&partial_matrix, controller.store_config().kzg_backend)?;
 
         prometheus_metrics::stop_and_record(reconstruction_timer);
 
@@ -4059,7 +4052,6 @@ fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
             eip_7594::construct_data_column_sidecars(block, &cells_and_kzg_proofs)?;
     }
 
-    // TODO(peerdas-fulu): `iterools::chunk_by` behave incorrectly when has multiple blobs
     let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
     for matrix in data_column_sidecars
         .into_iter()
