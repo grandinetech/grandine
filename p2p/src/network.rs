@@ -52,6 +52,7 @@ use types::{
         containers::{ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, NodeId, Slot, SubnetId, H256},
     },
+    eip7805::{InclusionList, SignedInclusionList},
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
@@ -415,6 +416,9 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
+                        ValidatorToP2p::PublishInclusionList(inclusion_list) => {
+                            self.publish_inclusion_list(inclusion_list);
+                        }
                     }
                 },
 
@@ -697,6 +701,12 @@ impl<P: Preset> Network<P> {
         self.publish(PubsubMessage::SignedContributionAndProof(
             contribution_and_proof,
         ));
+    }
+
+    fn publish_inclusion_list(&self, inclusion_list: Arc<SignedInclusionList<P>>) {
+        debug!("publishing inclusion list: {inclusion_list:?}");
+
+        self.publish(PubsubMessage::SignedInclusionList(inclusion_list));
     }
 
     fn publish_signed_bls_to_execution_change(
@@ -1567,6 +1577,18 @@ impl<P: Preset> Network<P> {
             }
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug!("received light client optimistic update as gossip");
+            }
+            PubsubMessage::SignedInclusionList(inclusion_list) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["inclusion_list"]);
+                }
+
+                trace!(
+                    "received inclusion list as gossip: {inclusion_list:?} from {source}",
+                );
+
+                P2pToSync::GossipInclusionList(inclusion_list, source, GossipId { source, message_id })
+                    .send(&self.channels.p2p_to_sync_tx);
             }
         }
     }

@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod combined;
 pub mod config;
+pub mod eip7805;
 pub mod nonstandard;
 pub mod preset;
 pub mod redacting_url;

@@ -22,6 +22,7 @@ use types::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, Slot, SubnetId, ValidatorIndex, H256},
     },
+    eip7805::{InclusionList,SignedInclusionList},
     preset::Preset,
 };
 
@@ -53,6 +54,7 @@ pub enum P2pToSync<P: Preset> {
     FinalizedCheckpoint(Checkpoint),
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
+    GossipInclusionList(Arc<SignedInclusionList<P>>, PeerId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
     Stop,
 }
@@ -161,6 +163,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
+    PublishInclusionList(Arc<SignedInclusionList<P>>),
 }
 
 impl<P: Preset> ValidatorToP2p<P> {
