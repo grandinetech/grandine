@@ -1057,9 +1057,36 @@ dependencies = [
 name = "bls"
 version = "0.0.0"
 dependencies = [
+ "bls-arkworks",
  "bls-blst",
  "bls-core",
  "bls-zkcrypto",
+]
+
+[[package]]
+name = "bls-arkworks"
+version = "0.0.0"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "bls-core",
+ "derivative",
+ "derive_more 1.0.0",
+ "fixed-hash",
+ "hex",
+ "impl-serde",
+ "itertools 0.13.0",
+ "once_cell",
+ "rand 0.8.5",
+ "serde",
+ "serde_utils",
+ "sha2 0.10.8",
+ "ssz",
+ "static_assertions",
+ "typenum",
+ "zeroize",
 ]
 
 [[package]]
