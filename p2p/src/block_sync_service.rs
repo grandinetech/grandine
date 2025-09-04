@@ -33,7 +33,6 @@ use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use try_from_iterator::TryFromIterator as _;
-use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -854,17 +853,6 @@ impl<P: Preset> BlockSyncService<P> {
                     && self.slot.saturating_sub(head_slot) < MISSED_SLOTS_TO_TRIGGER_SYNC
                 {
                     return Ok(());
-                }
-
-                let chain_config = self.controller.chain_config();
-                if self.sync_manager.is_local_head_not_progress(head_slot)
-                    && chain_config
-                        .phase_at_slot::<P>(head_slot + 1)
-                        .is_peerdas_activated()
-                    && self.controller.sampling_columns_count() * 2 >= P::NumberOfColumns::USIZE
-                {
-                    self.controller
-                        .on_reconstruct_data_column_sidecars(head_slot + 1);
                 }
 
                 self.sync_manager.build_forward_sync_batches(

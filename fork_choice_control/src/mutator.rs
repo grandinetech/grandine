@@ -321,13 +321,6 @@ where
                 MutatorMessage::StoreSamplingColumns { sampling_columns } => {
                     self.handle_store_sampling_columns(sampling_columns)
                 }
-                MutatorMessage::ReconstructMissingColumns {
-                    wait_group,
-                    block_root,
-                    slot,
-                } => {
-                    self.handle_reconstructing_data_column_sidecars(wait_group, block_root, slot);
-                }
                 MutatorMessage::ReconstructedMissingColumns {
                     wait_group,
                     block_root,
@@ -1822,7 +1815,7 @@ where
         data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
 
         debug!(
-            "storing data column sidecars from reconstruction (block: {block_root}, columns: {missing_indices:?})",
+            "storing data column sidecars from reconstruction (block: {block_root:?}, columns: {missing_indices:?})",
         );
 
         for data_column_sidecar in data_column_sidecars {
@@ -3694,7 +3687,10 @@ where
             .sampling_columns_count()
             .saturating_sub(missing_indices.len());
 
-        if available_columns_count * 2 >= P::NumberOfColumns::USIZE {
+        if available_columns_count * 2 >= P::NumberOfColumns::USIZE
+            && (self.store.is_forward_synced()
+                || self.store.store_config().sync_with_reconstruction)
+        {
             return BlockDataColumnAvailability::CompleteWithReconstruction;
         }
 
