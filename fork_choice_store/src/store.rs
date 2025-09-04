@@ -2628,6 +2628,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ))
     }
 
+    pub fn is_reconstruction_enabled_for(&self, block_root: H256) -> bool {
+        // samples enough columns for reconstruction
+        self.sampling_columns_count() * 2 >= P::NumberOfColumns::USIZE
+            // reconstruction not started for given block
+            && !self.is_sidecars_construction_started(&block_root)
+            // reconstruction is enabled during syncing (if syncing)
+            && (self.is_forward_synced()
+                || self.store_config().sync_with_reconstruction)
+    }
+
     fn insert_block(&mut self, chain_link: ChainLink<P>) -> Result<()> {
         let block_root = chain_link.block_root;
         let block = &chain_link.block;
