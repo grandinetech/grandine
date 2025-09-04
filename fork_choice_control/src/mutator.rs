@@ -2397,18 +2397,15 @@ where
         wait_group: &W,
         data_column_sidecar: &Arc<DataColumnSidecar<P>>,
     ) {
-        let block_root = data_column_sidecar
-            .signed_block_header
-            .message
-            .hash_tree_root();
+        let block_header = data_column_sidecar.signed_block_header.message;
+        let block_root = block_header.hash_tree_root();
 
         self.store_mut()
             .apply_data_column_sidecar(data_column_sidecar.clone_arc());
 
         self.update_store_snapshot();
 
-        let slot = data_column_sidecar.slot();
-        let accepted_data_columns = self.store.accepted_data_column_sidecars_at_slot(slot);
+        let accepted_data_columns = self.store.accepted_data_column_sidecars_count(block_header);
 
         // There is no data columns by each root request, while syncing we batch by root requests
         // to respective custodial peers in `p2p/src/block_sync_service.rs::batch_request_missing_data_columns` method

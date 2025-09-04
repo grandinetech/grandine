@@ -2605,10 +2605,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.data_column_cache.insert(data_sidecar);
     }
 
-    pub fn accepted_data_column_sidecars_at_slot(&self, slot: Slot) -> usize {
+    pub fn accepted_data_column_sidecars_count(&self, block_header: BeaconBlockHeader) -> usize {
         self.accepted_data_column_sidecars
-            .keys()
-            .filter(|(s, _, _)| *s == slot)
+            .iter()
+            .filter(|((slot, proposer_index, _), commitments)| {
+                *slot == block_header.slot
+                    && *proposer_index == block_header.proposer_index
+                    && commitments.contains_key(&block_header.hash_tree_root())
+            })
             .count()
     }
 
