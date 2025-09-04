@@ -81,35 +81,35 @@ pub enum Error<P: Preset> {
     DataColumnSidecarBlockNotADescendantOfFinalized {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
-    #[error("data_column sidecar is invalid: {data_column_sidecar:?}")]
+    #[error("data column sidecar is invalid: {data_column_sidecar:?}")]
     DataColumnSidecarInvalid {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
     // TODO(feature/deneb): This is vague.
     //                      The validation that fails with this error actually checks commitments.
-    #[error("data_column sidecar's kzg proofs is invalid: {data_column_sidecar:?} error: {error}")]
+    #[error("data column sidecar's kzg proofs is invalid: {data_column_sidecar:?} error: {error}")]
     DataColumnSidecarInvalidKzgProofs {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         error: AnyhowError,
     },
-    #[error("data_column sidecar's block's parent is invalid: {data_column_sidecar:?}")]
+    #[error("data column sidecar's block's parent is invalid: {data_column_sidecar:?}")]
     DataColumnSidecarInvalidParentOfBlock {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
-    #[error("data_column sidecar contains invalid inclusion proof: {data_column_sidecar:?}")]
+    #[error("data column sidecar contains invalid inclusion proof: {data_column_sidecar:?}")]
     DataColumnSidecarInvalidInclusionProof {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
     #[error(
-        "data_column sidecar is not newer than block parent \
-         (data_column sidecar: {data_column_sidecar:?}, parent_slot: {parent_slot})"
+        "data column sidecar is not newer than block parent \
+         (data_column_sidecar: {data_column_sidecar:?}, parent_slot: {parent_slot})"
     )]
     DataColumnSidecarNotNewerThanBlockParent {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         parent_slot: Slot,
     },
     #[error(
-        "data_column sidecar published on incorrect subnet \
+        "data column sidecar published on incorrect subnet \
          (data_column_sidecar: {data_column_sidecar:?}, expected: {expected}, actual: {actual})"
     )]
     DataColumnSidecarOnIncorrectSubnet {
@@ -118,7 +118,7 @@ pub enum Error<P: Preset> {
         actual: SubnetId,
     },
     #[error(
-        "data_column sidecar has incorrect proposer index \
+        "data column sidecar has incorrect proposer index \
          (data_column_sidecar: {data_column_sidecar:?}, computed: {computed})"
     )]
     DataColumnSidecarProposerIndexMismatch {
