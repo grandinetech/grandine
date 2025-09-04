@@ -34,7 +34,6 @@ use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
@@ -581,26 +580,6 @@ where
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
-    }
-
-    pub fn on_reconstruct_data_column_sidecars(&self, slot: Slot) {
-        let store_snapshot = self.store_snapshot();
-        if let Some(block_root) = store_snapshot.get_delayed_block_at_slot(slot) {
-            if !store_snapshot.is_sidecars_construction_started(block_root) {
-                let accepted = store_snapshot.accepted_data_column_sidecars_at_slot(slot);
-
-                if accepted < store_snapshot.sampling_columns_count()
-                    && accepted * 2 >= P::NumberOfColumns::USIZE
-                {
-                    MutatorMessage::ReconstructMissingColumns {
-                        wait_group: self.owned_wait_group(),
-                        block_root: *block_root,
-                        slot,
-                    }
-                    .send(&self.mutator_tx);
-                }
-            }
-        }
     }
 
     pub fn store_back_sync_blob_sidecars(
