@@ -30,6 +30,8 @@ pub enum Error {
     BlockNotValidatedForAggregation { block_root: H256 },
     #[error("block not found")]
     BlockNotFound,
+    #[error("pre-fulu block has no data column sidecars")]
+    BlockPreFulu,
     #[error(transparent)]
     Canceled(#[from] Canceled),
     #[error("Content-Type header invalid")]
@@ -206,7 +208,8 @@ impl Error {
             | Self::StateNotFound
             | Self::TargetStateNotFound
             | Self::ValidatorNotFound => StatusCode::NOT_FOUND,
-            Self::CommitteesAtSlotMismatch { .. }
+            Self::BlockPreFulu
+            | Self::CommitteesAtSlotMismatch { .. }
             | Self::ContentTypeHeaderInvalid(_)
             | Self::CurrentSlotHasNoSyncCommittee
             | Self::EpochBeforePrevious { .. }

@@ -2134,6 +2134,10 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
 
+    if !version.is_peerdas_activated() {
+        return Err(Error::BlockPreFulu);
+    }
+
     let data_column_identifiers = query
         .indices
         .unwrap_or_else(|| (0..P::NumberOfColumns::U64).collect())
