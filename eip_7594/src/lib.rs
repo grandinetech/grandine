@@ -337,9 +337,18 @@ pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
 
 pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
     blobs: &[Blob<P>],
-    kzg_proofs: &[KzgProof],
+    cell_proofs: &[KzgProof],
     backend: KzgBackend,
 ) -> Result<Vec<CellsAndKzgProofs<P>>> {
+    let expected_proofs_length = blobs.len() * P::CellsPerExtBlob::USIZE;
+    ensure!(
+        cell_proofs.len() == expected_proofs_length,
+        Error::InvalidCellsProofsLength {
+            expected: expected_proofs_length,
+            proofs_length: cell_proofs.len(),
+        }
+    );
+
     blobs
         .par_iter()
         .enumerate()
@@ -347,7 +356,7 @@ pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
             compute_cells::<P>(blob, backend).and_then(|cells| {
                 let start = P::CellsPerExtBlob::USIZE.saturating_mul(i);
                 let end = P::CellsPerExtBlob::USIZE.saturating_add(start);
-                ContiguousVector::try_from_iter(kzg_proofs[start..end].iter().copied())
+                ContiguousVector::try_from_iter(cell_proofs[start..end].iter().copied())
                     .map(|proofs| (cells, proofs))
                     .map_err(Into::into)
             })

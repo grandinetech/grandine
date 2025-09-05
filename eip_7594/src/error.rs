@@ -2,6 +2,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("cell proofs length is invalid: {proofs_length} expected: {expected}")]
+    InvalidCellsProofsLength {
+        expected: usize,
+        proofs_length: usize,
+    },
     #[error(
         "custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}", 
     )]
