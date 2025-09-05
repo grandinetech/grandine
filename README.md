@@ -57,7 +57,10 @@ cross build \
     --bin grandine \
     --target x86_64-unknown-linux-gnu \
     --features default-networks \
-    --profile compact
+    --profile compact \
+    --workspace \
+    --exclude zkvm_host \
+    --exclude zkvm_guest_risc0
 ```
 
 Cross-compilation command for `arm64` architecture:
@@ -67,7 +70,10 @@ cross build \
     --bin grandine \
     --target aarch64-unknown-linux-gnu \
     --features default-networks \
-    --profile compact
+    --profile compact \
+    --workspace \
+    --exclude zkvm_host \
+    --exclude zkvm_guest_risc0
 ```
 
 ### Docker Cross builds
