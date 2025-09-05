@@ -2408,7 +2408,7 @@ where
         let accepted_data_columns = self.store.accepted_data_column_sidecars_count(block_header);
 
         let should_retry_block = if self.store.is_reconstruction_enabled_for(block_root) {
-            accepted_data_columns * 2 >= self.store.sampling_columns_count()
+            accepted_data_columns * 2 >= P::NumberOfColumns::USIZE
         } else {
             accepted_data_columns == self.store.sampling_columns_count()
         };
