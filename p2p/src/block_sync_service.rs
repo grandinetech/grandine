@@ -838,8 +838,14 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
+        let is_peerdas_activated = self
+            .controller
+            .chain_config()
+            .phase_at_slot::<P>(self.slot)
+            .is_peerdas_activated();
+
         // Batch request data columns by root for missing columns if any
-        if !self.is_forward_synced {
+        if !self.is_forward_synced && is_peerdas_activated {
             self.batch_request_missing_data_columns()?;
         }
 
@@ -868,12 +874,7 @@ impl<P: Preset> BlockSyncService<P> {
                 )?
             }
             SyncDirection::Back => {
-                let data_availability_serve_range_slot = if self
-                    .controller
-                    .chain_config()
-                    .phase_at_slot::<P>(self.slot)
-                    .is_peerdas_activated()
-                {
+                let data_availability_serve_range_slot = if is_peerdas_activated {
                     misc::data_column_serve_range_slot::<P>(
                         self.controller.chain_config(),
                         self.slot,
