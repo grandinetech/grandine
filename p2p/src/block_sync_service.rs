@@ -1132,9 +1132,14 @@ impl<P: Preset> BlockSyncService<P> {
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();
 
-        let missing_column_by_indices = self
+        let Some(missing_column_indices_by_root) = self
             .sync_manager
             .missing_column_indices_by_root(&self.controller, head_slot)
+        else {
+            return Ok(());
+        };
+
+        let missing_column_by_indices = missing_column_indices_by_root
             .into_iter()
             .filter(|(block_root, _)| !self.controller.contains_block(*block_root))
             .fold(HashMap::new(), |mut acc, (block_root, indices)| {

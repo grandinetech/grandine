@@ -23,6 +23,7 @@ use lru::LruCache;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
 use ssz::ContiguousList;
+use tap::Pipe as _;
 use thiserror::Error;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -1086,9 +1087,9 @@ impl<P: Preset> SyncManager<P> {
         &self,
         controller: &RealController<P>,
         local_head_slot: Slot,
-    ) -> HashMap<H256, HashSet<ColumnIndex>> {
+    ) -> Option<HashMap<H256, HashSet<ColumnIndex>>> {
         let sampling_count = controller.sampling_columns_count();
-        let max_slot_ahead = 512 / sampling_count as u64;
+        let max_slot_ahead = 512_u64.checked_div(sampling_count as u64)?;
 
         self.received_data_column_sidecars
             .iter()
@@ -1116,7 +1117,8 @@ impl<P: Preset> SyncManager<P> {
                     (block_root, missing)
                 })
             })
-            .collect()
+            .collect::<HashMap<_, _>>()
+            .pipe(Some)
     }
 
     pub fn missing_column_indices_by_range(
