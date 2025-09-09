@@ -1071,22 +1071,38 @@ impl<P: Preset> Network<P> {
             }
             RequestType::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientBootstrap request (peer_id: {peer_id})");
+                debug!(
+                    "received LightClientBootstrap request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?})",
+                );
+
                 Ok(())
             }
             RequestType::LightClientFinalityUpdate => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientFinalityUpdate request (peer_id: {peer_id})");
+                debug!(
+                    "received LightClientFinalityUpdate request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?})",
+                );
+
                 Ok(())
             }
             RequestType::LightClientOptimisticUpdate => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientOptimisticUpdate request (peer_id: {peer_id})");
+                debug!(
+                    "received LightClientOptimisticUpdate request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?})",
+                );
+
                 Ok(())
             }
             RequestType::LightClientUpdatesByRange(_) => {
                 // TODO(Altair Light Client Sync Protocol)
-                debug!("received LightClientUpdatesByRange request (peer_id: {peer_id})");
+                debug!(
+                    "received LightClientUpdatesByRange request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?})",
+                );
+
                 Ok(())
             }
             RequestType::BlobsByRange(request) => {
@@ -1097,15 +1113,27 @@ impl<P: Preset> Network<P> {
                 Ok(())
             }
             RequestType::Goodbye(goodbye_reason) => {
-                debug!("received GoodBye request (peer_id: {peer_id}, reason: {goodbye_reason:?})");
+                debug!(
+                    "received GoodBye request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?}, reason: {goodbye_reason:?})",
+                );
+
                 Ok(())
             }
             RequestType::Ping(ping) => {
-                debug!("received Ping request (peer_id: {peer_id}, ping: {ping:?})");
+                debug!(
+                    "received Ping request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?}, ping: {ping:?})",
+                );
+
                 Ok(())
             }
             RequestType::MetaData(request) => {
-                debug!("received MetaData request (peer_id: {peer_id}, request: {request:?})");
+                debug!(
+                    "received MetaData request (peer_id: {peer_id}, \
+                    inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+                );
+
                 Ok(())
             }
         }
@@ -1117,7 +1145,10 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         remote: StatusMessage,
     ) {
-        debug!("received Status request (peer_id: {peer_id}, remote: {remote:?})");
+        debug!(
+            "received Status request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, remote: {remote:?})",
+        );
 
         let local = self.local_status();
 
@@ -1137,7 +1168,10 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: OldBlocksByRangeRequest,
     ) -> Result<()> {
-        debug!("received BeaconBlocksByRange request (peer_id: {peer_id}, request: {request:?})");
+        debug!(
+            "received BeaconBlocksByRange request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
 
         let start_slot = request.start_slot();
         let max_request_blocks = request.max_request_blocks(self.controller.chain_config());
@@ -1201,7 +1235,10 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: BlobsByRangeRequest,
     ) -> Result<()> {
-        debug!("received BlobSidecarsByRange request (peer_id: {peer_id}, request: {request:?})");
+        debug!(
+            "received BlobSidecarsByRange request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
 
         let BlobsByRangeRequest { start_slot, count } = request;
 
@@ -1261,7 +1298,10 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: DataColumnsByRangeRequest<P>,
     ) -> Result<()> {
-        debug!("received DataColumnsByRange request (peer_id: {peer_id}, request: {request:?})");
+        debug!(
+            "received DataColumnsByRange request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
 
         let DataColumnsByRangeRequest {
             start_slot,
@@ -1343,7 +1383,10 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: BlobsByRootRequest,
     ) {
-        debug!("received BlobsByRootRequest request (peer_id: {peer_id}, request: {request:?})");
+        debug!(
+            "received BlobsByRootRequest request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
 
         // TODO(feature/deneb): MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS
         let BlobsByRootRequest { blob_ids } = request;
@@ -1402,7 +1445,8 @@ impl<P: Preset> Network<P> {
         let block_roots = request.block_roots();
 
         debug!(
-            "received BeaconBlocksByRoot request (peer_id: {peer_id}, block_roots: {block_roots:?})",
+            "received BeaconBlocksByRoot request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, block_roots: {block_roots:?})",
         );
 
         let controller = self.controller.clone_arc();
@@ -1453,7 +1497,10 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: DataColumnsByRootRequest<P>,
     ) {
-        debug!("received DataColumnsByRoot request (peer_id: {peer_id}, request: {request:?})");
+        debug!(
+            "received DataColumnsByRoot request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
 
         let DataColumnsByRootRequest { data_column_ids } = request;
 
