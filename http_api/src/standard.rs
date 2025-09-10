@@ -2125,11 +2125,40 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<DataColumnSidecarsQuery>,
     headers: HeaderMap,
 ) -> Result<EthResponse<DynamicList<Arc<DataColumnSidecar<P>>>, (), JsonOrSsz>, Error> {
+    let block_with_status =
+        match block_id::block(block_id, &controller, &anchor_checkpoint_provider) {
+            Ok(block) => block,
+            Err(error) => {
+                if matches!(error, Error::BlockNotFound) {
+                    if let BlockId::Root(block_root) = block_id {
+                        // For debug purposes return any data column sidecars by block root
+                        // even if block does not exist in fork choice
+                        let data_column_sidecars =
+                            controller.data_column_sidecars_by_root(block_root)?;
+
+                        if data_column_sidecars.is_empty() {
+                            return Err(Error::BlockNotFound);
+                        }
+
+                        let data_column_sidecars =
+                            DynamicList::from_vec(data_column_sidecars, P::NumberOfColumns::USIZE)
+                                .map_err(AnyhowError::new)?;
+
+                        return Ok(EthResponse::json_or_ssz(data_column_sidecars, &headers)?
+                            .execution_optimistic(true)
+                            .finalized(false));
+                    }
+                }
+
+                return Err(error);
+            }
+        };
+
     let WithStatus {
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_with_status;
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
