@@ -2635,7 +2635,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             && !self.is_sidecars_construction_started(&block_root)
             // reconstruction is enabled during syncing (if syncing)
             && (self.is_forward_synced()
-                || self.store_config().sync_with_reconstruction)
+                || !self.store_config().sync_without_reconstruction)
     }
 
     fn insert_block(&mut self, chain_link: ChainLink<P>) -> Result<()> {
