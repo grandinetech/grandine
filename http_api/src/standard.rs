@@ -1240,13 +1240,13 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         .collect::<Result<Vec<_>>>()?;
 
     let blob_sidecars = if version.is_peerdas_activated() {
-        let data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
         let blobs = construct_blobs_from_data_column_sidecars(
-            &controller,
-            &block,
-            data_column_sidecars,
+            controller.clone_arc(),
+            block.clone_arc(),
+            block_root,
             metrics.as_ref(),
-        )?;
+        )
+        .await?;
 
         let blob_count = blobs.len();
         let blob_sidecars =
@@ -1328,13 +1328,13 @@ pub async fn blobs<P: Preset, W: Wait>(
     }
 
     let blobs = if version.is_peerdas_activated() {
-        let data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
         let blobs = construct_blobs_from_data_column_sidecars(
-            &controller,
-            &block,
-            data_column_sidecars,
+            controller.clone_arc(),
+            block,
+            block_root,
             metrics.as_ref(),
-        )?;
+        )
+        .await?;
 
         if let Some(indices) = requested_indices {
             blobs
@@ -4055,72 +4055,79 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
     Ok(())
 }
 
-fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
-    controller: &ApiController<P, W>,
-    block: &SignedBeaconBlock<P>,
-    mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    block: Arc<SignedBeaconBlock<P>>,
+    block_root: H256,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<Blob<P>>> {
-    if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
-        return Ok(vec![]);
-    }
+    let metrics = metrics.cloned();
 
-    let half_columns = P::NumberOfColumns::U64.saturating_div(2);
+    tokio::task::spawn_blocking(move || {
+        let mut data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
 
-    if (0..half_columns).any(|index| {
-        !data_column_sidecars
-            .iter()
-            .any(|sidecar| sidecar.index == index)
-    }) {
-        let partial_matrix = data_column_sidecars
-            .iter()
-            .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(sidecar))
-            .collect::<Vec<_>>();
+        if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
+            return Ok(vec![]);
+        }
 
-        let reconstruction_timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.columns_reconstruction_time.start_timer());
+        let half_columns = P::NumberOfColumns::U64.saturating_div(2);
 
-        let full_matrix =
-            eip_7594::recover_matrix(&partial_matrix, controller.store_config().kzg_backend)?;
+        if (0..half_columns).any(|index| {
+            !data_column_sidecars
+                .iter()
+                .any(|sidecar| sidecar.index == index)
+        }) {
+            let partial_matrix = data_column_sidecars
+                .iter()
+                .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(sidecar))
+                .collect::<Vec<_>>();
 
-        prometheus_metrics::stop_and_record(reconstruction_timer);
+            let reconstruction_timer = metrics
+                .as_ref()
+                .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
-        let _timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+            let full_matrix =
+                eip_7594::recover_matrix(&partial_matrix, controller.store_config().kzg_backend)?;
 
-        let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
+            prometheus_metrics::stop_and_record(reconstruction_timer);
 
-        data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(block, &cells_and_kzg_proofs)?;
-    }
+            let _timer = metrics
+                .as_ref()
+                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
-    let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
-    for matrix in data_column_sidecars
-        .into_iter()
-        .take_while(|sidecar| (0..half_columns).contains(&sidecar.index))
-        .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
-    {
+            let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
+
+            data_column_sidecars =
+                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
+        }
+
+        let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
+        for matrix in data_column_sidecars
+            .into_iter()
+            .take_while(|sidecar| (0..half_columns).contains(&sidecar.index))
+            .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
+        {
+            blobs_matrix_map
+                .entry(matrix.row_index)
+                .or_default()
+                .push(matrix);
+        }
+
         blobs_matrix_map
-            .entry(matrix.row_index)
-            .or_default()
-            .push(matrix);
-    }
-
-    blobs_matrix_map
-        .into_values()
-        .map(|blob_matrix| {
-            ContiguousVector::try_from_iter(
-                blob_matrix
-                    .into_iter()
-                    .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
-            )
-            .map(ByteVector::from)
-            .map(Blob::<P>::from)
-            .map_err(Into::into)
-        })
-        .collect::<Result<Vec<_>>>()
+            .into_values()
+            .map(|blob_matrix| {
+                ContiguousVector::try_from_iter(
+                    blob_matrix
+                        .into_iter()
+                        .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
+                )
+                .map(ByteVector::from)
+                .map(Blob::<P>::from)
+                .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>>>()
+    })
+    .await?
 }
 
 #[cfg(test)]
