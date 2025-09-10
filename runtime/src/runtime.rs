@@ -37,7 +37,8 @@ use liveness_tracker::LivenessTracker;
 use log::{info, warn};
 use metrics::{run_metrics_server, MetricsChannels, MetricsService};
 use operation_pools::{
-    AttestationAggPool, BlsToExecutionChangePool, Manager, SyncCommitteeAggPool,
+    AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, Manager,
+    SyncCommitteeAggPool,
 };
 use p2p::{
     BlockSyncService, BlockSyncServiceChannels, Channels, Network, NetworkConfig, SubnetService,
@@ -180,6 +181,9 @@ pub async fn run_after_genesis<P: Preset>(
         metrics.clone(),
     ));
 
+    let dedicated_executor_for_reconstruction =
+        DedicatedExecutor::new("de-reconstruct", 1, None, metrics.clone());
+
     let eth1_api = Arc::new(Eth1Api::new(
         chain_config.clone_arc(),
         signer_snapshot.client().clone(),
@@ -294,7 +298,6 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         received_blob_sidecars.clone_arc(),
         received_data_column_sidecars.clone_arc(),
-        sidecars_construction_started,
         metrics.clone(),
         blob_fetcher_to_p2p_tx,
         execution_service_to_blob_fetcher_rx,
@@ -525,6 +528,12 @@ pub async fn run_after_genesis<P: Preset>(
         validator_statistics.clone(),
     );
 
+    let blob_reconstruction_pool = BlobReconstructionPool::new(
+        controller.clone_arc(),
+        dedicated_executor_for_reconstruction,
+        metrics.clone(),
+    );
+
     let sync_committee_agg_pool = SyncCommitteeAggPool::new(
         dedicated_executor_normal_priority.clone_arc(),
         controller.clone_arc(),
@@ -544,6 +553,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let pool_manager = Manager::new(
         attestation_agg_pool.clone_arc(),
+        blob_reconstruction_pool,
         bls_to_execution_change_pool.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
         fork_choice_to_pool_rx,

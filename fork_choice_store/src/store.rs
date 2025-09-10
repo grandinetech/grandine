@@ -2634,11 +2634,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         false
     }
 
-    pub fn is_reconstruction_enabled_for(&self, block_root: H256) -> bool {
+    pub fn is_reconstruction_enabled_for(&self, block_root: &H256) -> bool {
         // samples enough columns for reconstruction
         self.sampling_columns_count() * 2 >= P::NumberOfColumns::USIZE
-            // reconstruction not started for given block
-            && !self.is_sidecars_construction_started(&block_root)
+            // reconstruction not started for given blocks
+            && !self.is_sidecars_construction_started(block_root)
             // reconstruction is enabled during syncing (if syncing)
             && (self.is_forward_synced()
                 || !self.store_config().sync_without_reconstruction)
@@ -3825,8 +3825,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.sidecars_construction_started.contains_key(block_root)
     }
 
-    pub fn mark_started_sidecars_construction(&self, block_root: H256, slot: Slot) {
+    pub fn mark_sidecar_construction_started(&self, block_root: H256, slot: Slot) {
         self.sidecars_construction_started.insert(block_root, slot);
+    }
+
+    pub fn mark_sidecar_construction_failed(&self, block_root: &H256) {
+        self.sidecars_construction_started.remove(block_root);
     }
 
     pub fn delay_block_at_slot(&mut self, slot: Slot, block_root: H256) {

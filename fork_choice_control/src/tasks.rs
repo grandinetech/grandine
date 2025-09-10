@@ -22,7 +22,6 @@ use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
-use typenum::Unsigned as _;
 use types::{
     combined::{
         AttesterSlashing, BeaconState as CombinedBeaconState, SignedAggregateAndProof,
@@ -537,73 +536,6 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
             }
             Err(error) => {
                 warn!("failed to persist data column sidecars to storage: {error:?}");
-            }
-        }
-    }
-}
-
-pub struct ReconstructDataColumnSidecarsTask<P: Preset, W> {
-    pub store_snapshot: Arc<Store<P, Storage<P>>>,
-    pub storage: Arc<Storage<P>>,
-    pub mutator_tx: Sender<MutatorMessage<P, W>>,
-    pub wait_group: W,
-    pub block_root: H256,
-    pub metrics: Option<Arc<Metrics>>,
-}
-
-impl<P: Preset, W> Run for ReconstructDataColumnSidecarsTask<P, W> {
-    fn run(self) {
-        let Self {
-            store_snapshot,
-            storage,
-            mutator_tx,
-            wait_group,
-            block_root,
-            metrics,
-        } = self;
-
-        let Ok(available_columns) = (0..P::NumberOfColumns::U64)
-            .map(|index| {
-                let identifier = DataColumnIdentifier { block_root, index };
-                match store_snapshot.cached_data_column_sidecar_by_id(identifier) {
-                    Some(data_column_sidecar) => Ok(Some(data_column_sidecar)),
-                    None => storage.data_column_sidecar_by_id(identifier),
-                }
-            })
-            .collect::<Result<Vec<_>>>()
-            .map(|columns| columns.into_iter().flatten().collect::<Vec<_>>())
-        else {
-            warn!("failed to retrieve data column sidecar from storage");
-            return;
-        };
-
-        if available_columns.len() * 2 >= P::NumberOfColumns::USIZE {
-            let _columns_reconstruction_timer = metrics
-                .as_ref()
-                .map(|metrics| metrics.columns_reconstruction_time.start_timer());
-
-            let partial_matrix = available_columns
-                .into_iter()
-                .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar))
-                .collect::<Vec<_>>();
-
-            debug!("handling data column sidecars reconstruction at block: {block_root}");
-
-            match eip_7594::recover_matrix(
-                &partial_matrix,
-                store_snapshot.store_config().kzg_backend,
-            ) {
-                Ok(full_matrix) => {
-                    MutatorMessage::ReconstructedMissingColumns {
-                        wait_group,
-                        block_root,
-                        full_matrix,
-                    }
-                    .send(&mutator_tx);
-                }
-                Err(error) => {
-                    warn!("failed to reconstruct missing data column sidecars: {error:?}");
-                }
             }
         }
     }

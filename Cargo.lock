@@ -8142,6 +8142,7 @@ dependencies = [
  "clock",
  "conv",
  "dedicated_executor",
+ "eip_7594",
  "eth1_api",
  "eth2_cache_utils",
  "eth2_libp2p",

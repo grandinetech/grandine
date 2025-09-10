@@ -219,13 +219,18 @@ impl<P: Preset> P2pMessage<P> {
     }
 }
 
-pub enum PoolMessage {
+pub enum PoolMessage<W> {
     Slot(Slot),
     Tick(Tick),
     Stop,
+    ReconstructDataColumns {
+        wait_group: W,
+        block_root: H256,
+        slot: Slot,
+    },
 }
 
-impl PoolMessage {
+impl<W> PoolMessage<W> {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug!("send to operation pools failed because the receiver was dropped");

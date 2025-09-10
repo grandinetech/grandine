@@ -40,7 +40,10 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
+    fulu::{
+        containers::{DataColumnSidecar, MatrixEntry},
+        primitives::ColumnIndex,
+    },
     nonstandard::ValidationOutcome,
     phase0::{
         containers::BeaconBlockHeader,
@@ -113,7 +116,7 @@ where
         metrics: Option<Arc<Metrics>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
-        pool_tx: impl UnboundedSink<PoolMessage>,
+        pool_tx: impl UnboundedSink<PoolMessage<W>>,
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
@@ -215,6 +218,21 @@ where
 
     pub fn on_store_sampling_columns(&self, sampling_columns: HashSet<ColumnIndex>) {
         MutatorMessage::StoreSamplingColumns { sampling_columns }.send(&self.owned_mutator_tx());
+    }
+
+    pub fn is_sidecars_construction_started(&self, block_root: &H256) -> bool {
+        self.store_snapshot()
+            .is_sidecars_construction_started(block_root)
+    }
+
+    pub fn mark_sidecar_construction_started(&self, block_root: H256, slot: Slot) {
+        self.store_snapshot()
+            .mark_sidecar_construction_started(block_root, slot);
+    }
+
+    pub fn mark_sidecar_construction_failed(&self, block_root: &H256) {
+        self.store_snapshot()
+            .mark_sidecar_construction_failed(block_root)
     }
 
     // This should be called at the start of every tick.
@@ -580,6 +598,20 @@ where
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
+    }
+
+    pub fn on_reconstruction(
+        &self,
+        wait_group: W,
+        block_root: H256,
+        full_matrix: Vec<MatrixEntry<P>>,
+    ) {
+        MutatorMessage::ReconstructedMissingColumns {
+            wait_group,
+            block_root,
+            full_matrix,
+        }
+        .send(&self.mutator_tx)
     }
 
     pub fn store_back_sync_blob_sidecars(

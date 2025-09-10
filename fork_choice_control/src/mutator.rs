@@ -83,7 +83,7 @@ use crate::{
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
         DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, ReconstructDataColumnSidecarsTask,
+        PersistPubkeyCacheTask, PreprocessStateTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -146,7 +146,7 @@ where
     W: Wait,
     TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
-    LS: UnboundedSink<PoolMessage>,
+    LS: UnboundedSink<PoolMessage<W>>,
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
@@ -710,11 +710,11 @@ where
                                 if !matches!(pending_block.origin, BlockOrigin::Own)
                                     && !self.store.is_sidecars_construction_started(&block_root)
                                 {
-                                    self.handle_reconstructing_data_column_sidecars(
+                                    self.send_to_pool(PoolMessage::ReconstructDataColumns {
                                         wait_group,
                                         block_root,
-                                        pending_block.block.message().slot(),
-                                    );
+                                        slot: pending_block.block.message().slot(),
+                                    })
                                 }
 
                                 self.delay_block_until_blobs(block_root, pending_block);
@@ -1560,6 +1560,9 @@ where
                         )
                     }
 
+                    let origin =
+                        self.accept_data_column_sidecar(&wait_group, &data_column_sidecar, origin);
+
                     let (gossip_id, sender) = origin.split();
 
                     if let Some(gossip_id) = gossip_id {
@@ -1567,8 +1570,6 @@ where
                     }
 
                     reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
-
-                    self.accept_data_column_sidecar(&wait_group, &data_column_sidecar);
                 }
             }
             Ok(DataColumnSidecarAction::Ignore(publishable)) => {
@@ -1789,26 +1790,6 @@ where
         self.update_store_snapshot();
     }
 
-    fn handle_reconstructing_data_column_sidecars(
-        &mut self,
-        wait_group: W,
-        block_root: H256,
-        slot: Slot,
-    ) {
-        self.store_mut()
-            .mark_started_sidecars_construction(block_root, slot);
-        self.update_store_snapshot();
-
-        self.spawn(ReconstructDataColumnSidecarsTask {
-            store_snapshot: self.owned_store(),
-            storage: self.storage.clone_arc(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            block_root,
-            metrics: self.metrics.clone(),
-        });
-    }
-
     fn handle_reconstructed_missing_columns(
         &mut self,
         wait_group: &W,
@@ -1845,7 +1826,11 @@ where
 
         for data_column_sidecar in data_column_sidecars {
             if missing_indices.contains(&data_column_sidecar.index) {
-                self.accept_data_column_sidecar(wait_group, &data_column_sidecar);
+                self.accept_data_column_sidecar(
+                    wait_group,
+                    &data_column_sidecar,
+                    DataColumnSidecarOrigin::Own,
+                );
 
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.reconstructed_columns.inc();
@@ -2418,7 +2403,8 @@ where
         &mut self,
         wait_group: &W,
         data_column_sidecar: &Arc<DataColumnSidecar<P>>,
-    ) {
+        origin: DataColumnSidecarOrigin,
+    ) -> DataColumnSidecarOrigin {
         let block_header = data_column_sidecar.signed_block_header.message;
         let block_root = block_header.hash_tree_root();
 
@@ -2428,19 +2414,19 @@ where
         self.update_store_snapshot();
 
         let accepted_data_columns = self.store.accepted_data_column_sidecars_count(block_header);
-        let reconstruction_enabled = self.store.is_reconstruction_enabled_for(block_root);
+        let reconstruction_enabled = self.store.is_reconstruction_enabled_for(&block_root);
 
         let should_retry_block = if reconstruction_enabled {
             accepted_data_columns * 2 >= P::NumberOfColumns::USIZE
         } else {
-            accepted_data_columns == self.store.sampling_columns_count()
+            accepted_data_columns >= self.store.sampling_columns_count()
         };
 
         info!(
             "accepted data column sidecar: {block_root:?}, index: {}, slot: {}, \
             accepted data columns: {}, should_retry_block: {should_retry_block}, \
             reconstruction enabled: {reconstruction_enabled}, sampling columns count: {}, \
-            reconstruction started: {}",
+            reconstruction started: {}, origin: {origin:?}",
             data_column_sidecar.index,
             block_header.slot,
             accepted_data_columns,
@@ -2458,6 +2444,8 @@ where
 
         self.event_channels
             .send_data_column_sidecar_event(block_root, data_column_sidecar);
+
+        origin
     }
 
     fn notify_about_finalized_checkpoint(&self) {
@@ -3489,7 +3477,7 @@ where
         }
     }
 
-    fn send_to_pool(&self, message: PoolMessage) {
+    fn send_to_pool(&self, message: PoolMessage<W>) {
         if self.finished_loading_from_storage {
             message.send(&self.pool_tx);
         }
