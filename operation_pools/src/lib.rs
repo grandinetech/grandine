@@ -3,6 +3,7 @@ pub use crate::{
         convert_attestation_for_pool, convert_to_electra_attestation,
         try_convert_to_single_attestation, AttestationPacker, Manager as AttestationAggPool,
     },
+    blob_reconstruction_pool::Manager as BlobReconstructionPool,
     bls_to_execution_change_pool::{
         BlsToExecutionChangePool, Service as BlsToExecutionChangePoolService,
     },
@@ -26,6 +27,13 @@ mod attestation_agg_pool {
     mod pool;
     mod tasks;
     mod types;
+}
+
+mod blob_reconstruction_pool {
+    pub use manager::Manager;
+
+    mod manager;
+    mod tasks;
 }
 
 mod bls_to_execution_change_pool;

@@ -15,7 +15,7 @@ use futures::{
 use helper_functions::misc;
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
-use ssz::{ContiguousList, H256};
+use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
     combined::SignedBeaconBlock,
@@ -39,20 +39,17 @@ pub struct ExecutionBlobFetcher<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
-    sidecars_construction_started: Arc<DashMap<H256, Slot>>,
     metrics: Option<Arc<Metrics>>,
     p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
     rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
 }
 
 impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
-    #[expect(clippy::too_many_arguments)]
     pub const fn new(
         api: Arc<Eth1Api>,
         controller: ApiController<P, W>,
         received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
         received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
-        sidecars_construction_started: Arc<DashMap<H256, Slot>>,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
         rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
@@ -62,7 +59,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             controller,
             received_blob_sidecars,
             received_data_column_sidecars,
-            sidecars_construction_started,
             metrics,
             p2p_tx,
             rx,
@@ -223,7 +219,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         let block_root = block_or_sidecar.block_root();
 
         if self.controller.contains_block(block_root)
-            || self.sidecars_construction_started.contains_key(&block_root)
+            || self
+                .controller
+                .is_sidecars_construction_started(&block_root)
         {
             debug!("cannot fetch blobs from EL: block has been imported, or is being imported");
             return;
@@ -296,9 +294,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                             let controller = self.controller.clone_arc();
 
-                            let sidecars_construction_started =
-                                self.sidecars_construction_started.clone_arc();
-
                             let received_data_column_sidecars =
                                 self.received_data_column_sidecars.clone_arc();
 
@@ -326,8 +321,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                                         match result {
                                             Ok(data_columns) => {
-                                                sidecars_construction_started
-                                                    .insert(block_root, slot);
+                                                controller.mark_sidecar_construction_started(block_root, slot);
 
                                                 for data_column_sidecar in
                                                     data_columns.into_iter().filter(|column| {
@@ -345,10 +339,14 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                                     data_column_sidecars.push(data_column_sidecar);
                                                 }
                                             }
-                                            Err(error) => warn!(
-                                                "failed to construct data column sidecars with \
-                                                cells and kzg proofs: {error:?}"
-                                            ),
+                                            Err(error) => {
+                                                controller.mark_sidecar_construction_failed(&block_root);
+
+                                                warn!(
+                                                    "failed to construct data column sidecars with \
+                                                    cells and kzg proofs: {error:?}"
+                                                );
+                                            }
                                         }
                                     }
                                     Err(error) => warn!(
@@ -385,7 +383,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             }
         }
 
-        if !self.sidecars_construction_started.contains_key(&block_root) {
+        if !self
+            .controller
+            .is_sidecars_construction_started(&block_root)
+        {
             // Request remaining missing data column sidecars from P2P
             let missing_indices = missing_columns_indices
                 .into_iter()
