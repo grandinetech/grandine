@@ -74,7 +74,7 @@ pub struct GrandineConfig {
     pub report_validator_performance: bool,
     pub withhold_data_columns_publishing: bool,
     pub disable_engine_getblobs: bool,
-    pub sync_with_reconstruction: bool,
+    pub sync_without_reconstruction: bool,
 }
 
 impl GrandineConfig {
@@ -105,7 +105,7 @@ impl GrandineConfig {
             validator_api_config,
             withhold_data_columns_publishing,
             disable_engine_getblobs,
-            sync_with_reconstruction,
+            sync_without_reconstruction,
             ..
         } = self;
 
@@ -205,8 +205,8 @@ impl GrandineConfig {
             info!("running without engine_getBlobs integration");
         }
 
-        if *sync_with_reconstruction {
-            info!("sync with reconstruction enabled");
+        if *sync_without_reconstruction {
+            info!("sync with reconstruction disabled");
         }
     }
 }

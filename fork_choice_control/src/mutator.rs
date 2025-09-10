@@ -3684,7 +3684,7 @@ where
 
         if available_columns_count * 2 >= P::NumberOfColumns::USIZE
             && (self.store.is_forward_synced()
-                || self.store.store_config().sync_with_reconstruction)
+                || !self.store.store_config().sync_without_reconstruction)
         {
             return BlockDataColumnAvailability::CompleteWithReconstruction;
         }

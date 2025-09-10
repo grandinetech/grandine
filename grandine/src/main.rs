@@ -406,7 +406,7 @@ fn try_main() -> Result<()> {
         report_validator_performance,
         withhold_data_columns_publishing,
         disable_engine_getblobs,
-        sync_with_reconstruction,
+        sync_without_reconstruction,
     } = config;
 
     PEER_LOG_METRICS.set_target_peer_count(network_config.target_peers);
@@ -452,7 +452,7 @@ fn try_main() -> Result<()> {
         unfinalized_states_in_memory,
         kzg_backend,
         disable_engine_getblobs,
-        sync_with_reconstruction,
+        sync_without_reconstruction,
     };
 
     let eth1_auth = Arc::new(Auth::new(auth_options)?);

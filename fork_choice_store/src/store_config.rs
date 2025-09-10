@@ -22,7 +22,7 @@ pub struct StoreConfig {
     #[derivative(Default(value = "false"))]
     pub disable_engine_getblobs: bool,
     #[derivative(Default(value = "false"))]
-    pub sync_with_reconstruction: bool,
+    pub sync_without_reconstruction: bool,
 }
 
 impl StoreConfig {
