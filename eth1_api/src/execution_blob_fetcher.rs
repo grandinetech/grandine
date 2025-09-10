@@ -16,6 +16,7 @@ use helper_functions::misc;
 use log::{debug, warn};
 use prometheus_metrics::Metrics;
 use ssz::{ContiguousList, H256};
+use std_ext::ArcExt as _;
 use types::{
     combined::SignedBeaconBlock,
     deneb::{containers::BlobIdentifier, primitives::BlobIndex},
@@ -212,7 +213,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         }
     }
 
-    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn get_blobs_v2(
         &self,
@@ -229,73 +229,86 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
-        if let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() {
-            let missing_columns_indices = data_column_identifiers
-                .iter()
-                .filter(|identifier| !self.received_data_column_sidecars.contains_key(identifier))
-                .map(|identifier| identifier.index)
-                .collect::<HashSet<ColumnIndex>>();
+        let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() else {
+            return;
+        };
 
-            if missing_columns_indices.is_empty() {
-                debug!(
-                    "cannot fetch blobs from EL: all missing data column sidecars have been received"
-                );
-                return;
+        let missing_columns_indices = data_column_identifiers
+            .iter()
+            .filter(|identifier| !self.received_data_column_sidecars.contains_key(identifier))
+            .map(|identifier| identifier.index)
+            .collect::<HashSet<ColumnIndex>>();
+
+        if missing_columns_indices.is_empty() {
+            debug!(
+                "cannot fetch blobs from EL: all missing data column sidecars have been received"
+            );
+            return;
+        }
+
+        if self.controller.is_forward_synced()
+            && !self.controller.store_config().disable_engine_getblobs
+        {
+            let request_timer = self
+                .metrics
+                .as_ref()
+                .map(|metrics| metrics.engine_get_blobs_v2_request_time.start_timer());
+
+            if let Some(metrics) = self.metrics.as_ref() {
+                metrics.engine_get_blobs_v2_requests_count.inc();
             }
 
-            if self.controller.is_forward_synced()
-                && !self.controller.store_config().disable_engine_getblobs
-            {
-                let request_timer = self
-                    .metrics
-                    .as_ref()
-                    .map(|metrics| metrics.engine_get_blobs_v2_request_time.start_timer());
+            let expected_blobs_count = kzg_commitments.len();
+            let versioned_hashes = kzg_commitments
+                .iter()
+                .copied()
+                .map(misc::kzg_commitment_to_versioned_hash)
+                .collect::<Vec<_>>();
 
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.engine_get_blobs_v2_requests_count.inc();
-                }
+            match self.api.get_blobs_v2::<P>(versioned_hashes).await {
+                Ok(blobs_and_proofs_opt) => {
+                    prometheus_metrics::stop_and_record(request_timer);
 
-                let expected_blobs_count = kzg_commitments.len();
-                let versioned_hashes = kzg_commitments
-                    .iter()
-                    .copied()
-                    .map(misc::kzg_commitment_to_versioned_hash)
-                    .collect::<Vec<_>>();
+                    if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
+                        if blobs_and_proofs.len() == expected_blobs_count {
+                            if let Some(metrics) = self.metrics.as_ref() {
+                                metrics.engine_get_blobs_v2_responses_count.inc();
+                            }
 
-                let mut data_column_sidecars = vec![];
-                match self.api.get_blobs_v2::<P>(versioned_hashes).await {
-                    Ok(blobs_and_proofs_opt) => {
-                        prometheus_metrics::stop_and_record(request_timer);
-
-                        if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
-                            if blobs_and_proofs.len() == expected_blobs_count {
-                                if let Some(metrics) = self.metrics.as_ref() {
-                                    metrics.engine_get_blobs_v2_responses_count.inc();
-                                }
-
-                                let (received_blobs, received_proofs): (Vec<_>, Vec<_>) =
-                                    blobs_and_proofs
-                                        .into_iter()
-                                        .map(|BlobAndProofV2 { blob, proofs }| (blob, proofs))
-                                        .unzip();
-
-                                debug!(
-                                    "received all {expected_blobs_count} blob sidecars from EL at slot: {slot}",
-                                );
-
-                                let cells_proofs = received_proofs
+                            let (received_blobs, received_proofs): (Vec<_>, Vec<_>) =
+                                blobs_and_proofs
                                     .into_iter()
-                                    .flat_map(IntoIterator::into_iter)
-                                    .collect::<Vec<_>>();
+                                    .map(|BlobAndProofV2 { blob, proofs }| (blob, proofs))
+                                    .unzip();
 
-                                let timer = self.metrics.as_ref().map(|metrics| {
-                                    metrics.data_column_sidecar_computation.start_timer()
-                                });
+                            debug!(
+                                "received all {expected_blobs_count} blob sidecars from EL at slot: {slot}",
+                            );
+
+                            let cells_proofs = received_proofs
+                                .into_iter()
+                                .flat_map(IntoIterator::into_iter)
+                                .collect::<Vec<_>>();
+
+                            let timer = self.metrics.as_ref().map(|metrics| {
+                                metrics.data_column_sidecar_computation.start_timer()
+                            });
+
+                            let controller = self.controller.clone_arc();
+
+                            let sidecars_construction_started =
+                                self.sidecars_construction_started.clone_arc();
+
+                            let received_data_column_sidecars =
+                                self.received_data_column_sidecars.clone_arc();
+
+                            let reconstruction_result = tokio::task::spawn_blocking(move || {
+                                let mut data_column_sidecars = vec![];
 
                                 match eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
                                     &received_blobs,
                                     &cells_proofs,
-                                    self.controller.store_config().kzg_backend,
+                                    controller.store_config().kzg_backend,
                                 ) {
                                     Ok(cells_and_kzg_proofs) => {
                                         let result = match block_or_sidecar {
@@ -313,12 +326,12 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                                         match result {
                                             Ok(data_columns) => {
-                                                self.sidecars_construction_started
+                                                sidecars_construction_started
                                                     .insert(block_root, slot);
 
                                                 for data_column_sidecar in
                                                     data_columns.into_iter().filter(|column| {
-                                                        self.controller
+                                                        controller
                                                             .sampling_columns()
                                                             .contains(&column.index)
                                                     })
@@ -327,71 +340,79 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                                         block_root,
                                                         index: data_column_sidecar.index,
                                                     };
-                                                    self.received_data_column_sidecars
-                                                        .insert(identifier, slot);
+
+                                                    received_data_column_sidecars.insert(identifier, slot);
                                                     data_column_sidecars.push(data_column_sidecar);
                                                 }
                                             }
                                             Err(error) => warn!(
                                                 "failed to construct data column sidecars with \
-                                            cells and kzg proofs: {error:?}"
+                                                cells and kzg proofs: {error:?}"
                                             ),
                                         }
                                     }
                                     Err(error) => warn!(
-                                        "failed to convert blobs received from EL \
-                                    into extended cells: {error:?}"
+                                        "failed to convert blobs received from EL into extended cells: {error:?}"
                                     ),
                                 }
-                            } else {
-                                warn!(
-                                    "EL must response all blobs or null (expected: {}, got: {})",
-                                    expected_blobs_count,
-                                    blobs_and_proofs.len(),
-                                );
+
+                                data_column_sidecars
+                            }).await;
+
+                            match reconstruction_result {
+                                Ok(data_column_sidecars) => {
+                                    for data_column_sidecar in data_column_sidecars {
+                                        self.controller
+                                            .on_el_data_column_sidecar(data_column_sidecar);
+                                    }
+                                }
+                                Err(error) => {
+                                    warn!("failed to reconstruct data columns from EL response: {error:?}")
+                                }
                             }
                         } else {
-                            debug!("EL doesn't has all blobs to response back",);
+                            warn!(
+                                "EL must response all blobs or null (expected: {}, got: {})",
+                                expected_blobs_count,
+                                blobs_and_proofs.len(),
+                            );
                         }
+                    } else {
+                        debug!("EL doesn't has all blobs to response back",);
                     }
-                    Err(error) => warn!("engine_getBlobsV2 call failed: {error}"),
                 }
-
-                for data_column_sidecar in data_column_sidecars {
-                    self.controller
-                        .on_el_data_column_sidecar(data_column_sidecar);
-                }
+                Err(error) => warn!("engine_getBlobsV2 call failed: {error}"),
             }
+        }
 
-            if !self.sidecars_construction_started.contains_key(&block_root) {
-                // Request remaining missing data column sidecars from P2P
-                let missing_indices = missing_columns_indices
-                    .into_iter()
-                    .filter(|index| {
-                        !self
-                            .received_data_column_sidecars
-                            .contains_key(&DataColumnIdentifier {
-                                block_root,
-                                index: *index,
-                            })
-                    })
-                    .collect::<Vec<_>>();
-
-                debug!("missing data columns sidecars: {missing_indices:?} at block {block_root}");
-
-                if !missing_indices.is_empty() {
-                    let columns = ContiguousList::try_from(missing_indices)
-                        .expect("missing column indices must not be more than NUMBER_OF_COLUMNS");
-
-                    BlobFetcherToP2p::DataColumnsNeeded(
-                        DataColumnsByRootIdentifier {
+        if !self.sidecars_construction_started.contains_key(&block_root) {
+            // Request remaining missing data column sidecars from P2P
+            let missing_indices = missing_columns_indices
+                .into_iter()
+                .filter(|index| {
+                    !self
+                        .received_data_column_sidecars
+                        .contains_key(&DataColumnIdentifier {
                             block_root,
-                            columns,
-                        },
-                        slot,
-                    )
-                    .send(&self.p2p_tx);
-                }
+                            index: *index,
+                        })
+                })
+                .collect::<Vec<_>>();
+
+            debug!("missing data columns sidecars: {missing_indices:?} at block {block_root}");
+
+            if !missing_indices.is_empty() {
+                let columns = ContiguousList::try_from(missing_indices)
+                    .expect("missing column indices must not be more than NUMBER_OF_COLUMNS");
+
+                BlobFetcherToP2p::DataColumnsNeeded(
+                    DataColumnsByRootIdentifier {
+                        block_root,
+                        columns,
+                    },
+                    slot,
+                )
+                .send(&self.p2p_tx);
             }
         }
     }
