@@ -16,6 +16,8 @@ namespace Grandine.Native
 
 
 
+
+
         [DllImport(__DllName, EntryPoint = "grandine_set_execution_layer_adapter", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void grandine_set_execution_layer_adapter(CEmbedAdapter adapter);
 
@@ -359,6 +361,13 @@ namespace Grandine.Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public unsafe partial struct CBlobAndProofV2
+    {
+        public CH384* proof;
+        public byte* blob;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public unsafe partial struct CBlobAndProofV1
     {
         public CH384 proof;
@@ -383,6 +392,27 @@ namespace Grandine.Native
     public unsafe partial struct CResultCVecCOptionCBlobAndProofV1
     {
         public CVecCOptionCBlobAndProofV1 value;
+        public ulong error;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe partial struct CVecCBlobAndProofV2
+    {
+        public CBlobAndProofV2* data;
+        public ulong data_len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe partial struct COptionCVecCBlobAndProofV2
+    {
+        [MarshalAs(UnmanagedType.U1)] public bool is_something;
+        public CVecCBlobAndProofV2 value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe partial struct CResultCOptionCVecCBlobAndProofV2
+    {
+        public COptionCVecCBlobAndProofV2 value;
         public ulong error;
     }
 
@@ -421,6 +451,23 @@ namespace Grandine.Native
         public CBlobsBundleV1 blobs_bundle;
         [MarshalAs(UnmanagedType.U1)] public bool should_override_builder;
         public CExecutionRequests execution_requests;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe partial struct CEngineGetPayloadV5Response
+    {
+        public CExecutionPayloadV3 execution_payload;
+        public fixed byte block_value[32];
+        public CBlobsBundleV1 blobs_bundle;
+        [MarshalAs(UnmanagedType.U1)] public bool should_override_builder;
+        public CExecutionRequests execution_requests;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe partial struct CResultCEngineGetPayloadV5Response
+    {
+        public CEngineGetPayloadV5Response value;
+        public ulong error;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -513,7 +560,9 @@ namespace Grandine.Native
         public delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV2Response> engine_get_payload_v2;
         public delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV3Response> engine_get_payload_v3;
         public delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV4Response> engine_get_payload_v4;
+        public delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV5Response> engine_get_payload_v5;
         public delegate* unmanaged[Cdecl]<byte**, ulong, CResultCVecCOptionCBlobAndProofV1> engine_get_blobs_v1;
+        public delegate* unmanaged[Cdecl]<byte**, ulong, CResultCOptionCVecCBlobAndProofV2> engine_get_blobs_v2;
     }
 
 

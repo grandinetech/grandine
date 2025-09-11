@@ -4,10 +4,11 @@ use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
 use execution_engine::{
-    BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
-    EngineGetPayloadV3Response, EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes,
-    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadId, PayloadStatusV1,
+    BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
+    EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
+    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
+    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
+    PayloadAttributesV3, PayloadId, PayloadStatusV1,
 };
 use futures::channel::mpsc::UnboundedSender;
 use prometheus_metrics::Metrics;
@@ -97,11 +98,17 @@ pub trait EmbedAdapter: Send + Sync {
         -> Result<EngineGetPayloadV3Response<Mainnet>>;
     fn engine_get_payload_v4(&self, payload_id: H64)
         -> Result<EngineGetPayloadV4Response<Mainnet>>;
+    fn engine_get_payload_v5(&self, payload_id: H64)
+        -> Result<EngineGetPayloadV5Response<Mainnet>>;
 
     fn engine_get_blobs_v1(
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Vec<Option<BlobAndProofV1<Mainnet>>>>;
+    fn engine_get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Option<Vec<BlobAndProofV2<Mainnet>>>>;
 }
 
 static CURRENT_ADAPTER: OnceLock<Box<dyn EmbedAdapter>> = OnceLock::new();
@@ -439,7 +446,7 @@ impl Eth1Api {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 6);
+                const_assert_eq!(Phase::CARDINALITY, 7);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -453,7 +460,7 @@ impl Eth1Api {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 6);
+                const_assert_eq!(Phase::CARDINALITY, 7);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -465,7 +472,7 @@ impl Eth1Api {
         })
     }
 
-    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] depending on `payload_id`.
+    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] or [`engine_getPayloadV5`] depending on `payload_id`.
     ///
     /// Newer versions of the method may be used to request payloads from all prior versions,
     /// but using the old methods allows the application to work with old execution clients.
@@ -474,6 +481,7 @@ impl Eth1Api {
     /// [`engine_getPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_getpayloadv2
     /// [`engine_getPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_getpayloadv3
     /// [`engine_getPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_getpayloadv4
+    /// [`engine_getPayloadV5`]: https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#engine_getpayloadv5
     pub async fn get_payload<P: Preset>(
         &self,
         payload_id: PayloadId,
@@ -487,7 +495,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value.into()))
+                Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Capella(payload_id) => {
                 let value = self.get_adapter()?.engine_get_payload_v2(payload_id)?;
@@ -497,7 +505,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value.into()))
+                Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Deneb(payload_id) => {
                 let value = self.get_adapter()?.engine_get_payload_v3(payload_id)?;
@@ -507,7 +515,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value.into()))
+                Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Electra(payload_id) => {
                 let value = self.get_adapter()?.engine_get_payload_v4(payload_id)?;
@@ -517,12 +525,22 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value.into()))
+                Ok(WithClientVersions::none(value).map(Into::into))
+            }
+            PayloadId::Fulu(payload_id) => {
+                let value = self.get_adapter()?.engine_get_payload_v5(payload_id)?;
+
+                let value: &dyn std::any::Any = &value;
+                let value: &EngineGetPayloadV5Response<P> =
+                    value.downcast_ref().ok_or(Error::InvalidPreset)?;
+                let value = value.clone();
+
+                Ok(WithClientVersions::none(value).map(Into::into))
             }
         }
     }
 
-    pub(crate) async fn get_blobs<P: Preset>(
+    pub(crate) async fn get_blobs_v1<P: Preset>(
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Vec<Option<BlobAndProofV1<P>>>> {
@@ -541,6 +559,28 @@ impl Eth1Api {
                     .transpose()
             })
             .collect::<Result<Vec<Option<BlobAndProofV1<P>>>>>()?;
+        Ok(results)
+    }
+
+    pub(crate) async fn get_blobs_v2<P: Preset>(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Option<Vec<BlobAndProofV2<P>>>> {
+        let results = self.get_adapter()?.engine_get_blobs_v2(versioned_hashes)?;
+        let results = results
+            .map(|value| {
+                value
+                    .into_iter()
+                    .map(|blob| {
+                        let blob: &dyn std::any::Any = &blob;
+                        let blob: &BlobAndProofV2<P> =
+                            blob.downcast_ref().ok_or(Error::InvalidPreset)?;
+                        let blob = blob.clone();
+                        Ok(blob)
+                    })
+                    .collect::<Result<Vec<BlobAndProofV2<P>>>>()
+            })
+            .transpose()?;
         Ok(results)
     }
 

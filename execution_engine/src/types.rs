@@ -421,7 +421,7 @@ pub struct BlobsBundleV1<P: Preset> {
 }
 
 /// [`BlobsBundleV2`](https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#blobsbundlev2)
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobsBundleV2<P: Preset> {
     pub commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
@@ -591,7 +591,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct EngineGetPayloadV5Response<P: Preset> {
     pub execution_payload: ExecutionPayloadV3<P>,
@@ -992,7 +992,7 @@ pub struct BlobAndProofV1<P: Preset> {
     pub proof: KzgProof,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct BlobAndProofV2<P: Preset> {
     pub blob: Blob<P>,

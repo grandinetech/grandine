@@ -1,15 +1,19 @@
 use allocator as _;
 use anyhow::Result;
 use clap::{Error as ClapError, Parser};
-use eth1_api::{Eth1Block, EmbedAdapter};
+use eth1_api::{EmbedAdapter, Eth1Block};
 use execution_engine::{
-    BlobAndProofV1, BlobsBundleV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response, EngineGetPayloadV3Response, EngineGetPayloadV4Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadStatusV1, PayloadValidationStatus, RawExecutionRequests, WithdrawalV1
+    BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetPayloadV1Response,
+    EngineGetPayloadV2Response, EngineGetPayloadV3Response, EngineGetPayloadV4Response,
+    EngineGetPayloadV5Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3,
+    PayloadStatusV1, PayloadValidationStatus, RawExecutionRequests, WithdrawalV1,
 };
 use libc::c_char;
 use log::error;
 use primitive_types::{H384, U256};
 use runtime::{grandine_args::GrandineArgs, run};
-use ssz::{ByteList, ByteVector, ContiguousList, SszReadDefault, SszWrite};
+use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite};
 use std::{ffi::CStr, sync::Arc};
 use try_from_iterator::TryFromIterator;
 use typenum::marker_traits::Unsigned;
@@ -985,6 +989,44 @@ pub struct CExecutionRequests {
 
 #[derive(Debug)]
 #[repr(C)]
+pub struct CBlobAndProofV2 {
+    proof: *const CH384,
+    blob: *const u8,
+}
+
+impl Default for CBlobAndProofV2 {
+    fn default() -> Self {
+        Self {
+            proof: core::ptr::null(),
+            blob: core::ptr::null(),
+        }
+    }
+}
+
+impl Clone for CBlobAndProofV2 {
+    fn clone(&self) -> Self {
+        todo!()
+    }
+}
+
+impl From<&CBlobAndProofV2> for BlobAndProofV2<Mainnet> {
+    fn from(value: &CBlobAndProofV2) -> Self {
+        BlobAndProofV2::<Mainnet> {
+            blob: Box::new(
+                unsafe { core::slice::from_raw_parts(value.blob, BytesPerBlob::<Mainnet>::USIZE) }.into(),
+            ),
+            proofs: ContiguousVector::<H384, <Mainnet as Preset>::CellsPerExtBlob>::try_from_iter(unsafe {
+                core::slice::from_raw_parts(
+                    value.proof,
+                    <Mainnet as Preset>::CellsPerExtBlob::USIZE,
+                )
+            }.iter().map(|v| v.clone().into())).unwrap(),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
 pub struct CBlobAndProofV1 {
     proof: CH384,
     blob: *const u8,
@@ -992,7 +1034,10 @@ pub struct CBlobAndProofV1 {
 
 impl Clone for CBlobAndProofV1 {
     fn clone(&self) -> Self {
-        Self { proof: self.proof.clone(), blob: todo!() }
+        Self {
+            proof: self.proof.clone(),
+            blob: todo!(),
+        }
     }
 }
 
@@ -1013,7 +1058,12 @@ impl From<&COptionCBlobAndProofV1> for Option<BlobAndProofV1<Mainnet>> {
             let value = &value.value;
             Some(BlobAndProofV1::<Mainnet> {
                 proof: value.proof.clone().into(),
-                blob: Box::new(unsafe { core::slice::from_raw_parts(value.blob, BytesPerBlob::<Mainnet>::USIZE) }.into())
+                blob: Box::new(
+                    unsafe {
+                        core::slice::from_raw_parts(value.blob, BytesPerBlob::<Mainnet>::USIZE)
+                    }
+                    .into(),
+                ),
             })
         }
     }
@@ -1046,6 +1096,33 @@ struct CResultCVecCOptionCBlobAndProofV1 {
 impl_c_result!(
     CResultCVecCOptionCBlobAndProofV1,
     CVecCOptionCBlobAndProofV1
+);
+
+#[repr(C)]
+struct CVecCBlobAndProofV2 {
+    data: *const CBlobAndProofV2,
+    data_len: u64,
+}
+
+impl_c_vec!(CVecCBlobAndProofV2, CBlobAndProofV2);
+
+#[repr(C)]
+struct COptionCVecCBlobAndProofV2 {
+    is_something: bool,
+    value: CVecCBlobAndProofV2,
+}
+
+impl_c_option!(COptionCVecCBlobAndProofV2, CVecCBlobAndProofV2);
+
+#[repr(C)]
+struct CResultCOptionCVecCBlobAndProofV2 {
+    value: COptionCVecCBlobAndProofV2,
+    error: u64,
+}
+
+impl_c_result!(
+    CResultCOptionCVecCBlobAndProofV2,
+    COptionCVecCBlobAndProofV2
 );
 
 impl CExecutionRequests {
@@ -1190,6 +1267,51 @@ impl Into<BlobsBundleV1<Mainnet>> for CBlobsBundleV1 {
     }
 }
 
+impl Into<BlobsBundleV2<Mainnet>> for CBlobsBundleV1 {
+    fn into(self) -> BlobsBundleV2<Mainnet> {
+        BlobsBundleV2::<Mainnet> {
+            commitments: ContiguousList::try_from_iter(
+                unsafe {
+                    std::slice::from_raw_parts(self.commitments, self.commitments_len as usize)
+                }
+                .iter()
+                .map(|&v| {
+                    H384(
+                        unsafe { std::slice::from_raw_parts(v, 48) }
+                            .try_into()
+                            .unwrap(),
+                    )
+                }),
+            )
+            .unwrap(),
+            proofs: ContiguousList::try_from_iter(
+                unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
+                    .iter()
+                    .map(|&v| {
+                        H384(
+                            unsafe { std::slice::from_raw_parts(v, 48) }
+                                .try_into()
+                                .unwrap(),
+                        )
+                    }),
+            )
+            .unwrap(),
+            blobs: ContiguousList::try_from_iter(
+                unsafe { std::slice::from_raw_parts(self.blobs, self.blobs_len as usize) }
+                    .iter()
+                    .map(|&blob| {
+                        let blob = unsafe {
+                            std::slice::from_raw_parts(blob, BytesPerBlob::<Mainnet>::to_usize())
+                        };
+
+                        Box::new(ByteVector::from_ssz_default(blob).unwrap())
+                    }),
+            )
+            .unwrap(),
+        }
+    }
+}
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct CEngineGetPayloadV3Response {
@@ -1223,6 +1345,39 @@ pub struct CEngineGetPayloadV4Response {
 impl Into<EngineGetPayloadV4Response<Mainnet>> for CEngineGetPayloadV4Response {
     fn into(self) -> EngineGetPayloadV4Response<Mainnet> {
         EngineGetPayloadV4Response::<Mainnet> {
+            execution_payload: self.execution_payload.into(),
+            blobs_bundle: self.blobs_bundle.into(),
+            block_value: Uint256::from_be_bytes(self.block_value),
+            should_override_builder: self.should_override_builder,
+            execution_requests: self.execution_requests.into(),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CEngineGetPayloadV5Response {
+    execution_payload: CExecutionPayloadV3,
+    block_value: [u8; 32],
+    blobs_bundle: CBlobsBundleV1,
+    should_override_builder: bool,
+    execution_requests: CExecutionRequests,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct CResultCEngineGetPayloadV5Response {
+    value: CEngineGetPayloadV5Response,
+    error: u64,
+}
+impl_c_result!(
+    CResultCEngineGetPayloadV5Response,
+    CEngineGetPayloadV5Response
+);
+
+impl Into<EngineGetPayloadV5Response<Mainnet>> for CEngineGetPayloadV5Response {
+    fn into(self) -> EngineGetPayloadV5Response<Mainnet> {
+        EngineGetPayloadV5Response::<Mainnet> {
             execution_payload: self.execution_payload.into(),
             blobs_bundle: self.blobs_bundle.into(),
             block_value: Uint256::from_be_bytes(self.block_value),
@@ -1486,8 +1641,16 @@ pub struct CEmbedAdapter {
         unsafe extern "C" fn(payload_id: *const u8) -> CResultCEngineGetPayloadV3Response,
     engine_get_payload_v4:
         unsafe extern "C" fn(payload_id: *const u8) -> CResultCEngineGetPayloadV4Response,
-    engine_get_blobs_v1:
-        unsafe extern "C" fn(versioned_hashes: *const *const u8, versioned_hashes_len: u64) -> CResultCVecCOptionCBlobAndProofV1
+    engine_get_payload_v5:
+        unsafe extern "C" fn(payload_id: *const u8) -> CResultCEngineGetPayloadV5Response,
+    engine_get_blobs_v1: unsafe extern "C" fn(
+        versioned_hashes: *const *const u8,
+        versioned_hashes_len: u64,
+    ) -> CResultCVecCOptionCBlobAndProofV1,
+    engine_get_blobs_v2: unsafe extern "C" fn(
+        versioned_hashes: *const *const u8,
+        versioned_hashes_len: u64,
+    ) -> CResultCOptionCVecCBlobAndProofV2,
 }
 
 impl eth1_api::EmbedAdapter for CEmbedAdapter {
@@ -1749,6 +1912,15 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         output.map(|v| v.into())
     }
 
+    fn engine_get_payload_v5(
+        &self,
+        payload_id: H64,
+    ) -> Result<EngineGetPayloadV5Response<Mainnet>> {
+        let output = unsafe { (self.engine_get_payload_v5)(payload_id.as_ptr()) };
+        let output: Result<_> = output.into();
+        output.map(|v| v.into())
+    }
+
     fn engine_get_blobs_v1(
         &self,
         versioned_hashes: Vec<types::deneb::primitives::VersionedHash>,
@@ -1758,16 +1930,39 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             .map(|hash| hash.0.as_ptr())
             .collect::<Vec<_>>();
 
-        let output = unsafe { (self.engine_get_blobs_v1)(versioned_hashes.as_ptr(), versioned_hashes.len() as u64) };
+        let output = unsafe {
+            (self.engine_get_blobs_v1)(versioned_hashes.as_ptr(), versioned_hashes.len() as u64)
+        };
 
         drop(versioned_hashes);
 
         let output: Result<_, _> = output.into();
 
         output.map(|value| {
-            value.map_convert(|item| -> Option<BlobAndProofV1<Mainnet>> {
-                item.into()
-            })
+            value.map_convert(|item| -> Option<BlobAndProofV1<Mainnet>> { item.into() })
+        })
+    }
+
+    fn engine_get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<types::deneb::primitives::VersionedHash>,
+    ) -> Result<Option<Vec<execution_engine::BlobAndProofV2<Mainnet>>>> {
+        let versioned_hashes = versioned_hashes
+            .iter()
+            .map(|hash| hash.0.as_ptr())
+            .collect::<Vec<_>>();
+
+        let output = unsafe {
+            (self.engine_get_blobs_v2)(versioned_hashes.as_ptr(), versioned_hashes.len() as u64)
+        };
+
+        drop(versioned_hashes);
+
+        let output: Result<_, _> = output.into();
+
+        output.map(|value| {
+            let value: Option<CVecCBlobAndProofV2> = value.into();
+            value.map(|blobs| blobs.map_convert(|item| -> BlobAndProofV2<Mainnet> { item.into() }))
         })
     }
 }
