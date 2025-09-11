@@ -163,6 +163,10 @@ impl GrandineConfig {
             info!("client version: {client_version}");
         }
 
+        if !network_config.trusted_peers.is_empty() {
+            info!("trusted peers: {:?}", network_config.trusted_peers);
+        }
+
         if let Some(slot) = state_slot {
             info!("force state slot: {slot}");
         }

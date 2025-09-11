@@ -729,6 +729,7 @@ impl<P: Preset> BlockSyncService<P> {
                             start_slot,
                             count,
                         );
+
                         let missing_column_indices = data_columns
                             .iter()
                             .filter(|index| missing_indices.contains(index))
@@ -759,10 +760,10 @@ impl<P: Preset> BlockSyncService<P> {
                         };
 
                         debug!(
-                            "retrying batch {batch:?}, request_ids: {:?}, mappings: {:?}, new peers: [{:?}]",
+                            "retrying batch {batch:?}, request_ids: {:?}, mappings: {:?}, \
+                            new peers: [{peer_custody_columns_mapping:?}]",
                             request_id..request_id,
                             peer_custody_columns_mapping.len(),
-                            peer_custody_columns_mapping.keys(),
                         );
 
                         for (peer_id, columns) in peer_custody_columns_mapping {

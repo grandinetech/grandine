@@ -1563,6 +1563,8 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::Ignore(publishable)) => {
+                info!("data column sidecar ignored (identifier: {data_column_identifier:?})");
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -1591,9 +1593,9 @@ where
                         Some(state),
                     );
                 } else {
-                    debug!(
+                    info!(
                         "data column sidecar delayed until state at same slot is ready \
-                         (identifier: {data_column_identifier:?}, slot: {slot})",
+                        (identifier: {data_column_identifier:?}, slot: {slot})",
                     );
 
                     let peer_id = pending_data_column_sidecar.origin.peer_id();
@@ -1625,7 +1627,10 @@ where
                 if self.store.contains_block(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
-                    debug!("data column sidecar delayed until block parent: {parent_root:?}");
+                    info!(
+                        "data column sidecar delayed until block parent: \
+                        {parent_root:?}, identifier: {data_column_identifier:?}",
+                    );
 
                     let peer_id = pending_data_column_sidecar.origin.peer_id();
 
@@ -1653,7 +1658,7 @@ where
                 if slot <= self.store.slot() {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
-                    debug!("data column sidecar delayed until slot: {slot}");
+                    info!("data column sidecar delayed until slot: {slot}");
 
                     let pending_data_column_sidecar =
                         reply_delayed_data_column_sidecar_validation_result(
@@ -2406,12 +2411,25 @@ where
         self.update_store_snapshot();
 
         let accepted_data_columns = self.store.accepted_data_column_sidecars_count(block_header);
+        let reconstruction_enabled = self.store.is_reconstruction_enabled_for(block_root);
 
-        let should_retry_block = if self.store.is_reconstruction_enabled_for(block_root) {
+        let should_retry_block = if reconstruction_enabled {
             accepted_data_columns * 2 >= P::NumberOfColumns::USIZE
         } else {
             accepted_data_columns == self.store.sampling_columns_count()
         };
+
+        info!(
+            "accepted data column sidecar: {block_root:?}, index: {}, slot: {}, \
+            accepted data columns: {}, should_retry_block: {should_retry_block}, \
+            reconstruction enabled: {reconstruction_enabled}, sampling columns count: {}, \
+            reconstruction started: {}",
+            data_column_sidecar.index,
+            block_header.slot,
+            accepted_data_columns,
+            self.store.sampling_columns_count(),
+            self.store.is_sidecars_construction_started(&block_root),
+        );
 
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
