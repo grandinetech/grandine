@@ -168,7 +168,6 @@ impl<P: Preset> Network<P> {
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(logger.clone(), shutdown_tx);
 
-        // TODO(peerdas-fulu): get custody value from metadata
         let custody_group_count =
             chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
 
@@ -207,6 +206,11 @@ impl<P: Preset> Network<P> {
         }
 
         if chain_config.is_peerdas_scheduled() {
+            let custody_group_count = network_globals
+                .local_metadata
+                .read()
+                .custody_group_count()
+                .unwrap_or(custody_group_count);
             let node_id = network_globals.local_enr().node_id().raw();
             let sampling_size = chain_config.sampling_size_custody_groups(custody_group_count);
 
