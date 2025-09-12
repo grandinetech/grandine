@@ -67,6 +67,8 @@ const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN: Duration = Duration::from_secs(12);
 const SEQUENTIAL_REDOWNLOADS_TILL_RESET: usize = 10;
 const MAX_COLUMNS_ASSIGNED_PER_PEER: usize = 32;
+// half of `DEFAULT_DATA_COLUMNS_BY_ROOT_QUOTA`
+const MAX_COLUMNS_BY_ROOT: u64 = 8192;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum SyncTarget {
@@ -1089,7 +1091,7 @@ impl<P: Preset> SyncManager<P> {
         local_head_slot: Slot,
     ) -> Option<HashMap<H256, HashSet<ColumnIndex>>> {
         let sampling_count = controller.sampling_columns_count();
-        let max_slot_ahead = 512_u64.checked_div(sampling_count as u64)?;
+        let max_slot_ahead = MAX_COLUMNS_BY_ROOT.checked_div(sampling_count as u64)?;
 
         self.received_data_column_sidecars
             .iter()

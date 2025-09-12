@@ -3711,7 +3711,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let block_root = block.hash_tree_root();
 
-        // TODO(peerdas-fulu): try to find a way to utilize sampling columns in network globals, rather than storing the indices twice
         self.sampling_columns
             .iter()
             .filter(|index| {
