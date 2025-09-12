@@ -114,7 +114,6 @@ pub fn compute_columns_for_custody_group<P: Preset>(
         ));
     }
 
-    columns.sort_unstable();
     Ok(columns.into_iter())
 }
 
