@@ -2621,11 +2621,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_header: BeaconBlockHeader,
         index: ColumnIndex,
     ) -> bool {
-        self.accepted_data_column_sidecars.contains_key(&(
+        let block_root = block_header.hash_tree_root();
+
+        if let Some(accepted) = self.accepted_data_column_sidecars.get(&(
             block_header.slot,
             block_header.proposer_index,
             index,
-        ))
+        )) {
+            return accepted.contains_key(&block_root);
+        }
+
+        false
     }
 
     pub fn is_reconstruction_enabled_for(&self, block_root: H256) -> bool {

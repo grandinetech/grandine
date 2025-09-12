@@ -1360,6 +1360,7 @@ where
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     fn handle_blob_sidecar(
         &mut self,
         wait_group: W,
@@ -1418,14 +1419,22 @@ where
 
                     let peer_id = pending_blob_sidecar.origin.peer_id();
 
-                    self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
-
                     let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
                         pending_blob_sidecar,
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
                     self.delay_blob_sidecar_until_state(pending_blob_sidecar, block_root);
+
+                    // During block validation the necessary beacon state should have been built
+                    // and stored in state cache despite block being delayed due to incomplete data availability.
+                    // If there is a delayed until blobs block and no corresponding state in state cache,
+                    // it means cache got pruned and it needs to rebuild necessary beacon state.
+                    if let Some(delayed_block) = self.take_delayed_until_blobs(block_root) {
+                        self.retry_block(wait_group, delayed_block);
+                    } else {
+                        self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+                    }
                 }
             }
             Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar)) => {
@@ -1600,8 +1609,6 @@ where
 
                     let peer_id = pending_data_column_sidecar.origin.peer_id();
 
-                    self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
-
                     let pending_data_column_sidecar =
                         reply_delayed_data_column_sidecar_validation_result(
                             pending_data_column_sidecar,
@@ -1612,6 +1619,16 @@ where
                         pending_data_column_sidecar,
                         block_root,
                     );
+
+                    // During block validation the necessary beacon state should have been built
+                    // and stored in state cache despite block being delayed due to incomplete data availability.
+                    // If there is a delayed until blobs block and no corresponding state in state cache,
+                    // it means cache got pruned and it needs to rebuild necessary beacon state.
+                    if let Some(delayed_block) = self.take_delayed_until_blobs(block_root) {
+                        self.retry_block(wait_group, delayed_block);
+                    } else {
+                        self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+                    }
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilParent(data_column_sidecar)) => {
