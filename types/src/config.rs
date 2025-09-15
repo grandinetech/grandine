@@ -5,6 +5,7 @@ use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
 use nonzero_ext::nonzero;
+use once_cell::sync::OnceCell;
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 use serde_utils::shared::Sortable;
 use serde_with::{As, DurationMilliSeconds};
@@ -23,7 +24,7 @@ use crate::{
             Slot, UnixSeconds, Version, H160, H256, H32,
         },
     },
-    preset::{Mainnet, Minimal, Preset, PresetName},
+    preset::{Preset, PresetName},
 };
 
 /// Configuration variables customizable at runtime.
@@ -186,7 +187,7 @@ pub struct Config {
 
     // Derived
     #[serde(skip)]
-    pub max_data_columns_by_root_request: usize,
+    pub max_data_columns_by_root_request: OnceCell<usize>,
 
     // Later phases and other unknown variables
     //
@@ -270,7 +271,7 @@ impl Default for Config {
             max_blobs_per_block: 6,
             max_blobs_per_block_electra: 9,
             max_request_blocks: 1024,
-            max_request_blocks_deneb: default_max_request_blocks_deneb(),
+            max_request_blocks_deneb: 128,
             max_request_blob_sidecars: 768,
             max_request_data_column_sidecars: 0x4000,
             min_epochs_for_blob_sidecars_requests: 4096,
@@ -299,31 +300,12 @@ impl Default for Config {
 
             blacklisted_blocks: vec![],
 
-            max_data_columns_by_root_request: max_data_columns_by_root_request::<Mainnet>(
-                default_max_request_blocks_deneb(),
-            ),
+            max_data_columns_by_root_request: OnceCell::new(),
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
         }
     }
-}
-
-const fn default_max_request_blocks_deneb() -> u64 {
-    128
-}
-
-fn max_data_columns_by_root_request<P: Preset>(max_request_blocks_deneb: u64) -> usize {
-    DynamicList::<DataColumnsByRootIdentifier<P>>::full(
-        DataColumnsByRootIdentifier {
-            block_root: H256::zero(),
-            columns: ContiguousList::full(0),
-        },
-        usize::try_from(max_request_blocks_deneb).expect("u64 to usize"),
-    )
-    .to_ssz()
-    .expect("Unable to get DataColumnsByRange full len")
-    .len()
 }
 
 #[derive(Constructor, Clone, Debug, Deserialize, Serialize)]
@@ -420,10 +402,6 @@ impl Config {
 
             // Networking
             min_epochs_for_block_requests: 272,
-
-            max_data_columns_by_root_request: max_data_columns_by_root_request::<Minimal>(
-                default_max_request_blocks_deneb(),
-            ),
 
             ..Self::default()
         }
@@ -1041,6 +1019,22 @@ impl Config {
         max_blobs
             .try_into()
             .expect("number of max blobs in block should fit in u64")
+    }
+
+    #[must_use]
+    pub fn max_data_columns_by_root_request<P: Preset>(&self) -> usize {
+        *self.max_data_columns_by_root_request.get_or_init(|| {
+            DynamicList::<DataColumnsByRootIdentifier<P>>::full(
+                DataColumnsByRootIdentifier {
+                    block_root: H256::zero(),
+                    columns: ContiguousList::full(0),
+                },
+                usize::try_from(self.max_request_blocks_deneb).expect("u64 to usize"),
+            )
+            .to_ssz()
+            .expect("Unable to get DataColumnSidecarsByRoot full length")
+            .len()
+        })
     }
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
