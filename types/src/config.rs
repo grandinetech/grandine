@@ -5,14 +5,17 @@ use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
 use nonzero_ext::nonzero;
+use once_cell::sync::OnceCell;
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 use serde_utils::shared::Sortable;
 use serde_with::{As, DurationMilliSeconds};
+use ssz::{ContiguousList, DynamicList, SszWrite};
 use thiserror::Error;
 use typenum::Unsigned as _;
 
 use crate::{
     bellatrix::primitives::Difficulty,
+    fulu::containers::DataColumnsByRootIdentifier,
     nonstandard::{Phase, Toption},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -182,6 +185,10 @@ pub struct Config {
     #[serde(skip_serializing)]
     pub blacklisted_blocks: Vec<H256>,
 
+    // Derived
+    #[serde(skip)]
+    pub max_data_columns_by_root_request: OnceCell<usize>,
+
     // Later phases and other unknown variables
     //
     // Collect unknown variables in a map so we can log a warning about them.
@@ -292,6 +299,8 @@ impl Default for Config {
             balance_per_additional_custody_group: 32_000_000_000,
 
             blacklisted_blocks: vec![],
+
+            max_data_columns_by_root_request: OnceCell::new(),
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
@@ -1010,6 +1019,22 @@ impl Config {
         max_blobs
             .try_into()
             .expect("number of max blobs in block should fit in u64")
+    }
+
+    #[must_use]
+    pub fn max_data_columns_by_root_request<P: Preset>(&self) -> usize {
+        *self.max_data_columns_by_root_request.get_or_init(|| {
+            DynamicList::<DataColumnsByRootIdentifier<P>>::full(
+                DataColumnsByRootIdentifier {
+                    block_root: H256::zero(),
+                    columns: ContiguousList::full(0),
+                },
+                usize::try_from(self.max_request_blocks_deneb).expect("u64 to usize"),
+            )
+            .to_ssz()
+            .expect("Unable to get DataColumnSidecarsByRoot full length")
+            .len()
+        })
     }
 
     fn fork_slots<P: Preset>(&self) -> impl Iterator<Item = (Phase, Toption<Slot>)> + '_ {
