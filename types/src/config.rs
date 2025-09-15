@@ -161,7 +161,7 @@ pub struct Config {
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars_fulu: u64,
-    #[serde(with = "serde_utils::sorted_list_asc_by_key")]
+    #[serde(with = "serde_utils::sorted_list_desc_by_key")]
     pub blob_schedule: Vec<BlobScheduleEntry>,
 
     // Transition
@@ -998,7 +998,6 @@ impl Config {
         // `epoch` in descending order.
         self.blob_schedule
             .iter()
-            .rev()
             .find_map(|entry| (epoch >= entry.epoch).then_some(entry.clone()))
             .unwrap_or_else(|| {
                 BlobScheduleEntry::new(self.electra_fork_epoch, self.max_blobs_per_block_electra)
