@@ -16,7 +16,9 @@ pub fn serialize<S: Serializer>(
     items: impl IntoIterator<Item = impl Serialize>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(items)
+    let mut reversed = items.into_iter().collect::<Vec<_>>();
+    reversed.reverse();
+    reversed.serialize(serializer)
 }
 
 pub fn deserialize<'de, I, T, D>(deserializer: D) -> Result<T, D::Error>
