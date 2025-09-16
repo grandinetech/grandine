@@ -2047,6 +2047,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
+        // Ignore non-sampling data column sidecars
+        if !self.sampling_columns.contains(&data_column_sidecar.index) {
+            return Ok(DataColumnSidecarAction::Ignore(false));
+        }
+
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
         ensure!(
             verify_data_column_sidecar(&data_column_sidecar),
