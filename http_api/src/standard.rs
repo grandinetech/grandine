@@ -2452,11 +2452,9 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
     EthPath(epoch): EthPath<Epoch>,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-
     let head = controller.head();
-    let head_epoch = misc::compute_epoch_at_slot::<P>(head.value.slot());
 
-    let (state, status) = if epoch >= head_epoch {
+    let (state, status) = if start_slot >= head.value.slot() {
         let block_root = controller.head().value.block_root;
         // `state_id::state` allows only a limited range of empty slots to be processed
         let state = controller.preprocessed_state_for_block_production(block_root, start_slot)?;
