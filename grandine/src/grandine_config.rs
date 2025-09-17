@@ -35,6 +35,7 @@ pub struct GrandineConfig {
     pub genesis_state_file: Option<PathBuf>,
     pub genesis_state_download_url: Option<RedactingUrl>,
     pub checkpoint_sync_url: Option<RedactingUrl>,
+    pub checkpoint_sync_slot: Option<Slot>,
     pub force_checkpoint_sync: bool,
     pub back_sync_enabled: bool,
     pub eth1_rpc_urls: Vec<RedactingUrl>,
