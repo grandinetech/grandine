@@ -3512,7 +3512,8 @@ where
         if let Some(metrics) = self.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
 
-            let (high_priority_tasks, low_priority_tasks) = self.thread_pool.task_counts();
+            let (high_priority_tasks, mid_priority_tasks, low_priority_tasks) =
+                self.thread_pool.task_counts();
 
             metrics.set_collection_length(
                 module_path!(),
@@ -3624,6 +3625,13 @@ where
                 &type_name,
                 "high_priority_tasks",
                 high_priority_tasks,
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "mid_priority_tasks",
+                mid_priority_tasks,
             );
 
             metrics.set_collection_length(

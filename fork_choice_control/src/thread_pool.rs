@@ -70,11 +70,12 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
         self.shared.condvar.notify_one();
     }
 
-    pub fn task_counts(&self) -> (usize, usize) {
+    pub fn task_counts(&self) -> (usize, usize, usize) {
         let critical = self.shared.critical.lock();
         let high = critical.high_priority_tasks.len();
+        let mid = critical.mid_priority_tasks.len();
         let low = critical.low_priority_tasks.len();
-        (high, low)
+        (high, mid, low)
     }
 }
 
@@ -96,32 +97,43 @@ pub struct Critical<P: Preset, E, W> {
     // allocation permanently. An unrolled linked list (other than `crossbeam_queue::SegQueue`)
     // might be the best of both worlds.
     high_priority_tasks: VecDeque<HighPriorityTask<P, E, W>>,
+    mid_priority_tasks: VecDeque<MidPriorityTask<P, W>>,
     low_priority_tasks: VecDeque<LowPriorityTask<P, W>>,
 }
 
-// TODO(feature/deneb): Figure out if `BlobSidecarTask` should be a high priority task.
 #[derive(From)]
 enum HighPriorityTask<P: Preset, E, W> {
+    BlobSidecar(BlobSidecarTask<P, W>),
     Block(BlockTask<P, E, W>),
     BlockForGossip(BlockVerifyForGossipTask<P, W>),
-    BlobSidecar(BlobSidecarTask<P, W>),
     // `CheckpointStateTask` is a high priority task to prevent attestation tasks from delaying
     // processing of blocks that are waiting for checkpoint states. However, this may result in a
     // `CheckpointStateTask` being prioritized when it's only needed to verify attestations.
     CheckpointState(CheckpointStateTask<P, W>),
-    DataColumnSidecar(DataColumnSidecarTask<P, W>),
     PreprocessState(PreprocessStateTask<P, W>),
+}
+
+#[derive(From)]
+enum MidPriorityTask<P: Preset, W> {
+    DataColumnSidecar(DataColumnSidecarTask<P, W>),
 }
 
 impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, W> {
     fn run(self) {
         match self {
+            Self::BlobSidecar(task) => task.run(),
             Self::Block(task) => task.run(),
             Self::BlockForGossip(task) => task.run(),
-            Self::BlobSidecar(task) => task.run(),
             Self::CheckpointState(task) => task.run(),
-            Self::DataColumnSidecar(task) => task.run(),
             Self::PreprocessState(task) => task.run(),
+        }
+    }
+}
+
+impl<P: Preset, W> Run for MidPriorityTask<P, W> {
+    fn run(self) {
+        match self {
+            Self::DataColumnSidecar(task) => task.run(),
         }
     }
 }
@@ -177,7 +189,7 @@ impl<P: Preset, E, W> Spawn<P, E, W> for BlobSidecarTask<P, W> {
 
 impl<P: Preset, E, W> Spawn<P, E, W> for DataColumnSidecarTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
-        critical.high_priority_tasks.push_back(self.into())
+        critical.mid_priority_tasks.push_back(self.into())
     }
 }
 
@@ -255,6 +267,13 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
             if let Some(task) = critical.high_priority_tasks.pop_front() {
                 drop(critical);
                 debug!("thread {} received high priority task", thread_name());
+                task.run_and_handle_panics();
+                continue 'outer;
+            }
+
+            if let Some(task) = critical.mid_priority_tasks.pop_front() {
+                drop(critical);
+                debug!("thread {} received mid priority task", thread_name());
                 task.run_and_handle_panics();
                 continue 'outer;
             }
