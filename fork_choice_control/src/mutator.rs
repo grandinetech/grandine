@@ -83,7 +83,7 @@ use crate::{
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
         DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask,
+        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -3005,16 +3005,18 @@ where
             submission_time,
         } = pending_data_column_sidecar;
 
-        self.spawn(DataColumnSidecarTask {
-            store_snapshot: self.owned_store(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group,
-            data_column_sidecar,
-            state,
-            block_seen,
-            origin,
-            submission_time,
-            metrics: self.metrics.clone(),
+        self.spawn(RetryDataColumnSidecarTask {
+            task: DataColumnSidecarTask {
+                store_snapshot: self.owned_store(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group,
+                data_column_sidecar,
+                state,
+                block_seen,
+                origin,
+                submission_time,
+                metrics: self.metrics.clone(),
+            },
         });
     }
 

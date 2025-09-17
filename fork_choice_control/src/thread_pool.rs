@@ -22,13 +22,13 @@ use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
 use types::preset::Preset;
 
-use crate::tasks::DataColumnSidecarTask;
 use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
-        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask, PersistPubkeyCacheTask,
-        PreprocessStateTask, Run, StateAtSlotCacheFlushTask,
+        DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask, Run,
+        StateAtSlotCacheFlushTask,
     },
     wait::Wait,
 };
@@ -111,6 +111,7 @@ enum HighPriorityTask<P: Preset, E, W> {
     // `CheckpointStateTask` being prioritized when it's only needed to verify attestations.
     CheckpointState(CheckpointStateTask<P, W>),
     PreprocessState(PreprocessStateTask<P, W>),
+    RetryDataColumnSidecar(RetryDataColumnSidecarTask<P, W>),
 }
 
 #[derive(From)]
@@ -126,6 +127,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, 
             Self::BlockForGossip(task) => task.run(),
             Self::CheckpointState(task) => task.run(),
             Self::PreprocessState(task) => task.run(),
+            Self::RetryDataColumnSidecar(task) => task.run(),
         }
     }
 }
@@ -238,6 +240,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PersistBlobSidecarsTask<P, W> {
 impl<P: Preset, E, W> Spawn<P, E, W> for PersistPubkeyCacheTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for RetryDataColumnSidecarTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.high_priority_tasks.push_back(self.into())
     }
 }
 

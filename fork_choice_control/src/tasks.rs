@@ -458,6 +458,16 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
     }
 }
 
+pub struct RetryDataColumnSidecarTask<P: Preset, W> {
+    pub task: DataColumnSidecarTask<P, W>,
+}
+
+impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
+    fn run(self) {
+        self.task.run()
+    }
+}
+
 pub struct PersistBlobSidecarsTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub storage: Arc<Storage<P>>,
