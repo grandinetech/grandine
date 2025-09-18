@@ -44,6 +44,10 @@ use types::{
         beacon_state::BeaconState as FuluBeaconState,
         containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     },
+    gloas::{
+        beacon_state::BeaconState as GloasBeaconState,
+        containers::{BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody},
+    },
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
@@ -86,6 +90,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
             Phase::Deneb => DenebBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Electra => ElectraBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Fulu => FuluBeaconBlockBody::<P>::default().hash_tree_root(),
+            Phase::Gloas => GloasBeaconBlockBody::<P>::default().hash_tree_root(),
         };
 
         let latest_block_header = BeaconBlockHeader {
@@ -144,6 +149,14 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 latest_block_header,
                 deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
                 ..FuluBeaconState::default()
+            }
+            .into(),
+            Phase::Gloas => GloasBeaconState {
+                slot,
+                fork,
+                latest_block_header,
+                deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
+                ..GloasBeaconState::default()
             }
             .into(),
         };
@@ -330,6 +343,7 @@ fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBea
         Phase::Deneb => BeaconBlock::from(DenebBeaconBlock::default()),
         Phase::Electra => BeaconBlock::from(ElectraBeaconBlock::default()),
         Phase::Fulu => BeaconBlock::from(FuluBeaconBlock::default()),
+        Phase::Gloas => BeaconBlock::from(GloasBeaconBlock::default()),
     }
     .with_state_root(state_root)
     .with_zero_signature()
@@ -428,7 +442,7 @@ mod spec_tests {
         let expected_genesis_state = case.ssz::<_, BeaconState<Minimal>>(&config, "state");
 
         let execution_payload_header = match phase {
-            Phase::Phase0 | Phase::Altair => {
+            Phase::Phase0 | Phase::Altair | Phase::Gloas => {
                 assert!(!case.exists("execution_payload_header"));
                 None
             }

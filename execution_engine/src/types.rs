@@ -755,6 +755,7 @@ pub enum PayloadId {
     Deneb(H64),
     Electra(H64),
     Fulu(H64),
+    Gloas(H64),
 }
 
 #[derive(Deserialize)]

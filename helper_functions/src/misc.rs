@@ -711,6 +711,15 @@ pub fn construct_blob_sidecar<P: Preset>(
         SignedBeaconBlock::Fulu(block) => {
             electra_kzg_commitment_inclusion_proof(&block.message.body, index)?
         }
+        SignedBeaconBlock::Gloas(_) => {
+            let message = block.message();
+
+            return Err(Error::BlobsForPostGloasBlock {
+                root: message.hash_tree_root(),
+                slot: message.slot(),
+            }
+            .into());
+        }
         SignedBeaconBlock::Phase0(_)
         | SignedBeaconBlock::Altair(_)
         | SignedBeaconBlock::Bellatrix(_)

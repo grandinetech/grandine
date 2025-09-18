@@ -98,7 +98,8 @@ use types::{
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{
-        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -904,7 +905,10 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = state.phase();
-    let proposer_lookahead = state.proposer_lookahead().ok_or(Error::StatePreFulu)?;
+    let proposer_lookahead = state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
+        .ok_or(Error::StatePreFulu)?;
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
         .execution_optimistic(status.is_optimistic())
@@ -1956,7 +1960,7 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
                 .map(|slashing| AttesterSlashing::Phase0(slashing))
                 .collect()
         }
-        Phase::Electra | Phase::Fulu => slashings
+        Phase::Electra | Phase::Fulu | Phase::Gloas => slashings
             .into_iter()
             .filter_map(AttesterSlashing::post_electra)
             .map(|slashing| AttesterSlashing::Electra(slashing))

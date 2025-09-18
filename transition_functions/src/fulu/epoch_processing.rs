@@ -6,8 +6,11 @@ use ssz::{PersistentVector, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    capella::containers::HistoricalSummary, config::Config,
-    fulu::beacon_state::BeaconState as FuluBeaconState, preset::Preset, traits::BeaconState,
+    capella::containers::HistoricalSummary,
+    config::Config,
+    fulu::beacon_state::BeaconState as FuluBeaconState,
+    preset::Preset,
+    traits::{BeaconState, PostFuluBeaconState},
 };
 
 use super::epoch_intermediates;
@@ -95,11 +98,11 @@ fn process_historical_summaries_update<P: Preset>(state: &mut FuluBeaconState<P>
     Ok(())
 }
 
-fn process_proposer_lookahead<P: Preset>(
+pub fn process_proposer_lookahead<P: Preset>(
     config: &Config,
-    state: &mut FuluBeaconState<P>,
+    state: &mut impl PostFuluBeaconState<P>,
 ) -> Result<()> {
-    let mut proposer_lookahead = state.proposer_lookahead.into_iter().collect::<Vec<_>>();
+    let mut proposer_lookahead = state.proposer_lookahead().into_iter().collect::<Vec<_>>();
 
     let last_epoch_start = proposer_lookahead
         .len()
@@ -111,7 +114,7 @@ fn process_proposer_lookahead<P: Preset>(
     let refs = last_proposers_indices.iter().collect::<Vec<&_>>();
     proposer_lookahead[last_epoch_start..].copy_from_slice(&refs);
 
-    state.proposer_lookahead =
+    *state.proposer_lookahead_mut() =
         PersistentVector::try_from_iter(proposer_lookahead.into_iter().copied())?;
 
     Ok(())

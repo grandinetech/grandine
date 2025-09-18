@@ -310,6 +310,7 @@ pub fn construct_data_column_sidecars<P: Preset>(
     let signed_block_header = signed_block.to_header();
     let body = match signed_block {
         SignedBeaconBlock::Fulu(block) => &block.message.body,
+        SignedBeaconBlock::Gloas(_) => todo!(),
         SignedBeaconBlock::Phase0(_)
         | SignedBeaconBlock::Altair(_)
         | SignedBeaconBlock::Bellatrix(_)
