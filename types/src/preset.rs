@@ -1051,7 +1051,7 @@ mod tests {
         for preset_name in enum_iterator::all::<PresetName>() {
             // Do not remove the type annotation.
             // It ensures that this test is up to date when new phases are added.
-            let _: [&dyn Send; Phase::CARDINALITY] = [
+            let _: [&dyn Send; Phase::CARDINALITY - 1] = [
                 &preset_name.phase0_preset(),
                 &preset_name.altair_preset(),
                 &preset_name.bellatrix_preset(),

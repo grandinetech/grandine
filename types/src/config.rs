@@ -78,6 +78,9 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub fulu_fork_epoch: Epoch,
     pub fulu_fork_version: Version,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub gloas_fork_epoch: Epoch,
+    pub gloas_fork_version: Version,
 
     // Time parameters
     #[serde(with = "serde_utils::string_or_native")]
@@ -235,6 +238,8 @@ impl Default for Config {
             electra_fork_version: H32(hex!("05000000")),
             fulu_fork_epoch: FAR_FUTURE_EPOCH,
             fulu_fork_version: H32(hex!("06000000")),
+            gloas_fork_epoch: FAR_FUTURE_EPOCH,
+            gloas_fork_version: H32(hex!("07000000")),
 
             // Time parameters
             eth1_follow_distance: 2048,
@@ -381,6 +386,7 @@ impl Config {
             deneb_fork_version: H32(hex!("04000001")),
             electra_fork_version: H32(hex!("05000001")),
             fulu_fork_version: H32(hex!("06000001")),
+            gloas_fork_version: H32(hex!("07000001")),
 
             // Time parameters
             eth1_follow_distance: 16,
@@ -881,6 +887,7 @@ impl Config {
             Phase::Deneb => self.deneb_fork_version,
             Phase::Electra => self.electra_fork_version,
             Phase::Fulu => self.fulu_fork_version,
+            Phase::Gloas => self.gloas_fork_version,
         }
     }
 
@@ -901,6 +908,7 @@ impl Config {
             Phase::Deneb => self.deneb_fork_epoch,
             Phase::Electra => self.electra_fork_epoch,
             Phase::Fulu => self.fulu_fork_epoch,
+            Phase::Gloas => self.gloas_fork_epoch,
         }
     }
 
@@ -952,7 +960,9 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella => {
                 self.max_request_blocks
             }
-            Phase::Deneb | Phase::Electra | Phase::Fulu => self.max_request_blocks_deneb,
+            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
+                self.max_request_blocks_deneb
+            }
         }
     }
 
@@ -962,7 +972,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 self.blob_sidecar_subnet_count
             }
-            Phase::Electra | Phase::Fulu => self.blob_sidecar_subnet_count_electra,
+            Phase::Electra | Phase::Fulu | Phase::Gloas => self.blob_sidecar_subnet_count_electra,
         }
     }
 
@@ -972,7 +982,7 @@ impl Config {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 self.max_request_blob_sidecars
             }
-            Phase::Electra | Phase::Fulu => self.max_request_blob_sidecars_electra,
+            Phase::Electra | Phase::Fulu | Phase::Gloas => self.max_request_blob_sidecars_electra,
         }
     }
 
@@ -1057,7 +1067,7 @@ impl Config {
                 self.max_blobs_per_block
             }
             Phase::Electra => self.max_blobs_per_block_electra,
-            Phase::Fulu => self.get_blob_schedule_entry(epoch).max_blobs_per_block,
+            Phase::Fulu | Phase::Gloas => self.get_blob_schedule_entry(epoch).max_blobs_per_block,
         };
 
         max_blobs
@@ -1095,6 +1105,7 @@ impl Config {
             self.deneb_fork_epoch,
             self.electra_fork_epoch,
             self.fulu_fork_epoch,
+            self.gloas_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)
@@ -1110,6 +1121,7 @@ impl Config {
             &mut self.deneb_fork_epoch,
             &mut self.electra_fork_epoch,
             &mut self.fulu_fork_epoch,
+            &mut self.gloas_fork_epoch,
         ];
 
         enum_iterator::all().skip(1).zip(fields)

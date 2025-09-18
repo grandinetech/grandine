@@ -221,6 +221,8 @@ pub mod electra {
 }
 
 pub mod fulu {
+    pub use epoch_processing::process_proposer_lookahead;
+
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
@@ -228,6 +230,20 @@ pub mod fulu {
     pub(crate) use state_transition::{state_transition, verify_signatures};
 
     mod blinded_block_processing;
+    mod block_processing;
+    mod epoch_intermediates;
+    mod epoch_processing;
+    mod slot_processing;
+    mod state_transition;
+}
+
+pub mod gloas {
+    pub(crate) use block_processing::{process_block, process_block_for_gossip};
+    pub use block_processing::{validate_voluntary_exit, validate_voluntary_exit_with_verifier};
+    pub(crate) use epoch_processing::{epoch_report, process_epoch};
+    pub(crate) use slot_processing::process_slots;
+    pub(crate) use state_transition::{state_transition, verify_signatures};
+
     mod block_processing;
     mod epoch_intermediates;
     mod epoch_processing;

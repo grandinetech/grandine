@@ -87,6 +87,14 @@ pub mod fulu {
     mod spec_tests;
 }
 
+pub mod gloas {
+    pub mod beacon_state;
+    pub mod containers;
+
+    #[cfg(test)]
+    mod spec_tests;
+}
+
 pub use collections::ProposerLookahead;
 
 mod collections;
