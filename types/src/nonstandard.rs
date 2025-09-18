@@ -61,6 +61,7 @@ pub enum Phase {
     Deneb,
     Electra,
     Fulu,
+    Gloas,
 }
 
 impl Phase {
@@ -607,6 +608,7 @@ mod tests {
             Phase::Deneb,
             Phase::Electra,
             Phase::Fulu,
+            Phase::Gloas,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);

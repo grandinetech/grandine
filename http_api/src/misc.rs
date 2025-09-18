@@ -45,6 +45,7 @@ use types::{
         SignedBeaconBlock as FuluSignedBeaconBlock,
         SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
     },
+    gloas::containers::SignedBeaconBlock as GloasSignedBeaconBlock,
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
         consts::TargetAggregatorsPerCommittee,
@@ -119,6 +120,14 @@ pub struct SignedFuluBlockWithBlobs<P: Preset> {
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
+#[derive(Deserialize, Ssz)]
+#[serde(bound = "")]
+pub struct SignedGloasBlockWithBlobs<P: Preset> {
+    pub signed_block: GloasSignedBeaconBlock<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
 #[derive(Serialize, Ssz)]
 #[serde(bound = "")]
 #[ssz(derive_read = false, derive_hash = false)]
@@ -177,6 +186,11 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
                 kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
                 blobs: blobs.unwrap_or_default(),
             }),
+            BeaconBlock::Gloas(block) => Self::WithBlobs(BlockWithBlobs {
+                block: block.into(),
+                kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
+                blobs: blobs.unwrap_or_default(),
+            }),
         }
     }
 }
@@ -224,6 +238,10 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                     kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
                     blobs: blobs.unwrap_or_default(),
                 }),
+                // TODO(gloas): there is no blinded/unblinded block term in Gloas
+                BeaconBlock::Gloas(block) => {
+                    Self::Other(ValidatorBlindedBlock::BeaconBlock(block.into()))
+                }
             },
         }
     }
@@ -262,12 +280,14 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPha
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
-                Phase::Electra | Phase::Fulu => ContiguousList::<
-                    ElectraSignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
-                >::deserialize(deserializer)?
-                .map(Into::into)
-                .map(Arc::new),
+                Phase::Electra | Phase::Fulu | Phase::Gloas => {
+                    ContiguousList::<
+                        ElectraSignedAggregateAndProof<P>,
+                        TargetAggregatorsPerCommittee,
+                    >::deserialize(deserializer)?
+                    .map(Into::into)
+                    .map(Arc::new)
+                }
             };
 
         Ok(result)
@@ -302,7 +322,7 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SingleApiAttestationListPhaseDeser
                 )?
                 .map(Into::into)
             }
-            Phase::Electra | Phase::Fulu => ContiguousList::<
+            Phase::Electra | Phase::Fulu | Phase::Gloas => ContiguousList::<
                 SingleAttestation,
                 P::MaxAttestersPerSlot,
             >::deserialize(deserializer)?
@@ -322,7 +342,7 @@ pub enum SingleApiAttestation<P: Preset> {
 impl<P: Preset> SszSize for SingleApiAttestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
         Phase0Attestation::<P>::SIZE,
         SingleAttestation::SIZE,
     ]);
@@ -334,7 +354,9 @@ impl<P: Preset> SszRead<Phase> for SingleApiAttestation<P> {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
             }
-            Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra | Phase::Fulu | Phase::Gloas => {
+                Self::Electra(SszReadDefault::from_ssz_default(bytes)?)
+            }
         };
 
         Ok(api_attestation)
@@ -380,6 +402,9 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedBlindedBeaconPhaseDeserializ
             Phase::Deneb => DenebSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
             Phase::Electra => ElectraSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
             Phase::Fulu => FuluSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Gloas => {
+                return Err(D::Error::custom("there is no blinded block in phase Gloas"))
+            }
         };
 
         Ok(Box::new(result))
@@ -414,6 +439,7 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAPIBlockPhaseDeserializer<P>
             Phase::Deneb => SignedDenebBlockWithBlobs::deserialize(deserializer)?.into(),
             Phase::Electra => SignedElectraBlockWithBlobs::deserialize(deserializer)?.into(),
             Phase::Fulu => SignedFuluBlockWithBlobs::deserialize(deserializer)?.into(),
+            Phase::Gloas => SignedGloasBlockWithBlobs::deserialize(deserializer)?.into(),
         };
 
         Ok(Box::new(result))
@@ -433,6 +459,7 @@ pub enum SignedAPIBlock<P: Preset> {
     Deneb(SignedDenebBlockWithBlobs<P>),
     Electra(SignedElectraBlockWithBlobs<P>),
     Fulu(SignedFuluBlockWithBlobs<P>),
+    Gloas(SignedGloasBlockWithBlobs<P>),
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
@@ -481,6 +508,19 @@ impl<P: Preset> SignedAPIBlock<P> {
                     Some(blobs),
                 )
             }
+            Self::Gloas(block) => {
+                let SignedGloasBlockWithBlobs {
+                    signed_block,
+                    kzg_proofs,
+                    blobs,
+                } = block;
+
+                (
+                    signed_block.into(),
+                    Some(KzgProofs::Fulu(kzg_proofs)),
+                    Some(blobs),
+                )
+            }
         }
     }
 }
@@ -496,6 +536,7 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
         SignedDenebBlockWithBlobs::<P>::SIZE,
         SignedElectraBlockWithBlobs::<P>::SIZE,
         SignedFuluBlockWithBlobs::<P>::SIZE,
+        SignedGloasBlockWithBlobs::<P>::SIZE,
     ]);
 }
 
@@ -509,6 +550,7 @@ impl<P: Preset> SszRead<Phase> for SignedAPIBlock<P> {
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(api_block)
