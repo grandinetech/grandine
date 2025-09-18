@@ -13,7 +13,6 @@ IGNORED_GLOBS = %w[
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/data_collection/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/eip7805/*/*/*/*/*.{ssz_snappy,yaml}
-  tests/*/gloas/*/*/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/{compatible_unions,progressive_bitlist,progressive_containers,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/containers/{valid,invalid}/{ProgressiveBitsStruct,ProgressiveTestStruct}_*/*.{ssz_snappy,yaml}
   tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
