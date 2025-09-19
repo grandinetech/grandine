@@ -37,7 +37,10 @@ use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
-    phase0::primitives::{Slot, H256},
+    phase0::{
+        consts::GENESIS_SLOT,
+        primitives::{Slot, H256},
+    },
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -46,6 +49,7 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     back_sync::{
         BackSync, BackSyncDataBySlot, Data as BackSyncData, Error as BackSyncError, SyncCheckpoint,
+        SyncMode as BackSyncMode,
     },
     messages::{ArchiverToSync, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p},
     misc::{PeerReportReason, RPCRequestType},
@@ -76,7 +80,7 @@ pub struct Channels<P: Preset> {
 
 pub struct BlockSyncService<P: Preset> {
     config: Arc<Config>,
-    database: Option<Database>,
+    database: Database,
     sync_direction: SyncDirection,
     back_sync: Option<BackSync<P>>,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
@@ -127,7 +131,6 @@ impl<P: Preset> BlockSyncService<P> {
         data_dumper: Arc<DataDumper>,
         network_globals: Arc<NetworkGlobals>,
     ) -> Result<Self> {
-        let database;
         let back_sync;
 
         let (archiver_to_sync_tx, archiver_to_sync_rx) = if back_sync_enabled {
@@ -163,11 +166,14 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                     });
 
-                let back_sync_process = BackSync::<P>::new(BackSyncData {
-                    current: anchor_checkpoint,
-                    high: anchor_checkpoint,
-                    low: back_sync_terminus,
-                });
+                let back_sync_process = BackSync::<P>::new(
+                    BackSyncData {
+                        current: anchor_checkpoint,
+                        high: anchor_checkpoint,
+                        low: back_sync_terminus,
+                    },
+                    BackSyncMode::Default,
+                );
 
                 if !back_sync_process.is_finished() {
                     back_sync_process.save(&db)?;
@@ -182,10 +188,8 @@ impl<P: Preset> BlockSyncService<P> {
 
             let (sync_tx, sync_rx) = futures::channel::mpsc::unbounded();
 
-            database = Some(db);
             (Some(sync_tx), Some(sync_rx))
         } else {
-            database = None;
             back_sync = None;
             (None, None)
         };
@@ -204,9 +208,11 @@ impl<P: Preset> BlockSyncService<P> {
         let is_forward_synced = controller.is_forward_synced();
         let slot = controller.slot();
 
+        controller.on_back_sync_status(is_back_synced);
+
         let mut service = Self {
             config,
-            database,
+            database: db,
             sync_direction: SyncDirection::Forward,
             back_sync,
             anchor_checkpoint_provider,
@@ -270,21 +276,8 @@ impl<P: Preset> BlockSyncService<P> {
                     ArchiverToSync::BackSyncStatesArchived => {
                         debug!("received back-sync states archived message");
 
-                        if let Some(back_sync) = self.back_sync.as_mut() {
-                            if let Some(database) = self.database.as_ref() {
-                                back_sync.remove(database)?;
-
-                                debug!("finishing back-sync: {:?}", back_sync.data());
-
-                                if let Some(sync) = BackSync::load(database)? {
-                                    self.back_sync = Some(sync);
-                                    self.try_to_spawn_back_sync_states_archiver()?;
-                                    self.request_blobs_and_blocks_if_ready()?;
-                                } else {
-                                    self.set_back_synced(true);
-                                }
-                            }
-                        }
+                        self.finish_back_sync()?;
+                        self.controller.on_back_sync_status(true);
                     }
                 },
 
@@ -293,13 +286,11 @@ impl<P: Preset> BlockSyncService<P> {
                     None => Either::Right(futures::future::pending()),
                 }, if self.fork_choice_to_sync_rx.is_some() => match message {
                     SyncMessage::Finalized(block) => {
-                        if let Some(database) = &self.database {
-                            let checkpoint = block.as_ref().into();
+                        let checkpoint = block.as_ref().into();
 
-                            debug!("saving latest finalized back-sync checkpoint: {checkpoint:?}");
+                        debug!("saving latest finalized back-sync checkpoint: {checkpoint:?}");
 
-                            save_latest_finalized_back_sync_checkpoint(database, checkpoint)?;
-                        }
+                        save_latest_finalized_back_sync_checkpoint(&self.database, checkpoint)?;
                     }
                 },
 
@@ -577,6 +568,11 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::PeerCgcUpdated(peer_id) => {
                             self.sync_manager.update_peer_cgc(peer_id);
                         }
+                        P2pToSync::RequestCustodyGroupBackfill(column_indices) => {
+                            if let Err(error) = self.request_custody_group_backfill(column_indices) {
+                                warn!("failed to start data column backfill: {error}");
+                            }
+                        }
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
 
@@ -608,16 +604,13 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         };
 
-        let Some(database) = self.database.as_ref() else {
-            return Ok(());
-        };
-
-        if let Err(error) = back_sync.verify_blocks(&self.config, database, &self.controller) {
-            warn!("error occurred while verifying back-sync blocks: {error:?}");
+        if let Err(error) = back_sync.verify_blocks(&self.config, &self.database, &self.controller)
+        {
+            warn!("error occurred while verifying back-sync data: {error:?}");
 
             if let Some(BackSyncError::FinalCheckpointMismatch::<P> { .. }) = error.downcast_ref() {
-                back_sync.remove(database)?;
-                self.back_sync = BackSync::load(database)?;
+                back_sync.remove(&self.database)?;
+                self.back_sync = BackSync::load(&self.database)?;
             }
         }
 
@@ -626,6 +619,27 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         self.try_to_spawn_back_sync_states_archiver()
+    }
+
+    fn finish_back_sync(&mut self) -> Result<()> {
+        if let Some(back_sync) = self.back_sync.as_mut() {
+            back_sync.remove(&self.database)?;
+
+            debug!("finishing back-sync: {:?}", back_sync.data());
+
+            if let Some(sync) = BackSync::load(&self.database)? {
+                self.back_sync = Some(sync);
+                self.try_to_spawn_back_sync_states_archiver()?;
+                self.request_blobs_and_blocks_if_ready()?;
+            } else {
+                SyncToP2p::UpdateEarliestAvailableSlot(back_sync.current_slot())
+                    .send(&self.sync_to_p2p_tx);
+
+                self.set_back_synced(true);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn try_to_spawn_back_sync_states_archiver(&mut self) -> Result<()> {
@@ -637,6 +651,9 @@ impl<P: Preset> BlockSyncService<P> {
                     self.is_exiting.clone_arc(),
                     archiver_to_sync_tx.clone(),
                 )?;
+            } else if back_sync.is_finished() {
+                // Trigger back sync finish & clean-up without archiving
+                self.finish_back_sync()?;
             }
         }
 
@@ -895,6 +912,7 @@ impl<P: Preset> BlockSyncService<P> {
                             // download one extra block for parent validation
                             back_sync.low_slot_with_parent(),
                             &sampling_columns,
+                            back_sync.sync_mode(),
                         )
                     })
                     .unwrap_or_default()
@@ -943,6 +961,55 @@ impl<P: Preset> BlockSyncService<P> {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    fn request_custody_group_backfill(&mut self, column_indices: HashSet<u64>) -> Result<()> {
+        let current: SyncCheckpoint = self.controller.head().value.block.as_ref().into();
+
+        if current.slot == GENESIS_SLOT {
+            return Ok(());
+        }
+
+        // +1 to include head slot into backfill range
+        let current = SyncCheckpoint {
+            slot: current.slot + 1,
+            ..current
+        };
+
+        let high = current;
+
+        let low = match &self.back_sync {
+            Some(back_sync) => back_sync.data().current,
+            // If back sync does not exist, that means all the back sync is completed
+            None => {
+                let terminus_epoch = self.controller.min_checked_block_availability_epoch();
+                SyncCheckpoint {
+                    slot: misc::compute_start_slot_at_epoch::<P>(terminus_epoch),
+                    block_root: H256::zero(),
+                    parent_root: H256::zero(),
+                }
+            }
+        };
+
+        let back_sync_process = BackSync::<P>::new(
+            BackSyncData { current, high, low },
+            BackSyncMode::DataColumnsOnly { column_indices },
+        );
+
+        if !back_sync_process.is_finished() {
+            back_sync_process.save(&self.database)?;
+        }
+
+        self.back_sync = Some(back_sync_process);
+
+        if self.is_forward_synced {
+            self.sync_direction = SyncDirection::Back;
+            self.set_back_synced(false);
+        }
+
+        self.request_blobs_and_blocks_if_ready()?;
 
         Ok(())
     }
@@ -1238,8 +1305,6 @@ impl<P: Preset> BlockSyncService<P> {
             self.sync_manager.cache_clear();
             self.sync_direction = SyncDirection::Forward;
         }
-
-        self.controller.on_back_sync_status(is_back_synced);
     }
 
     fn set_forward_synced(&mut self, is_forward_synced: bool) -> Result<()> {

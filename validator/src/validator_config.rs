@@ -20,4 +20,6 @@ pub struct ValidatorConfig {
     pub default_gas_limit: Gas,
     pub keystore_storage_password_file: Option<PathBuf>,
     pub withhold_data_columns_publishing: bool,
+    #[derivative(Default(value = "true"))]
+    pub backfill_custody_groups: bool,
 }

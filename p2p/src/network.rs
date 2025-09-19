@@ -472,6 +472,12 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
+                        ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count, backfill_custody_groups) => {
+                            self.update_data_column_subnets(custody_group_count, backfill_custody_groups);
+                        }
+                        ValidatorToP2p::UpdateEarliestAvailableSlot(slot) => {
+                            self.update_earliest_available_slot(slot);
+                        }
                     }
                 },
 
@@ -519,12 +525,6 @@ impl<P: Preset> Network<P> {
                     match message {
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
-                        }
-                        SubnetServiceToP2p::UpdateDataColumnSubnets(custody_group_count) => {
-                            self.update_data_column_subnets(custody_group_count);
-                        }
-                        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot) => {
-                            self.update_earliest_available_slot(slot);
                         }
                         SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions) => {
                             self.update_sync_committee_subnets(actions);
@@ -954,7 +954,7 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn update_data_column_subnets(&self, custody_group_count: u64) {
+    fn update_data_column_subnets(&self, custody_group_count: u64, backfill_custody_groups: bool) {
         ServiceInboundMessage::UpdateEnrCgc(custody_group_count).send(&self.network_to_service_tx);
 
         let node_id = self.network_globals.local_enr().node_id().raw();
@@ -964,8 +964,17 @@ impl<P: Preset> Network<P> {
         ServiceInboundMessage::UpdateDataColumnSubnets(sampling_size)
             .send(&self.network_to_service_tx);
 
-        Self::update_sampling_columns(&self.controller, node_id, sampling_size, config)
-            .expect("should compute node custody groups and columns");
+        let sampling_columns =
+            Self::update_sampling_columns(&self.controller, node_id, sampling_size, config)
+                .expect("should compute node custody groups and columns");
+
+        if backfill_custody_groups {
+            let current_sampling_columns = self.controller.sampling_columns();
+            let backfill_column_indices = &sampling_columns - &current_sampling_columns;
+
+            P2pToSync::RequestCustodyGroupBackfill(backfill_column_indices)
+                .send(&self.channels.p2p_to_sync_tx);
+        }
     }
 
     fn update_sampling_columns(
@@ -973,7 +982,7 @@ impl<P: Preset> Network<P> {
         raw_node_id: [u8; 32],
         sampling_size: u64,
         chain_config: &Config,
-    ) -> Result<()> {
+    ) -> Result<HashSet<ColumnIndex>> {
         let custody_groups = get_custody_groups(raw_node_id, sampling_size, chain_config)?;
 
         let mut sampling_columns = HashSet::new();
@@ -981,9 +990,9 @@ impl<P: Preset> Network<P> {
             let columns = compute_columns_for_custody_group::<P>(custody_index, chain_config)?;
             sampling_columns.extend(columns);
         }
-        controller.on_store_sampling_columns(sampling_columns);
+        controller.on_store_sampling_columns(sampling_columns.clone());
 
-        Ok(())
+        Ok(sampling_columns)
     }
 
     const fn update_earliest_available_slot(&mut self, slot: Slot) {

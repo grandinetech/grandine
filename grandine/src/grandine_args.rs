@@ -834,6 +834,10 @@ struct ValidatorOptions {
     // Withhold all data column sidecars when assigned to propose a block. Use for testing purpose
     #[clap(long)]
     withhold_data_columns_publishing: bool,
+
+    // Backfill custody groups
+    #[clap(long)]
+    no_custody_groups_backfill: bool,
 }
 
 #[derive(Args)]
@@ -1035,6 +1039,7 @@ impl GrandineArgs {
             slashing_protection_history_limit,
             report_validator_performance,
             withhold_data_columns_publishing,
+            no_custody_groups_backfill,
         } = validator_options;
 
         if in_memory {
@@ -1407,6 +1412,7 @@ impl GrandineArgs {
             blacklisted_blocks: blacklisted_blocks.into_iter().collect(),
             report_validator_performance,
             withhold_data_columns_publishing,
+            backfill_custody_groups: !no_custody_groups_backfill,
             disable_engine_getblobs,
             sync_without_reconstruction,
         })

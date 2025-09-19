@@ -96,12 +96,6 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
                     debug!("failed to send response because the receiver was dropped");
                 }
             }
-            ToSubnetService::UpdateDataColumnSubnets(custody_group_count) => {
-                self.update_data_column_subnets(custody_group_count);
-            }
-            ToSubnetService::UpdateEarliestAvailableSlot(slot) => {
-                self.update_earliest_available_slot(slot);
-            }
             ToSubnetService::UpdateSyncCommitteeSubscriptions(current_epoch, subscriptions) => {
                 self.update_sync_committee_subscriptions(current_epoch, subscriptions);
             }
@@ -180,13 +174,5 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
         if !actions.is_empty() {
             SubnetServiceToP2p::UpdateSyncCommitteeSubnets(actions).send(&self.p2p_tx);
         }
-    }
-
-    fn update_data_column_subnets(&self, custody_group_count: u64) {
-        SubnetServiceToP2p::UpdateDataColumnSubnets(custody_group_count).send(&self.p2p_tx);
-    }
-
-    fn update_earliest_available_slot(&self, slot: Slot) {
-        SubnetServiceToP2p::UpdateEarliestAvailableSlot(slot).send(&self.p2p_tx);
     }
 }

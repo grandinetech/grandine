@@ -697,6 +697,11 @@ impl<P: Preset> DataColumnSidecarAction<P> {
     pub const fn accepted(&self) -> bool {
         matches!(self, Self::Accept(_))
     }
+
+    #[must_use]
+    pub const fn ignored(&self) -> bool {
+        matches!(self, Self::Ignore(_))
+    }
 }
 
 pub enum PartialBlockAction {

@@ -38,7 +38,10 @@ use types::{
     preset::Preset,
 };
 
-use crate::{block_sync_service::SyncDirection, range_and_root_requests::RangeAndRootRequests};
+use crate::{
+    back_sync::SyncMode, block_sync_service::SyncDirection,
+    range_and_root_requests::RangeAndRootRequests,
+};
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct ChainId {
@@ -282,14 +285,19 @@ impl<P: Preset> SyncManager<P> {
         mut current_back_sync_slot: Slot,
         low_slot: Slot,
         sampling_columns: &HashSet<ColumnIndex>,
+        sync_mode: &SyncMode,
     ) -> Vec<SyncBatch<P>> {
         let Some(peers_to_sync) = self.find_peers_to_sync(true) else {
             return vec![];
         };
         let mut peers_to_request = peers_to_sync.clone();
 
-        // Use half of the available peers for back-sync batches.
-        let max_sync_batches = peers_to_sync.len() / 2;
+        let max_sync_batches = if sync_mode.is_default() {
+            peers_to_sync.len() / 2
+        } else {
+            peers_to_sync.len()
+        };
+
         let mut peers = peers_to_sync.iter();
         let mut sync_batches = vec![];
 
@@ -303,12 +311,27 @@ impl<P: Preset> SyncManager<P> {
             };
 
             let start_slot = current_back_sync_slot.saturating_sub(count);
+            let count = current_back_sync_slot.saturating_sub(start_slot);
+
+            if count == 0 {
+                continue;
+            }
+
+            if let Some(earliest_slot) = self.peer_earliest_available_slot(peer) {
+                if earliest_slot > start_slot + count {
+                    continue;
+                }
+            }
 
             if should_batch_blobs {
                 match peers.next() {
                     Some(next_peer) => {
-                        // test if there is enough space for both blobs and blocks batches
-                        if sync_batches.len() + 2 > max_sync_batches {
+                        if sync_mode.is_default() {
+                            // test if there is enough space for both blobs and blocks batches
+                            if sync_batches.len() + 2 > max_sync_batches {
+                                break;
+                            }
+                        } else if sync_batches.len() > max_sync_batches {
                             break;
                         }
 
@@ -323,12 +346,28 @@ impl<P: Preset> SyncManager<P> {
                             start_slot = data_availability_serve_range_slot;
                         }
 
+                        if let Some(earliest_slot) = self.peer_earliest_available_slot(next_peer) {
+                            if earliest_slot > start_slot + count {
+                                continue;
+                            }
+                        }
+
                         if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
                             let missing_column_indices = self.missing_column_indices_by_range(
                                 sampling_columns,
                                 start_slot,
                                 count,
                             );
+
+                            let missing_column_indices = match sync_mode {
+                                SyncMode::Default => missing_column_indices,
+                                SyncMode::DataColumnsOnly { column_indices } => {
+                                    missing_column_indices
+                                        .intersection(column_indices)
+                                        .copied()
+                                        .collect()
+                                }
+                            };
 
                             if !missing_column_indices.is_empty() {
                                 self.log(
@@ -383,7 +422,7 @@ impl<P: Preset> SyncManager<P> {
                                     sync_batches.push(batch);
                                 }
                             }
-                        } else {
+                        } else if sync_mode.is_default() {
                             let batch = SyncBatch {
                                 target: SyncTarget::BlobSidecar,
                                 direction: SyncDirection::Back,
@@ -407,24 +446,25 @@ impl<P: Preset> SyncManager<P> {
                 }
             }
 
-            let batch = SyncBatch {
-                target: SyncTarget::Block,
-                direction: SyncDirection::Back,
-                peer_id: *peer,
-                start_slot,
-                count,
-                response_received: false,
-                retry_count: 0,
-                // TODO(feature/eip7594)
-                data_columns: None,
-            };
+            if sync_mode.is_default() {
+                let batch = SyncBatch {
+                    target: SyncTarget::Block,
+                    direction: SyncDirection::Back,
+                    peer_id: *peer,
+                    start_slot,
+                    count,
+                    response_received: false,
+                    retry_count: 0,
+                    data_columns: None,
+                };
 
-            self.log(
-                Level::Debug,
-                format_args!("back-sync batch built: {batch:?})"),
-            );
+                self.log(
+                    Level::Debug,
+                    format_args!("back-sync batch built: {batch:?})"),
+                );
 
-            sync_batches.push(batch);
+                sync_batches.push(batch);
+            }
 
             if start_slot <= low_slot || sync_batches.len() >= max_sync_batches {
                 break;
@@ -1019,6 +1059,13 @@ impl<P: Preset> SyncManager<P> {
             .choose(&mut thread_rng())
     }
 
+    fn peer_earliest_available_slot(&self, peer_id: &PeerId) -> Option<Slot> {
+        match self.peers.get(peer_id)? {
+            StatusMessage::V1(_) => None,
+            StatusMessage::V2(status) => Some(status.earliest_available_slot),
+        }
+    }
+
     fn peers(&self, use_black_list: bool) -> impl Iterator<Item = (&PeerId, &StatusMessage)> {
         self.peers.iter().filter(move |(&peer_id, _)| {
             if use_black_list {
@@ -1398,7 +1445,7 @@ mod tests {
         30,
         [
             (14, 16, SyncTarget::Block),
-            (0, 16, SyncTarget::Block),
+            (0, 14, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -1422,7 +1469,7 @@ mod tests {
             (40, 16, SyncTarget::Block),
             (24, 16, SyncTarget::Block),
             (8, 16, SyncTarget::Block),
-            (0, 16, SyncTarget::Block),
+            (0, 8, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -1443,8 +1490,8 @@ mod tests {
         [
             (1, 8, SyncTarget::BlobSidecar),
             (1, 8, SyncTarget::Block),
-            (0, 8, SyncTarget::BlobSidecar),
-            (0, 8, SyncTarget::Block),
+            (0, 1, SyncTarget::BlobSidecar),
+            (0, 1, SyncTarget::Block),
         ]
     )]
     fn build_back_sync_batches(
@@ -1490,6 +1537,7 @@ mod tests {
             head_slot,
             0,
             &sampling_columns,
+            &SyncMode::Default,
         );
 
         itertools::assert_equal(
