@@ -73,6 +73,7 @@ pub struct GrandineConfig {
     pub blacklisted_blocks: HashSet<H256>,
     pub report_validator_performance: bool,
     pub withhold_data_columns_publishing: bool,
+    pub backfill_custody_groups: bool,
     pub disable_engine_getblobs: bool,
     pub sync_without_reconstruction: bool,
 }

@@ -8211,6 +8211,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arithmetic",
+ "bincode",
  "bls",
  "cached",
  "dashmap",

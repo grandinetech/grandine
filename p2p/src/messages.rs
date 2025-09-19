@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
@@ -70,6 +73,7 @@ pub enum P2pToSync<P: Preset> {
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
+    RequestCustodyGroupBackfill(HashSet<u64>),
     Stop,
 }
 
@@ -188,6 +192,8 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
+    UpdateDataColumnSubnets(u64, bool),
+    UpdateEarliestAvailableSlot(Slot),
 }
 
 impl<P: Preset> ValidatorToP2p<P> {
@@ -267,14 +273,11 @@ impl<P: Preset> ServiceOutboundMessage<P> {
     }
 }
 
-#[expect(clippy::enum_variant_names)]
 #[derive(Serialize)]
 pub enum SubnetServiceToP2p {
     // Use `BTreeMap` to make serialization deterministic for snapshot testing.
     // `Vec` would work too and would be slightly faster.
     UpdateAttestationSubnets(AttestationSubnetActions),
-    UpdateDataColumnSubnets(u64),
-    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubnets(BTreeMap<SubnetId, SyncCommitteeSubnetAction>),
 }
 
@@ -289,8 +292,6 @@ impl SubnetServiceToP2p {
 pub enum ToSubnetService {
     SetRegisteredValidators(Vec<PublicKeyBytes>, Vec<ValidatorIndex>),
     UpdateBeaconCommitteeSubscriptions(Slot, Vec<BeaconCommitteeSubscription>, Sender<Result<()>>),
-    UpdateDataColumnSubnets(u64),
-    UpdateEarliestAvailableSlot(Slot),
     UpdateSyncCommitteeSubscriptions(Epoch, Vec<SyncCommitteeSubscription>),
 }
 

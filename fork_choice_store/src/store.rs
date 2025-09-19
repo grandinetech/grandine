@@ -2028,12 +2028,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     #[expect(clippy::too_many_lines)]
     pub fn validate_data_column_sidecar_with_state(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
+        validate_block_presence: bool,
         parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
@@ -2043,7 +2045,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // No need to validate and import data column sidecars for blocks that are already in fork choice,
         // i.e. already have all the data columns validated
-        if self.contains_block(block_root) {
+        // The exception to this is data column sidecars from custody group column backfill,
+        // where additional columns are being downloaded for blocks already in fork choice.
+        if validate_block_presence && self.contains_block(block_root) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
@@ -2235,6 +2239,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 data_column_sidecar,
                 block_seen,
                 origin,
+                true,
                 parent_info,
                 || Some(state),
                 metrics,
@@ -2244,6 +2249,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 data_column_sidecar,
                 block_seen,
                 origin,
+                true,
                 parent_info,
                 || {
                     self.state_cache.existing_state_at_slot(

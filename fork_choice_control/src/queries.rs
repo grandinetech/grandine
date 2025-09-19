@@ -754,6 +754,7 @@ where
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
+        validate_block_presence: bool,
         parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<DataColumnSidecarAction<P>> {
@@ -762,6 +763,7 @@ where
                 data_column_sidecar,
                 block_seen,
                 origin,
+                validate_block_presence,
                 parent_fn,
                 state_fn,
                 None,
