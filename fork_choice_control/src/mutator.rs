@@ -43,7 +43,7 @@ use fork_choice_store::{
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
 use itertools::{Either, Itertools as _};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
@@ -667,7 +667,7 @@ where
                             .map(|pending| pending.data_column_sidecar.as_ref()),
                     );
 
-                    info!(
+                    debug!(
                         "availability for block: {:?} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
                         pending_block.block.message().hash_tree_root(),
                         pending_block.origin,
@@ -795,7 +795,8 @@ where
                                 });
                         }
                         BlockBlobAvailability::Missing(missing_blob_indices) => {
-                            debug!("block delayed until blobs: {pending_block:?}");
+                            debug!("block delayed until blobs: {block_root:?}");
+                            trace!("block delayed until blobs: {pending_block:?}");
 
                             if let Some(gossip_id) = pending_block.origin.gossip_id() {
                                 self.send_to_p2p(P2pMessage::Accept(gossip_id));
@@ -848,7 +849,8 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    debug!("block delayed until parent: {pending_block:?}");
+                    debug!("block delayed until parent: {block_root:?}");
+                    trace!("block delayed until parent: {pending_block:?}");
 
                     let peer_id = pending_block.origin.peer_id();
 
@@ -875,7 +877,8 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    debug!("block delayed until slot: {pending_block:?}");
+                    debug!("block delayed until slot: {block_root:?}");
+                    trace!("block delayed until slot: {pending_block:?}");
 
                     self.delay_block_until_slot(pending_block);
                 }
@@ -897,6 +900,12 @@ where
                     self.accept_block(&wait_group, pending_chain_link)?;
                 } else {
                     debug!(
+                        "block waiting for checkpoint state \
+                         (block_root: {:?}, checkpoint: {checkpoint:?})",
+                        pending_chain_link.chain_link.block_root,
+                    );
+
+                    trace!(
                         "block waiting for checkpoint state \
                          (block_root: {:?}, block: {:?}, checkpoint: {checkpoint:?})",
                         pending_chain_link.chain_link.block_root,
@@ -941,7 +950,7 @@ where
                     metrics.register_mutator_aggregate_and_proof(&["accepted"]);
                 }
 
-                debug!(
+                trace!(
                     "aggregate and proof accepted \
                      (aggregate_and_proof: {aggregate_and_proof:?}, origin: {origin:?})",
                 );
@@ -1117,7 +1126,7 @@ where
                     metrics.register_mutator_attestation(&["accepted"]);
                 }
 
-                debug!("attestation accepted (attestation: {attestation:?})");
+                trace!("attestation accepted (attestation: {attestation:?})");
 
                 if attestation.origin.should_generate_event() {
                     self.event_channels
@@ -1413,6 +1422,10 @@ where
                 } else {
                     debug!(
                         "blob sidecar delayed until state at same slot is ready \
+                         (block_root: {block_root:?}, slot: {slot})",
+                    );
+                    trace!(
+                        "blob sidecar delayed until state at same slot is ready \
                          (blob_sidecar: {:?}, block_root: {block_root:?}, slot: {slot})",
                         pending_blob_sidecar.blob_sidecar,
                     );
@@ -1573,7 +1586,7 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::Ignore(publishable)) => {
-                info!("data column sidecar ignored (identifier: {data_column_identifier:?})");
+                debug!("data column sidecar ignored (identifier: {data_column_identifier:?})");
 
                 let (gossip_id, sender) = origin.split();
 
@@ -1603,7 +1616,7 @@ where
                         Some(state),
                     );
                 } else {
-                    info!(
+                    debug!(
                         "data column sidecar delayed until state at same slot is ready \
                         (identifier: {data_column_identifier:?}, slot: {slot})",
                     );
@@ -1645,7 +1658,7 @@ where
                 if self.store.contains_block(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
-                    info!(
+                    debug!(
                         "data column sidecar delayed until block parent: \
                         {parent_root:?}, identifier: {data_column_identifier:?}",
                     );
@@ -1676,7 +1689,7 @@ where
                 if slot <= self.store.slot() {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
-                    info!("data column sidecar delayed until slot: {slot}");
+                    debug!("data column sidecar delayed until slot: {slot}");
 
                     let pending_data_column_sidecar =
                         reply_delayed_data_column_sidecar_validation_result(
@@ -2053,6 +2066,12 @@ where
         if block.message().slot() <= self.store.finalized_slot() {
             debug!(
                 "block became orphaned while being processed \
+                 (block_root: {block_root:?}, \
+                  origin: {origin:?}, finalized slot: {})",
+                self.store.finalized_slot(),
+            );
+            trace!(
+                "block became orphaned while being processed \
                  (block_root: {block_root:?}, block: {block:?}, \
                   origin: {origin:?}, finalized slot: {})",
                 self.store.finalized_slot(),
@@ -2069,7 +2088,8 @@ where
             return Ok(());
         }
 
-        debug!("block accepted (block_root: {block_root:?}, block: {block:?}, origin: {origin:?})");
+        debug!("block accepted (block_root: {block_root:?}, origin: {origin:?})");
+        trace!("block accepted (block_root: {block_root:?}, block: {block:?}, origin: {origin:?})");
 
         let block_slot = chain_link.slot();
 
@@ -2422,7 +2442,7 @@ where
             accepted_data_columns >= self.store.sampling_columns_count()
         };
 
-        info!(
+        debug!(
             "accepted data column sidecar: {block_root:?}, index: {}, slot: {}, \
             accepted data columns: {}, should_retry_block: {should_retry_block}, \
             reconstruction enabled: {reconstruction_enabled}, sampling columns count: {}, \
@@ -2599,7 +2619,7 @@ where
         if self.store.contains_block(block_root) {
             self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         } else {
-            debug!(
+            trace!(
                 "aggregate and proof delayed until block \
                  (pending_aggregate_and_proof: {pending_aggregate_and_proof:?}, \
                   block_root: {block_root:?})",
@@ -2629,7 +2649,7 @@ where
         if self.store.contains_block(block_root) {
             self.retry_attestation(wait_group.clone(), pending_attestation);
         } else {
-            debug!(
+            trace!(
                 "attestation delayed until block \
                  (pending_attestation: {pending_attestation:?}, block_root: {block_root:?})",
             );
@@ -2700,7 +2720,7 @@ where
         if slot <= self.store.slot() {
             self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
         } else {
-            debug!("aggregate and proof delayed until slot: {pending_aggregate_and_proof:?}");
+            trace!("aggregate and proof delayed until slot: {pending_aggregate_and_proof:?}");
 
             self.delayed_until_slot
                 .entry(slot)
@@ -2720,7 +2740,7 @@ where
         if slot <= self.store.slot() {
             self.retry_attestation(wait_group.clone(), pending_attestation);
         } else {
-            debug!("attestation delayed until slot: {pending_attestation:?}");
+            trace!("attestation delayed until slot: {pending_attestation:?}");
 
             // Attestations produced by the application itself should never be delayed.
             // Attestations included in blocks should never be delayed until a slot
@@ -2895,7 +2915,7 @@ where
     }
 
     fn retry_block(&self, wait_group: W, pending_block: PendingBlock<P>) {
-        debug!("retrying delayed block: {pending_block:?}");
+        trace!("retrying delayed block: {pending_block:?}");
 
         let PendingBlock {
             block,
@@ -2919,7 +2939,7 @@ where
     }
 
     fn retry_attestation(&self, wait_group: W, attestation: PendingAttestation<P>) {
-        debug!("retrying delayed attestation: {attestation:?}");
+        trace!("retrying delayed attestation: {attestation:?}");
 
         if attestation.verify_signatures() {
             self.send_to_attestation_verifier(AttestationVerifierMessage::Attestation {
@@ -2948,7 +2968,7 @@ where
         wait_group: W,
         pending_aggregate_and_proof: PendingAggregateAndProof<P>,
     ) {
-        debug!("retrying delayed aggregate and proof: {pending_aggregate_and_proof:?}");
+        trace!("retrying delayed aggregate and proof: {pending_aggregate_and_proof:?}");
 
         let PendingAggregateAndProof {
             aggregate_and_proof,
@@ -2968,7 +2988,7 @@ where
         pending_blob_sidecar: PendingBlobSidecar<P>,
         state: Option<Arc<BeaconState<P>>>,
     ) {
-        debug!("retrying delayed blob sidecar: {pending_blob_sidecar:?}");
+        trace!("retrying delayed blob sidecar: {pending_blob_sidecar:?}");
 
         let PendingBlobSidecar {
             blob_sidecar,
@@ -2996,7 +3016,7 @@ where
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
         state: Option<Arc<BeaconState<P>>>,
     ) {
-        debug!("retrying delayed data column sidecar: {pending_data_column_sidecar:?}");
+        trace!("retrying delayed data column sidecar: {pending_data_column_sidecar:?}");
 
         let PendingDataColumnSidecar {
             data_column_sidecar,
