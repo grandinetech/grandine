@@ -16,7 +16,8 @@ use types::{
     preset::{Mainnet, Preset},
 };
 
-fn read_block_and_state<P: Preset>() -> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
+fn read_block_and_state<P: Preset>(
+) -> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
     let config_kind: u8 = sp1_zkvm::io::read();
     let config = match config_kind {
         0 => Config::mainnet(),

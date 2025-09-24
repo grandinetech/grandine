@@ -246,7 +246,7 @@ fn main() -> Result<()> {
 
             proof.save(Path::new(env!("CARGO_MANIFEST_DIR")).join("proof.bin"))?;
 
-            assert_eq!(proof.verify(), true);
+            assert!(proof.verify());
             assert_eq!(state_root, expected_root);
         }
     }
