@@ -1,6 +1,7 @@
 [package]
 name = 'zkvm_host'
 edition = { workspace = true }
+version = "0.1.0"
 authors = ["Grandine <info@grandine.io>"]
 
 [lints]
@@ -16,6 +17,7 @@ enum-iterator = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 risc0-zkvm = { workspace = true, optional = true, features = ['unstable', 'heap-embedded-alloc'] }
+serde_json = { workspace = true, optional = true  }
 snap = { workspace = true }
 sp1-sdk = { workspace = true, optional = true }
 ssz = { workspace = true }
@@ -25,8 +27,13 @@ types = { workspace = true }
 xz2 = { workspace = true }
 zkvm_guest_risc0 = { workspace = true, optional = true }
 
+# For pico zkvm
+pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" , optional = true }
+pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" , optional = true }
+
 [build-dependencies]
 sp1-helper = { workspace = true, optional = true }
+zkvm_pico_helper = { workspace = true, optional = true }
 
 [features]
 risc0 = [
@@ -38,4 +45,11 @@ risc0 = [
 sp1 = [
     "dep:sp1-helper",
     "dep:sp1-sdk"
+]
+pico = [
+    "dep:serde_json",
+    "dep:pico-sdk",
+    "dep:pico-vm",
+    "dep:zkvm_pico_helper",
+    "bls/zkvm-pico",
 ]

@@ -9,6 +9,7 @@ workspace = true
 [features]
 blst = ["dep:bls-blst"]
 zkcrypto = ["dep:bls-zkcrypto"]
+zkvm-pico = ["bls-zkcrypto/zkvm-pico"]
 
 [dependencies]
 bls-core = { workspace = true }

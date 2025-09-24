@@ -1,5 +1,8 @@
 [toolchain]
-channel = 'stable-2025-06-26'
+# channel = 'stable-2025-06-26'
+# Need nightly rust toolchain to build zkvm_host with `pico` feature
+channel = 'nightly-2025-08-04'
+
 profile = 'minimal'
 components = ['clippy', 'rustfmt']
 targets = ['i686-unknown-linux-gnu', 'x86_64-unknown-linux-gnu']

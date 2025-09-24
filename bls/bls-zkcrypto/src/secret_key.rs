@@ -66,10 +66,17 @@ impl SecretKeyTrait<SIZE> for SecretKey {
 
     #[inline]
     fn sign(&self, message: impl AsRef<[u8]>) -> Signature {
+        #[cfg(not(feature = "zkvm-pico"))]
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
+        #[cfg(feature = "zkvm-pico")]
+        let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
+            message.as_ref(),
+            DOMAIN_SEPARATION_TAG,
+        );
+
         let signature = h * self.as_raw();
 
         Signature::from(signature)

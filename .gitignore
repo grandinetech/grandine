@@ -1,7 +1,7 @@
 .idea/
 .vscode/
 
-/target/
+/**/target/
 book/book
 book/deploy
 
