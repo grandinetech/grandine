@@ -69,6 +69,7 @@ members = [
     'zkvm/guest/risc0',
     'zkvm/host',
 ]
+
 # Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
 # virtual workspaces. Starting with Rust 1.72.0, Cargo warns if a Rust 2021 virtual workspace does
 # not explicitly specify a feature resolver. See <https://github.com/rust-lang/cargo/pull/10910>.
@@ -297,7 +298,7 @@ base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
-bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
 blst = { version = '0.3', features = ['portable'] }
 bonsai-sdk = '1.4'
 borsh = '1.5'
@@ -429,7 +430,12 @@ serde_with = '3'
 serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0', features = ['compress'] }
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1', features = ['compress'] }
+
+slog = { version = '2', features = ['max_level_trace'] }
+slog-async = '2'
+slog-stdlog = '4'
+slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 sp1-helper = '5.2.1'
@@ -601,7 +607,7 @@ lto = false
 # We had to fork `jsonrpc` because it does not allow nonstandard members.
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '681f413312404ab6e51f0b46f39b0075c6f4ebfd' }
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0' }
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1' }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
-bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
