@@ -96,7 +96,7 @@ jobs:
   zkvm-test:
     strategy:
       matrix:
-        backend: [risc0, sp1, pico]
+        backend: [risc0, sp1, pico, ziren]
         include:
           # zkVM test - risc0 implementation
           - backend: risc0
@@ -128,8 +128,22 @@ jobs:
               cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
             execute: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST" execute
 
+          # zkVM test - ZKM implementation
+          - backend: ziren
+            install: |
+              curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
+              echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+            pre_build: |
+              source ~/.zkm-toolchain/env
+              if ! rustup toolchain list | grep -q "nightly-2025-06-30"; then
+                rustup toolchain install nightly-2025-06-30-x86_64-unknown-linux-gnu
+              fi
+              cd zkvm/guest/ziren
+              rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
+            execute: |
+              source ~/.zkm-toolchain/env
+              RUST_LOG=info cargo run -p zkvm_host --features ziren --release -- --test "$TEST" execute
     runs-on: ubuntu-latest
-
     steps:
       - name: Free Disk Space (Ubuntu)
         if: runner.os == 'Linux'
@@ -170,11 +184,22 @@ jobs:
         shell: bash
         run: |
           git submodule update --init dedicated_executor eth2_libp2p
-
+      - name: Cache ZKM toolchain
+        if: matrix.backend == 'ziren'
+        id: cache-zkm
+        uses: actions/cache@v4
+        with:
+          path: ~/.zkm-toolchain
+          key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-v2
+          restore-keys: |
+            ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
       - name: Installing ${{ matrix.backend }} zkVM
         run: ${{ matrix.install }}
+      - name: Pre-build step for ${{ matrix.backend }}
+        if: matrix.pre_build != ''
+        run: ${{ matrix.pre_build }}
 
-      - name: Runing ${{ matrix.backend }} test
+      - name: Running ${{ matrix.backend }} test
         run: |
           IFS=$'\n'
           for TEST in $TEST_CASES; do

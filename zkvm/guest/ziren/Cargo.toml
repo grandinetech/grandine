@@ -1,0 +1,24 @@
+[package]
+name = 'zkvm_guest_ziren'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = '1'
+bls = { path = '../../../bls', features = ['zkcrypto'] }
+enum-iterator = '2'
+pubkey_cache = { path = '../../../pubkey_cache' }
+ssz = { path = '../../../ssz' }
+transition_functions = { path = '../../../transition_functions' }
+types = { path = '../../../types' }
+zkm-primitives = { workspace = true }
+zkm-zkvm = { workspace = true }
+
+[lints]
+workspace = true
+
+[patch.crates-io]
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1'}
+
+[patch.'https://github.com/zkcrypto/bls12_381.git']
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }

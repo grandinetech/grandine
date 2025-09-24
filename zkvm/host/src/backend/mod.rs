@@ -16,6 +16,11 @@ mod pico;
 #[cfg(feature = "pico")]
 pub use pico::*;
 
+#[cfg(feature = "ziren")]
+mod ziren;
+#[cfg(feature = "ziren")]
+pub use ziren::*;
+
 #[derive(Clone, Copy, Debug)]
 pub enum ConfigKind {
     Mainnet = 0,

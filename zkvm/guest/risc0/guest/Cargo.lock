@@ -2875,9 +2875,9 @@ dependencies = [
 
 [[package]]
 name = "risc0-bigint2"
-version = "1.4.10"
+version = "1.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e916aa385e61e31935d7964aaeaec1fae9da617af6415d6363864147f430ebff"
+checksum = "3bd8ae1058e6f5d4635dfd206a41bab7ad64067df70421a5f32e18b1a17979ac"
 dependencies = [
  "include_bytes_aligned",
  "stability",
@@ -4413,8 +4413,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-lib"
-version = "1.2.0"
-source = "git+https://github.com/ProjectZKM/Ziren.git#8793fceda3771c25e7ea67daf9ce357fd891e620"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -4425,8 +4425,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-primitives"
-version = "1.2.0"
-source = "git+https://github.com/ProjectZKM/Ziren.git#8793fceda3771c25e7ea67daf9ce357fd891e620"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "hex",

@@ -71,6 +71,29 @@
    ```
    Again, replace `<test_case>` with one of the four test cases mentioned above.
 
+## ZKM Ziren implementation:
+
+1. **Load ZKM env vars to current shell and build the guest program**
+    ```sh
+    cd zkvm/guest/ziren && source ~/.zkm-toolchain/env && $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+    ```
+    Return back to the root directory after successful build
+
+2. **Execute without proving:**
+
+   ```sh
+   cargo run -p zkvm_host --features ziren --release -- --test <test_case> execute
+   ```
+   Replace `<test_case>` with one of the four test cases mentioned above.
+
+3. **Prove using local prover:**
+
+   ```sh
+   cargo run -p zkvm_host --features ziren --release -- --test <test_case> prove
+   ```
+
+   Again, replace `<test_case>` with one of the four test cases mentioned above.
+
 ## Adding new zkvm
 
 To add new zkvm, you need to:
