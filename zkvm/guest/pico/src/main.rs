@@ -66,7 +66,7 @@ fn read_block_and_state<P: Preset>() -> Result<(Config, SignedBeaconBlock<P>, Be
     };
     println!("parsing SignedBeaconBlock ends");
 
-    println!("parsing BeaconState starts: {:?}", phase);
+    println!("parsing BeaconState starts");
     let state = match phase {
         Some(phase) => BeaconState::<P>::from_ssz_at_phase(phase, &state_ssz)?,
         None => BeaconState::<P>::from_ssz(&config, &state_ssz)?,
