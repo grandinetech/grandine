@@ -473,7 +473,7 @@ impl Config {
         }
     }
 
-    /// [Sepolia configuration](https://github.com/eth-clients/sepolia/blob/2b65b51eb3b4cf20cde37f88c50a5fec3100bc76/bepolia/config.yaml)
+    /// [Sepolia configuration](https://github.com/eth-clients/sepolia/blob/56f0bff41cecab6c661251d72b73ceecc52c5701/metadata/config.yaml)
     #[must_use]
     pub fn sepolia() -> Self {
         Self {
@@ -497,6 +497,8 @@ impl Config {
             deneb_fork_version: H32(hex!("90000073")),
             electra_fork_epoch: 222_464,
             electra_fork_version: H32(hex!("90000074")),
+            fulu_fork_epoch: 272_640,
+            fulu_fork_version: H32(hex!("90000075")),
 
             // Deposit contract
             deposit_chain_id: 11_155_111,
@@ -505,6 +507,18 @@ impl Config {
 
             // Transition
             terminal_total_difficulty: Difficulty::from_u128(17_000_000_000_000_000),
+
+            // Networking
+            blob_schedule: vec![
+                BlobScheduleEntry {
+                    epoch: 274_176,
+                    max_blobs_per_block: 15,
+                },
+                BlobScheduleEntry {
+                    epoch: 275_712,
+                    max_blobs_per_block: 21,
+                },
+            ],
 
             ..Self::default()
         }
@@ -582,7 +596,7 @@ impl Config {
         }
     }
 
-    /// [Holesky configuration](https://github.com/eth-clients/holesky/blob/9d9aabf2d4de51334ee5fed6c79a4d55097d1a43/custom_config_data/config.yaml)
+    /// [Holesky configuration](https://github.com/eth-clients/holesky/blob/8aec65f11f0c986d6b76b2eb902420635eb9b815/metadata/config.yaml)
     #[must_use]
     pub fn holesky() -> Self {
         Self {
@@ -605,6 +619,8 @@ impl Config {
             deneb_fork_version: H32(hex!("05017000")),
             electra_fork_epoch: 115_968,
             electra_fork_version: H32(hex!("06017000")),
+            fulu_fork_epoch: 165_120,
+            fulu_fork_version: H32(hex!("07017000")),
 
             // Validator cycle
             ejection_balance: 28_000_000_000,
@@ -616,6 +632,18 @@ impl Config {
 
             // Transition
             terminal_total_difficulty: Difficulty::ZERO,
+
+            // Networking
+            blob_schedule: vec![
+                BlobScheduleEntry {
+                    epoch: 166_400,
+                    max_blobs_per_block: 15,
+                },
+                BlobScheduleEntry {
+                    epoch: 167_936,
+                    max_blobs_per_block: 21,
+                },
+            ],
 
             blacklisted_blocks: vec![H256(hex!(
                 "2db899881ed8546476d0b92c6aa9110bea9a4cd0dbeb5519eb0ea69575f1f359"
@@ -669,7 +697,7 @@ impl Config {
         }
     }
 
-    /// [Hoodi configuration](https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/config.yaml)
+    /// [Hoodi configuration](https://github.com/eth-clients/hoodi/blob/21a110a60e6558a2ba7c819fa4b80029d49ab205/metadata/config.yaml)
     #[must_use]
     pub fn hoodi() -> Self {
         Self {
@@ -692,6 +720,8 @@ impl Config {
             deneb_fork_version: H32(hex!("50000910")),
             electra_fork_epoch: 2048,
             electra_fork_version: H32(hex!("60000910")),
+            fulu_fork_epoch: 50_688,
+            fulu_fork_version: H32(hex!("70000910")),
 
             // Time parameters
             seconds_per_eth1_block: 12,
@@ -706,6 +736,16 @@ impl Config {
 
             // Networking
             data_column_sidecar_subnet_count: 128,
+            blob_schedule: vec![
+                BlobScheduleEntry {
+                    epoch: 52_480,
+                    max_blobs_per_block: 15,
+                },
+                BlobScheduleEntry {
+                    epoch: 54_016,
+                    max_blobs_per_block: 21,
+                },
+            ],
 
             // Transition
             terminal_total_difficulty: Difficulty::ZERO,
