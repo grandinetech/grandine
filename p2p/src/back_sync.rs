@@ -343,10 +343,11 @@ impl<P: Preset> Batch<P> {
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let block = block.message();
 
-        if !config
-            .phase_at_slot::<P>(block.slot())
-            .is_peerdas_activated()
-        {
+        let Some(body) = block.body().post_fulu() else {
+            return Ok(vec![]);
+        };
+
+        if body.blob_kzg_commitments().is_empty() {
             return Ok(vec![]);
         }
 
