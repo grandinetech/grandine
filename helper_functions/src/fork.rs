@@ -5,7 +5,7 @@ use anyhow::Result;
 use bls::{traits::SignatureBytes as _, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentList, PersistentVector};
+use ssz::{BitVector, PersistentList, PersistentVector};
 use std_ext::ArcExt as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -29,7 +29,10 @@ use types::{
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
     fulu::beacon_state::BeaconState as FuluBeaconState,
-    gloas::beacon_state::BeaconState as GloasBeaconState,
+    gloas::{
+        beacon_state::BeaconState as GloasBeaconState,
+        containers::{BuilderPendingPayment, ExecutionPayloadBid},
+    },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -873,8 +876,8 @@ pub fn upgrade_to_gloas<P: Preset>(
         // > Sync
         current_sync_committee,
         next_sync_committee,
-        // > Execution-layer
-        latest_execution_payload_header,
+        // > Execution
+        latest_execution_payload_bid: ExecutionPayloadBid::default(),
         // > Withdrawals
         next_withdrawal_index,
         next_withdrawal_validator_index,
@@ -890,7 +893,12 @@ pub fn upgrade_to_gloas<P: Preset>(
         pending_partial_withdrawals,
         pending_consolidations,
         proposer_lookahead,
-        // TODO(gloas): init new fields https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork.md#upgrading-the-state
+        // > ePBS states introduced in Gloas
+        execution_payload_availability: BitVector::new(true),
+        builder_pending_payments: PersistentVector::repeat_element(BuilderPendingPayment::default()),
+        builder_pending_withdrawals: PersistentList::default(),
+        latest_block_hash: latest_execution_payload_header.block_hash,
+        latest_withdrawals_root: H256::zero(),
         // Cache
         cache,
     }

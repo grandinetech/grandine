@@ -310,7 +310,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [&mut self.field]
     [(&mut self.validators, &self.balances)]
     [(&mut self.balances, &self.slashings)]
-    [Some(self)]
+    [None]
     [true]
     [true]
     [true]
@@ -631,16 +631,6 @@ impl<P: Preset> PostBellatrixBeaconState<P> for FuluBeaconState<P> {
     }
 }
 
-impl<P: Preset> PostBellatrixBeaconState<P> for GloasBeaconState<P> {
-    fn latest_execution_payload_header(&self) -> &dyn ExecutionPayload<P> {
-        &self.latest_execution_payload_header
-    }
-
-    fn latest_execution_payload_header_mut(&mut self) -> &mut dyn ExecutionPayload<P> {
-        &mut self.latest_execution_payload_header
-    }
-}
-
 pub trait PostCapellaBeaconState<P: Preset>: PostBellatrixBeaconState<P> {
     fn next_withdrawal_index(&self) -> WithdrawalIndex;
     fn next_withdrawal_index_mut(&mut self) -> &mut WithdrawalIndex;
@@ -739,23 +729,23 @@ impl<P: Preset> PostCapellaBeaconState<P> for FuluBeaconState<P> {
     }
 }
 
-impl<P: Preset> PostCapellaBeaconState<P> for GloasBeaconState<P> {
-    fn next_withdrawal_index(&self) -> WithdrawalIndex {
-        self.next_withdrawal_index
-    }
-
-    fn next_withdrawal_index_mut(&mut self) -> &mut WithdrawalIndex {
-        &mut self.next_withdrawal_index
-    }
-
-    fn next_withdrawal_validator_index(&self) -> ValidatorIndex {
-        self.next_withdrawal_validator_index
-    }
-
-    fn next_withdrawal_validator_index_mut(&mut self) -> &mut ValidatorIndex {
-        &mut self.next_withdrawal_validator_index
-    }
-}
+// impl<P: Preset> PostCapellaBeaconState<P> for GloasBeaconState<P> {
+//     fn next_withdrawal_index(&self) -> WithdrawalIndex {
+//         self.next_withdrawal_index
+//     }
+//
+//     fn next_withdrawal_index_mut(&mut self) -> &mut WithdrawalIndex {
+//         &mut self.next_withdrawal_index
+//     }
+//
+//     fn next_withdrawal_validator_index(&self) -> ValidatorIndex {
+//         self.next_withdrawal_validator_index
+//     }
+//
+//     fn next_withdrawal_validator_index_mut(&mut self) -> &mut ValidatorIndex {
+//         &mut self.next_withdrawal_validator_index
+//     }
+// }
 
 pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     fn deposit_requests_start_index(&self) -> u64;
@@ -804,11 +794,11 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     [&self.field]
     [&mut self.field];
 
-    [P: Preset]
-    [GloasBeaconState<P>]
-    [self.field]
-    [&self.field]
-    [&mut self.field];
+    // [P: Preset]
+    // [GloasBeaconState<P>]
+    // [self.field]
+    // [&self.field]
+    // [&mut self.field];
 )]
 impl<parameters> PostElectraBeaconState<P> for implementor {
     #[duplicate_item(
@@ -876,15 +866,15 @@ impl<P: Preset> PostFuluBeaconState<P> for FuluBeaconState<P> {
     }
 }
 
-impl<P: Preset> PostFuluBeaconState<P> for GloasBeaconState<P> {
-    fn proposer_lookahead(&self) -> &ProposerLookahead<P> {
-        &self.proposer_lookahead
-    }
-
-    fn proposer_lookahead_mut(&mut self) -> &mut ProposerLookahead<P> {
-        &mut self.proposer_lookahead
-    }
-}
+// impl<P: Preset> PostFuluBeaconState<P> for GloasBeaconState<P> {
+//     fn proposer_lookahead(&self) -> &ProposerLookahead<P> {
+//         &self.proposer_lookahead
+//     }
+//
+//     fn proposer_lookahead_mut(&mut self) -> &mut ProposerLookahead<P> {
+//         &mut self.proposer_lookahead
+//     }
+// }
 
 // TODO(gloas): PostGloasBeaconState trait for new added fields
 

@@ -79,8 +79,6 @@ pub fn process_block_for_gossip<P: Preset>(
 
     unphased::process_block_header_for_gossip(config, state, &block.message)?;
 
-    process_execution_payload_for_gossip(config, state, &block.message.body)?;
-
     let public_key = accessors::public_key(state, block.message.proposer_index)?;
 
     SingleVerifier.verify_singular(
@@ -117,17 +115,17 @@ pub fn custom_process_block<P: Preset>(
 
     // > [New in Gloas:EIP7732]
     // TODO(gloas): replace with process_execution_payload_bid(state, block)?;
-    process_execution_payload(
-        config,
-        state,
-        // TODO(Grandine Team): Try caching `block.hash_tree_root()`.
-        //                      Also consider removing the parameter entirely.
-        //                      It's only used for error reporting.
-        //                      Perhaps it would be better to send the whole block?
-        block.hash_tree_root(),
-        &block.body,
-        execution_engine,
-    )?;
+    // process_execution_payload(
+    //     config,
+    //     state,
+    //     // TODO(Grandine Team): Try caching `block.hash_tree_root()`.
+    //     //                      Also consider removing the parameter entirely.
+    //     //                      It's only used for error reporting.
+    //     //                      Perhaps it would be better to send the whole block?
+    //     block.hash_tree_root(),
+    //     &block.body,
+    //     execution_engine,
+    // )?;
 
     unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
@@ -152,93 +150,94 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-fn process_execution_payload_for_gossip<P: Preset>(
-    config: &Config,
-    state: &BeaconState<P>,
-    body: &BeaconBlockBody<P>,
-) -> Result<()> {
-    let payload = &body.execution_payload;
-
-    // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
-    let in_block = payload.timestamp;
-
-    ensure!(
-        computed == in_block,
-        Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
-    );
-
-    // > [Modified in Fulu:EIP7594] Verify commitments are under limit
-    // > [Modified in Fulu:EIP7892] BPO blob schedule
-    let maximum = config
-        .get_blob_schedule_entry(get_current_epoch(state))
-        .max_blobs_per_block;
-    let in_block = body.blob_kzg_commitments.len();
-
-    ensure!(
-        in_block <= maximum,
-        Error::<P>::TooManyBlockKzgCommitments { in_block, maximum },
-    );
-
-    Ok(())
-}
-
-// TODO(gloas): [spec](https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/beacon-chain.md#new-process_execution_payload)
-// Move to `execution_payload_processing.rs`
-fn process_execution_payload<P: Preset>(
-    config: &Config,
-    state: &mut BeaconState<P>,
-    block_root: H256,
-    body: &BeaconBlockBody<P>,
-    execution_engine: impl ExecutionEngine<P>,
-) -> Result<()> {
-    let payload = &body.execution_payload;
-    let execution_requests = &body.execution_requests;
-
-    // > Verify consistency of the parent hash with respect to the previous execution payload header
-    let in_state = state.latest_execution_payload_header.block_hash;
-    let in_block = payload.parent_hash;
-
-    ensure!(
-        in_state == in_block,
-        Error::<P>::ExecutionPayloadParentHashMismatch { in_state, in_block },
-    );
-
-    // > Verify prev_randao
-    let in_state = get_randao_mix(state, get_current_epoch(state));
-    let in_block = payload.prev_randao;
-
-    ensure!(
-        in_state == in_block,
-        Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
-    );
-
-    process_execution_payload_for_gossip(config, state, body)?;
-
-    // > Verify the execution payload is valid
-    let versioned_hashes = body
-        .blob_kzg_commitments
-        .iter()
-        .copied()
-        .map(kzg_commitment_to_versioned_hash)
-        .collect();
-
-    execution_engine.notify_new_payload(
-        block_root,
-        payload.clone().into(),
-        Some(ExecutionPayloadParams::Electra {
-            versioned_hashes,
-            parent_beacon_block_root: state.latest_block_header.parent_root,
-            execution_requests: execution_requests.clone(),
-        }),
-        None,
-    )?;
-
-    // > Cache execution payload header
-    state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
-
-    Ok(())
-}
+// TODO(gloas): implement [`process_execution_payload_bid`](https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/beacon-chain.md#new-process_execution_payload_bid)
+// fn process_execution_payload_for_gossip<P: Preset>(
+//     config: &Config,
+//     state: &BeaconState<P>,
+//     body: &BeaconBlockBody<P>,
+// ) -> Result<()> {
+//     let payload = &body.execution_payload;
+//
+//     // > Verify timestamp
+//     let computed = compute_timestamp_at_slot(config, state, state.slot);
+//     let in_block = payload.timestamp;
+//
+//     ensure!(
+//         computed == in_block,
+//         Error::<P>::ExecutionPayloadTimestampMismatch { computed, in_block },
+//     );
+//
+//     // > [Modified in Fulu:EIP7594] Verify commitments are under limit
+//     // > [Modified in Fulu:EIP7892] BPO blob schedule
+//     let maximum = config
+//         .get_blob_schedule_entry(get_current_epoch(state))
+//         .max_blobs_per_block;
+//     let in_block = body.blob_kzg_commitments.len();
+//
+//     ensure!(
+//         in_block <= maximum,
+//         Error::<P>::TooManyBlockKzgCommitments { in_block, maximum },
+//     );
+//
+//     Ok(())
+// }
+//
+// // TODO(gloas): [spec](https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/beacon-chain.md#new-process_execution_payload)
+// // Move to `execution_payload_processing.rs`
+// fn process_execution_payload<P: Preset>(
+//     config: &Config,
+//     state: &mut BeaconState<P>,
+//     block_root: H256,
+//     body: &BeaconBlockBody<P>,
+//     execution_engine: impl ExecutionEngine<P>,
+// ) -> Result<()> {
+//     let payload = &body.execution_payload;
+//     let execution_requests = &body.execution_requests;
+//
+//     // > Verify consistency of the parent hash with respect to the previous execution payload header
+//     let in_state = state.latest_execution_payload_header.block_hash;
+//     let in_block = payload.parent_hash;
+//
+//     ensure!(
+//         in_state == in_block,
+//         Error::<P>::ExecutionPayloadParentHashMismatch { in_state, in_block },
+//     );
+//
+//     // > Verify prev_randao
+//     let in_state = get_randao_mix(state, get_current_epoch(state));
+//     let in_block = payload.prev_randao;
+//
+//     ensure!(
+//         in_state == in_block,
+//         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
+//     );
+//
+//     process_execution_payload_for_gossip(config, state, body)?;
+//
+//     // > Verify the execution payload is valid
+//     let versioned_hashes = body
+//         .blob_kzg_commitments
+//         .iter()
+//         .copied()
+//         .map(kzg_commitment_to_versioned_hash)
+//         .collect();
+//
+//     execution_engine.notify_new_payload(
+//         block_root,
+//         payload.clone().into(),
+//         Some(ExecutionPayloadParams::Electra {
+//             versioned_hashes,
+//             parent_beacon_block_root: state.latest_block_header.parent_root,
+//             execution_requests: execution_requests.clone(),
+//         }),
+//         None,
+//     )?;
+//
+//     // > Cache execution payload header
+//     state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
+//
+//     Ok(())
+// }
 
 pub fn validate_voluntary_exit<P: Preset>(
     config: &Config,
@@ -378,117 +377,124 @@ mod spec_tests {
         "consensus-spec-tests/tests/minimal/gloas/operations/block_header/*/*",
     }
 
-    processing_tests! {
-        process_consolidation_request,
-        |config, _, state, consolidation_request, _| electra::process_consolidation_request(config, state, consolidation_request),
-        "consolidation_request",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/consolidation_request/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/consolidation_request/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_consolidation_request,
+    //     |config, _, state, consolidation_request, _| electra::process_consolidation_request(config, state, consolidation_request),
+    //     "consolidation_request",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/consolidation_request/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/consolidation_request/*/*",
+    // }
 
-    processing_tests! {
-        process_proposer_slashing,
-        |config, pubkey_cache, state, proposer_slashing, _| {
-            electra::process_proposer_slashing(
-                config,
-                pubkey_cache,
-                state,
-                proposer_slashing,
-                SingleVerifier,
-                NullSlotReport,
-            )
-        },
-        "proposer_slashing",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/proposer_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/proposer_slashing/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_proposer_slashing,
+    //     |config, pubkey_cache, state, proposer_slashing, _| {
+    //         electra::process_proposer_slashing(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             proposer_slashing,
+    //             SingleVerifier,
+    //             NullSlotReport,
+    //         )
+    //     },
+    //     "proposer_slashing",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/proposer_slashing/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/proposer_slashing/*/*",
+    // }
 
-    processing_tests! {
-        process_attester_slashing,
-        |config, pubkey_cache, state, attester_slashing: AttesterSlashing<P>, _| {
-            electra::process_attester_slashing(
-                config,
-                pubkey_cache,
-                state,
-                &attester_slashing,
-                SingleVerifier,
-                NullSlotReport,
-            )
-        },
-        "attester_slashing",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/attester_slashing/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/attester_slashing/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_attester_slashing,
+    //     |config, pubkey_cache, state, attester_slashing: AttesterSlashing<P>, _| {
+    //         electra::process_attester_slashing(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             &attester_slashing,
+    //             SingleVerifier,
+    //             NullSlotReport,
+    //         )
+    //     },
+    //     "attester_slashing",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/attester_slashing/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/attester_slashing/*/*",
+    // }
 
-    processing_tests! {
-        process_attestation,
-        |config, pubkey_cache, state, attestation, bls_setting| {
-            process_attestation(
-                config,
-                pubkey_cache,
-                state,
-                &attestation,
-                bls_setting,
-            )
-        },
-        "attestation",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/attestation/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/attestation/*/*",
-    }
+    // TODO(gloas): uncomment once [`process_attestation`](https://github.com/ethereum/consensus-specs/blob/v1.6.0-beta.0/specs/gloas/beacon-chain.md#modified-process_attestation) implemented
+    // processing_tests! {
+    //     process_attestation,
+    //     |config, pubkey_cache, state, attestation, bls_setting| {
+    //         process_attestation(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             &attestation,
+    //             bls_setting,
+    //         )
+    //     },
+    //     "attestation",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/attestation/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/attestation/*/*",
+    // }
 
-    processing_tests! {
-        process_bls_to_execution_change,
-        |config, pubkey_cache, state, bls_to_execution_change, _| {
-            capella::process_bls_to_execution_change(
-                config,
-                pubkey_cache,
-                state,
-                bls_to_execution_change,
-                SingleVerifier,
-            )
-        },
-        "address_change",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/bls_to_execution_change/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/bls_to_execution_change/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_bls_to_execution_change,
+    //     |config, pubkey_cache, state, bls_to_execution_change, _| {
+    //         capella::process_bls_to_execution_change(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             bls_to_execution_change,
+    //             SingleVerifier,
+    //         )
+    //     },
+    //     "address_change",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/bls_to_execution_change/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/bls_to_execution_change/*/*",
+    // }
 
-    processing_tests! {
-        process_deposit,
-        |config, pubkey_cache, state, deposit, _| process_deposit(config, pubkey_cache, state, deposit),
-        "deposit",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/deposit/*/*",
-    }
-
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_deposit,
+    //     |config, pubkey_cache, state, deposit, _| process_deposit(config, pubkey_cache, state, deposit),
+    //     "deposit",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/deposit/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/deposit/*/*",
+    // }
+    //
     // `process_deposit_data` reimplements deposit validation differently for performance reasons,
     // so we need to test it separately.
-    processing_tests! {
-        process_deposit_data,
-        |config, pubkey_cache, state, deposit, _| {
-            unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
-            electra::process_deposit_data(config, pubkey_cache, state, deposit.data)?;
-            Ok(())
-        },
-        "deposit",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/deposit/*/*",
-    }
+    // processing_tests! {
+    //     process_deposit_data,
+    //     |config, pubkey_cache, state, deposit, _| {
+    //         unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
+    //         electra::process_deposit_data(config, pubkey_cache, state, deposit.data)?;
+    //         Ok(())
+    //     },
+    //     "deposit",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/deposit/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/deposit/*/*",
+    // }
 
-    processing_tests! {
-        process_voluntary_exit,
-        |config, pubkey_cache, state, voluntary_exit, _| {
-            electra::process_voluntary_exit(
-                config,
-                pubkey_cache,
-                state,
-                voluntary_exit,
-                SingleVerifier,
-            )
-        },
-        "voluntary_exit",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_voluntary_exit,
+    //     |config, pubkey_cache, state, voluntary_exit, _| {
+    //         electra::process_voluntary_exit(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             voluntary_exit,
+    //             SingleVerifier,
+    //         )
+    //     },
+    //     "voluntary_exit",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
+    // }
 
     processing_tests! {
         process_sync_aggregate,
@@ -507,21 +513,23 @@ mod spec_tests {
         "consensus-spec-tests/tests/minimal/gloas/operations/sync_aggregate/*/*",
     }
 
-    processing_tests! {
-        process_deposit_request,
-        |_, _, state, deposit_request, _| electra::process_deposit_request(state, deposit_request),
-        "deposit_request",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/deposit_request/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/deposit_request/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_deposit_request,
+    //     |_, _, state, deposit_request, _| electra::process_deposit_request(state, deposit_request),
+    //     "deposit_request",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/deposit_request/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/deposit_request/*/*",
+    // }
 
-    processing_tests! {
-        process_withdrawal_request,
-        |config, _, state, withdrawal_request, _| electra::process_withdrawal_request(config, state, withdrawal_request),
-        "withdrawal_request",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/withdrawal_request/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/withdrawal_request/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // processing_tests! {
+    //     process_withdrawal_request,
+    //     |config, _, state, withdrawal_request, _| electra::process_withdrawal_request(config, state, withdrawal_request),
+    //     "withdrawal_request",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/withdrawal_request/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/withdrawal_request/*/*",
+    // }
 
     validation_tests! {
         validate_proposer_slashing,
@@ -543,46 +551,50 @@ mod spec_tests {
         "consensus-spec-tests/tests/minimal/gloas/operations/attester_slashing/*/*",
     }
 
-    validation_tests! {
-        validate_voluntary_exit,
-        |config, pubkey_cache, state, voluntary_exit| {
-            electra::validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
-        },
-        "voluntary_exit",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // validation_tests! {
+    //     validate_voluntary_exit,
+    //     |config, pubkey_cache, state, voluntary_exit| {
+    //         electra::validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
+    //     },
+    //     "voluntary_exit",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
+    // }
 
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
     // TODO(feature/electra): comment this & run missing test script
-    validation_tests! {
-        validate_bls_to_execution_change,
-        |config, pubkey_cache, state, bls_to_execution_change| {
-            capella::validate_bls_to_execution_change(config, pubkey_cache, state, bls_to_execution_change)
-        },
-        "address_change",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/bls_to_execution_change/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/bls_to_execution_change/*/*",
-    }
+    // validation_tests! {
+    //     validate_bls_to_execution_change,
+    //     |config, pubkey_cache, state, bls_to_execution_change| {
+    //         capella::validate_bls_to_execution_change(config, pubkey_cache, state, bls_to_execution_change)
+    //     },
+    //     "address_change",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/bls_to_execution_change/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/bls_to_execution_change/*/*",
+    // }
 
-    #[test_resources("consensus-spec-tests/tests/mainnet/gloas/operations/execution_payload/*/*")]
-    fn mainnet_execution_payload(case: Case) {
-        run_execution_payload_case::<Mainnet>(case);
-    }
+    // TODO(gloas): uncomment after `process_execution_payload` implemented
+    // #[test_resources("consensus-spec-tests/tests/mainnet/gloas/operations/execution_payload/*/*")]
+    // fn mainnet_execution_payload(case: Case) {
+    //     run_execution_payload_case::<Mainnet>(case);
+    // }
+    //
+    // #[test_resources("consensus-spec-tests/tests/minimal/gloas/operations/execution_payload/*/*")]
+    // fn minimal_execution_payload(case: Case) {
+    //     run_execution_payload_case::<Minimal>(case);
+    // }
 
-    #[test_resources("consensus-spec-tests/tests/minimal/gloas/operations/execution_payload/*/*")]
-    fn minimal_execution_payload(case: Case) {
-        run_execution_payload_case::<Minimal>(case);
-    }
-
-    #[test_resources("consensus-spec-tests/tests/mainnet/gloas/operations/withdrawals/*/*")]
-    fn mainnet_withdrawals(case: Case) {
-        run_withdrawals_case::<Mainnet>(case);
-    }
-
-    #[test_resources("consensus-spec-tests/tests/minimal/gloas/operations/withdrawals/*/*")]
-    fn minimal_withdrawals(case: Case) {
-        run_withdrawals_case::<Minimal>(case);
-    }
+    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+    // #[test_resources("consensus-spec-tests/tests/mainnet/gloas/operations/withdrawals/*/*")]
+    // fn mainnet_withdrawals(case: Case) {
+    //     run_withdrawals_case::<Mainnet>(case);
+    // }
+    //
+    // #[test_resources("consensus-spec-tests/tests/minimal/gloas/operations/withdrawals/*/*")]
+    // fn minimal_withdrawals(case: Case) {
+    //     run_withdrawals_case::<Minimal>(case);
+    // }
 
     fn run_processing_case<P: Preset, O: SszReadDefault>(
         case: Case,
@@ -638,86 +650,90 @@ mod spec_tests {
         }
     }
 
-    fn run_execution_payload_case<P: Preset>(case: Case) {
-        let mut state = case.ssz_default::<BeaconState<P>>("pre");
-        let body = case.ssz_default("body");
-        let post_option = case.try_ssz_default("post");
-        let Execution { execution_valid } = case.yaml("execution");
-        let execution_engine = MockExecutionEngine::new(execution_valid, false, None);
+    // TODO(gloas): uncomment after `process_execution_payload` implemented
+    // fn run_execution_payload_case<P: Preset>(case: Case) {
+    //     let mut state = case.ssz_default::<BeaconState<P>>("pre");
+    //     let body = case.ssz_default("body");
+    //     let post_option = case.try_ssz_default("post");
+    //     let Execution { execution_valid } = case.yaml("execution");
+    //     let execution_engine = MockExecutionEngine::new(execution_valid, false, None);
+    //
+    //     let result = process_execution_payload(
+    //         &P::default_config(),
+    //         &mut state,
+    //         H256::default(),
+    //         &body,
+    //         &execution_engine,
+    //     )
+    //     .map(|()| state);
+    //
+    //     if let Some(expected_post) = post_option {
+    //         let actual_post = result.expect("execution payload processing should succeed");
+    //         assert_eq!(actual_post, expected_post);
+    //     } else {
+    //         result.expect_err("execution payload processing should fail");
+    //     }
+    // }
 
-        let result = process_execution_payload(
-            &P::default_config(),
-            &mut state,
-            H256::default(),
-            &body,
-            &execution_engine,
-        )
-        .map(|()| state);
+    // TODO(gloas): uncomment after `state` param is compatible with GloasBeaconState
+    // fn run_withdrawals_case<P: Preset>(case: Case) {
+    //     let mut state = case.ssz_default::<BeaconState<P>>("pre");
+    //     let payload = case.ssz_default::<ExecutionPayload<P>>("execution_payload");
+    //     let post_option = case.try_ssz_default("post");
+    //
+    //     let result = electra::process_withdrawals(&mut state, &payload).map(|()| state);
+    //
+    //     if let Some(expected_post) = post_option {
+    //         let actual_post = result.expect("withdrawals processing should succeed");
+    //         assert_eq!(actual_post, expected_post);
+    //     } else {
+    //         result.expect_err("withdrawals processing should fail");
+    //     }
+    // }
 
-        if let Some(expected_post) = post_option {
-            let actual_post = result.expect("execution payload processing should succeed");
-            assert_eq!(actual_post, expected_post);
-        } else {
-            result.expect_err("execution payload processing should fail");
-        }
-    }
+    // TODO(gloas): uncomment after `state` param is compatible with GloasBeaconState
+    // fn process_attestation<P: Preset>(
+    //     config: &Config,
+    //     pubkey_cache: &PubkeyCache,
+    //     state: &mut BeaconState<P>,
+    //     attestation: &Attestation<P>,
+    //     bls_setting: BlsSetting,
+    // ) -> Result<()> {
+    //     match bls_setting {
+    //         BlsSetting::Optional | BlsSetting::Required => {
+    //             electra::validate_attestation_with_verifier(
+    //                 config,
+    //                 pubkey_cache,
+    //                 state,
+    //                 attestation,
+    //                 SingleVerifier,
+    //             )?
+    //         }
+    //         BlsSetting::Ignored => electra::validate_attestation_with_verifier(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             attestation,
+    //             NullVerifier,
+    //         )?,
+    //     }
+    //
+    //     electra::apply_attestation(config, state, attestation, NullSlotReport)
+    // }
 
-    fn run_withdrawals_case<P: Preset>(case: Case) {
-        let mut state = case.ssz_default::<BeaconState<P>>("pre");
-        let payload = case.ssz_default::<ExecutionPayload<P>>("execution_payload");
-        let post_option = case.try_ssz_default("post");
-
-        let result = electra::process_withdrawals(&mut state, &payload).map(|()| state);
-
-        if let Some(expected_post) = post_option {
-            let actual_post = result.expect("withdrawals processing should succeed");
-            assert_eq!(actual_post, expected_post);
-        } else {
-            result.expect_err("withdrawals processing should fail");
-        }
-    }
-
-    fn process_attestation<P: Preset>(
-        config: &Config,
-        pubkey_cache: &PubkeyCache,
-        state: &mut BeaconState<P>,
-        attestation: &Attestation<P>,
-        bls_setting: BlsSetting,
-    ) -> Result<()> {
-        match bls_setting {
-            BlsSetting::Optional | BlsSetting::Required => {
-                electra::validate_attestation_with_verifier(
-                    config,
-                    pubkey_cache,
-                    state,
-                    attestation,
-                    SingleVerifier,
-                )?
-            }
-            BlsSetting::Ignored => electra::validate_attestation_with_verifier(
-                config,
-                pubkey_cache,
-                state,
-                attestation,
-                NullVerifier,
-            )?,
-        }
-
-        electra::apply_attestation(config, state, attestation, NullSlotReport)
-    }
-
-    fn process_deposit<P: Preset>(
-        config: &Config,
-        pubkey_cache: &PubkeyCache,
-        state: &mut BeaconState<P>,
-        deposit: Deposit,
-    ) -> Result<()> {
-        let combined_deposits =
-            unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
-
-        // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() += 1;
-
-        electra::apply_deposits(state, combined_deposits, NullSlotReport)
-    }
+    // TODO(gloas): uncomment after `state` param is compatible with GloasBeaconState
+    // fn process_deposit<P: Preset>(
+    //     config: &Config,
+    //     pubkey_cache: &PubkeyCache,
+    //     state: &mut BeaconState<P>,
+    //     deposit: Deposit,
+    // ) -> Result<()> {
+    //     let combined_deposits =
+    //         unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
+    //
+    //     // > Deposits must be processed in order
+    //     *state.eth1_deposit_index_mut() += 1;
+    //
+    //     electra::apply_deposits(state, combined_deposits, NullSlotReport)
+    // }
 }

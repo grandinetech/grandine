@@ -957,9 +957,9 @@ pub fn process_deposit_data(
         BeaconState::Fulu(state) => {
             electra::process_deposit_data(config, pubkey_cache, state, deposit_data)
         }
-        BeaconState::Gloas(state) => {
-            electra::process_deposit_data(config, pubkey_cache, state, deposit_data)
-        }
+        // TODO(gloas): update `state` param to be compatible with GloasBeaconState
+        // electra::process_deposit_data(config, pubkey_cache, state, deposit_data)
+        BeaconState::Gloas(_state) => todo!(),
     }
 }
 

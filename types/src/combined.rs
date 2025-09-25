@@ -94,7 +94,8 @@ use crate::{
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         containers::{
-            BeaconBlock as GloasBeaconBlock, LightClientBootstrap as GloasLightClientBootstrap,
+            BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid,
+            LightClientBootstrap as GloasLightClientBootstrap,
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate,
@@ -264,6 +265,33 @@ impl<P: Preset> BeaconState<P> {
         Ok(self)
     }
 
+    pub fn with_execution_payload_bid(
+        mut self,
+        execution_payload_bid: Option<ExecutionPayloadBid>,
+    ) -> Result<Self, StatePhaseError> {
+        let Some(execution_payload_bid) = execution_payload_bid else {
+            return Ok(self);
+        };
+
+        match &mut self {
+            Self::Gloas(state) => {
+                state.latest_execution_payload_bid = execution_payload_bid;
+            }
+            _ => {
+                // This match arm will silently match any new phases.
+                // Cause a compilation error if a new phase is added.
+                const_assert_eq!(Phase::CARDINALITY, 8);
+
+                return Err(StatePhaseError {
+                    state_phase: self.phase(),
+                    payload_phase: Phase::Gloas,
+                });
+            }
+        }
+
+        Ok(self)
+    }
+
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Phase0(_) => Phase::Phase0,
@@ -317,7 +345,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Deneb(state) => Some(state),
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(state) => Some(state),
+            Self::Gloas(_state) => None,
         }
     }
 
@@ -329,7 +357,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Deneb(state) => Some(state),
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(state) => Some(state),
+            Self::Gloas(_state) => None,
         }
     }
 
@@ -340,7 +368,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Deneb(state) => Some(state),
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(state) => Some(state),
+            Self::Gloas(_state) => None,
         }
     }
 
@@ -353,7 +381,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(state) => Some(state),
+            Self::Gloas(_state) => None,
         }
     }
 
@@ -366,7 +394,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(state) => Some(state),
+            Self::Gloas(_state) => None,
         }
     }
 
@@ -380,7 +408,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_)
             | Self::Electra(_) => None,
             Self::Fulu(state) => Some(state),
-            Self::Gloas(state) => Some(state),
+            Self::Gloas(_state) => None,
         }
     }
 
@@ -2145,14 +2173,14 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/fulu/ssz_static/BeaconState/*/*"]            [fulu_minimal_beacon_state]             [BeaconState]       [Minimal] [Fulu];
         ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/SignedBeaconBlock/*/*"]      [fulu_mainnet_signed_beacon_block]      [SignedBeaconBlock] [Mainnet] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/ssz_static/SignedBeaconBlock/*/*"]      [fulu_minimal_signed_beacon_block]      [SignedBeaconBlock] [Minimal] [Fulu];
-        ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/Attestation/*/*"]            [fulu_mainnet_attestation]              [Attestation]       [Mainnet] [Fulu];
-        ["consensus-spec-tests/tests/minimal/fulu/ssz_static/Attestation/*/*"]            [fulu_minimal_attestation]              [Attestation]       [Minimal] [Fulu];
+        ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/Attestation/*/*"]            [fulu_mainnet_attestation]              [Attestation]       [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/fulu/ssz_static/Attestation/*/*"]            [fulu_minimal_attestation]              [Attestation]       [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/BeaconState/*/*"]           [gloas_mainnet_beacon_state]            [BeaconState]       [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/ssz_static/BeaconState/*/*"]           [gloas_minimal_beacon_state]            [BeaconState]       [Minimal] [Gloas];
         ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedBeaconBlock/*/*"]     [gloas_mainnet_signed_beacon_block]     [SignedBeaconBlock] [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedBeaconBlock/*/*"]     [gloas_minimal_signed_beacon_block]     [SignedBeaconBlock] [Minimal] [Gloas];
-        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/Attestation/*/*"]           [gloas_mainnet_attestation]             [Attestation]       [Mainnet] [Gloas];
-        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/Attestation/*/*"]           [gloas_minimal_attestation]             [Attestation]       [Minimal] [Gloas];
+        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/Attestation/*/*"]           [gloas_mainnet_attestation]             [Attestation]       [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/Attestation/*/*"]           [gloas_minimal_attestation]             [Attestation]       [Minimal] [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {

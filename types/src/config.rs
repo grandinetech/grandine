@@ -96,6 +96,16 @@ pub struct Config {
     pub shard_committee_period: u64,
     #[serde(with = "As::<DurationMilliSeconds<String>>")]
     pub slot_duration_ms: Duration,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub attestation_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregate_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub sync_message_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub contribution_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub payload_attestation_due_bps: u64,
 
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
@@ -164,6 +174,8 @@ pub struct Config {
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars_fulu: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_request_payloads: u64,
     #[serde(with = "serde_utils::sorted_list_desc_by_key")]
     pub blob_schedule: Vec<BlobScheduleEntry>,
 
@@ -248,6 +260,11 @@ impl Default for Config {
             seconds_per_slot: nonzero!(12_u64),
             shard_committee_period: 256,
             slot_duration_ms: Duration::from_millis(12000),
+            attestation_due_bps_gloas: 2500,
+            aggregate_due_bps_gloas: 5000,
+            sync_message_due_bps_gloas: 2500,
+            contribution_due_bps_gloas: 5000,
+            payload_attestation_due_bps: 7500,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
@@ -287,6 +304,7 @@ impl Default for Config {
             max_request_blob_sidecars_electra: 1152,
             blob_sidecar_subnet_count_electra: nonzero!(9_u64),
             max_request_blob_sidecars_fulu: 1536,
+            max_request_payloads: 128,
             blob_schedule: vec![],
 
             // Transition

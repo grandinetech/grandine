@@ -26,7 +26,7 @@ mod tested_types {
             PendingPartialWithdrawal, SignedAggregateAndProof, SingleAttestation,
             WithdrawalRequest,
         },
-        fulu::containers::{DataColumnSidecar, DataColumnsByRootIdentifier, MatrixEntry},
+        fulu::containers::{DataColumnsByRootIdentifier, MatrixEntry},
         gloas::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
@@ -130,6 +130,18 @@ tests_for_type! {
 }
 
 tests_for_type! {
+    BuilderPendingPayment,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BuilderPendingPayment/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/BuilderPendingPayment/*/*",
+}
+
+tests_for_type! {
+    BuilderPendingWithdrawal,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BuilderPendingWithdrawal/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/BuilderPendingWithdrawal/*/*",
+}
+
+tests_for_type! {
     Checkpoint,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/Checkpoint/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/Checkpoint/*/*",
@@ -148,15 +160,15 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    DataColumnsByRootIdentifier<_>,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/DataColumnsByRootIdentifier/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/DataColumnsByRootIdentifier/*/*",
-}
-
-tests_for_type! {
     DataColumnSidecar<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/DataColumnSidecar/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/DataColumnSidecar/*/*",
+}
+
+tests_for_type! {
+    DataColumnsByRootIdentifier<_>,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/DataColumnsByRootIdentifier/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/DataColumnsByRootIdentifier/*/*",
 }
 
 tests_for_type! {
@@ -196,6 +208,18 @@ tests_for_type! {
 }
 
 tests_for_type! {
+    ExecutionPayloadBid,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ExecutionPayloadBid/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/ExecutionPayloadBid/*/*",
+}
+
+tests_for_type! {
+    ExecutionPayloadEnvelope<_>,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ExecutionPayloadEnvelope/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/ExecutionPayloadEnvelope/*/*",
+}
+
+tests_for_type! {
     ExecutionPayloadHeader<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ExecutionPayloadHeader/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/ExecutionPayloadHeader/*/*",
@@ -211,6 +235,12 @@ tests_for_type! {
     Fork,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/Fork/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/Fork/*/*",
+}
+
+tests_for_type! {
+    ForkChoiceNode,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ForkChoiceNode/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/ForkChoiceNode/*/*",
 }
 
 tests_for_type! {
@@ -235,6 +265,12 @@ tests_for_type! {
     IndexedAttestation<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/IndexedAttestation/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/IndexedAttestation/*/*",
+}
+
+tests_for_type! {
+    IndexedPayloadAttestation<_>,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/IndexedPayloadAttestation/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/IndexedPayloadAttestation/*/*",
 }
 
 tests_for_type! {
@@ -274,21 +310,39 @@ tests_for_type! {
 }
 
 tests_for_type! {
+    PayloadAttestation<_>,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PayloadAttestation/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/PayloadAttestation/*/*",
+}
+
+tests_for_type! {
+    PayloadAttestationData,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PayloadAttestationData/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/PayloadAttestationData/*/*",
+}
+
+tests_for_type! {
+    PayloadAttestationMessage,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PayloadAttestationMessage/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/PayloadAttestationMessage/*/*",
+}
+
+tests_for_type! {
     PendingAttestation<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PendingAttestation/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/PendingAttestation/*/*",
 }
 
 tests_for_type! {
-    PendingDeposit,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PendingDeposit/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/PendingDeposit/*/*",
-}
-
-tests_for_type! {
     PendingConsolidation,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PendingConsolidation/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/PendingConsolidation/*/*",
+}
+
+tests_for_type! {
+    PendingDeposit,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PendingDeposit/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/PendingDeposit/*/*",
 }
 
 tests_for_type! {
@@ -337,6 +391,18 @@ tests_for_type! {
     SignedContributionAndProof<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedContributionAndProof/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedContributionAndProof/*/*",
+}
+
+tests_for_type! {
+    SignedExecutionPayloadBid,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedExecutionPayloadBid/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedExecutionPayloadBid/*/*",
+}
+
+tests_for_type! {
+    SignedExecutionPayloadEnvelope<_>,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedExecutionPayloadEnvelope/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedExecutionPayloadEnvelope/*/*",
 }
 
 tests_for_type! {

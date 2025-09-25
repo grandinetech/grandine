@@ -89,7 +89,9 @@ pub mod fulu {
 
 pub mod gloas {
     pub mod beacon_state;
+    pub mod consts;
     pub mod containers;
+    pub mod primitives;
 
     #[cfg(test)]
     mod spec_tests;

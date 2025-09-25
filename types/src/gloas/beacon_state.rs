@@ -9,17 +9,20 @@ use crate::{
     cache::Cache,
     capella::primitives::WithdrawalIndex,
     collections::{
-        Balances, EpochParticipation, Eth1DataVotes, HistoricalRoots, HistoricalSummaries,
-        InactivityScores, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals,
-        ProposerLookahead, RandaoMixes, RecentRoots, Slashings, Validators,
+        Balances, BuilderPendingPayments, BuilderPendingWithdrawals, EpochParticipation,
+        Eth1DataVotes, HistoricalRoots, HistoricalSummaries, InactivityScores,
+        PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, ProposerLookahead,
+        RandaoMixes, RecentRoots, Slashings, Validators,
     },
-    deneb::containers::ExecutionPayloadHeader,
+    gloas::containers::ExecutionPayloadBid,
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
-        primitives::{DepositIndex, Epoch, Gwei, Slot, UnixSeconds, ValidatorIndex, H256},
+        primitives::{
+            DepositIndex, Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, ValidatorIndex, H256,
+        },
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerHistoricalRoot},
 };
 
 #[derive(Clone, Debug, Default, Derivative, Deserialize, Serialize, Ssz)]
@@ -79,7 +82,7 @@ pub struct BeaconState<P: Preset> {
     pub next_sync_committee: Arc<Hc<SyncCommittee<P>>>,
 
     // > Execution
-    pub latest_execution_payload_header: ExecutionPayloadHeader<P>,
+    pub latest_execution_payload_bid: ExecutionPayloadBid,
 
     // > Withdrawals
     #[serde(with = "serde_utils::string_or_native")]
@@ -106,6 +109,13 @@ pub struct BeaconState<P: Preset> {
     pub pending_consolidations: PendingConsolidations<P>,
     #[serde(with = "serde_utils::string_or_native_sequence")]
     pub proposer_lookahead: ProposerLookahead<P>,
+
+    // > ePBS states introduced in Gloas
+    pub execution_payload_availability: BitVector<SlotsPerHistoricalRoot<P>>,
+    pub builder_pending_payments: BuilderPendingPayments<P>,
+    pub builder_pending_withdrawals: BuilderPendingWithdrawals<P>,
+    pub latest_block_hash: ExecutionBlockHash,
+    pub latest_withdrawals_root: H256,
 
     // Cache
     #[derivative(PartialEq = "ignore")]
