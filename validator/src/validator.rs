@@ -931,7 +931,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     {
                         Ok(response) => response,
                         Err(error) => {
+                            if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
+                                if reqwest_error.is_timeout() {
+                                    // If posting signed blinded beacon block to builder fails, don't print a warning,
+                                    // because builder should publish the block anyway, just cannot respond in a timely
+                                    // manner. We cannot do anything else here either, but exit early from propose, due
+                                    // to the risk of slashing.
+                                    debug!("failed to post blinded block to the builder node: {error:?}");
+                                }
+
+                                return Ok(());
+                            }
+
                             warn!("failed to post blinded block to the builder node: {error:?}");
+
                             return Ok(());
                         }
                     };

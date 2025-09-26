@@ -2237,6 +2237,7 @@ dependencies = [
  "operation_pools",
  "prometheus_metrics",
  "pubkey_cache",
+ "reqwest",
  "serde",
  "serde_utils",
  "ssz",
