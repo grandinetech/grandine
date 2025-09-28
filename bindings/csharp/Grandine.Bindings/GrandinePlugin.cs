@@ -49,7 +49,7 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
     public string Author => "Grandine team";
 
     private ILogger _logger;
-    private INethermindApi _api;
+    private INethermindApi? _api;
 
     public bool Enabled => grandineConfig.Enabled;
 

@@ -4,15 +4,18 @@ using Grandine.Native;
 using Nethermind.Core.Crypto;
 using Nethermind.Facade.Eth;
 using System;
+using Nethermind.Int256;
 
 namespace Grandine.Bindings;
 
-public static class GrandineUtils {
-
-    public unsafe static CH256 convertHash256(Hash256 hash) {
+public static class GrandineUtils
+{
+    public unsafe static CH256 convertHash256(Hash256 hash)
+    {
         var result = new CH256();
 
-        if (hash == null) {
+        if (hash == null)
+        {
             return result;
         }
 
@@ -26,9 +29,5 @@ public static class GrandineUtils {
         }
 
         return result;
-    }
-
-    public unsafe static CEth1Block convertBlockForRpc(BlockForRpc block) {
-        return new CEth1Block();
     }
 }

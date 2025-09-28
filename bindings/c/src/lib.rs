@@ -1,5 +1,5 @@
 use allocator as _;
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use clap::{Error as ClapError, Parser};
 use eth1_api::{EmbedAdapter, Eth1Block};
 use execution_engine::{
@@ -1013,14 +1013,20 @@ impl From<&CBlobAndProofV2> for BlobAndProofV2<Mainnet> {
     fn from(value: &CBlobAndProofV2) -> Self {
         BlobAndProofV2::<Mainnet> {
             blob: Box::new(
-                unsafe { core::slice::from_raw_parts(value.blob, BytesPerBlob::<Mainnet>::USIZE) }.into(),
+                unsafe { core::slice::from_raw_parts(value.blob, BytesPerBlob::<Mainnet>::USIZE) }
+                    .into(),
             ),
-            proofs: ContiguousVector::<H384, <Mainnet as Preset>::CellsPerExtBlob>::try_from_iter(unsafe {
-                core::slice::from_raw_parts(
-                    value.proof,
-                    <Mainnet as Preset>::CellsPerExtBlob::USIZE,
-                )
-            }.iter().map(|v| v.clone().into())).unwrap(),
+            proofs: ContiguousVector::<H384, <Mainnet as Preset>::CellsPerExtBlob>::try_from_iter(
+                unsafe {
+                    core::slice::from_raw_parts(
+                        value.proof,
+                        <Mainnet as Preset>::CellsPerExtBlob::USIZE,
+                    )
+                }
+                .iter()
+                .map(|v| v.clone().into()),
+            )
+            .unwrap(),
         }
     }
 }
@@ -1214,9 +1220,9 @@ impl Into<EngineGetPayloadV2Response<Mainnet>> for CEngineGetPayloadV2Response {
 #[derive(Debug)]
 #[repr(C)]
 pub struct CBlobsBundleV1 {
-    commitments: *const *const u8,
+    commitments: *const CH384,
     commitments_len: u64,
-    proofs: *const *const u8,
+    proofs: *const CH384,
     proofs_len: u64,
     blobs: *const *const u8,
     blobs_len: u64,
@@ -1230,25 +1236,13 @@ impl Into<BlobsBundleV1<Mainnet>> for CBlobsBundleV1 {
                     std::slice::from_raw_parts(self.commitments, self.commitments_len as usize)
                 }
                 .iter()
-                .map(|&v| {
-                    H384(
-                        unsafe { std::slice::from_raw_parts(v, 48) }
-                            .try_into()
-                            .unwrap(),
-                    )
-                }),
+                .map(|v| H384(v.0)),
             )
             .unwrap(),
             proofs: ContiguousList::try_from_iter(
                 unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
                     .iter()
-                    .map(|&v| {
-                        H384(
-                            unsafe { std::slice::from_raw_parts(v, 48) }
-                                .try_into()
-                                .unwrap(),
-                        )
-                    }),
+                    .map(|v| H384(v.0)),
             )
             .unwrap(),
             blobs: ContiguousList::try_from_iter(
@@ -1275,25 +1269,13 @@ impl Into<BlobsBundleV2<Mainnet>> for CBlobsBundleV1 {
                     std::slice::from_raw_parts(self.commitments, self.commitments_len as usize)
                 }
                 .iter()
-                .map(|&v| {
-                    H384(
-                        unsafe { std::slice::from_raw_parts(v, 48) }
-                            .try_into()
-                            .unwrap(),
-                    )
-                }),
+                .map(|v| H384(v.0)),
             )
             .unwrap(),
             proofs: ContiguousList::try_from_iter(
                 unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
                     .iter()
-                    .map(|&v| {
-                        H384(
-                            unsafe { std::slice::from_raw_parts(v, 48) }
-                                .try_into()
-                                .unwrap(),
-                        )
-                    }),
+                    .map(|v| H384(v.0)),
             )
             .unwrap(),
             blobs: ContiguousList::try_from_iter(
@@ -1407,14 +1389,14 @@ pub enum CBlockNumber {
 #[repr(C)]
 struct CH160([u8; 20]);
 
-#[repr(C)]
-pub struct CFilter {
-    from_block: COptionU64,
-    to_block: COptionU64,
-    address: COptionCVecCH160,
-    topics: COptionCVecCOptionCVecCH256,
-    limit: COptionU64,
-}
+// #[repr(C)]
+// pub struct CFilter {
+//     from_block: COptionU64,
+//     to_block: COptionU64,
+//     address: COptionCVecCH160,
+//     topics: COptionCVecCOptionCVecCH256,
+//     limit: COptionU64,
+// }
 
 fn block_number_into_u64(b: BlockNumber) -> u64 {
     match b {
@@ -1427,77 +1409,77 @@ fn block_number_into_u64(b: BlockNumber) -> u64 {
     }
 }
 
-impl CFilter {
-    fn from(
-        value: Filter,
-    ) -> (
-        Self,
-        Option<Vec<CH160>>,
-        Vec<Vec<CH256>>,
-        Option<Vec<COptionCVecCH256>>,
-    ) {
-        let address = value.address.map(|v| {
-            let v: Vec<H160> = v.0.into();
-            let v = v.into_iter().map(|c| CH160(c.0)).collect::<Vec<_>>();
-            let cv: CVecCH160 = (&v).into();
+// impl CFilter {
+//     fn from(
+//         value: Filter,
+//     ) -> (
+//         Self,
+//         Option<Vec<CH160>>,
+//         Vec<Vec<CH256>>,
+//         Option<Vec<COptionCVecCH256>>,
+//     ) {
+//         let address = value.address.map(|v| {
+//             let v: Vec<H160> = v.0.into();
+//             let v = v.into_iter().map(|c| CH160(c.0)).collect::<Vec<_>>();
+//             let cv: CVecCH160 = (&v).into();
 
-            (cv, v)
-        });
+//             (cv, v)
+//         });
 
-        let (address, vec) = if let Some((a, v)) = address {
-            (Some(a), Some(v))
-        } else {
-            (None, None)
-        };
+//         let (address, vec) = if let Some((a, v)) = address {
+//             (Some(a), Some(v))
+//         } else {
+//             (None, None)
+//         };
 
-        let mut allocated_topics = Vec::new();
+//         let mut allocated_topics = Vec::new();
 
-        let topics = value.topics.map(|v| {
-            let vec = v
-                .into_iter()
-                .map(|v| {
-                    if let Some(v) = v {
-                        let v: Vec<H256> = v.0.into();
-                        let v = v.iter().map(|v| CH256(v.0)).collect::<Vec<_>>();
-                        allocated_topics.push(v);
+//         let topics = value.topics.map(|v| {
+//             let vec = v
+//                 .into_iter()
+//                 .map(|v| {
+//                     if let Some(v) = v {
+//                         let v: Vec<H256> = v.0.into();
+//                         let v = v.iter().map(|v| CH256(v.0)).collect::<Vec<_>>();
+//                         allocated_topics.push(v);
 
-                        COptionCVecCH256 {
-                            is_something: true,
-                            value: allocated_topics.last().unwrap().into(),
-                        }
-                    } else {
-                        COptionCVecCH256 {
-                            is_something: false,
-                            value: Default::default(),
-                        }
-                    }
-                })
-                .collect::<Vec<COptionCVecCH256>>();
-            let cvec: CVecCOptionCVecCH256 = (&vec).into();
+//                         COptionCVecCH256 {
+//                             is_something: true,
+//                             value: allocated_topics.last().unwrap().into(),
+//                         }
+//                     } else {
+//                         COptionCVecCH256 {
+//                             is_something: false,
+//                             value: Default::default(),
+//                         }
+//                     }
+//                 })
+//                 .collect::<Vec<COptionCVecCH256>>();
+//             let cvec: CVecCOptionCVecCH256 = (&vec).into();
 
-            (cvec, vec)
-        });
+//             (cvec, vec)
+//         });
 
-        let (topics, vec2) = if let Some((t, v)) = topics {
-            (Some(t), Some(v))
-        } else {
-            (None, None)
-        };
+//         let (topics, vec2) = if let Some((t, v)) = topics {
+//             (Some(t), Some(v))
+//         } else {
+//             (None, None)
+//         };
 
-        (
-            CFilter {
-                from_block: value.from_block.map(block_number_into_u64).into(),
-                to_block: value.to_block.map(block_number_into_u64).into(),
-                address: address.into(),
-                topics: topics.into(),
-                limit: value.limit.map(|v| v as u64).into(),
-            },
-            vec,
-            allocated_topics,
-            vec2,
-        )
-    }
-}
+//         (
+//             CFilter {
+//                 from_block: value.from_block.map(block_number_into_u64).into(),
+//                 to_block: value.to_block.map(block_number_into_u64).into(),
+//                 address: address.into(),
+//                 topics: topics.into(),
+//                 limit: value.limit.map(|v| v as u64).into(),
+//             },
+//             vec,
+//             allocated_topics,
+//             vec2,
+//         )
+//     }
+// }
 
 #[derive(Debug)]
 #[repr(C)]
@@ -1603,7 +1585,7 @@ pub struct CEmbedAdapter {
     eth_get_block_latest: unsafe extern "C" fn() -> CResultCOptionCEth1Block,
     eth_get_block_earliest: unsafe extern "C" fn() -> CResultCOptionCEth1Block,
     eth_get_block_pending: unsafe extern "C" fn() -> CResultCOptionCEth1Block,
-    eth_logs: unsafe extern "C" fn(filter: CFilter) -> CResultCLogs,
+    // eth_logs: unsafe extern "C" fn(filter: CFilter) -> CResultCLogs,
     engine_new_payload_v1:
         unsafe extern "C" fn(payload: CExecutionPayloadV1) -> CResultCPayloadStatusV1,
     engine_new_payload_v2:
@@ -1682,17 +1664,18 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
     }
 
     fn eth_logs(&self, filter: web3::types::Filter) -> Result<Vec<web3::types::Log>> {
-        let (filter, vec1, vec2, vec3) = CFilter::from(filter);
+        // let (filter, vec1, vec2, vec3) = CFilter::from(filter);
 
-        let output = unsafe { (self.eth_logs)(filter) };
+        // let output = unsafe { (self.eth_logs)(filter) };
 
-        drop(vec1);
-        drop(vec2);
-        drop(vec3);
+        // drop(vec1);
+        // drop(vec2);
+        // drop(vec3);
 
-        let output: Result<_> = output.into();
+        // let output: Result<_> = output.into();
 
-        output.map(|v| v.into())
+        // output.map(|v| v.into())
+        bail!("eth_logs function is not implemented in embedded api")
     }
 
     fn engine_new_payload_v1(

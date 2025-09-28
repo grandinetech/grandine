@@ -42,13 +42,6 @@ namespace Grandine.Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CResultCLogs
-    {
-        public CLogs value;
-        public ulong error;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
     public unsafe partial struct CResultCPayloadStatusV1
     {
         public CPayloadStatusV1 value;
@@ -212,53 +205,6 @@ namespace Grandine.Native
     {
         [MarshalAs(UnmanagedType.U1)] public bool is_something;
         public CH64 value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct COptionU64
-    {
-        [MarshalAs(UnmanagedType.U1)] public bool is_something;
-        public ulong value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct COptionCVecCH160
-    {
-        [MarshalAs(UnmanagedType.U1)] public bool is_something;
-        public CVecCH160 value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct COptionCVecCH256
-    {
-        [MarshalAs(UnmanagedType.U1)] public bool is_something;
-        public CVecCH256 value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct COptionCVecCOptionCVecCH256
-    {
-        [MarshalAs(UnmanagedType.U1)] public bool is_something;
-        public CVecCOptionCVecCH256 value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct COptionCStr
-    {
-        [MarshalAs(UnmanagedType.U1)] public bool is_something;
-        public CCharPtr value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CCharPtr
-    {
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct COptionBool
-    {
-        [MarshalAs(UnmanagedType.U1)] public bool is_something;
-        [MarshalAs(UnmanagedType.U1)] public bool value;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -426,9 +372,9 @@ namespace Grandine.Native
     [StructLayout(LayoutKind.Sequential)]
     public unsafe partial struct CBlobsBundleV1
     {
-        public byte** commitments;
+        public CH384* commitments;
         public ulong commitments_len;
-        public byte** proofs;
+        public CH384* proofs;
         public ulong proofs_len;
         public byte** blobs;
         public ulong blobs_len;
@@ -471,73 +417,6 @@ namespace Grandine.Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CH160
-    {
-        public fixed byte Item1[20];
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CFilter
-    {
-        public COptionU64 from_block;
-        public COptionU64 to_block;
-        public COptionCVecCH160 address;
-        public COptionCVecCOptionCVecCH256 topics;
-        public COptionU64 limit;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CVecCH160
-    {
-        public CH160* data;
-        public ulong data_len;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CVecCH256
-    {
-        public CH256* data;
-        public ulong data_len;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CVecCOptionCVecCH256
-    {
-        public COptionCVecCH256* data;
-        public ulong data_len;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CVecU8
-    {
-        public byte* data;
-        public ulong data_len;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CLog
-    {
-        public fixed byte address[20];
-        public CVecCH256 topics;
-        public CVecU8 data;
-        public COptionCH256 block_hash;
-        public COptionU64 block_number;
-        public COptionCH256 transaction_hash;
-        public COptionU64 transaction_index;
-        public COptionCH256 log_index;
-        public COptionCH256 transaction_log_index;
-        public COptionCStr log_type;
-        public COptionBool removed;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe partial struct CLogs
-    {
-        public CLog* logs;
-        public ulong logs_len;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
     public unsafe partial struct CEmbedAdapter
     {
         public delegate* unmanaged[Cdecl]<CResultU64> eth_block_number;
@@ -548,7 +427,6 @@ namespace Grandine.Native
         public delegate* unmanaged[Cdecl]<CResultCOptionCEth1Block> eth_get_block_latest;
         public delegate* unmanaged[Cdecl]<CResultCOptionCEth1Block> eth_get_block_earliest;
         public delegate* unmanaged[Cdecl]<CResultCOptionCEth1Block> eth_get_block_pending;
-        public delegate* unmanaged[Cdecl]<CFilter, CResultCLogs> eth_logs;
         public delegate* unmanaged[Cdecl]<CExecutionPayloadV1, CResultCPayloadStatusV1> engine_new_payload_v1;
         public delegate* unmanaged[Cdecl]<CExecutionPayloadV2, CResultCPayloadStatusV1> engine_new_payload_v2;
         public delegate* unmanaged[Cdecl]<CExecutionPayloadV3, byte**, ulong, byte*, CResultCPayloadStatusV1> engine_new_payload_v3;

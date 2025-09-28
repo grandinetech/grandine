@@ -476,7 +476,7 @@ url = '2'
 uuid = { version = '1', features = ['serde', 'v4'] }
 variant_count = '1'
 void = '1'
-web3 = { path = "../rust-web3" }
+web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 xz2 = { version = "0.1" }
 zeroize = { version = '1', features = ['derive', 'serde'] }
