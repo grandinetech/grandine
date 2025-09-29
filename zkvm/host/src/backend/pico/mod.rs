@@ -1,5 +1,5 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use pico_sdk::{client::DefaultProverClient, init_logger};
 use pico_vm::{
     configs::stark_config::KoalaBearPoseidon2,
@@ -79,12 +79,8 @@ impl VmBackend for Vm {
         // Load the ELF file
         let out_dir = env!("OUT_DIR");
         let zkvm_guest_path = Path::new(&out_dir).join(ZKVM_GUEST_PICO_SUFFIX);
-        let elf = fs::read(&zkvm_guest_path).map_err(|err| {
-            anyhow!(format!(
-                "Failed to load ELF file from {}: {}",
-                zkvm_guest_path.display(),
-                err
-            ))
+        let elf = fs::read(&zkvm_guest_path).with_context(|| {
+            format!("Failed to load ELF file from {}", zkvm_guest_path.display())
         })?;
 
         // Initialize the prover client
@@ -142,7 +138,7 @@ impl VmBackend for Vm {
 
         let proof_set = prover
             .prove(stdin_builder)
-            .expect("Failed to generate proof");
+            .context("Failed to generate proof")?;
 
         println!("zkvm_host: proving ends.");
 
@@ -150,7 +146,7 @@ impl VmBackend for Vm {
             .0
             .pv_stream
             .clone()
-            .expect("Reading proof_set error");
+            .context("Reading proof_set error")?;
 
         Ok((output, Proof { prover, proof_set }))
     }
