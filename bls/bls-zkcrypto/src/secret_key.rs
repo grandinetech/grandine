@@ -71,6 +71,9 @@ impl SecretKeyTrait<SIZE> for SecretKey {
             [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
+
+        // This section applies to both when compiling `-p zkvm_host --feature pico` and when
+        // compiling the guest program. zkvm-pico has a target string of "riscv32im-risc0-zkvm-elf".
         #[cfg(feature = "zkvm-pico")]
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             message.as_ref(),
