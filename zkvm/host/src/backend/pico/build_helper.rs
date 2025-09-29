@@ -1,5 +1,9 @@
 use anyhow::{Result, Context};
-use std::{env, process::Command, path::Path};
+use std::{
+    env,
+    path::Path,
+    process::Command,
+};
 
 const GUEST_PROGRAM: &str = "zkvm-guest-pico.elf";
 

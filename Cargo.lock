@@ -14863,12 +14863,4 @@ dependencies = [
  "types",
  "xz2",
  "zkvm_guest_risc0",
- "zkvm_pico_helper",
-]
-
-[[package]]
-name = "zkvm_pico_helper"
-version = "0.1.0"
-dependencies = [
- "anyhow",
 ]

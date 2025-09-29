@@ -6,8 +6,8 @@ use pico_vm::{
     instances::configs::embed_kb_config::KoalaBearBn254Poseidon2, machine::proof::MetaProof,
 };
 use std::{
-    env, fs,
-    fs::File,
+    env,
+    fs::{self, File},
     io::{BufWriter, Write},
     path::Path,
 };

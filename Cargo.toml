@@ -67,7 +67,6 @@ members = [
     'validator_statistics',
     'zkvm/guest/risc0',
     'zkvm/host',
-    'zkvm/host/pico_helper',
 ]
 exclude = [
     # Excluding the zkvm guest library will make the compiled guest code size a lot smaller, from
@@ -557,7 +556,6 @@ validator_key_cache = { path = 'validator_key_cache' }
 validator_statistics = { path = 'validator_statistics' }
 zkvm_guest_risc0 = { path = 'zkvm/guest/risc0' }
 zkvm_host = { path = 'zkvm/host' }
-zkvm_pico_helper = { path = 'zkvm/host/pico_helper' }
 
 # Banned crates
 #

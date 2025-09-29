@@ -3,9 +3,7 @@ use anyhow::Result;
 use borsh::BorshSerialize;
 use risc0_zkvm::{default_prover, ExecutorEnv, Receipt, SessionStats};
 use std::{fs::File, io::BufWriter};
-use zkvm_guest_risc0::{
-    RISC0_GRANDINE_STATE_TRANSITION_ELF, RISC0_GRANDINE_STATE_TRANSITION_ID,
-};
+use zkvm_guest_risc0::{RISC0_GRANDINE_STATE_TRANSITION_ELF, RISC0_GRANDINE_STATE_TRANSITION_ID};
 
 pub struct Vm;
 

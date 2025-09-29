@@ -33,7 +33,7 @@ pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" 
 
 [build-dependencies]
 sp1-helper = { workspace = true, optional = true }
-zkvm_pico_helper = { workspace = true, optional = true }
+anyhow = { workspace = true }
 
 [features]
 risc0 = [
@@ -50,6 +50,5 @@ pico = [
     "dep:serde_json",
     "dep:pico-sdk",
     "dep:pico-vm",
-    "dep:zkvm_pico_helper",
     "bls/zkvm-pico",
 ]
