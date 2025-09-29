@@ -99,7 +99,7 @@ const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
 // We originally set `MAX_VALIDATORS_PER_REGISTRATION` to 1000.
 // That didn't work because processing registrations for 1000 validators takes around 3 seconds,
 // which happens to be the default timeout for validator registration requests in `mev-boost`.
-const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
+const MAX_VALIDATORS_PER_REGISTRATION: usize = 175;
 
 #[derive(Display)]
 #[display("too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
