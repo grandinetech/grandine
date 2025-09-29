@@ -537,6 +537,20 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         {
             Ok(execution_payload) => execution_payload,
             Err(error) => {
+                if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
+                    if reqwest_error.is_timeout() {
+                        // If posting signed blinded beacon block to builder fails, don't print a warning,
+                        // because builder should publish the block anyway, just cannot respond in a timely
+                        // manner. We cannot do anything else here either, but exit early from propose, due
+                        // to the risk of slashing.
+                        log_with_feature(format_args!(
+                            "failed to post blinded block to the builder node: {error:?}",
+                        ));
+                    }
+
+                    return None;
+                }
+
                 warn!("failed to post blinded block to the builder node: {error:?}");
                 return None;
             }

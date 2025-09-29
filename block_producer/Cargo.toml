@@ -28,6 +28,7 @@ log = { workspace = true }
 operation_pools = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
