@@ -5,9 +5,8 @@ use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::containers::PowBlock,
-    combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    fulu::containers::DataColumnSidecar,
     phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
@@ -16,6 +15,10 @@ use types::{
 pub enum Error<P: Preset> {
     #[error("attestation data should have index as zero")]
     AttestationDataIndexNotZero { attestation: Arc<Attestation<P>> },
+    #[error("attestation data with invalid payload status")]
+    AttestationDataInvalidPayloadStatus { attestation: Arc<Attestation<P>> },
+    #[error("attestation data for current slot with payload presence")]
+    AttestationDataPayloadPresenceForCurrentSlot { attestation: Arc<Attestation<P>> },
     #[error("attestation with multiple committee bits")]
     AttestationFromMultipleCommittees { attestation: Arc<Attestation<P>> },
     #[error("aggregate attestation has no aggregation bits set: {aggregate_and_proof:?}")]
@@ -85,6 +88,10 @@ pub enum Error<P: Preset> {
     DataColumnSidecarInvalid {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
+    #[error("data column sidecar's kzg commitments is invalid: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalidKzgCommitments {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
     // TODO(feature/deneb): This is vague.
     //                      The validation that fails with this error actually checks commitments.
     #[error("data column sidecar's kzg proofs is invalid: {data_column_sidecar:?} error: {error}")]
@@ -116,6 +123,11 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         expected: SubnetId,
         actual: SubnetId,
+    },
+    #[error("data column sidecar's slot mismatch the slot in beacon block: {data_column_sidecar:?}, block_slot: {block_slot}")]
+    DataColumnSidecarSlotMismatch {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_slot: Slot,
     },
     #[error(
         "data column sidecar has incorrect proposer index \
