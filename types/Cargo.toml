@@ -20,7 +20,6 @@ ethereum-types = { workspace = true }
 generic-array = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
-itertools = { workspace = true }
 nonzero_ext = { workspace = true }
 once_cell = { workspace = true }
 primitive-types = { workspace = true }
