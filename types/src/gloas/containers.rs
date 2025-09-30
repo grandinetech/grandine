@@ -56,7 +56,7 @@ pub struct BeaconBlockBody<P: Preset> {
     pub payload_attestations: ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct BuilderPendingPayment {
     #[serde(with = "serde_utils::string_or_native")]
@@ -64,7 +64,7 @@ pub struct BuilderPendingPayment {
     pub withdrawal: BuilderPendingWithdrawal,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct BuilderPendingWithdrawal {
     pub fee_recipient: ExecutionAddress,
@@ -76,7 +76,7 @@ pub struct BuilderPendingWithdrawal {
     pub withdrawable_epoch: Epoch,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, PartialEq, Eq, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
@@ -84,10 +84,12 @@ pub struct DataColumnSidecar<P: Preset> {
     pub column: ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
     pub beacon_block_root: H256,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct ExecutionPayloadBid {
     pub parent_block_hash: ExecutionBlockHash,
@@ -119,7 +121,7 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     pub state_root: H256,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct ForkChoiceNode {
     pub root: H256,
@@ -136,7 +138,7 @@ pub struct IndexedPayloadAttestation<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct PayloadAttestationData {
     pub beacon_block_root: H256,
@@ -146,7 +148,7 @@ pub struct PayloadAttestationData {
     pub blob_data_available: bool,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct PayloadAttestation<P: Preset> {
     pub aggregation_bits: BitVector<P::PtcSize>,
@@ -154,7 +156,7 @@ pub struct PayloadAttestation<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct PayloadAttestationMessage {
     #[serde(with = "serde_utils::string_or_native")]
@@ -219,7 +221,7 @@ pub struct SignedBeaconBlock<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct SignedExecutionPayloadBid {
     pub message: ExecutionPayloadBid,

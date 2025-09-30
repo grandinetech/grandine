@@ -93,6 +93,8 @@ pub mod gloas {
     pub mod containers;
     pub mod primitives;
 
+    mod container_impls;
+
     #[cfg(test)]
     mod spec_tests;
 }

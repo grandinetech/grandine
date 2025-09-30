@@ -49,11 +49,14 @@ use tokio_stream::wrappers::IntervalStream;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
@@ -703,7 +706,7 @@ impl<P: Preset> Network<P> {
     fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         let subnet_id = misc::compute_subnet_for_data_column_sidecar(
             self.controller.chain_config(),
-            data_column_sidecar.index,
+            data_column_sidecar.index(),
         );
 
         let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
@@ -1443,7 +1446,7 @@ impl<P: Preset> Network<P> {
                 )?;
 
                 // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
-                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index()));
 
                 for data_column_sidecar in data_column_sidecars {
                     let data_column_identifier: DataColumnIdentifier =
@@ -1784,8 +1787,7 @@ impl<P: Preset> Network<P> {
                 debug!(
                     "received DataColumnsByRange response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
-                    slot: {}, id: {data_column_identifier:?})",
-                    data_column_sidecar.slot(),
+                    data_column_identifier: {data_column_identifier:?})",
                 );
 
                 P2pToSync::RequestedDataColumnSidecar(
@@ -1812,8 +1814,7 @@ impl<P: Preset> Network<P> {
                 debug!(
                     "received DataColumnsByRoot response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
-                    slot: {}, id: {data_column_identifier:?})",
-                    data_column_sidecar.slot(),
+                    data_column_identifier: {data_column_identifier:?})",
                 );
 
                 P2pToSync::RequestedDataColumnSidecar(

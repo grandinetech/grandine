@@ -27,6 +27,16 @@ pub fn validate_merge_block<P: Preset, E: ExecutionEngine<P>>(
     body: &(impl PostBellatrixBeaconBlockBody<P> + ?Sized),
     execution_engine: E,
 ) -> Result<PartialBlockAction> {
+    // > [Modified in Gloas:EIP7732]
+    let parent_hash = body
+        .post_gloas()
+        .map(|body| {
+            body.signed_execution_payload_bid()
+                .message
+                .parent_block_hash
+        })
+        .unwrap_or_else(|| body.execution_payload().parent_hash());
+
     if !chain_config.terminal_block_hash.is_zero() {
         let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
 
@@ -40,7 +50,7 @@ pub fn validate_merge_block<P: Preset, E: ExecutionEngine<P>>(
         );
 
         ensure!(
-            body.execution_payload().parent_hash() == chain_config.terminal_block_hash,
+            parent_hash == chain_config.terminal_block_hash,
             Error::TerminalBlockHashMismatch {
                 block: block.clone_arc(),
             },
@@ -63,7 +73,7 @@ pub fn validate_merge_block<P: Preset, E: ExecutionEngine<P>>(
         };
 
     // > Check if `pow_block` is available
-    let Some(pow_block) = execution_engine.pow_block(body.execution_payload().parent_hash()) else {
+    let Some(pow_block) = execution_engine.pow_block(parent_hash) else {
         return Ok(pow_block_missing_block_action);
     };
 
