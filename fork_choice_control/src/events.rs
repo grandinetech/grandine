@@ -18,12 +18,12 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use types::{
     altair::containers::SignedContributionAndProof,
     capella::{containers::SignedBlsToExecutionChange, primitives::WithdrawalIndex},
-    combined::{Attestation, AttesterSlashing},
+    combined::{Attestation, AttesterSlashing, DataColumnSidecar},
     deneb::{
         containers::BlobSidecar,
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
-    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
+    fulu::primitives::ColumnIndex,
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -579,9 +579,9 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
     fn new(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
         Self {
             block_root,
-            index: data_column_sidecar.index,
+            index: data_column_sidecar.index(),
             slot: data_column_sidecar.slot(),
-            kzg_commitments: data_column_sidecar.kzg_commitments.clone(),
+            kzg_commitments: data_column_sidecar.kzg_commitments().clone(),
         }
     }
 }
@@ -709,6 +709,7 @@ pub enum CombinedPayloadAttributesEventData {
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
     Fulu(PayloadAttributesEventDataV3),
+    Gloas(PayloadAttributesEventDataV3),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -838,6 +839,9 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             }
             PayloadAttributes::Fulu(payload_attributes_v3) => {
                 Self::Fulu(payload_attributes_v3.into())
+            }
+            PayloadAttributes::Gloas(payload_attributes_v3) => {
+                Self::Gloas(payload_attributes_v3.into())
             }
         }
     }

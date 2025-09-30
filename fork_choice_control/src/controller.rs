@@ -37,19 +37,14 @@ use thiserror::Error;
 use tracing::instrument;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{
-        containers::{DataColumnSidecar, MatrixEntry},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::MatrixEntry, primitives::ColumnIndex},
     nonstandard::ValidationOutcome,
-    phase0::{
-        containers::BeaconBlockHeader,
-        primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
-    },
+    phase0::primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -627,16 +622,28 @@ where
         block_seen: bool,
         peer_id: PeerId,
     ) {
-        let block_header = data_column_sidecar.signed_block_header.message;
+        let block_root = data_column_sidecar.beacon_block_root();
         if !self.store_snapshot().is_forward_synced()
-            && self
-                .store_snapshot()
-                .accepted_data_column_sidecar(block_header, data_column_sidecar.index)
+            && data_column_sidecar
+                .pre_gloas()
+                .map(|sidecar| {
+                    self.store_snapshot().accepted_data_column_sidecar(
+                        sidecar.signed_block_header.message,
+                        sidecar.index,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    self.store_snapshot().accepted_gloas_data_column_sidecar(
+                        data_column_sidecar.slot(),
+                        block_root,
+                        data_column_sidecar.index(),
+                    )
+                })
         {
             debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from peer {peer_id} \
                  (index: {}, slot: {})",
-                data_column_sidecar.index,
+                data_column_sidecar.index(),
                 data_column_sidecar.slot(),
             );
             return;
@@ -646,6 +653,7 @@ where
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
+            block_root,
             data_column_sidecar,
             state: None,
             block_seen,
@@ -763,16 +771,28 @@ where
     ) {
         // During syncing, prevent spawning task if the sidecar has been accepted.
         // On the other hand, forward it to the `mutator` to allow distributed publishing if it is synced.
-        let block_header = data_column_sidecar.signed_block_header.message;
+        let block_root = data_column_sidecar.beacon_block_root();
         if !self.store_snapshot().is_forward_synced()
-            && self
-                .store_snapshot()
-                .accepted_data_column_sidecar(block_header, data_column_sidecar.index)
+            && data_column_sidecar
+                .pre_gloas()
+                .map(|sidecar| {
+                    self.store_snapshot().accepted_data_column_sidecar(
+                        sidecar.signed_block_header.message,
+                        sidecar.index,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    self.store_snapshot().accepted_gloas_data_column_sidecar(
+                        data_column_sidecar.slot(),
+                        block_root,
+                        data_column_sidecar.index(),
+                    )
+                })
         {
             debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from {origin:?} \
                  (index: {}, slot: {})",
-                data_column_sidecar.index,
+                data_column_sidecar.index(),
                 data_column_sidecar.slot(),
             );
             return;
@@ -782,6 +802,7 @@ where
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
+            block_root,
             data_column_sidecar,
             state: None,
             block_seen,
@@ -858,15 +879,6 @@ where
 
     pub fn sampling_columns_count(&self) -> usize {
         self.store_snapshot().sampling_columns_count()
-    }
-
-    pub fn accepted_data_column_sidecar(
-        &self,
-        block_header: BeaconBlockHeader,
-        index: ColumnIndex,
-    ) -> bool {
-        self.store_snapshot()
-            .accepted_data_column_sidecar(block_header, index)
     }
 
     pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P, Storage<P>>>> {

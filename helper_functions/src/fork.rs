@@ -988,6 +988,16 @@ mod spec_tests {
         run_fulu_case::<Minimal>(case);
     }
 
+    #[test_resources("consensus-spec-tests/tests/mainnet/gloas/fork/*/*/*")]
+    fn gloas_mainnet(case: Case) {
+        run_gloas_case::<Mainnet>(case);
+    }
+
+    #[test_resources("consensus-spec-tests/tests/minimal/gloas/fork/*/*/*")]
+    fn gloas_minimal(case: Case) {
+        run_gloas_case::<Minimal>(case);
+    }
+
     fn run_altair_case<P: Preset>(case: Case) {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
@@ -1042,6 +1052,15 @@ mod spec_tests {
 
         let actual_post = upgrade_to_fulu::<P>(&P::default_config(), pre)
             .expect("upgrade from Electra to Fulu should succeed");
+
+        assert_eq!(actual_post, expected_post);
+    }
+
+    fn run_gloas_case<P: Preset>(case: Case) {
+        let pre = case.ssz_default("pre");
+        let expected_post = case.ssz_default("post");
+
+        let actual_post = upgrade_to_gloas::<P>(&P::default_config(), pre);
 
         assert_eq!(actual_post, expected_post);
     }

@@ -16,10 +16,12 @@ use fork_choice_store::{
 use logging::debug_with_peers;
 use serde::Serialize;
 use types::{
-    combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
     phase0::{

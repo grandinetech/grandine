@@ -19,10 +19,13 @@ use serde::Serialize;
 use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
     nonstandard::Phase,
