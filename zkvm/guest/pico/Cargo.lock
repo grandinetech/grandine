@@ -404,7 +404,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_utils",
- "sha2 0.10.8",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "ssz",
  "static_assertions",
  "typenum",
@@ -1631,7 +1631,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_arrays",
- "sha2 0.10.9",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "static_assertions",
  "subtle",
  "unroll",
@@ -1681,7 +1681,7 @@ dependencies = [
  "ethereum-types",
  "generic-array",
  "hex-literal",
- "sha2 0.10.8",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
 ]
 
 [[package]]
@@ -1710,7 +1710,7 @@ dependencies = [
  "rayon",
  "rc-box",
  "serde",
- "sha2 0.10.8",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "shuffling",
  "ssz",
  "static_assertions",
@@ -2105,7 +2105,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "once_cell",
- "sha2 0.10.9",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "signature",
 ]
 
@@ -2153,7 +2153,7 @@ dependencies = [
  "hkdf",
  "multihash",
  "quick-protobuf",
- "sha2 0.10.9",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.16",
  "tracing",
 ]
@@ -2466,7 +2466,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
- "sha2 0.10.9",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3016,7 +3016,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3795,8 +3795,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.10.8"
-source = "git+https://github.com/brevis-network/hashes.git?branch=sha2-0.10.8-v1.0.0#ddeaa09a00f17a42e9224d2f9aa20646421da3fc"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -3806,8 +3807,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#7d82ad19b793aa292ba917aed1fe109b937ccc57"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -5123,7 +5123,7 @@ dependencies = [
  "pasta_curves 0.5.1",
  "rand 0.8.5",
  "serde",
- "sha2 0.10.9",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "sha3",
  "subtle",
 ]
@@ -5138,6 +5138,7 @@ dependencies = [
  "pico-sdk",
  "pubkey_cache",
  "serde",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "ssz",
  "transition_functions",
  "types",

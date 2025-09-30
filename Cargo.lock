@@ -11574,8 +11574,8 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.10.8"
-source = "git+https://github.com/brevis-network/hashes.git?branch=sha2-0.10.8-v1.0.0#ddeaa09a00f17a42e9224d2f9aa20646421da3fc"
+version = "0.10.9"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#7d82ad19b793aa292ba917aed1fe109b937ccc57"
 dependencies = [
  "cfg-if",
  "cpufeatures",
