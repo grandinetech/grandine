@@ -73,7 +73,7 @@ pub enum P2pToSync<P: Preset> {
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
-    RequestCustodyGroupBackfill(HashSet<u64>),
+    RequestCustodyGroupBackfill(HashSet<u64>, Slot),
     Stop,
 }
 
@@ -193,7 +193,6 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
     UpdateDataColumnSubnets(u64, bool),
-    UpdateEarliestAvailableSlot(Slot),
 }
 
 impl<P: Preset> ValidatorToP2p<P> {

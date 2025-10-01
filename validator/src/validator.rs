@@ -2050,8 +2050,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 backfill_custody_groups,
             )
             .send(&self.p2p_tx);
-
-            ValidatorToP2p::UpdateEarliestAvailableSlot(current_slot).send(&self.p2p_tx);
         }
 
         self.last_cgc_update_epoch = Some(current_epoch);
