@@ -55,6 +55,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
+        let reconstructed_count = P::NumberOfColumns::USIZE.saturating_sub(available_columns.len());
         let partial_matrix = available_columns
             .into_iter()
             .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar))
@@ -64,6 +65,12 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             Ok(full_matrix) => {
                 info!("reconstructed missing data columns for block: {block_root:?}");
                 controller.on_reconstruction(wait_group, block_root, full_matrix);
+
+                if let Some(metrics) = metrics.as_ref() {
+                    metrics
+                        .reconstructed_columns
+                        .inc_by(reconstructed_count as u64);
+                }
             }
             Err(error) => {
                 controller.mark_sidecar_construction_failed(&block_root);

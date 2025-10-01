@@ -12,13 +12,14 @@ use try_from_iterator::TryFromIterator;
 
 use crate::shared::Sortable;
 
-pub fn serialize<S: Serializer>(
-    items: impl IntoIterator<Item = impl Serialize>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut reversed = items.into_iter().collect::<Vec<_>>();
-    reversed.reverse();
-    reversed.serialize(serializer)
+pub fn serialize<S, T>(items: &[T], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize + Sortable + Clone,
+{
+    let mut sorted = items.to_vec();
+    sorted.sort_by(|a, b| a.key().cmp(&b.key()));
+    sorted.serialize(serializer)
 }
 
 pub fn deserialize<'de, I, T, D>(deserializer: D) -> Result<T, D::Error>
@@ -61,7 +62,7 @@ mod tests {
 
     use super::*;
 
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct Object {
         key: u64,
         value: u64,
