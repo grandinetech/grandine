@@ -25,7 +25,7 @@ use helper_functions::{
 };
 use im::{HashSet, OrdMap, Vector, hashmap, hashmap::HashMap, ordmap, vector};
 use itertools::{Either, EitherOrBoth, Itertools as _, izip};
-use logging::{error_with_peers, info_with_peers, warn_with_peers};
+use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
@@ -1176,8 +1176,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             && data_availability_policy.check()
         {
             if state.phase().is_peerdas_activated() {
-                if !self.indices_of_missing_data_columns(block).is_empty() {
-                    return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
+                let missing_indices = self.indices_of_missing_data_columns(block);
+
+                if !missing_indices.is_empty() {
+                    let available_columns_count = self
+                        .sampling_columns_count()
+                        .saturating_sub(missing_indices.len());
+
+                    let can_import_with_reconstruction_promise = self.is_forward_synced() &&
+                        available_columns_count * 2 >= P::NumberOfColumns::USIZE &&
+                        // avoid importing blocks without triggering reconstruction
+                        self.is_sidecars_construction_started(&block_root);
+
+                    debug_with_peers!(
+                        "can import with reconstruction promise: {can_import_with_reconstruction_promise} \
+                        for {block_root:?}, available_columns: {available_columns_count}, \
+                        is_sidecars_reconstruction_started: {}, is_forward_synced: {}",
+                        self.is_sidecars_construction_started(&block_root),
+                        self.is_forward_synced(),
+                    );
+
+                    if !can_import_with_reconstruction_promise {
+                        return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
+                    }
                 }
             } else if !self.indices_of_missing_blobs(block).is_empty() {
                 return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
@@ -2682,14 +2703,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         false
     }
 
-    pub fn is_reconstruction_enabled_for(&self, block_root: &H256) -> bool {
+    pub fn is_reconstruction_or_early_import_available_for(
+        &self,
+        block_root: &H256,
+        accepted_data_columns_count: usize,
+    ) -> bool {
         // samples enough columns for reconstruction
-        self.sampling_columns_count() * 2 >= P::NumberOfColumns::USIZE
-            // reconstruction not started for given blocks
-            && !self.is_sidecars_construction_started(block_root)
-            // reconstruction is enabled during syncing (if syncing)
-            && (self.is_forward_synced()
-                || !self.store_config().sync_without_reconstruction)
+        if self.sampling_columns_count() * 2 < P::NumberOfColumns::USIZE {
+            return false;
+        }
+
+        // accepted enough columns for reconstruction or early import
+        if accepted_data_columns_count * 2 < P::NumberOfColumns::USIZE {
+            return false;
+        }
+
+        // early import is available only when 'is_forward_synced` is true
+        self.is_forward_synced() || {
+            // otherwise check if reconstruction is available during syncing
+            !self.is_sidecars_construction_started(block_root)
+                && !self.store_config().sync_without_reconstruction
+        }
     }
 
     fn insert_block(&mut self, chain_link: ChainLink<P>) -> Result<()> {

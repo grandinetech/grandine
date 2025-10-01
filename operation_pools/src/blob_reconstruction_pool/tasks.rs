@@ -34,7 +34,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             metrics,
         } = self;
 
-        let Ok(available_columns) = controller.data_column_sidecars_by_ids(
+        let Ok(available_columns) = controller.accepted_data_column_sidecars_by_ids(
             (0..P::NumberOfColumns::U64).map(|index| DataColumnIdentifier { block_root, index }),
         ) else {
             warn_with_peers!("failed to retrieve data column sidecar from storage");

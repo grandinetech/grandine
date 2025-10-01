@@ -10,8 +10,10 @@ use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
 };
+use scc::HashMap as SccHashMap;
 use serde::Serialize;
 use strum::IntoStaticStr;
+use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
     combined::{SignedAggregateAndProof, SignedBeaconBlock},
@@ -237,8 +239,11 @@ pub enum ReorgSource {
 #[derive(Debug)]
 pub enum BlockDataColumnAvailability {
     Complete,
-    CompleteWithReconstruction,
+    CompleteWithReconstruction { import_block: bool },
     AnyPending,
     Missing(Vec<ColumnIndex>),
     Irrelevant,
 }
+
+pub type SidecarsPendingReconstruction<P> =
+    Arc<SccHashMap<DataColumnIdentifier, (Slot, Sender<Arc<DataColumnSidecar<P>>>)>>;
