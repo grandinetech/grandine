@@ -1177,8 +1177,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             && data_availability_policy.check()
         {
             if state.phase().is_peerdas_activated() {
-                if !self.indices_of_missing_data_columns(block).is_empty() {
-                    return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
+                let missing_indices = self.indices_of_missing_data_columns(block);
+
+                if !missing_indices.is_empty() {
+                    let available_columns_count = self
+                        .sampling_columns_count()
+                        .saturating_sub(missing_indices.len());
+
+                    let can_import_with_reconstruction_promise = self.is_forward_synced() &&
+                        available_columns_count * 2 >= P::NumberOfColumns::USIZE &&
+                        // avoid importing blocks without triggering reconstruction
+                        self.is_sidecars_construction_started(&block_root);
+
+                    if !can_import_with_reconstruction_promise {
+                        return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
+                    }
                 }
             } else if !self.indices_of_missing_blobs(block).is_empty() {
                 return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));

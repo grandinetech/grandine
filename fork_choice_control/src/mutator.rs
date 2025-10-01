@@ -90,6 +90,7 @@ use crate::{
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
     wait::Wait,
+    SidecarsPendingReconstruction,
 };
 
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
@@ -127,6 +128,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     // computing the checkpoint state for each target. Individual attestations received in quick
     // succession would still perform slot processing independently.
     waiting_for_checkpoint_states: HashMap<Checkpoint, WaitingForCheckpointState<P>>,
+    sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
     storage: Arc<Storage<P>>,
     thread_pool: ThreadPool<P, E, W>,
     metrics: Option<Arc<Metrics>>,
@@ -161,6 +163,7 @@ where
         block_processor: Arc<BlockProcessor<P>>,
         event_channels: Arc<EventChannels<P>>,
         execution_engine: E,
+        sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
         storage: Arc<Storage<P>>,
         thread_pool: ThreadPool<P, E, W>,
         metrics: Option<Arc<Metrics>>,
@@ -187,6 +190,7 @@ where
             delayed_until_payload: HashMap::new(),
             delayed_until_state: HashMap::new(),
             waiting_for_checkpoint_states: HashMap::new(),
+            sidecars_pending_reconstruction,
             storage,
             thread_pool,
             metrics,
@@ -713,16 +717,18 @@ where
                                     );
                                 });
                         }
-                        BlockDataColumnAvailability::CompleteWithReconstruction => {
+                        BlockDataColumnAvailability::CompleteWithReconstruction {
+                            import_block,
+                        } => {
                             if let Some(gossip_id) = pending_block.origin.gossip_id() {
                                 self.send_to_p2p(P2pMessage::Accept(gossip_id));
                             }
 
-                            if self
+                            let missing_indices = self
                                 .store
-                                .indices_of_missing_data_columns(&pending_block.block)
-                                .is_empty()
-                            {
+                                .indices_of_missing_data_columns(&pending_block.block);
+
+                            if missing_indices.is_empty() {
                                 self.retry_block(wait_group, pending_block);
                             } else {
                                 // TODO(peerdas-fulu): NEED REVIEW! if block proposed by itself, therefore all sampling
@@ -730,15 +736,33 @@ where
                                 if !matches!(pending_block.origin, BlockOrigin::Own)
                                     && !self.store.is_sidecars_construction_started(&block_root)
                                 {
+                                    let slot = pending_block.block.message().slot();
+
+                                    self.store
+                                        .mark_sidecar_construction_started(block_root, slot);
+
+                                    if import_block {
+                                        for index in missing_indices {
+                                            self.mark_sidecar_as_being_reconstructed(
+                                                DataColumnIdentifier { block_root, index },
+                                                slot,
+                                            );
+                                        }
+                                    }
+
                                     self.send_to_pool(PoolMessage::ReconstructDataColumns {
-                                        wait_group,
+                                        wait_group: wait_group.clone(),
                                         block_root,
                                         block: pending_block.block.clone_arc(),
                                         slot: pending_block.block.message().slot(),
                                     })
                                 }
 
-                                self.delay_block_until_blobs(block_root, pending_block);
+                                if import_block {
+                                    self.retry_block(wait_group, pending_block);
+                                } else {
+                                    self.delay_block_until_blobs(block_root, pending_block);
+                                }
                             }
                         }
                         BlockDataColumnAvailability::Missing(missing_column_indices) => {
@@ -2485,6 +2509,19 @@ where
             }
         }
 
+        let identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+
+        if let Some((_, (_, sender))) = self.sidecars_pending_reconstruction.remove(&identifier) {
+            if sender.receiver_count() > 0 {
+                if let Err(error) = sender.send(data_column_sidecar.clone_arc()) {
+                    debug_with_peers!(
+                        "unable to send reconstructed data column sidecar to pending requests: \
+                        {identifier:?}, error: {error:?}",
+                    )
+                }
+            }
+        }
+
         self.event_channels
             .send_data_column_sidecar_event(block_root, data_column_sidecar);
 
@@ -3519,6 +3556,17 @@ where
         }
     }
 
+    fn mark_sidecar_as_being_reconstructed(
+        &self,
+        data_column_identifier: DataColumnIdentifier,
+        slot: Slot,
+    ) {
+        self.sidecars_pending_reconstruction.insert(
+            data_column_identifier,
+            (slot, tokio::sync::broadcast::channel(1).0),
+        );
+    }
+
     fn send_to_pool(&self, message: PoolMessage<P, W>) {
         if self.finished_loading_from_storage {
             message.send(&self.pool_tx);
@@ -3683,6 +3731,13 @@ where
                 low_priority_tasks,
             );
 
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "sidecars_pending_reconstruction",
+                self.sidecars_pending_reconstruction.len(),
+            );
+
             self.event_channels.track_collection_metrics(metrics);
             self.pubkey_cache.track_collection_metrics(metrics);
             self.store.track_collection_metrics(metrics);
@@ -3745,6 +3800,11 @@ where
             return BlockDataColumnAvailability::Complete;
         }
 
+        let available_columns_count = self
+            .store
+            .sampling_columns_count()
+            .saturating_sub(missing_indices.len());
+
         let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
             missing_indices.contains(&data_column_sidecar.index)
                 && data_column_sidecar.kzg_commitments == *body.blob_kzg_commitments()
@@ -3754,16 +3814,13 @@ where
             return BlockDataColumnAvailability::AnyPending;
         }
 
-        let available_columns_count = self
-            .store
-            .sampling_columns_count()
-            .saturating_sub(missing_indices.len());
-
         if available_columns_count * 2 >= P::NumberOfColumns::USIZE
             && (self.store.is_forward_synced()
                 || !self.store.store_config().sync_without_reconstruction)
         {
-            return BlockDataColumnAvailability::CompleteWithReconstruction;
+            return BlockDataColumnAvailability::CompleteWithReconstruction {
+                import_block: self.store.is_forward_synced(),
+            };
         }
 
         BlockDataColumnAvailability::Missing(missing_indices)

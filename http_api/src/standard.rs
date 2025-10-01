@@ -2241,7 +2241,8 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let data_column_sidecars = controller.data_column_sidecars_by_ids(data_column_identifiers)?;
+    let data_column_sidecars =
+        controller.accepted_data_column_sidecars_by_ids(data_column_identifiers)?;
 
     let data_column_sidecars =
         DynamicList::from_vec(data_column_sidecars, P::NumberOfColumns::USIZE)
