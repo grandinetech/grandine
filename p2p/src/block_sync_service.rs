@@ -571,7 +571,24 @@ impl<P: Preset> BlockSyncService<P> {
                             } else {
                                 self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
                             }
+
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
+
+                            if !self.controller.sidecars_pending_reconstruction().is_empty() {
+                                let availability_slot = misc::data_column_serve_range_slot::<P>(
+                                    self.controller.chain_config(),
+                                    self.slot,
+                                );
+
+                                let sidecars_pending_reconstruction = self
+                                    .controller
+                                    .sidecars_pending_reconstruction()
+                                    .clone_arc();
+
+                                tokio::task::spawn_blocking(move || {
+                                    sidecars_pending_reconstruction.retain(|_, value| value.0 >= availability_slot);
+                                });
+                            }
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
