@@ -568,8 +568,11 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::PeerCgcUpdated(peer_id) => {
                             self.sync_manager.update_peer_cgc(peer_id);
                         }
-                        P2pToSync::RequestCustodyGroupBackfill(column_indices) => {
-                            if let Err(error) = self.request_custody_group_backfill(column_indices) {
+                        P2pToSync::RequestCustodyGroupBackfill(column_indices, previous_earliest_available_slot) => {
+                            if let Err(error) = self.request_custody_group_backfill(
+                                column_indices,
+                                previous_earliest_available_slot,
+                            ) {
                                 warn!("failed to start data column backfill: {error}");
                             }
                         }
@@ -627,13 +630,25 @@ impl<P: Preset> BlockSyncService<P> {
 
             debug!("finishing back-sync: {:?}", back_sync.data());
 
-            if !back_sync.sync_mode().is_default() {
-                if let Some(metrics) = self.metrics.as_ref() {
-                    let custody_groups_count = self
-                        .controller
-                        .chain_config()
-                        .custody_size::<P>(self.controller.sampling_columns_count() as u64);
-                    metrics.set_beacon_custody_groups_backfilled(custody_groups_count);
+            match back_sync.sync_mode() {
+                BackSyncMode::Default => {
+                    SyncToP2p::UpdateEarliestAvailableSlot(back_sync.current_slot())
+                        .send(&self.sync_to_p2p_tx);
+                }
+                BackSyncMode::DataColumnsOnly {
+                    previous_earliest_available_slot,
+                    ..
+                } => {
+                    SyncToP2p::UpdateEarliestAvailableSlot(*previous_earliest_available_slot)
+                        .send(&self.sync_to_p2p_tx);
+
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        let custody_groups_count = self
+                            .controller
+                            .chain_config()
+                            .custody_size::<P>(self.controller.sampling_columns_count() as u64);
+                        metrics.set_beacon_custody_groups_backfilled(custody_groups_count);
+                    }
                 }
             }
 
@@ -642,9 +657,6 @@ impl<P: Preset> BlockSyncService<P> {
                 self.try_to_spawn_back_sync_states_archiver()?;
                 self.request_blobs_and_blocks_if_ready()?;
             } else {
-                SyncToP2p::UpdateEarliestAvailableSlot(back_sync.current_slot())
-                    .send(&self.sync_to_p2p_tx);
-
                 self.set_back_synced(true);
             }
         }
@@ -975,7 +987,11 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    fn request_custody_group_backfill(&mut self, column_indices: HashSet<u64>) -> Result<()> {
+    fn request_custody_group_backfill(
+        &mut self,
+        column_indices: HashSet<u64>,
+        previous_earliest_available_slot: Slot,
+    ) -> Result<()> {
         let current: SyncCheckpoint = self.controller.head().value.block.as_ref().into();
 
         if current.slot == GENESIS_SLOT {
@@ -994,7 +1010,9 @@ impl<P: Preset> BlockSyncService<P> {
             Some(back_sync) => back_sync.data().current,
             // If back sync does not exist, that means all the back sync is completed
             None => {
-                let terminus_epoch = self.controller.min_checked_block_availability_epoch();
+                let terminus_epoch = self
+                    .controller
+                    .min_checked_data_availability_epoch(current.slot);
                 SyncCheckpoint {
                     slot: misc::compute_start_slot_at_epoch::<P>(terminus_epoch),
                     block_root: H256::zero(),
@@ -1005,7 +1023,10 @@ impl<P: Preset> BlockSyncService<P> {
 
         let back_sync_process = BackSync::<P>::new(
             BackSyncData { current, high, low },
-            BackSyncMode::DataColumnsOnly { column_indices },
+            BackSyncMode::DataColumnsOnly {
+                column_indices,
+                previous_earliest_available_slot,
+            },
         );
 
         if !back_sync_process.is_finished() {

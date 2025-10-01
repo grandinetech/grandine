@@ -472,9 +472,6 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count, backfill_custody_groups) => {
                             self.update_data_column_subnets(custody_group_count, backfill_custody_groups);
                         }
-                        ValidatorToP2p::UpdateEarliestAvailableSlot(slot) => {
-                            self.update_earliest_available_slot(slot);
-                        }
                     }
                 },
 
@@ -951,7 +948,11 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn update_data_column_subnets(&self, custody_group_count: u64, backfill_custody_groups: bool) {
+    fn update_data_column_subnets(
+        &mut self,
+        custody_group_count: u64,
+        backfill_custody_groups: bool,
+    ) {
         ServiceInboundMessage::UpdateEnrCgc(custody_group_count).send(&self.network_to_service_tx);
 
         if let Some(metrics) = self.metrics.as_ref() {
@@ -973,8 +974,15 @@ impl<P: Preset> Network<P> {
             let current_sampling_columns = self.controller.sampling_columns();
             let backfill_column_indices = &sampling_columns - &current_sampling_columns;
 
-            P2pToSync::RequestCustodyGroupBackfill(backfill_column_indices)
+            if !backfill_column_indices.is_empty() {
+                P2pToSync::RequestCustodyGroupBackfill(
+                    backfill_column_indices,
+                    self.earliest_available_slot,
+                )
                 .send(&self.channels.p2p_to_sync_tx);
+
+                self.update_earliest_available_slot(self.controller.slot());
+            }
         }
     }
 
