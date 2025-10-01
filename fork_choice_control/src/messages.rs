@@ -222,11 +222,7 @@ pub enum PoolMessage<W> {
     Slot(Slot),
     Tick(Tick),
     Stop,
-    ReconstructDataColumns {
-        wait_group: W,
-        block_root: H256,
-        slot: Slot,
-    },
+    ReconstructDataColumns { wait_group: W, block_root: H256 },
 }
 
 impl<W> PoolMessage<W> {
