@@ -179,6 +179,18 @@ impl ArchiverToSync {
     }
 }
 
+pub enum BlockSyncServiceMessage {
+    RequestData,
+}
+
+impl BlockSyncServiceMessage {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to block sync service failed because the receiver was dropped");
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(bound = "")]
 pub enum ValidatorToP2p<P: Preset> {

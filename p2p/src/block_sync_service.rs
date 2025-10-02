@@ -51,7 +51,9 @@ use crate::{
         BackSync, BackSyncDataBySlot, Data as BackSyncData, Error as BackSyncError, SyncCheckpoint,
         SyncMode as BackSyncMode,
     },
-    messages::{ArchiverToSync, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p},
+    messages::{
+        ArchiverToSync, BlockSyncServiceMessage, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p,
+    },
     misc::{PeerReportReason, RPCRequestType},
     sync_manager::{SyncBatch, SyncManager, SyncTarget},
 };
@@ -104,6 +106,8 @@ pub struct BlockSyncService<P: Preset> {
     sync_to_metrics_tx: Option<UnboundedSender<SyncToMetrics>>,
     archiver_to_sync_tx: Option<UnboundedSender<ArchiverToSync>>,
     archiver_to_sync_rx: Option<UnboundedReceiver<ArchiverToSync>>,
+    self_tx: UnboundedSender<BlockSyncServiceMessage>,
+    self_rx: UnboundedReceiver<BlockSyncServiceMessage>,
 }
 
 impl<P: Preset> Drop for BlockSyncService<P> {
@@ -202,6 +206,8 @@ impl<P: Preset> BlockSyncService<P> {
             sync_to_metrics_tx,
         } = channels;
 
+        let (self_tx, self_rx) = futures::channel::mpsc::unbounded();
+
         // `is_back_synced` is set correctly only when back-sync is enabled. Otherwise it is set
         // to `true` and users can attempt to query historical data even after checkpoint sync.
         let is_back_synced = back_sync.is_none();
@@ -242,10 +248,12 @@ impl<P: Preset> BlockSyncService<P> {
             sync_to_metrics_tx,
             archiver_to_sync_tx,
             archiver_to_sync_rx,
+            self_tx,
+            self_rx,
         };
 
         service.set_back_synced(is_back_synced);
-        service.set_forward_synced(is_forward_synced)?;
+        service.set_forward_synced(is_forward_synced);
 
         Ok(service)
     }
@@ -259,7 +267,7 @@ impl<P: Preset> BlockSyncService<P> {
         loop {
             select! {
                 _ = interval.select_next_some() => {
-                    self.request_blobs_and_blocks_if_ready()?;
+                    self.request_blobs_and_blocks_if_ready();
 
                     if self.sync_direction == SyncDirection::Back {
                         if let Some(back_sync) = &self.back_sync {
@@ -306,7 +314,7 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                         P2pToSync::AddPeer(peer_id, status) => {
                             self.sync_manager.add_peer(peer_id, status);
-                            self.request_blobs_and_blocks_if_ready()?;
+                            self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::RemovePeer(peer_id) => {
                             let batches_to_retry = self.sync_manager.remove_peer(&peer_id);
@@ -517,7 +525,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 self.check_back_sync_progress()?;
                             }
 
-                            self.request_blobs_and_blocks_if_ready()?;
+                            self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::BlocksByRangeRequestFinished(peer_id, request_id) => {
                             let request_direction = self.sync_manager.request_direction(request_id);
@@ -533,7 +541,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 self.check_back_sync_progress()?;
                             }
 
-                            self.request_blobs_and_blocks_if_ready()?;
+                            self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::DataColumnsByRangeRequestFinished(request_id) => {
                             let request_direction = self.sync_manager.request_direction(request_id);
@@ -544,7 +552,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 self.check_back_sync_progress()?;
                             }
 
-                            self.request_blobs_and_blocks_if_ready()?;
+                            self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
@@ -586,7 +594,17 @@ impl<P: Preset> BlockSyncService<P> {
                             break;
                         }
                     }
-                }
+                },
+
+                message = self.self_rx.select_next_some() => {
+                    match message {
+                        BlockSyncServiceMessage::RequestData => {
+                            if let Err(error) = self.request_data() {
+                                warn!("unable to request new data from the network: {error:?}");
+                            }
+                        }
+                    }
+                },
             }
         }
 
@@ -655,7 +673,7 @@ impl<P: Preset> BlockSyncService<P> {
             if let Some(sync) = BackSync::load(&self.database)? {
                 self.back_sync = Some(sync);
                 self.try_to_spawn_back_sync_states_archiver()?;
-                self.request_blobs_and_blocks_if_ready()?;
+                self.request_blobs_and_blocks_if_ready();
             } else {
                 self.set_back_synced(true);
             }
@@ -799,9 +817,8 @@ impl<P: Preset> BlockSyncService<P> {
                         };
 
                         debug!(
-                            "retrying batch {batch:?}, request_ids: {:?}, mappings: {:?}, \
+                            "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
                             new peers: [{peer_custody_columns_mapping:?}]",
-                            request_id..request_id,
                             peer_custody_columns_mapping.len(),
                         );
 
@@ -869,7 +886,11 @@ impl<P: Preset> BlockSyncService<P> {
         self.retry_sync_batches(expired_batches)
     }
 
-    fn request_blobs_and_blocks_if_ready(&mut self) -> Result<()> {
+    fn request_blobs_and_blocks_if_ready(&self) {
+        BlockSyncServiceMessage::RequestData.send(&self.self_tx);
+    }
+
+    fn request_data(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
         self.request_expired_data_column_range_requests()?;
@@ -895,7 +916,7 @@ impl<P: Preset> BlockSyncService<P> {
             misc::compute_start_slot_at_epoch::<P>(snapshot.finalized_epoch());
         let sampling_columns = self.controller.sampling_columns();
 
-        self.set_forward_synced(snapshot.is_forward_synced())?;
+        self.set_forward_synced(snapshot.is_forward_synced());
 
         let batches = match self.sync_direction {
             SyncDirection::Forward => {
@@ -1040,7 +1061,7 @@ impl<P: Preset> BlockSyncService<P> {
             self.set_back_synced(false);
         }
 
-        self.request_blobs_and_blocks_if_ready()?;
+        self.request_blobs_and_blocks_if_ready();
 
         Ok(())
     }
@@ -1338,7 +1359,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
     }
 
-    fn set_forward_synced(&mut self, is_forward_synced: bool) -> Result<()> {
+    fn set_forward_synced(&mut self, is_forward_synced: bool) {
         debug!("set forward synced: {is_forward_synced}");
 
         let was_forward_synced = self.is_forward_synced;
@@ -1349,7 +1370,7 @@ impl<P: Preset> BlockSyncService<P> {
             if self.sync_direction == SyncDirection::Back {
                 self.sync_direction = SyncDirection::Forward;
                 self.sync_manager.cache_clear();
-                self.request_blobs_and_blocks_if_ready()?;
+                self.request_blobs_and_blocks_if_ready();
             }
         }
 
@@ -1362,7 +1383,7 @@ impl<P: Preset> BlockSyncService<P> {
                 self.received_data_column_sidecars.clear();
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
-                self.request_blobs_and_blocks_if_ready()?;
+                self.request_blobs_and_blocks_if_ready();
             }
 
             if let Some(validator_statistics) = self.validator_statistics.as_ref() {
@@ -1378,8 +1399,6 @@ impl<P: Preset> BlockSyncService<P> {
                 SyncToMetrics::SyncStatus(is_forward_synced).send(sync_to_metrics_tx);
             }
         }
-
-        Ok(())
     }
 
     fn register_new_received_block(&mut self, block_root: H256, slot: Slot) -> bool {
