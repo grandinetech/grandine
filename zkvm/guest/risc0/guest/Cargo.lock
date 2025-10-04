@@ -107,7 +107,7 @@ dependencies = [
  "digest",
  "fnv",
  "merlin",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -495,6 +495,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=zkcrypto%2Fbls12_381#c383ee94bc6a1c9eba855719521930aedaf95bd6"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -504,6 +505,7 @@ dependencies = [
  "hex",
  "pairing",
  "rand_core 0.6.4",
+ "risc0-bigint2",
  "sp1-lib",
  "subtle",
  "zkm-lib",
@@ -1880,7 +1882,7 @@ dependencies = [
  "hkdf",
  "multihash",
  "quick-protobuf",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.16",
  "tracing",
 ]
@@ -2856,6 +2858,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "risc0-bigint2"
+version = "1.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e916aa385e61e31935d7964aaeaec1fae9da617af6415d6363864147f430ebff"
+dependencies = [
+ "include_bytes_aligned",
+ "stability",
+]
+
+[[package]]
 name = "risc0-binfmt"
 version = "2.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2986,7 +2998,7 @@ dependencies = [
  "risc0-core",
  "risc0-zkvm-platform",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "stability",
  "tracing",
 ]
@@ -3015,7 +3027,7 @@ dependencies = [
  "rrs-lib",
  "semver",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "stability",
  "tracing",
 ]
@@ -3044,6 +3056,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bls",
+ "bls-zkcrypto",
  "database",
  "enum-iterator",
  "pubkey_cache",
@@ -3239,7 +3252,8 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0#bd34a0d4d68c814f060946cbb801eba1f4be3598"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -3342,7 +3356,7 @@ dependencies = [
  "p3-poseidon2 0.2.3-succinct",
  "p3-symmetric 0.2.3-succinct",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -4387,7 +4401,7 @@ dependencies = [
  "bincode",
  "cfg-if",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "zkm-primitives",
 ]
 
@@ -4406,10 +4420,5 @@ dependencies = [
  "p3-poseidon2 0.1.0",
  "p3-symmetric 0.1.0",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0)",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[patch.unused]]
-name = "bls12_381"
-version = "0.8.0"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.0#6f2b1f2a5f76c3bc843d371c1c2655077ce4d0e5"

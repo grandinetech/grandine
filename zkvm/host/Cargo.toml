@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bls = { workspace = true, features = ['zkcrypto'] }
+bls-zkcrypto = { workspace = true }
 borsh = { workspace = true, optional = true }
 clap = { workspace = true, features = ['derive'] }
 database = { workspace = true }
@@ -41,6 +42,7 @@ risc0 = [
     "dep:risc0-zkvm",
     "dep:tracing-subscriber",
     "dep:zkvm_guest_risc0",
+    "bls-zkcrypto/zkvm-risc0",
 ]
 sp1 = [
     "dep:sp1-helper",
@@ -50,5 +52,5 @@ pico = [
     "dep:serde_json",
     "dep:pico-sdk",
     "dep:pico-vm",
-    "bls/zkvm-pico",
+    "bls-zkcrypto/zkvm-pico",
 ]
