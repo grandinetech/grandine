@@ -420,7 +420,7 @@ pub fn beacon_committee<P: Preset>(
     state: &impl BeaconState<P>,
     slot: Slot,
     committee_index: CommitteeIndex,
-) -> Result<IndexSlice> {
+) -> Result<IndexSlice<'_>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
     let committees_per_slot = get_committee_count_per_slot(state, relative_epoch);
@@ -444,7 +444,7 @@ pub fn beacon_committee<P: Preset>(
 pub fn beacon_committees<P: Preset>(
     state: &impl BeaconState<P>,
     slot: Slot,
-) -> Result<impl Iterator<Item = IndexSlice>> {
+) -> Result<impl Iterator<Item = IndexSlice<'_>>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
     let committees_per_slot = get_committee_count_per_slot(state, relative_epoch);

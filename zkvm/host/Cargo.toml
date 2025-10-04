@@ -44,7 +44,7 @@ risc0 = [
 ]
 sp1 = [
     "dep:sp1-helper",
-    "dep:sp1-sdk"
+    "dep:sp1-sdk",
 ]
 pico = [
     "dep:serde_json",

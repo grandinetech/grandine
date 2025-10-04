@@ -26,4 +26,6 @@ zeroize = { workspace = true }
 rand_chacha = { workspace = true }
 
 [features]
-zkvm-pico = []
+zkvm-pico = [
+  "bls12_381/zkvm-pico"
+]

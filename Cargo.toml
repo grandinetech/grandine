@@ -306,7 +306,8 @@ bit_field = '0.10'
 bitvec = '1'
 # bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
 # For Brevis Pico
-bls12_381 = { git = "https://github.com/jimmychu0807/brevis-bls12_381.git", branch = "jc/dev" }
+# bls12_381 = { git = "https://github.com/jimmychu0807/brevis-bls12_381.git", branch = "jc/dev" }
+bls12_381 = { path = "../grandine-universal-precompiles" }
 
 blst = { version = '0.3', features = ['portable'] }
 bonsai-sdk = '1.4.0'
@@ -619,4 +620,5 @@ sha2 = { git = 'https://github.com/jimmychu0807/grandine-universal-precompiles.g
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 # bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
-bls12_381 = { git = "https://github.com/jimmychu0807/brevis-bls12_381.git", branch = "jc/dev" }
+# bls12_381 = { git = "https://github.com/jimmychu0807/brevis-bls12_381.git", branch = "jc/dev" }
+bls12_381 = { path = "../grandine-universal-precompiles" }

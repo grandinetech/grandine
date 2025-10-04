@@ -306,7 +306,7 @@ impl Database {
 
     pub fn iterate_all_keys_with_lengths(
         &self,
-    ) -> Result<impl Iterator<Item = Result<(Cow<[u8]>, usize)>>> {
+    ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, usize)>>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -352,7 +352,7 @@ impl Database {
     pub fn iterator_ascending(
         &self,
         range: RangeFrom<impl AsRef<[u8]>>,
-    ) -> Result<impl Iterator<Item = Result<(Cow<[u8]>, Vec<u8>)>>> {
+    ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, Vec<u8>)>>> {
         let start = range.start.as_ref();
 
         match self.kind() {
@@ -408,7 +408,7 @@ impl Database {
     pub fn iterator_descending(
         &self,
         range: RangeToInclusive<impl AsRef<[u8]>>,
-    ) -> Result<impl Iterator<Item = Result<(Cow<[u8]>, Vec<u8>)>>> {
+    ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, Vec<u8>)>>> {
         let end = range.end.as_ref();
 
         match self.kind() {

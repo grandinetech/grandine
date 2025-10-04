@@ -99,7 +99,7 @@ impl PackedIndices {
     // This cannot be an `Index` impl because this has to return an owned value.
     #[inline]
     #[must_use]
-    pub fn slice(&self, range: Range<usize>) -> IndexSlice {
+    pub fn slice(&self, range: Range<usize>) -> IndexSlice<'_> {
         match self {
             Self::U8(indices) => IndexSlice::U8(&indices[range]),
             Self::U16(indices) => IndexSlice::U16(&indices[range]),
