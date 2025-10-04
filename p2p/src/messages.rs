@@ -73,7 +73,7 @@ pub enum P2pToSync<P: Preset> {
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
-    RequestCustodyGroupBackfill(HashSet<u64>),
+    RequestCustodyGroupBackfill(HashSet<u64>, Slot),
     Stop,
 }
 
@@ -179,6 +179,18 @@ impl ArchiverToSync {
     }
 }
 
+pub enum BlockSyncServiceMessage {
+    RequestData,
+}
+
+impl BlockSyncServiceMessage {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug!("send to block sync service failed because the receiver was dropped");
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(bound = "")]
 pub enum ValidatorToP2p<P: Preset> {
@@ -193,7 +205,6 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
     UpdateDataColumnSubnets(u64, bool),
-    UpdateEarliestAvailableSlot(Slot),
 }
 
 impl<P: Preset> ValidatorToP2p<P> {

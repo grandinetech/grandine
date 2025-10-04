@@ -211,7 +211,7 @@ impl<P: Preset> BackSync<P> {
                 self.batch
                     .verify_from_checkpoint(config, controller, last_block_checkpoint)?
             }
-            SyncMode::DataColumnsOnly { column_indices } => {
+            SyncMode::DataColumnsOnly { column_indices, .. } => {
                 self.batch.verify_extra_data_columns_from_checkpoint(
                     config,
                     controller,
@@ -639,6 +639,10 @@ pub enum SyncMode {
     Default,
     DataColumnsOnly {
         column_indices: HashSet<ColumnIndex>,
+        // Data column backfill resets earliest available slot, so this field is used to preserve
+        // previous earliest available slot (either from previously finished back-sync or anchor block).
+        // After data column backfill is finished, earliest available slot is restored to its previous value.
+        previous_earliest_available_slot: Slot,
     },
 }
 
@@ -646,7 +650,7 @@ impl SyncMode {
     fn name(&self) -> String {
         match self {
             Self::Default => "back-sync".into(),
-            Self::DataColumnsOnly { column_indices } => {
+            Self::DataColumnsOnly { column_indices, .. } => {
                 format!("data column backfill (columns: {column_indices:?})")
             }
         }

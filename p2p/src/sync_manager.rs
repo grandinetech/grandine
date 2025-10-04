@@ -361,7 +361,7 @@ impl<P: Preset> SyncManager<P> {
 
                             let missing_column_indices = match sync_mode {
                                 SyncMode::Default => missing_column_indices,
-                                SyncMode::DataColumnsOnly { column_indices } => {
+                                SyncMode::DataColumnsOnly { column_indices, .. } => {
                                     missing_column_indices
                                         .intersection(column_indices)
                                         .copied()
