@@ -10,7 +10,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bls = { workspace = true, features = ['zkcrypto'] }
-bls-zkcrypto = { workspace = true }
+bls-zkcrypto = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true }
 clap = { workspace = true, features = ['derive'] }
 database = { workspace = true }
@@ -34,7 +34,7 @@ pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" 
 
 [build-dependencies]
 sp1-helper = { workspace = true, optional = true }
-anyhow = { workspace = true }
+anyhow = { workspace = true, optional = true }
 
 [features]
 risc0 = [
@@ -52,5 +52,6 @@ pico = [
     "dep:serde_json",
     "dep:pico-sdk",
     "dep:pico-vm",
+    "anyhow",
     "bls-zkcrypto/zkvm-pico",
 ]
