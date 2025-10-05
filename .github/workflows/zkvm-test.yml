@@ -39,8 +39,7 @@ jobs:
     - name: Install r0vm
       run: |
         curl -L https://risczero.com/install | bash
-        source "/home/runner/.bashrc"
-        rzup install cargo-risczero 3.0.1
+        /home/runner/.risc0/bin/rzup install cargo-risczero 3.0.1
 
     - name: Test zkvm-risc0
       run: RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "${{ matrix.test_case }}" execute
@@ -48,8 +47,7 @@ jobs:
     - name: Install SP1
       run: |
         curl -L https://sp1up.succinct.xyz | bash
-        source "/home/runner/.bashrc"
-        sp1up -v 5.2.1 -- token ${{ secrets.GITHUB_TOKEN }}
+        /home/runner/.sp1/bin/sp1up -v 5.2.1 -- token ${{ secrets.GITHUB_TOKEN }}
 
     - name: zkvm-sp1
       run: RUST_LOG=info cargo run -p zkvm_host --features sp1 --release -- --test "${{ matrix.test_case }}" execute
