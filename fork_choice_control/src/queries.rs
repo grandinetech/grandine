@@ -498,7 +498,7 @@ where
                     let block_kzg_commitment_indices = block
                         .message()
                         .body()
-                        .post_deneb()
+                        .with_blob_kzg_commitments()
                         .map(|body| {
                             (0..)
                                 .zip(body.blob_kzg_commitments())

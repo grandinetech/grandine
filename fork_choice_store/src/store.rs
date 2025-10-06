@@ -1041,7 +1041,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if let Some(body) = block
                     .message()
                     .body()
-                    .post_bellatrix()
+                    .with_execution_payload()
                     .filter(|body| predicates::is_merge_transition_block(&state, *body))
                 {
                     match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
@@ -2428,7 +2428,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
         let log_imported_block_info = || {
-            if let Some(post_deneb_block_body) = chain_link.block.message().body().post_deneb() {
+            if let Some(post_deneb_block_body) = chain_link
+                .block
+                .message()
+                .body()
+                .with_blob_kzg_commitments()
+            {
                 if self.should_check_data_availability_at_slot(chain_link.slot()) {
                     let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
 
@@ -3711,7 +3716,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn indices_of_missing_blobs(&self, block: &SignedBeaconBlock<P>) -> Vec<BlobIndex> {
         let block = block.message();
 
-        let Some(body) = block.body().post_deneb() else {
+        let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
         };
 

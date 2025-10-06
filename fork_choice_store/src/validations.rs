@@ -9,7 +9,7 @@ use types::{
     combined::SignedBeaconBlock,
     config::Config as ChainConfig,
     preset::Preset,
-    traits::{PostBellatrixBeaconBlockBody, SignedBeaconBlock as _},
+    traits::{BlockBodyWithExecutionPayload, SignedBeaconBlock as _},
 };
 
 use crate::{error::Error, misc::PartialBlockAction};
@@ -24,7 +24,7 @@ use crate::{error::Error, misc::PartialBlockAction};
 pub fn validate_merge_block<P: Preset, E: ExecutionEngine<P>>(
     chain_config: &ChainConfig,
     block: &Arc<SignedBeaconBlock<P>>,
-    body: &(impl PostBellatrixBeaconBlockBody<P> + ?Sized),
+    body: &(impl BlockBodyWithExecutionPayload<P> + ?Sized),
     execution_engine: E,
 ) -> Result<PartialBlockAction> {
     if !chain_config.terminal_block_hash.is_zero() {

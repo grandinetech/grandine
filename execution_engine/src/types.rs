@@ -43,7 +43,7 @@ use types::{
         },
     },
     preset::Preset,
-    traits::{PostDenebBeaconBlockBody, SignedBeaconBlock as _},
+    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 const SUPPORTED_REQUEST_TYPES: &[&str; 3] = &[
@@ -1063,8 +1063,8 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Block(block) => block
                 .message()
                 .body()
-                .post_deneb()
-                .map(PostDenebBeaconBlockBody::blob_kzg_commitments),
+                .with_blob_kzg_commitments()
+                .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
             Self::Sidecar(sidecar) => Some(&sidecar.kzg_commitments),
         }
     }

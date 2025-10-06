@@ -286,7 +286,7 @@ impl<P: Preset> Batch<P> {
     ) -> Result<Vec<Arc<BlobSidecar<P>>>> {
         let block = block.message();
 
-        let Some(body) = block.body().post_deneb() else {
+        let Some(body) = block.body().with_blob_kzg_commitments() else {
             return Ok(vec![]);
         };
 
@@ -583,7 +583,7 @@ impl<P: Preset> Batch<P> {
                 if let Some(parent) = controller.block_by_root(parent_root)? {
                     let parent = parent.value;
 
-                    if let Some(body) = parent.message().body().post_deneb() {
+                    if let Some(body) = parent.message().body().with_blob_kzg_commitments() {
                         if parent.message().slot() >= low_slot
                             && body.blob_kzg_commitments().is_empty()
                         {
