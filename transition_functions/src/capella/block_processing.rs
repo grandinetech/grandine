@@ -31,7 +31,7 @@ use types::{
     phase0::primitives::{ExecutionAddress, H256},
     preset::Preset,
     traits::{
-        PostCapellaBeaconBlockBody, PostCapellaBeaconState, PostCapellaExecutionPayload,
+        BlockBodyWithBlsToExecutionChanges, PostCapellaBeaconState, PostCapellaExecutionPayload,
         PreElectraBeaconBlockBody,
     },
 };
@@ -225,7 +225,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostCapellaBeaconState<P>,
-    body: &(impl PostCapellaBeaconBlockBody<P> + PreElectraBeaconBlockBody<P>),
+    body: &(impl BlockBodyWithBlsToExecutionChanges<P> + PreElectraBeaconBlockBody<P>),
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {

@@ -440,7 +440,9 @@ where
                             parent_beacon_block_root: head.block.message().parent_root(),
                             execution_requests: body.execution_requests().clone(),
                         });
-                    } else if let Some(body) = head.block.message().body().post_deneb() {
+                    } else if let Some(body) =
+                        head.block.message().body().with_blob_kzg_commitments()
+                    {
                         let versioned_hashes = body
                             .blob_kzg_commitments()
                             .iter()
@@ -3674,7 +3676,7 @@ where
         block: &SignedBeaconBlock<P>,
         pending_blobs_for_block: impl Iterator<Item = &'blob BlobSidecar<P>>,
     ) -> BlockBlobAvailability {
-        let Some(body) = block.message().body().post_deneb() else {
+        let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockBlobAvailability::Irrelevant;
         };
 

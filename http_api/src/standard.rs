@@ -94,7 +94,7 @@ use types::{
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{
-        BeaconBlock as _, BeaconState as _, PostDenebBeaconBlockBody, PostFuluBeaconState,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
         SignedBeaconBlock as _,
     },
 };
@@ -1303,8 +1303,8 @@ pub async fn blobs<P: Preset, W: Wait>(
         let Some(kzg_commitments) = block
             .message()
             .body()
-            .post_deneb()
-            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+            .with_blob_kzg_commitments()
+            .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
         else {
             return Ok(EthResponse::json_or_ssz(DynamicList::empty(), &headers)?
                 .execution_optimistic(status.is_optimistic())

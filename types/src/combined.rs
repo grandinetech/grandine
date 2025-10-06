@@ -118,9 +118,9 @@ use crate::{
     },
     preset::{Mainnet, Preset},
     traits::{
-        BeaconBlock as _, BeaconState as _, ExecutionPayload as ExecutionPayloadTrait,
-        PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
-        PostDenebBeaconBlockBody, PostElectraBeaconBlockBody, PostElectraBeaconState,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
+        ExecutionPayload as ExecutionPayloadTrait, PostAltairBeaconState, PostBellatrixBeaconState,
+        PostCapellaBeaconState, PostElectraBeaconBlockBody, PostElectraBeaconState,
         PostFuluBeaconState, SignedBeaconBlock as _,
     },
 };
@@ -644,7 +644,7 @@ impl<P: Preset> SignedBeaconBlock<P> {
     pub fn execution_block_hash(&self) -> Option<ExecutionBlockHash> {
         self.message()
             .body()
-            .post_bellatrix()
+            .with_execution_payload()
             .map(|body| body.execution_payload().block_hash())
     }
 
@@ -982,14 +982,14 @@ impl<P: Preset> TryFrom<BeaconBlock<P>> for BlindedBeaconBlock<P> {
     type Error = TryBlindedFromBlockError;
 
     fn try_from(block: BeaconBlock<P>) -> Result<Self, Self::Error> {
-        let Some(body) = block.body().post_bellatrix() else {
+        let Some(body) = block.body().with_execution_payload() else {
             return Err(TryBlindedFromBlockError(block.phase()));
         };
 
         let kzg_commitments = block
             .body()
-            .post_deneb()
-            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+            .with_blob_kzg_commitments()
+            .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
             .cloned();
 
         let execution_requests = block
