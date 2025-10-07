@@ -44,7 +44,7 @@ impl<P: Preset> Eth1ApiToBlobFetcher<P> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub enum BlobFetcherToP2p<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),

@@ -25,6 +25,7 @@ use eth2_libp2p::{
     NetworkGlobals, PeerAction, PeerId, PubsubMessage, ReportSource, Response, ShutdownReason,
     Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
 };
+use features::Feature;
 use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage};
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
@@ -250,18 +251,28 @@ impl<P: Preset> Network<P> {
         loop {
             select! {
                 _ = gossipsub_parameter_update_interval.select_next_some() => {
+                    let debug_info = message_debug_info("update_gossipsub_parameters");
+
                     self.update_gossipsub_parameters();
+
+                    debug_info.handle();
                 },
 
                 message = self.service_to_network_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         ServiceOutboundMessage::NetworkEvent(network_event) => {
                             self.handle_network_event(network_event)
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.blob_fetcher_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         BlobFetcherToP2p::BlobsNeeded(identifiers, slot, peer_id) => {
                             debug!("blobs needed: {identifiers:?} from {peer_id:?}");
@@ -278,9 +289,13 @@ impl<P: Preset> Network<P> {
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.api_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     let success = match message {
                         ApiToP2p::PublishBeaconBlock(beacon_block) => {
                             self.publish_beacon_block(beacon_block);
@@ -335,9 +350,13 @@ impl<P: Preset> Network<P> {
                     if !success {
                         debug!("send to HTTP API failed because the receiver was dropped");
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.pool_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         PoolToP2pMessage::Accept(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Accept);
@@ -358,9 +377,13 @@ impl<P: Preset> Network<P> {
                             self.publish_signed_bls_to_execution_change(signed_bls_to_execution_change);
                         },
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.fork_choice_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         P2pMessage::Slot(slot) => {
                             self.on_slot(slot);
@@ -429,9 +452,13 @@ impl<P: Preset> Network<P> {
                             break;
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.validator_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         ValidatorToP2p::Accept(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Accept);
@@ -473,9 +500,13 @@ impl<P: Preset> Network<P> {
                             self.update_data_column_subnets(custody_group_count, backfill_custody_groups);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         SyncToP2p::ReportPeer(peer_id, peer_action, report_source, reason) => {
                             self.report_peer(
@@ -513,9 +544,13 @@ impl<P: Preset> Network<P> {
                             self.update_earliest_available_slot(slot);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.subnet_service_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
@@ -524,6 +559,8 @@ impl<P: Preset> Network<P> {
                             self.update_sync_committee_subnets(actions);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 shutdown_reason = self.shutdown_rx.select_next_some() => match shutdown_reason {
@@ -2359,6 +2396,40 @@ impl<P: Preset> Network<P> {
     }
 }
 
+pub struct MessageDebugInfo {
+    pub info: String,
+    pub processing_started_at: Instant,
+}
+
+pub trait MessageDebugInfoHandler {
+    fn handle(&self);
+}
+
+impl MessageDebugInfoHandler for Option<MessageDebugInfo> {
+    fn handle(&self) {
+        let Some(info) = self else {
+            return;
+        };
+
+        let duration_ms = info.processing_started_at.elapsed().as_millis();
+
+        if duration_ms > 100 {
+            warn!("processed P2p message in {duration_ms} ms: {}", info.info);
+        }
+    }
+}
+
+fn message_debug_info(message: &(impl core::fmt::Debug + ?Sized)) -> Option<MessageDebugInfo> {
+    if !Feature::DebugP2pMessages.is_enabled() {
+        return None;
+    }
+
+    Some(MessageDebugInfo {
+        info: format!("{:.1000}", format!("{message:?}")),
+        processing_started_at: Instant::now(),
+    })
+}
+
 #[derive(Debug, Error)]
 enum Error {
     #[error("end slot overflowed ({start_slot} + {difference})")]
@@ -2379,12 +2450,16 @@ fn run_network_service<P: Preset>(
         loop {
             tokio::select! {
                 _ = network_metrics_update_interval.select_next_some(), if metrics_enabled => {
+                    let debug_info = message_debug_info("network_metrics_update_interval");
+
                     eth2_libp2p::metrics::update_discovery_metrics();
                     eth2_libp2p::metrics::update_sync_metrics(service.network_globals());
                     eth2_libp2p::metrics::update_gossipsub_extended_metrics(
                         service.gossipsub(),
                         service.network_globals(),
                     );
+
+                    debug_info.handle();
                 },
 
                 network_event = service.next_event().fuse() => {
@@ -2392,6 +2467,8 @@ fn run_network_service<P: Preset>(
                 }
 
                 message = network_to_service_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         ServiceInboundMessage::DiscoverSubnetPeers(subnet_discoveries) => {
                             service.discover_subnet_peers(subnet_discoveries);
@@ -2461,6 +2538,8 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::Stop => break,
                     }
+
+                    debug_info.handle();
                 }
             }
         }

@@ -25,6 +25,7 @@ pub enum Feature {
     DebugAttestationPacker,
     DebugBlockProducer,
     DebugEth1,
+    DebugP2pMessages,
     DumpAggregateAttestations,
     DumpBeaconBlocks,
     DumpBeaconStates,
