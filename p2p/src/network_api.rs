@@ -7,7 +7,7 @@ use types::preset::Preset;
 
 use crate::Network;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct NodePeersQuery {
     #[serde(rename(deserialize = "state"))]
     states: Option<Vec<PeerState>>,
@@ -72,7 +72,7 @@ struct NodeMetadata {
     custody_group_count: u64,
 }
 
-#[derive(PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum PeerState {
     Connected,
@@ -94,7 +94,7 @@ impl PeerState {
     }
 }
 
-#[derive(PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum PeerDirection {
     Inbound,

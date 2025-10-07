@@ -85,7 +85,7 @@ impl<P: Preset> P2pToSync<P> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
@@ -140,6 +140,7 @@ impl SyncToMetrics {
     }
 }
 
+#[derive(Debug)]
 pub enum SyncToP2p<P: Preset> {
     ReportPeer(PeerId, PeerAction, ReportSource, PeerReportReason),
     RequestBlobsByRange(AppRequestId, PeerId, Slot, u64),
@@ -191,7 +192,7 @@ impl BlockSyncServiceMessage {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub enum ValidatorToP2p<P: Preset> {
     Accept(GossipId),
@@ -242,6 +243,7 @@ impl<P: Preset> P2pToSlasher<P> {
     }
 }
 
+#[derive(Debug)]
 pub enum ServiceInboundMessage<P: Preset> {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
@@ -272,6 +274,7 @@ impl<P: Preset> ServiceInboundMessage<P> {
     }
 }
 
+#[derive(Debug)]
 pub enum ServiceOutboundMessage<P: Preset> {
     NetworkEvent(NetworkEvent<P>),
 }
@@ -284,7 +287,7 @@ impl<P: Preset> ServiceOutboundMessage<P> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub enum SubnetServiceToP2p {
     // Use `BTreeMap` to make serialization deterministic for snapshot testing.
     // `Vec` would work too and would be slightly faster.
