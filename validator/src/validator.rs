@@ -900,7 +900,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     "Builder API should be present as it was used to query ExecutionPayloadHeader",
                 );
 
-                if self.chain_config.is_peerdas_scheduled()
+                if slot_head.phase() >= Phase::Fulu
                     && builder_api
                         .post_blinded_block_post_fulu(
                             &self.chain_config,
