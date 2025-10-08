@@ -737,33 +737,46 @@ impl<P: Preset> Network<P> {
             "publishing singular attestation (attestation: {attestation:?}, subnet_id: {subnet_id})",
         );
 
-        match attestation.as_ref() {
-            Attestation::Phase0(_) => {
-                self.publish(PubsubMessage::Attestation(subnet_id, attestation));
-            }
-            Attestation::Electra(attestation) => {
-                let single_attestation = match operation_pools::try_convert_to_single_attestation(
-                    &self.controller,
-                    attestation,
-                ) {
-                    Ok(single_attestation) => single_attestation,
-                    Err(error) => {
-                        warn!(
-                            "cannot convert electra attestation to single attestation: {error:?}"
-                        );
-                        return;
-                    }
-                };
-
-                self.publish(PubsubMessage::SingleAttestation(
+        match Arc::unwrap_or_clone(attestation) {
+            Attestation::Phase0(phase0_attestation) => {
+                self.publish(PubsubMessage::Attestation(
                     subnet_id,
-                    single_attestation,
+                    Attestation::Phase0(phase0_attestation).into(),
                 ));
+            }
+            Attestation::Electra(electra_attestation) => {
+                let network_to_service_tx = self.network_to_service_tx.clone();
+                let controller = self.controller.clone_arc();
+
+                // Attestation conversion may be CPU intensive, so it is done in a separate task.
+                self.dedicated_executor
+                    .spawn(async move {
+                        let single_attestation = match operation_pools::try_convert_to_single_attestation(
+                            &controller,
+                            electra_attestation,
+                        ) {
+                            Ok(single_attestation) => single_attestation,
+                            Err(error) => {
+                                warn!(
+                                    "cannot convert electra attestation to single attestation: {error:?}",
+                                );
+                                return;
+                            }
+                        };
+
+                        let message = PubsubMessage::SingleAttestation(
+                            subnet_id,
+                            single_attestation,
+                        );
+
+                        ServiceInboundMessage::Publish(message).send(&network_to_service_tx);
+                    })
+                    .detach();
             }
             Attestation::Single(single_attestation) => {
                 self.publish(PubsubMessage::SingleAttestation(
                     subnet_id,
-                    *single_attestation,
+                    single_attestation,
                 ));
             }
         }
@@ -2413,7 +2426,7 @@ impl MessageDebugInfoHandler for Option<MessageDebugInfo> {
 
         let duration_ms = info.processing_started_at.elapsed().as_millis();
 
-        if duration_ms > 100 {
+        if duration_ms > 10 {
             warn!("processed P2p message in {duration_ms} ms: {}", info.info);
         }
     }
