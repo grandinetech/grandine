@@ -383,6 +383,7 @@ impl<P: Preset> SyncManager<P> {
                                 let peer_custody_columns_mapping = match self
                                     .map_peer_custody_columns(
                                         missing_column_indices,
+                                        start_slot,
                                         &mut peers_to_request,
                                     ) {
                                     Ok(mapping) => mapping,
@@ -489,13 +490,13 @@ impl<P: Preset> SyncManager<P> {
         local_head_slot: Slot,
         local_finalized_slot: Slot,
         sampling_columns: &HashSet<ColumnIndex>,
-    ) -> Result<Vec<SyncBatch<P>>> {
-        let Some(peers_to_sync) = self.find_peers_to_sync(false) else {
-            return Ok(vec![]);
+    ) -> Vec<SyncBatch<P>> {
+        let Some(mut peers_to_sync) = self.find_peers_to_sync(false) else {
+            return vec![];
         };
 
         let Some(remote_head_slot) = self.max_remote_head_slot(&peers_to_sync) else {
-            return Ok(vec![]);
+            return vec![];
         };
 
         if remote_head_slot <= local_head_slot {
@@ -507,11 +508,10 @@ impl<P: Preset> SyncManager<P> {
                 ),
             );
 
-            return Ok(vec![]);
+            return vec![];
         }
 
         let slots_per_request = P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST;
-
         let mut redownloads_increased = false;
 
         if self.sync_from_finalized && self.last_sync_range.end >= local_head_slot {
@@ -550,7 +550,7 @@ impl<P: Preset> SyncManager<P> {
             .is_peerdas_activated()
             && self.peers_custodial.is_empty()
         {
-            return Ok(vec![]);
+            return vec![];
         }
 
         self.log(
@@ -570,7 +570,7 @@ impl<P: Preset> SyncManager<P> {
         self.last_sync_head = local_head_slot;
 
         if sync_start_slot >= local_head_slot + MAX_SYNC_DISTANCE_IN_SLOTS {
-            return Ok(vec![]);
+            return vec![];
         }
 
         if remote_head_slot <= sync_start_slot {
@@ -586,105 +586,122 @@ impl<P: Preset> SyncManager<P> {
                 ),
             );
 
-            return Ok(vec![]);
+            return vec![];
         }
 
         let slot_distance = remote_head_slot.saturating_sub(sync_start_slot);
-        let batches_in_front = usize::try_from(slot_distance / slots_per_request + 1)?;
-
-        let mut max_slot = local_head_slot;
+        let batches_in_front = slot_distance / slots_per_request + 1;
         let blob_serve_range_slot = misc::blob_serve_range_slot::<P>(config, current_slot);
         let data_column_serve_range_slot =
             misc::data_column_serve_range_slot::<P>(config, current_slot);
 
-        let mut peers_to_request = peers_to_sync.clone();
+        let mut max_slot = local_head_slot;
         let mut sync_batches = vec![];
-        for (peer_id, index) in Self::peer_sync_batch_assignments(&peers_to_sync)
-            .zip(0..)
-            .take(batches_in_front)
-        {
-            let start_slot = sync_start_slot + slots_per_request * index;
-            let count = remote_head_slot.saturating_sub(start_slot) + 1;
-            let count = count.min(slots_per_request);
+        let mut batch_index: u64 = 0;
+        let mut block_peers = peers_to_sync.clone();
 
-            max_slot = start_slot + count - 1;
+        'outer: loop {
+            let Some(block_peer_id) = block_peers.pop() else {
+                break;
+            };
 
-            if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
-                && data_column_serve_range_slot < max_slot
-            {
-                let missing_column_indices =
-                    self.missing_column_indices_by_range(sampling_columns, start_slot, count);
-
-                if missing_column_indices.is_empty() {
-                    continue;
+            for _ in 0..BATCHES_PER_PEER {
+                if batch_index >= batches_in_front {
+                    break 'outer;
                 }
 
-                self.log(
-                    Level::Debug,
-                    format_args!(
-                        "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
-                        missing_column_indices.len(),
-                        missing_column_indices.iter().join(", "),
-                    ),
-                );
+                let start_slot = sync_start_slot + slots_per_request * batch_index;
+                let count = remote_head_slot.saturating_sub(start_slot) + 1;
+                let count = count.min(slots_per_request);
 
-                let peer_custody_columns_mapping = match self
-                    .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
+                max_slot = start_slot + count - 1;
+
+                if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
+                    && data_column_serve_range_slot < max_slot
                 {
-                    Ok(mapping) => mapping,
-                    Err(error) => {
-                        self.log(
-                            Level::Debug,
-                            format_args!("build_forward_sync_batches: {error:?}"),
-                        );
+                    let missing_column_indices =
+                        self.missing_column_indices_by_range(sampling_columns, start_slot, count);
 
-                        break;
+                    if missing_column_indices.is_empty() {
+                        // all columns for this batch are received
+                        batch_index += 1;
+                        continue;
                     }
-                };
 
-                for (peer_id, columns) in peer_custody_columns_mapping {
+                    self.log(
+                        Level::Debug,
+                        format_args!(
+                            "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
+                            missing_column_indices.len(),
+                            missing_column_indices.iter().join(", "),
+                        ),
+                    );
+
+                    let peer_custody_columns_mapping = match self.map_peer_custody_columns(
+                        missing_column_indices,
+                        start_slot,
+                        &mut peers_to_sync,
+                    ) {
+                        Ok(mapping) => mapping,
+                        Err(error) => {
+                            self.log(
+                                Level::Debug,
+                                format_args!("build_forward_sync_batches: {error:?}"),
+                            );
+
+                            break 'outer;
+                        }
+                    };
+
+                    for (peer_id, columns) in peer_custody_columns_mapping {
+                        match ContiguousList::try_from_iter(columns.into_iter()) {
+                            Ok(columns) => {
+                                sync_batches.push(SyncBatch {
+                                    target: SyncTarget::DataColumnSidecar,
+                                    direction: SyncDirection::Forward,
+                                    peer_id,
+                                    start_slot,
+                                    count,
+                                    response_received: false,
+                                    retry_count: 0,
+                                    data_columns: Some(columns.into()),
+                                });
+                            }
+                            Err(error) => self.log(
+                                Level::Error,
+                                format_args!(
+                                    "failed to parse data_columns in SyncBatch, \
+                                        this should not happen {error:?}",
+                                ),
+                            ),
+                        }
+                    }
+                } else if blob_serve_range_slot < max_slot {
                     sync_batches.push(SyncBatch {
-                        target: SyncTarget::DataColumnSidecar,
+                        target: SyncTarget::BlobSidecar,
                         direction: SyncDirection::Forward,
-                        peer_id,
+                        peer_id: block_peer_id,
                         start_slot,
                         count,
                         response_received: false,
                         retry_count: 0,
-                        data_columns: ContiguousList::try_from_iter(
-                            columns.into_iter(),
-                        )
-                        .map(Arc::new)
-                        .inspect_err(|e| self.log(
-                            Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
-                        ))
-                        .ok(),
+                        data_columns: None,
                     });
                 }
-            } else if blob_serve_range_slot < max_slot {
+
                 sync_batches.push(SyncBatch {
-                    target: SyncTarget::BlobSidecar,
+                    target: SyncTarget::Block,
                     direction: SyncDirection::Forward,
-                    peer_id,
+                    peer_id: block_peer_id,
                     start_slot,
                     count,
                     response_received: false,
                     retry_count: 0,
                     data_columns: None,
                 });
-            }
 
-            // TODO(feature/eip7594): refactor SyncBatch to Enum instead of struct with options
-            sync_batches.push(SyncBatch {
-                target: SyncTarget::Block,
-                direction: SyncDirection::Forward,
-                peer_id,
-                start_slot,
-                count,
-                response_received: false,
-                retry_count: 0,
-                data_columns: None,
-            });
+                batch_index += 1;
+            }
         }
 
         self.log(
@@ -692,9 +709,15 @@ impl<P: Preset> SyncManager<P> {
             format_args!("new sync batches count: {}", sync_batches.len()),
         );
 
-        self.last_sync_range = sync_start_slot..max_slot;
+        if sync_batches.is_empty() {
+            if redownloads_increased {
+                self.sequential_redownloads = self.sequential_redownloads.saturating_sub(1);
+            }
+        } else {
+            self.last_sync_range = sync_start_slot..max_slot;
+        }
 
-        Ok(sync_batches)
+        sync_batches
     }
 
     pub fn ready_to_request_by_range(&mut self) -> bool {
@@ -1101,12 +1124,6 @@ impl<P: Preset> SyncManager<P> {
             .max()
     }
 
-    fn peer_sync_batch_assignments(peers: &[PeerId]) -> impl Iterator<Item = PeerId> + '_ {
-        core::iter::repeat_n(peers, BATCHES_PER_PEER)
-            .flatten()
-            .copied()
-    }
-
     fn busy_peers(&self) -> HashSet<PeerId> {
         self.blob_requests
             .busy_peers()
@@ -1194,6 +1211,7 @@ impl<P: Preset> SyncManager<P> {
     pub fn map_peer_custody_columns(
         &self,
         mut column_indices: HashSet<ColumnIndex>,
+        start_slot: Slot,
         peers_to_request: &mut Vec<PeerId>,
     ) -> Result<HashMap<PeerId, HashSet<ColumnIndex>>> {
         if column_indices.is_empty() {
@@ -1214,6 +1232,9 @@ impl<P: Preset> SyncManager<P> {
                     peers_to_request.contains(*peer)
                         && !columns.is_disjoint(&column_indices)
                         && !peer_columns_mapping.contains_key(*peer)
+                        && self
+                            .peer_earliest_available_slot(peer)
+                            .is_some_and(|earliest_slot| earliest_slot <= start_slot)
                 })
                 .min_by(|(_, columns_a), (_, columns_b)| {
                     let total_custody_a = columns_a.len();
@@ -1381,14 +1402,17 @@ impl<P: Preset> SyncManager<P> {
 
 #[cfg(test)]
 mod tests {
-    use eth2_libp2p::{rpc::StatusMessageV1, NetworkConfig};
+    use eth2_libp2p::{
+        rpc::{StatusMessageV1, StatusMessageV2},
+        NetworkConfig,
+    };
     use slog::{o, Drain};
     use std::sync::Arc;
     use std_ext::ArcExt;
     use test_case::test_case;
     use types::{
         config::Config,
-        phase0::primitives::H32,
+        phase0::primitives::{ForkDigest, H32},
         preset::{Mainnet, Minimal},
     };
 
@@ -1503,21 +1527,12 @@ mod tests {
         config.fulu_fork_epoch = 8;
         let config = Arc::new(config);
         let sampling_columns = HashSet::new();
-
-        let peer_status = StatusMessage::V1(StatusMessageV1 {
-            fork_digest: H32::default(),
-            finalized_root: H256::default(),
-            finalized_epoch: 0,
-            head_root: H256::default(),
-            head_slot,
-        });
-
         let mut sync_manager = build_sync_manager::<Minimal>(config.clone_arc());
 
         // Add 10 valid peers.
         // This will indirectly test that half of them are used for back-syncing (5 batches).
         for _ in 0..12 {
-            sync_manager.add_peer(PeerId::random(), peer_status);
+            sync_manager.add_peer(PeerId::random(), status_message_v1());
         }
 
         // Add one peer to a blacklist
@@ -1549,7 +1564,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_forward_sync_batches_when_head_progresses() -> Result<()> {
+    fn test_build_forward_sync_batches_when_head_progresses() {
         let config = Arc::new(Config::mainnet());
         let current_slot = 20_001;
         let local_head_slot = 3000;
@@ -1576,7 +1591,7 @@ mod tests {
                 local_head_slot + i,
                 local_finalized_slot,
                 &sampling_columns,
-            )?;
+            );
 
             let sync_range_from = local_head_slot + slots_per_request * i + 1;
             let sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1595,12 +1610,10 @@ mod tests {
                 [(sync_range_from, slots_per_request)],
             );
         }
-
-        Ok(())
     }
 
     #[test]
-    fn test_build_forward_sync_batches_when_head_does_not_progress() -> Result<()> {
+    fn test_build_forward_sync_batches_when_head_does_not_progress() {
         let config = Arc::new(Config::mainnet());
         let current_slot = 20_001;
         let local_head_slot = 3000;
@@ -1626,7 +1639,7 @@ mod tests {
             local_head_slot,
             local_finalized_slot,
             &sampling_columns,
-        )?;
+        );
 
         // From first to sixth retry try to download blocks from local head slot
 
@@ -1637,7 +1650,7 @@ mod tests {
                 local_head_slot,
                 local_finalized_slot,
                 &sampling_columns,
-            )?;
+            );
 
             let sync_range_from = local_head_slot + 1;
             let sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1654,7 +1667,7 @@ mod tests {
                 local_head_slot,
                 local_finalized_slot,
                 &sampling_columns,
-            )?;
+            );
 
             let sync_range_from = local_head_slot - 32 + 1;
             let sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1674,7 +1687,7 @@ mod tests {
                 local_head_slot,
                 local_finalized_slot,
                 &sampling_columns,
-            )?;
+            );
 
             let sync_range_from = local_finalized_slot + slots_per_request * i + 1;
             sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1692,19 +1705,18 @@ mod tests {
             local_head_slot,
             local_finalized_slot,
             &sampling_columns,
-        )?;
+        );
 
         let sync_range_from = local_head_slot + 1;
         let sync_range_to = sync_range_from + slots_per_request - 1;
 
         assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
-
-        Ok(())
     }
 
     // Helper function to create a test SyncManager with custom custodial peers
     fn create_test_sync_manager_with_custody(
         peers_custodial: HashMap<PeerId, HashSet<ColumnIndex>>,
+        peer_statuses: HashMap<PeerId, StatusMessage>,
     ) -> SyncManager<Minimal> {
         let log = build_log(slog::Level::Debug, false);
         let chain_config = Arc::new(Config::minimal().rapid_upgrade());
@@ -1715,7 +1727,29 @@ mod tests {
         let mut sync_manager =
             SyncManager::new(network_globals.into(), 100, received_data_column_sidecars);
         sync_manager.peers_custodial = peers_custodial;
+        sync_manager.peers = peer_statuses;
         sync_manager
+    }
+
+    fn status_message_v1() -> StatusMessage {
+        StatusMessage::V1(StatusMessageV1 {
+            fork_digest: ForkDigest::zero(),
+            finalized_root: H256::zero(),
+            finalized_epoch: 1,
+            head_root: H256::zero(),
+            head_slot: 1,
+        })
+    }
+
+    fn status_message_v2(earliest_available_slot: Slot) -> StatusMessage {
+        StatusMessage::V2(StatusMessageV2 {
+            fork_digest: ForkDigest::zero(),
+            finalized_root: H256::zero(),
+            finalized_epoch: 1,
+            head_root: H256::zero(),
+            head_slot: 1,
+            earliest_available_slot,
+        })
     }
 
     #[test]
@@ -1725,6 +1759,12 @@ mod tests {
         let peer3 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([
+            (peer1, status_message_v2(0)),
+            (peer2, status_message_v2(0)),
+            (peer3, status_message_v2(0)),
+        ]);
+
         // peer1 has 5 columns (heavy load)
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 4]));
         // peer2 has 2 columns (light load)
@@ -1732,12 +1772,12 @@ mod tests {
         // peer3 has 1 column (lightest load)
         peers_custodial.insert(peer3, HashSet::from([7]));
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2, peer3];
         let column_indices = HashSet::from([0, 5, 7]); // Each peer can serve one of these
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Should assign to peer3 first (lightest), then peer2, then peer1
@@ -1753,16 +1793,19 @@ mod tests {
         let peer2 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses =
+            HashMap::from([(peer1, status_message_v2(0)), (peer2, status_message_v2(0))]);
+
         // Both peers have same number of total columns (3 each)
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2]));
         peers_custodial.insert(peer2, HashSet::from([2, 3, 4])); // peer2 can cover 2 of requested columns
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2];
         let column_indices = HashSet::from([2, 3]); // peer2 can cover both, peer1 can cover only one
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // peer2 should be selected as it can cover more columns despite same total load
@@ -1776,15 +1819,16 @@ mod tests {
         let peer1 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([(peer1, status_message_v2(0))]);
         // peer1 can custody many columns
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1];
         let column_indices = HashSet::from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]); // Request all columns
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Should not assign more than MAX_COLUMNS_ASSIGNED_PER_PEER
@@ -1796,14 +1840,15 @@ mod tests {
     fn test_empty_column_indices_returns_empty_map() {
         let peer1 = PeerId::random();
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([(peer1, status_message_v2(0))]);
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2]));
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1];
         let column_indices = HashSet::new(); // Empty request
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         assert!(result.is_empty());
@@ -1811,12 +1856,12 @@ mod tests {
 
     #[test]
     fn test_no_available_peers_returns_error() {
-        let sync_manager = create_test_sync_manager_with_custody(HashMap::new());
+        let sync_manager = create_test_sync_manager_with_custody(HashMap::new(), HashMap::new());
         let mut peers_to_request = vec![];
         let column_indices = HashSet::from([0, 1, 2]);
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect_err("no peers to request");
 
         assert!(matches!(
@@ -1829,14 +1874,15 @@ mod tests {
     fn test_no_peers_can_serve_requested_columns() {
         let peer1 = PeerId::random();
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([(peer1, status_message_v2(0))]);
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2])); // peer1 can't serve column 5
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1];
         let column_indices = HashSet::from([5, 6, 7]); // Columns peer1 can't serve
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect_err("no available custodial peers to request");
 
         assert!(matches!(
@@ -1852,16 +1898,22 @@ mod tests {
         let peer3 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([
+            (peer1, status_message_v2(0)),
+            (peer2, status_message_v2(0)),
+            (peer3, status_message_v2(0)),
+        ]);
+
         peers_custodial.insert(peer1, HashSet::from([0]));
         peers_custodial.insert(peer2, HashSet::from([1]));
         peers_custodial.insert(peer3, HashSet::from([2, 3, 4])); // peer3 not needed
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2, peer3];
         let column_indices = HashSet::from([0, 1]); // Only need peer1 and peer2
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // peer1 and peer2 should be assigned and removed from peers_to_request
@@ -1881,6 +1933,13 @@ mod tests {
         let peer4 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([
+            (peer1, status_message_v2(0)),
+            (peer2, status_message_v2(0)),
+            (peer3, status_message_v2(0)),
+            (peer4, status_message_v2(0)),
+        ]);
+
         // peer1: heavy load (8 columns), can serve columns [0, 1, 2, 3]
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 10, 11, 12, 13]));
         // peer2: medium load (4 columns), can serve columns [1, 2, 4, 5]
@@ -1890,12 +1949,12 @@ mod tests {
         // peer4: lightest load (1 column), can serve column [7]
         peers_custodial.insert(peer4, HashSet::from([7]));
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2, peer3, peer4];
         let column_indices = HashSet::from([0, 1, 2, 4, 6, 7]);
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices.clone(), &mut peers_to_request)
+            .map_peer_custody_columns(column_indices.clone(), 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Verify that lighter-loaded peers get assigned first
@@ -1925,15 +1984,18 @@ mod tests {
         let peer2 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses =
+            HashMap::from([(peer1, status_message_v2(0)), (peer2, status_message_v2(0))]);
+
         peers_custodial.insert(peer1, HashSet::from([0, 1])); // peer1 can serve but not in request list
         peers_custodial.insert(peer2, HashSet::from([0, 2])); // peer2 is in request list
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer2]; // Only peer2 is allowed
         let column_indices = HashSet::from([0, 1, 2]);
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Only peer2 should be assigned (peer1 ignored despite being able to serve)
@@ -1948,15 +2010,18 @@ mod tests {
         let peer2 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses =
+            HashMap::from([(peer1, status_message_v2(0)), (peer2, status_message_v2(0))]);
+
         peers_custodial.insert(peer1, HashSet::from([0, 1]));
         peers_custodial.insert(peer2, HashSet::from([1, 2]));
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2];
         let column_indices = HashSet::from([0, 1, 2]);
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices.clone(), &mut peers_to_request)
+            .map_peer_custody_columns(column_indices.clone(), 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Each peer should only be assigned once, even if they could serve multiple columns
@@ -1973,21 +2038,53 @@ mod tests {
     }
 
     #[test]
+    fn test_peer_with_higher_earliest_available_slot_is_skipped() {
+        let peer1 = PeerId::random();
+        let peer2 = PeerId::random();
+        let peer3 = PeerId::random();
+
+        let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([
+            (peer1, status_message_v2(0)),
+            (peer2, status_message_v2(1)),
+            (peer3, status_message_v1()),
+        ]);
+
+        peers_custodial.insert(peer1, HashSet::from([0, 1]));
+        peers_custodial.insert(peer2, HashSet::from([1, 2]));
+        peers_custodial.insert(peer3, HashSet::from([2, 3]));
+
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
+        let mut peers_to_request = vec![peer1, peer2, peer3];
+        let column_indices = HashSet::from([0, 1, 2, 3]);
+
+        let result = sync_manager
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
+            .expect("custodial peers should be available");
+
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&peer1));
+    }
+
+    #[test]
     fn test_equal_load_peers_prefer_better_coverage() {
         let peer1 = PeerId::random();
         let peer2 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses =
+            HashMap::from([(peer1, status_message_v2(0)), (peer2, status_message_v2(0))]);
+
         // Both peers have same total load (3 columns each)
         peers_custodial.insert(peer1, HashSet::from([0, 10, 11])); // Can serve 1 requested column
         peers_custodial.insert(peer2, HashSet::from([1, 2, 12])); // Can serve 2 requested columns
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2];
         let column_indices = HashSet::from([0, 1, 2]); // peer2 has better coverage
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // peer2 should be selected first due to better coverage (same load)
@@ -2002,17 +2099,23 @@ mod tests {
         let peer3 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([
+            (peer1, status_message_v2(0)),
+            (peer2, status_message_v2(0)),
+            (peer3, status_message_v2(0)),
+        ]);
+
         // Graduated loads: 1, 2, 3 columns respectively
         peers_custodial.insert(peer1, HashSet::from([0])); // 1 column
         peers_custodial.insert(peer2, HashSet::from([1, 2])); // 2 columns
         peers_custodial.insert(peer3, HashSet::from([3, 4, 5])); // 3 columns
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2, peer3];
         let column_indices = HashSet::from([0, 1, 3]); // Each peer can serve one
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // All three peers should get assigned (peer1 first, then peer2, then peer3)
@@ -2028,17 +2131,20 @@ mod tests {
         let peer2 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses =
+            HashMap::from([(peer1, status_message_v2(0)), (peer2, status_message_v2(0))]);
+
         // peer1: light load, overlapping custody
         peers_custodial.insert(peer1, HashSet::from([0, 1])); // 2 columns
                                                               // peer2: heavy load, overlapping custody
         peers_custodial.insert(peer2, HashSet::from([0, 1, 2, 3, 4, 5])); // 6 columns
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2];
         let column_indices = HashSet::from([0, 1]);
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // peer1 should be selected due to lighter load, even though both can serve the columns
@@ -2054,16 +2160,22 @@ mod tests {
         let peer3 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([
+            (peer1, status_message_v2(0)),
+            (peer2, status_message_v2(0)),
+            (peer3, status_message_v2(0)),
+        ]);
+
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 10])); // 4 columns
         peers_custodial.insert(peer2, HashSet::from([3, 4, 11, 12])); // 4 columns
         peers_custodial.insert(peer3, HashSet::from([5, 6, 7, 8, 9, 13, 14, 15])); // 8 columns
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2, peer3];
         let column_indices = HashSet::from([0, 3, 5, 1, 4, 6]); // Multiple rounds of assignment
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Should distribute across multiple peers, with lighter-loaded peers getting priority
@@ -2088,15 +2200,18 @@ mod tests {
         let peer2 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses =
+            HashMap::from([(peer1, status_message_v2(0)), (peer2, status_message_v2(0))]);
+
         peers_custodial.insert(peer1, HashSet::from([0, 1])); // Can serve 2 requested columns
         peers_custodial.insert(peer2, HashSet::from([2])); // Can serve 1 requested column
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1, peer2];
         let column_indices = HashSet::from([0, 1, 2, 99]); // Column 99 cannot be served
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Should successfully assign the columns that can be served
@@ -2120,14 +2235,16 @@ mod tests {
         let peer1 = PeerId::random();
 
         let mut peers_custodial = HashMap::new();
+        let peer_statuses = HashMap::from([(peer1, status_message_v2(0))]);
+
         peers_custodial.insert(peer1, HashSet::from([0, 1, 2, 3, 4]));
 
-        let sync_manager = create_test_sync_manager_with_custody(peers_custodial);
+        let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);
         let mut peers_to_request = vec![peer1];
         let column_indices = HashSet::from([0, 1, 2]);
 
         let result = sync_manager
-            .map_peer_custody_columns(column_indices, &mut peers_to_request)
+            .map_peer_custody_columns(column_indices, 0, &mut peers_to_request)
             .expect("custodial peers should be available");
 
         // Single peer should get all requested columns it can serve
