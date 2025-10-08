@@ -47,7 +47,7 @@ use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
-use ssz::{BitList, BitVector, ContiguousList, ReadError};
+use ssz::{BitList, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
@@ -63,8 +63,8 @@ use types::{
     },
     config::Config as ChainConfig,
     electra::containers::{
-        AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
-        SignedAggregateAndProof as ElectraSignedAggregateAndProof,
+        AggregateAndProof as ElectraAggregateAndProof,
+        SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
     nonstandard::{
         KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
@@ -1676,20 +1676,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     signature: signature.into(),
                                 }))
                             } else {
-                                let mut aggregation_bits =
-                                    BitList::with_length(member.committee_size);
-
-                                aggregation_bits.set(member.position_in_committee, true);
-
-                                // TODO(feature/electra: don't hide error?)
-                                let mut committee_bits = BitVector::default();
-
-                                committee_bits.set(member.committee_index.try_into().ok()?, true);
-
-                                Some(Attestation::from(ElectraAttestation {
-                                    aggregation_bits,
+                                Some(Attestation::from(SingleAttestation {
+                                    committee_index: member.committee_index,
+                                    attester_index: member.validator_index,
                                     data,
-                                    committee_bits,
                                     signature: signature.into(),
                                 }))
                             };
