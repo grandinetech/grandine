@@ -805,18 +805,20 @@ impl<P: Preset> BlockSyncService<P> {
                             missing_column_indices.iter().join(", "),
                         );
 
-                        let peer_custody_columns_mapping = match self
-                            .sync_manager
-                            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
-                        {
-                            Ok(mapping) => mapping,
-                            Err(error) => {
-                                debug!("retry_sync_batches: {error:?}");
+                        let peer_custody_columns_mapping =
+                            match self.sync_manager.map_peer_custody_columns(
+                                missing_column_indices,
+                                start_slot,
+                                &mut peers_to_request,
+                            ) {
+                                Ok(mapping) => mapping,
+                                Err(error) => {
+                                    debug!("retry_sync_batches: {error:?}");
 
-                                self.sync_manager.retry_batch(request_id, batch, None);
-                                continue;
-                            }
-                        };
+                                    self.sync_manager.retry_batch(request_id, batch, None);
+                                    continue;
+                                }
+                            };
 
                         debug!(
                             "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
@@ -934,7 +936,7 @@ impl<P: Preset> BlockSyncService<P> {
                     head_slot,
                     local_finalized_slot,
                     &sampling_columns,
-                )?
+                )
             }
             SyncDirection::Back => {
                 let data_availability_serve_range_slot = if is_peerdas_activated {
@@ -1214,10 +1216,11 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
-        let peer_custody_columns_mapping = match self
-            .sync_manager
-            .map_peer_custody_columns(missing_indices, &mut peers_to_request)
-        {
+        let peer_custody_columns_mapping = match self.sync_manager.map_peer_custody_columns(
+            missing_indices,
+            slot,
+            &mut peers_to_request,
+        ) {
             Ok(mapping) => mapping,
             Err(error) => {
                 debug!("request_needed_data_columns: {error:?}");
@@ -1284,10 +1287,11 @@ impl<P: Preset> BlockSyncService<P> {
         // Find the best peer coverage for these missing columns
         let missing_column_indices = missing_column_by_indices.keys().copied().collect();
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
-        let peer_custody_columns_mapping = match self
-            .sync_manager
-            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
-        {
+        let peer_custody_columns_mapping = match self.sync_manager.map_peer_custody_columns(
+            missing_column_indices,
+            head_slot,
+            &mut peers_to_request,
+        ) {
             Ok(mapping) => mapping,
             Err(error) => {
                 debug!("batch_request_missing_data_columns: {error:?}");
