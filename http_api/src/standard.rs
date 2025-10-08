@@ -34,6 +34,7 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use http_api_utils::{BlockId, StateId};
 use itertools::{izip, Either, Itertools as _};
+use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
 use operation_pools::{
@@ -71,7 +72,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::{Blob, BlobIndex, KzgProof, VersionedHash},
+        primitives::{Blob, BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::{
         containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
@@ -1240,6 +1241,17 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         .collect::<Result<Vec<_>>>()?;
 
     let blob_sidecars = if version.is_peerdas_activated() {
+        let Some(kzg_commitments) = block
+            .message()
+            .body()
+            .post_deneb()
+            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+        else {
+            return Ok(EthResponse::json_or_ssz(DynamicList::empty(), &headers)?
+                .execution_optimistic(status.is_optimistic())
+                .finalized(finalized));
+        };
+
         let blobs = construct_blobs_from_data_column_sidecars(
             controller.clone_arc(),
             block.clone_arc(),
@@ -1248,15 +1260,21 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         )
         .await?;
 
-        let blob_count = blobs.len();
-        let blob_sidecars =
-            misc::construct_blob_sidecars(&block, blobs, vec![KzgProof::zero(); blob_count])?;
+        let (blobs, kzg_commitments): (Vec<Blob<P>>, Vec<KzgCommitment>) =
+            izip!(0.., blobs, kzg_commitments)
+                .filter_map(|(index, blob, kzg_commitment)| {
+                    blob_identifiers
+                        .contains(&BlobIdentifier { block_root, index })
+                        .then_some((blob, kzg_commitment))
+                })
+                .unzip();
 
-        blob_sidecars
-            .into_iter()
-            .filter(|blob_sidecar| blob_identifiers.contains(&blob_sidecar.into()))
-            .map(Arc::new)
-            .collect::<Vec<_>>()
+        construct_blob_sidecars_from_blobs_and_commitments(
+            controller.clone_arc(),
+            &block,
+            blobs,
+            kzg_commitments,
+        )?
     } else {
         controller.blob_sidecars_by_ids(blob_identifiers)?
     };
@@ -4113,11 +4131,11 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
 
         blobs_matrix_map
             .into_values()
-            .map(|blob_matrix| {
+            .map(|entries| {
                 ContiguousVector::try_from_iter(
-                    blob_matrix
+                    entries
                         .into_iter()
-                        .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
+                        .flat_map(|entry| entry.cell.as_bytes().to_vec().into_iter()),
                 )
                 .map(ByteVector::from)
                 .map(Blob::<P>::from)
@@ -4126,6 +4144,26 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
             .collect::<Result<Vec<_>>>()
     })
     .await?
+}
+
+fn construct_blob_sidecars_from_blobs_and_commitments<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    block: &SignedBeaconBlock<P>,
+    blobs: Vec<Blob<P>>,
+    kzg_commitments: Vec<KzgCommitment>,
+) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+    tokio::task::block_in_place(move || {
+        let blob_proofs = blobs
+            .iter()
+            .zip(kzg_commitments.into_iter())
+            .map(|(blob, commitment)| {
+                compute_blob_kzg_proof::<P>(blob, commitment, controller.store_config().kzg_backend)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        misc::construct_blob_sidecars(block, blobs, blob_proofs)
+            .map(|blob_sidecars| blob_sidecars.into_iter().map(Arc::new).collect::<Vec<_>>())
+    })
 }
 
 #[cfg(test)]
