@@ -277,8 +277,6 @@ impl<P: Preset> Network<P> {
                         BlobFetcherToP2p::BlobsNeeded(identifiers, slot, peer_id) => {
                             debug!("blobs needed: {identifiers:?} from {peer_id:?}");
 
-                            let peer_id = self.ensure_peer_connected(peer_id);
-
                             P2pToSync::BlobsNeeded(identifiers, slot, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
@@ -432,10 +430,6 @@ impl<P: Preset> Network<P> {
                             }
                         }
                         P2pMessage::BlockNeeded(root, peer_id) => {
-                            debug!("block needed: {root:?} from {peer_id:?}");
-
-                            let peer_id = self.ensure_peer_connected(peer_id);
-
                             P2pToSync::BlockNeeded(root, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
@@ -2392,16 +2386,6 @@ impl<P: Preset> Network<P> {
 
     fn update_peer_count(&self) {
         PEER_LOG_METRICS.set_connected_peer_count(self.network_globals.connected_peers())
-    }
-
-    fn ensure_peer_connected(&self, peer_id: Option<PeerId>) -> Option<PeerId> {
-        peer_id
-            .filter(|peer_id| self.network_globals.is_peer_connected(peer_id))
-            .or_else(|| {
-                debug!("Peer {peer_id:?} is no longer connected, will find a new peer");
-
-                None
-            })
     }
 
     const fn start_of_epoch(epoch: Epoch) -> Slot {
