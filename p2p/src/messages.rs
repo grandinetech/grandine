@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
-    rpc::{GoodbyeReason, InboundRequestId, RequestType, StatusMessage},
+    rpc::{GoodbyeReason, InboundRequestId, RequestType, RpcErrorResponse, StatusMessage},
     service::api_types::AppRequestId,
     types::{EnrForkId, GossipKind},
     GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PubsubMessage,
@@ -250,6 +250,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     Publish(PubsubMessage<P>),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
+    SendErrorResponse(PeerId, InboundRequestId, RpcErrorResponse, &'static str),
     SendRequest(PeerId, AppRequestId, RequestType<P>),
     SendResponse(PeerId, InboundRequestId, Box<Response<P>>),
     Subscribe(GossipTopic),
