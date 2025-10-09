@@ -12,6 +12,8 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin,
+    ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction,
+    PayloadAttestationOrigin,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -24,6 +26,7 @@ use types::{
         containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -34,7 +37,7 @@ use types::{
 use crate::{
     misc::{
         MutatorRejectionReason, ProcessingTimings, VerifyAggregateAndProofResult,
-        VerifyAttestationResult,
+        VerifyAttestationResult, VerifyPayloadAttestationResult,
     },
     unbounded_sink::UnboundedSink,
 };
@@ -111,6 +114,16 @@ pub enum MutatorMessage<P: Preset, W> {
         results:
             Vec<Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>>,
     },
+    /// Process payload attestations from block body.
+    /// Each PayloadAttestation is de-aggregated and processed via notify_ptc_messages.
+    /// Results is Vec<Result<()>> because:
+    /// - Each PayloadAttestation can succeed/fail independently (e.g., validator not in PTC)
+    /// - No Actions returned (Accept/Ignore/Delay) - directly updates store.ptc_vote
+    /// - Handler logs failures and updates store snapshot on success
+    BlockPayloadAttestations {
+        wait_group: W,
+        results: Vec<Result<()>>,
+    },
     AttesterSlashing {
         wait_group: W,
         result: Result<Vec<ValidatorIndex>>,
@@ -138,6 +151,18 @@ pub enum MutatorMessage<P: Preset, W> {
         origin: DataColumnSidecarOrigin,
         data_column_identifier: DataColumnIdentifier,
         block_seen: bool,
+        submission_time: Instant,
+    },
+    ExecutionPayloadEnvelope {
+        wait_group: W,
+        result: Result<ExecutionPayloadEnvelopeAction<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+        beacon_block_seen: bool,
+        submission_time: Instant,
+    },
+    PayloadAttestation {
+        wait_group: W,
+        result: VerifyPayloadAttestationResult,
         submission_time: Instant,
     },
     FinishedPersistingBlobSidecars {

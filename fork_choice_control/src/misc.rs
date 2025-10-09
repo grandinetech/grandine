@@ -9,6 +9,8 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
+    ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction, PayloadAttestationItem,
+    PayloadAttestationOrigin, PayloadAttestationValidationError,
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
@@ -18,7 +20,11 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    fulu::{
+        containers::DataColumnIdentifier,
+        primitives::ColumnIndex,
+    },
+    gloas::containers::{PayloadAttestation, SignedExecutionPayloadEnvelope},
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -36,6 +42,8 @@ pub struct Delayed<P: Preset> {
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
+    pub execution_payload_envelopes: Vec<PendingExecutionPayloadEnvelope<P>>,
+    pub payload_attestations: Vec<PendingPayloadAttestation<GossipId>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,6 +100,8 @@ impl<P: Preset> Delayed<P> {
             attestations,
             blob_sidecars,
             data_column_sidecars,
+            execution_payload_envelopes,
+            payload_attestations,
         } = self;
 
         blocks.is_empty()
@@ -100,6 +110,8 @@ impl<P: Preset> Delayed<P> {
             && attestations.is_empty()
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
+            && execution_payload_envelopes.is_empty()
+            && payload_attestations.is_empty()
     }
 }
 
@@ -167,6 +179,20 @@ pub struct PendingDataColumnSidecar<P: Preset> {
     pub submission_time: Instant,
 }
 
+#[derive(Debug)]
+pub struct PendingExecutionPayloadEnvelope<P: Preset> {
+    pub envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub beacon_block_seen: bool,
+    pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub submission_time: Instant,
+}
+
+#[derive(Debug)]
+pub struct PendingPayloadAttestation<I: Clone> {
+    pub payload_attestation: PayloadAttestationItem<I>,
+    pub submission_time: Instant,
+}
+
 pub struct VerifyAggregateAndProofResult<P: Preset> {
     pub result: Result<AggregateAndProofAction<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
@@ -174,6 +200,9 @@ pub struct VerifyAggregateAndProofResult<P: Preset> {
 
 pub type VerifyAttestationResult<P> =
     Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>;
+
+pub type VerifyPayloadAttestationResult =
+    Result<PayloadAttestationAction<GossipId>, PayloadAttestationValidationError<GossipId>>;
 
 #[expect(clippy::enum_variant_names)]
 #[derive(Debug, IntoStaticStr, Serialize)]
@@ -190,6 +219,7 @@ pub enum MutatorRejectionReason {
     InvalidDataColumnSidecar {
         data_column_identifier: DataColumnIdentifier,
     },
+    InvalidPayloadAttestation,
 }
 
 #[derive(Clone, Copy, Debug)]

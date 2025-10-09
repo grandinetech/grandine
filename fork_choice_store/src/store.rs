@@ -27,6 +27,7 @@ use helper_functions::{
 use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
 use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use logging::{error_with_peers, info_with_peers, warn_with_peers};
+use tracing::{debug, error, warn};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::{ContiguousList, SszHash as _};
@@ -52,7 +53,10 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
         primitives::ColumnIndex,
     },
-    gloas::containers::{DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid},
+    gloas::containers::{
+        DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
+        IndexedPayloadAttestation, SignedExecutionPayloadEnvelope,
+    },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -73,8 +77,10 @@ use crate::{
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
         BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink,
         DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin, Difference,
-        DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId, Storage,
+        DifferenceAtLocation, DissolvedDifference, ExecutionPayloadEnvelopeAction,
+        ExecutionPayloadEnvelopeOrigin, LatestMessage, Location, PartialAttestationAction,
+        PartialBlockAction, PayloadAction, PayloadAttestationAction, PayloadAttestationItem,
+        PayloadAttestationValidationError, Score, SegmentId, Storage,
         UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
@@ -1451,7 +1457,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let index = misc::committee_index(&attestation.item);
 
-        let AttestationData { slot, target, .. } = attestation.data();
+        let AttestationData { slot, target, beacon_block_root, .. } = attestation.data();
+
+        // [New in Gloas:EIP7732] Attestation data index validation
+        if self.phase() >= Phase::Gloas {
+            // Rule 1: attestation.data.index must be < 2
+            if index > 1 {
+                return Err(AttestationValidationError::CommitteeIndexTooHigh {
+                    index,
+                    attestation: Box::new(attestation),
+                });
+            }
+
+            // Rule 2: If head_block.slot == attestation.data.slot, then index must be 0
+            // Get the head block referenced by the attestation
+            if let Some(head_block) = self.chain_link(beacon_block_root) {
+                if head_block.slot() == slot && index != 0 {
+                    return Err(AttestationValidationError::CommitteeIndexNonZeroSameSlot {
+                        index,
+                        attestation: Box::new(attestation),
+                    });
+                }
+            }
+        }
 
         // TODO(feature/deneb): Figure out why this validation is split over 2 methods.
         // TODO(feature/deneb): This appears to be unfinished.
@@ -2415,6 +2443,205 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    /// Validates ExecutionPayloadEnvelope received via gossip
+    ///
+    /// Spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md#execution_payload
+    pub fn validate_execution_payload_envelope(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        beacon_block_seen: bool,
+        origin: &ExecutionPayloadEnvelopeOrigin,
+    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
+        let _ = origin;
+        let slot = envelope.message.slot;
+        let beacon_block_root = envelope.message.beacon_block_root;
+        let builder_index = envelope.message.builder_index;
+
+        // [IGNORE] The envelope is not from a future slot (with MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
+        // i.e. validate that envelope.slot <= current_slot
+        if self.slot() < slot {
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilSlot(envelope));
+        }
+
+        // [IGNORE] The envelope is from a slot greater than the latest finalized slot
+        // i.e. validate that envelope.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
+        if slot <= self.finalized_slot() {
+            return Ok(ExecutionPayloadEnvelopeAction::Ignore);
+        }
+
+        // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
+        // (a client MAY queue envelope for processing once the block is retrieved)
+        if !beacon_block_seen {
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
+                envelope,
+                beacon_block_root,
+            ));
+        }
+
+        // Get the beacon block to validate against
+        let Some(chain_link) = self.chain_link(beacon_block_root) else {
+            // Block not in store yet, delay until it arrives
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
+                envelope,
+                beacon_block_root,
+            ));
+        };
+
+        let block = &chain_link.block;
+        let state = chain_link.state(self);
+
+        // [REJECT] block.slot equals envelope.slot
+        ensure!(
+            block.message().slot() == slot,
+            Error::<P>::ExecutionPayloadEnvelopeSlotMismatch {
+                expected: block.message().slot(),
+                actual: slot,
+            },
+        );
+
+        // [REJECT] The builder_index must be a valid and active validator
+        let validator = state
+            .validators()
+            .get(builder_index)
+            .map_err(|_| Error::<P>::ValidatorNotActive { builder_index })?;
+
+        ensure!(
+            predicates::is_active_validator(validator, accessors::get_current_epoch(&state)),
+            Error::<P>::ValidatorNotActive { builder_index },
+        );
+
+        // [REJECT] The builder signature envelope.signature is valid
+        // ExecutionPayloadEnvelope is Gloas-only, so state must be Gloas
+        let BeaconState::Gloas(gloas_state) = state.as_ref() else {
+            bail!("ExecutionPayloadEnvelope validation requires Gloas state");
+        };
+        transition_functions::gloas::execution_payload_processing::verify_execution_payload_envelope_signature(
+            &self.chain_config,
+            &self.pubkey_cache,
+            gloas_state,
+            &envelope,
+            SingleVerifier,
+        )?;
+
+        // [REJECT] Get the bid from the block
+        // ExecutionPayloadEnvelope is Gloas-only, so block must be Gloas
+        let SignedBeaconBlock::Gloas(gloas_block) = block.as_ref() else {
+            bail!("ExecutionPayloadEnvelope validation requires Gloas block");
+        };
+
+        let signed_bid = &gloas_block.message.body.signed_execution_payload_bid;
+        let bid = &signed_bid.message;
+
+        // [REJECT] envelope.builder_index == bid.builder_index
+        ensure!(
+            builder_index == bid.builder_index,
+            Error::<P>::BuilderIndexMismatch {
+                expected: bid.builder_index,
+                actual: builder_index,
+            },
+        );
+
+        // [REJECT] payload.block_hash == bid.block_hash
+        ensure!(
+            envelope.message.payload.block_hash == bid.block_hash,
+            Error::<P>::ExecutionPayloadBlockHashMismatch {
+                expected: bid.block_hash,
+                actual: envelope.message.payload.block_hash,
+            },
+        );
+
+        // [IGNORE] This is the first payload envelope for this block root from this builder
+        // TODO: Implement deduplication tracking
+        // Spec: gossib_sub_gloas.md line 228-229
+        // "The node has not seen another valid SignedExecutionPayloadEnvelope for this
+        // block root from this builder."
+        //
+        // Implementation requires:
+        // 1. Add field to Store: seen_envelopes: HashMap<(H256, ValidatorIndex), ()>
+        // 2. Check: if seen_envelopes.contains_key(&(beacon_block_root, builder_index)) { return Ignore }
+        // 3. On Accept: seen_envelopes.insert((beacon_block_root, builder_index), ())
+        // 4. Prune old entries when finalized
+
+        // All validations passed
+        Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
+    }
+
+    /// Validates PayloadAttestation received via gossip
+    ///
+    /// Note: We do NOT validate whether payload_present or blob_data_available
+    /// match actual payload status. These are validator votes/claims that get
+    /// recorded in fork choice (ptc_vote map). Validation of the vote's
+    /// "correctness" happens implicitly in fork choice weight calculation.
+    ///
+    /// Spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md#payload_attestation_message
+    pub fn validate_payload_attestation<I: Clone>(
+        &self,
+        payload_attestation: PayloadAttestationItem<I>,
+    ) -> Result<PayloadAttestationAction<I>, PayloadAttestationValidationError<I>> {
+        let attestation = &payload_attestation.item;
+        let slot = attestation.data.slot;
+        let beacon_block_root = attestation.data.beacon_block_root;
+
+        // [IGNORE] The attestation is not from a future slot
+        if self.slot() < slot {
+            return Ok(PayloadAttestationAction::DelayUntilSlot(payload_attestation));
+        }
+
+        // [IGNORE] The attestation is from a slot greater than the latest finalized slot
+        if slot <= self.finalized_slot() {
+            return Ok(PayloadAttestationAction::Ignore(payload_attestation));
+        }
+
+        // [IGNORE] The attestation's beacon_block_root has been seen
+        // (a client MAY queue attestation for processing once the block is retrieved)
+        if !self.contains_block(beacon_block_root) {
+            return Ok(PayloadAttestationAction::DelayUntilBeaconBlock(
+                payload_attestation,
+                beacon_block_root,
+            ));
+        }
+
+        // Get the beacon block and state for validation
+        let Some(chain_link) = self.chain_link(beacon_block_root) else {
+            return Ok(PayloadAttestationAction::DelayUntilBeaconBlock(
+                payload_attestation,
+                beacon_block_root,
+            ));
+        };
+
+        let state = chain_link.state(self);
+
+        // Convert PayloadAttestationMessage to IndexedPayloadAttestation
+        // For individual message, validator_index is the single attesting index
+        let attesting_indices = ContiguousList::try_from([attestation.validator_index])
+            .map_err(|source| PayloadAttestationValidationError::Other {
+                source: source.into(),
+                payload_attestation: Box::new(payload_attestation.clone()),
+            })?;
+
+        let indexed_attestation = IndexedPayloadAttestation {
+            attesting_indices,
+            data: attestation.data,
+            signature: attestation.signature,
+        };
+
+        // [REJECT] The signature is valid using validate_indexed_payload_attestation
+        predicates::validate_received_indexed_payload_attestation(
+            &self.chain_config,
+            &self.pubkey_cache,
+            &state,
+            &indexed_attestation,
+            SingleVerifier,
+        )
+        .map_err(|source| PayloadAttestationValidationError::Other {
+            source: source.into(),
+            payload_attestation: Box::new(payload_attestation.clone()),
+        })?;
+
+        // All validations passed
+        Ok(PayloadAttestationAction::Accept(payload_attestation.into_verified()))
+    }
+
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)
     pub fn apply_tick(&mut self, new_tick: Tick) -> Result<Option<ApplyTickChanges<P>>> {
         let old_tick = self.tick;
@@ -2776,6 +3003,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.data_column_cache.insert(data_sidecar);
+    }
+
+    /// Implements `on_execution_payload` from fork choice spec
+    ///
+    /// Spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#on_execution_payload
+    pub fn apply_execution_payload_envelope(
+        &mut self,
+        signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) -> Result<()> {
+        // TODO Phase 2: Add execution_engine parameter when implementing full state transition
+        let envelope = &signed_envelope.message;
+        let beacon_block_root = envelope.beacon_block_root;
+
+        // TODO Phase 2: Implement full state transition
+        //
+        // Spec requirements (fc_gloas.md lines 573-593):
+        // 1. Get chain_link state for beacon_block_root
+        // 2. Check blob data availability: assert is_data_available(beacon_block_root)
+        // 3. Clone state to avoid mutability issues
+        // 4. Call gloas::process_execution_payload() for full validation + processing
+        // 5. Store updated state in execution_payload_states map
+        //
+        // This will call:
+        // - validate_execution_payload() (state consistency checks)
+        // - process_execution_payload_for_gossip() (timestamp, blob count)
+        // - execution_engine.notify_new_payload() (send to execution layer)
+        // - Update state with builder payments, etc.
+
+        debug!(
+            "apply_execution_payload_envelope stub called for beacon_block_root: {beacon_block_root:?}, \
+             slot: {}, builder_index: {}",
+            envelope.slot,
+            envelope.builder_index
+        );
+
+        // For Phase 1, just acknowledge receipt without full processing
+        // Phase 2 will implement the actual state transition
+
+        Ok(())
     }
 
     pub fn accepted_data_column_sidecars_count(

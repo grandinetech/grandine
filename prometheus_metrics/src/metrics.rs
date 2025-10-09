@@ -80,6 +80,7 @@ pub struct Metrics {
 
     // Mutator
     mutator_attestations: IntCounterVec,
+    mutator_payload_attestations: IntCounterVec,
     mutator_aggregate_and_proofs: IntCounterVec,
 
     pub block_insertion_times: Histogram,
@@ -148,6 +149,9 @@ pub struct Metrics {
     pub fc_blob_sidecar_persist_task_times: Histogram,
     pub fc_data_column_sidecar_persist_task_times: Histogram,
     pub fc_block_attestation_task_times: Histogram,
+    pub fc_block_payload_attestation_task_times: Histogram,
+    pub fc_execution_payload_envelope_task_times: Histogram,
+    pub fc_payload_attestation_task_times: HistogramVec,
     pub fc_attester_slashing_task_times: Histogram,
     pub fc_preprocess_state_task_times: Histogram,
     pub fc_checkpoint_state_task_times: Histogram,
@@ -400,6 +404,14 @@ impl Metrics {
                     "Counter for different attestations (delayed/ignored etc) for Mutator",
                 ),
                 &["type"],
+            )?,
+
+            mutator_payload_attestations: IntCounterVec::new(
+                opts!(
+                    "MUTATOR_PAYLOAD_ATTESTATIONS",
+                    "Counter for different payload attestations (accepted/ignored/delayed/rejected) for Mutator",
+                ),
+                &["outcome"],
             )?,
 
             mutator_aggregate_and_proofs: IntCounterVec::new(
@@ -660,6 +672,24 @@ impl Metrics {
                 "Forkchoice BlockAttesttionTask times",
             ))?,
 
+            fc_block_payload_attestation_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_BLOCK_PAYLOAD_ATTESTATION_TASK_TIMES",
+                "Forkchoice BlockPayloadAttestationTask times",
+            ))?,
+
+            fc_execution_payload_envelope_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_EXECUTION_PAYLOAD_ENVELOPE_TASK_TIMES",
+                "Forkchoice ExecutionPayloadEnvelopeTask times",
+            ))?,
+
+            fc_payload_attestation_task_times: HistogramVec::new(
+                histogram_opts!(
+                    "FC_PAYLOAD_ATTESTATION_TASK_TIMES",
+                    "Forkchoice PayloadAttestationTask times",
+                ),
+                &["origin"],
+            )?,
+
             fc_attester_slashing_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_ATTESTER_SLASHING_TASK_TIMES",
                 "Forkchoice AttesterSlashingTask times",
@@ -917,6 +947,7 @@ impl Metrics {
         default_registry.register(Box::new(self.engine_get_blobs_v2_request_time.clone()))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
+        default_registry.register(Box::new(self.mutator_payload_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
         default_registry.register(Box::new(self.block_insertion_times.clone()))?;
         default_registry.register(Box::new(self.block_processing_times.clone()))?;
@@ -992,6 +1023,9 @@ impl Metrics {
             self.fc_data_column_sidecar_persist_task_times.clone(),
         ))?;
         default_registry.register(Box::new(self.fc_block_attestation_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_block_payload_attestation_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_execution_payload_envelope_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_payload_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_attester_slashing_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_preprocess_state_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_checkpoint_state_task_times.clone()))?;
@@ -1238,6 +1272,18 @@ impl Metrics {
             Ok(counter) => counter.inc(),
             Err(error) => {
                 warn_with_peers!("unable to register mutator attestation for {labels:?}: {error:?}")
+            }
+        }
+    }
+
+    pub fn register_mutator_payload_attestation(&self, labels: &[&str]) {
+        match self
+            .mutator_payload_attestations
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!("unable to register mutator payload attestation for {labels:?}: {error:?}")
             }
         }
     }

@@ -4,14 +4,15 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    StateCacheProcessor, Store,
+    ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction,
+    PayloadAttestationItem, PayloadAttestationOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -30,6 +31,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -41,8 +43,8 @@ use types::{
 
 use crate::{
     block_processor::BlockProcessor,
-    messages::MutatorMessage,
-    misc::{ProcessingTimings, VerifyAggregateAndProofResult},
+    messages::{MutatorMessage, P2pMessage},
+    misc::{MutatorRejectionReason, ProcessingTimings, VerifyAggregateAndProofResult},
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
 };
@@ -295,6 +297,54 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             .collect();
 
         MutatorMessage::BlockAttestations {
+            wait_group,
+            results,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+pub struct BlockPayloadAttestationsTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub block_root: H256,
+    pub block: Arc<SignedBeaconBlock<P>>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for BlockPayloadAttestationsTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            block_root,
+            block,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_block_payload_attestation_task_times.start_timer());
+
+        // Use post_gloas() to access payload_attestations from Gloas blocks
+        let results = if let Some(gloas_body) = block.message().body().post_gloas() {
+            gloas_body
+                .payload_attestations()
+                .iter()
+                .map(|_payload_attestation| {
+                    // TODO: Implement processing when store method is ready
+                    // Will call store.validate_payload_attestation or similar
+                    Ok(())
+                })
+                .collect()
+        } else {
+            // Pre-Gloas blocks have no payload attestations
+            vec![]
+        };
+
+        MutatorMessage::BlockPayloadAttestations {
             wait_group,
             results,
         }
@@ -703,5 +753,89 @@ impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
         if let Err(error) = state_at_slot_cache.flush() {
             warn_with_peers!("failed to flush state at slot cache: {error:?}");
         }
+    }
+}
+
+pub struct ExecutionPayloadEnvelopeTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub beacon_block_seen: bool,
+    pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            execution_payload_envelope,
+            beacon_block_seen,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_execution_payload_envelope_task_times.start_timer());
+
+        // Call validation stub (will be implemented later with full validation)
+        let result = store_snapshot.validate_execution_payload_envelope(
+            execution_payload_envelope,
+            beacon_block_seen,
+            &origin,
+        );
+
+        MutatorMessage::ExecutionPayloadEnvelope {
+            wait_group,
+            result,
+            origin,
+            beacon_block_seen,
+            submission_time,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+pub struct PayloadAttestationTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_attestation: PayloadAttestationItem<GossipId>,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PayloadAttestationTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_attestation,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_payload_attestation_task_times,
+                payload_attestation.origin.as_ref(),
+            )
+        });
+
+        let result = store_snapshot.validate_payload_attestation(payload_attestation);
+
+        MutatorMessage::PayloadAttestation {
+            wait_group,
+            result,
+            submission_time,
+        }
+        .send(&mutator_tx);
     }
 }
