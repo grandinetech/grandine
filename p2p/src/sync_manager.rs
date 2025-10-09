@@ -310,8 +310,8 @@ impl<P: Preset> SyncManager<P> {
                 P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST
             };
 
-            let start_slot = current_back_sync_slot.saturating_sub(count);
-            let count = current_back_sync_slot.saturating_sub(start_slot);
+            let mut start_slot = current_back_sync_slot.saturating_sub(count);
+            let mut count = current_back_sync_slot.saturating_sub(start_slot);
 
             if count == 0 {
                 continue;
@@ -320,6 +320,11 @@ impl<P: Preset> SyncManager<P> {
             if let Some(earliest_slot) = self.peer_earliest_available_slot(peer) {
                 if earliest_slot > start_slot + count {
                     continue;
+                }
+
+                if earliest_slot > start_slot && earliest_slot < start_slot + count {
+                    count = (start_slot + count).checked_sub(earliest_slot).unwrap_or(1);
+                    start_slot = earliest_slot;
                 }
             }
 
@@ -349,6 +354,13 @@ impl<P: Preset> SyncManager<P> {
                         if let Some(earliest_slot) = self.peer_earliest_available_slot(next_peer) {
                             if earliest_slot > start_slot + count {
                                 continue;
+                            }
+
+                            if earliest_slot > start_slot && earliest_slot < start_slot + count {
+                                count =
+                                    (start_slot + count).checked_sub(earliest_slot).unwrap_or(1);
+
+                                start_slot = earliest_slot;
                             }
                         }
 
