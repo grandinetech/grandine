@@ -16,6 +16,7 @@ use eth2_libp2p::{
         methods::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
             DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
+            RpcErrorResponse, RpcResponse,
         },
         GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
     },
@@ -1306,6 +1307,26 @@ impl<P: Preset> Network<P> {
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
 
+        let start_epoch = misc::compute_epoch_at_slot::<P>(request.start_slot);
+
+        if start_epoch < self.controller.min_checked_blob_availability_epoch() {
+            debug!(
+                "received invalid request requesting blobs before availability period: \
+                (peer_id: {peer_id}, inbound_request_id: {inbound_request_id:?}, \
+                request: {request:?})",
+            );
+
+            ServiceInboundMessage::SendErrorResponse(
+                peer_id,
+                inbound_request_id,
+                RpcErrorResponse::InvalidRequest,
+                "requested blobs before data availability period",
+            )
+            .send(&self.network_to_service_tx);
+
+            return Ok(());
+        }
+
         let BlobsByRangeRequest { start_slot, count } = request;
 
         let difference = count.min(MAX_FOR_DOS_PREVENTION);
@@ -1369,16 +1390,32 @@ impl<P: Preset> Network<P> {
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
 
+        let start_epoch = misc::compute_epoch_at_slot::<P>(request.start_slot);
+
+        if start_epoch < self.controller.min_checked_data_column_availability_epoch() {
+            debug!(
+                "received invalid request requesting data columns before availability period: \
+                (peer_id: {peer_id}, inbound_request_id: {inbound_request_id:?}, \
+                request: {request:?})",
+            );
+
+            ServiceInboundMessage::SendErrorResponse(
+                peer_id,
+                inbound_request_id,
+                RpcErrorResponse::InvalidRequest,
+                "requested data columns before data availability period",
+            )
+            .send(&self.network_to_service_tx);
+
+            return Ok(());
+        }
+
         let DataColumnsByRangeRequest {
             start_slot,
             count,
             columns,
         } = request;
 
-        // TODO(feature/eip-7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
-        let start_slot = start_slot.max(misc::compute_start_slot_at_epoch::<P>(
-            self.controller.chain_config().fulu_fork_epoch,
-        ));
         let difference = count.min(MAX_FOR_DOS_PREVENTION);
 
         let end_slot = start_slot
@@ -1454,7 +1491,6 @@ impl<P: Preset> Network<P> {
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
 
-        // TODO(feature/deneb): MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS
         let BlobsByRootRequest { blob_ids } = request;
 
         let controller = self.controller.clone_arc();
@@ -2433,6 +2469,7 @@ enum Error {
     EndSlotOverflow { start_slot: u64, difference: u64 },
 }
 
+#[expect(clippy::too_many_lines)]
 fn run_network_service<P: Preset>(
     mut service: Service<P>,
     mut network_to_service_rx: UnboundedReceiver<ServiceInboundMessage<P>>,
@@ -2484,6 +2521,13 @@ fn run_network_service<P: Preset>(
                                 &gossip_id.source,
                                 gossip_id.message_id,
                                 message_acceptance,
+                            );
+                        }
+                        ServiceInboundMessage::SendErrorResponse(peer_id, inbound_request_id, rpc_error_response, reason) => {
+                            service.send_response(
+                                peer_id,
+                                inbound_request_id,
+                                RpcResponse::Error(rpc_error_response, reason.into()),
                             );
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {

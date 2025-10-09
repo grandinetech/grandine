@@ -1036,6 +1036,7 @@ impl<P: Preset> BlockSyncService<P> {
                 let terminus_epoch = self
                     .controller
                     .min_checked_data_availability_epoch(current.slot);
+
                 SyncCheckpoint {
                     slot: misc::compute_start_slot_at_epoch::<P>(terminus_epoch),
                     block_root: H256::zero(),

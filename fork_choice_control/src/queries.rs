@@ -717,6 +717,15 @@ where
         self.store_snapshot().min_checked_block_availability_epoch()
     }
 
+    pub fn min_checked_blob_availability_epoch(&self) -> Epoch {
+        self.store_snapshot().min_checked_blob_availability_epoch()
+    }
+
+    pub fn min_checked_data_column_availability_epoch(&self) -> Epoch {
+        self.store_snapshot()
+            .min_checked_data_column_availability_epoch()
+    }
+
     pub fn min_checked_data_availability_epoch(&self, slot: Slot) -> Epoch {
         self.store_snapshot()
             .min_checked_data_availability_epoch(slot)
