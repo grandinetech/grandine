@@ -15,7 +15,7 @@ pub struct DataColumnCache<P: Preset> {
 }
 
 impl<P: Preset> DataColumnCache<P> {
-    pub fn exibits_equivocation(
+    pub fn exhibits_equivocation(
         &self,
         slot: Slot,
         proposer_index: ValidatorIndex,
