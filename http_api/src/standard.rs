@@ -3600,8 +3600,10 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
                         StatusCode::OK
                     }
                     BroadcastValidation::ConsensusAndEquivocation => {
-                        if controller.exibits_equivocation(&block) {
-                            return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
+                        if controller.exhibits_equivocation(&block) {
+                            return Err(Error::InvalidBlock(anyhow!(
+                                "block exhibits equivocation"
+                            )));
                         }
 
                         publish_block_to_network(block, &blob_sidecars, &api_to_p2p_tx);
@@ -3693,8 +3695,10 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                         StatusCode::OK
                     }
                     BroadcastValidation::ConsensusAndEquivocation => {
-                        if controller.exibits_equivocation(&block) {
-                            return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
+                        if controller.exhibits_equivocation(&block) {
+                            return Err(Error::InvalidBlock(anyhow!(
+                                "block exhibits equivocation"
+                            )));
                         }
 
                         publish_block_to_network_with_data_column_sidecars(

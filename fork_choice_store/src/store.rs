@@ -485,7 +485,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn exibits_equivocation_on_blobs(
+    pub fn exhibits_equivocation_on_blobs(
         &self,
         slot: Slot,
         proposer_index: ValidatorIndex,
@@ -497,15 +497,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .is_peerdas_activated()
         {
             self.data_column_cache
-                .exibits_equivocation(slot, proposer_index, block_root)
+                .exhibits_equivocation(slot, proposer_index, block_root)
         } else {
             self.blob_cache
-                .exibits_equivocation(slot, proposer_index, block_root)
+                .exhibits_equivocation(slot, proposer_index, block_root)
         }
     }
 
     #[must_use]
-    pub fn exibits_equivocation_on_blocks(
+    pub fn exhibits_equivocation_on_blocks(
         &self,
         slot: Slot,
         proposer_index: ValidatorIndex,
