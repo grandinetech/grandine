@@ -623,6 +623,21 @@ impl<P: Preset> SyncManager<P> {
                 }
 
                 let start_slot = sync_start_slot + slots_per_request * batch_index;
+
+                if let Some(earliest_slot) = self.peer_earliest_available_slot(&block_peer_id) {
+                    if earliest_slot > start_slot {
+                        self.log(
+                            Level::Debug,
+                            format_args!(
+                                "not syncing from peer due to earliest_available_slot: \
+                                {earliest_slot} > {start_slot}"
+                            ),
+                        );
+
+                        continue 'outer;
+                    }
+                }
+
                 let count = remote_head_slot.saturating_sub(start_slot) + 1;
                 let count = count.min(slots_per_request);
 
@@ -683,7 +698,7 @@ impl<P: Preset> SyncManager<P> {
                                 Level::Error,
                                 format_args!(
                                     "failed to parse data_columns in SyncBatch, \
-                                        this should not happen {error:?}",
+                                    this should not happen {error:?}",
                                 ),
                             ),
                         }
@@ -1541,10 +1556,11 @@ mod tests {
         let sampling_columns = HashSet::new();
         let mut sync_manager = build_sync_manager::<Minimal>(config.clone_arc());
 
-        // Add 10 valid peers.
-        // This will indirectly test that half of them are used for back-syncing (5 batches).
-        for _ in 0..12 {
+        // Add 12 valid peers.
+        // This will indirectly test that half of them are used for back-syncing (6 batches).
+        for _ in 0..6 {
             sync_manager.add_peer(PeerId::random(), status_message_v1());
+            sync_manager.add_peer(PeerId::random(), status_message_v2(0));
         }
 
         // Add one peer to a blacklist
@@ -1572,6 +1588,27 @@ mod tests {
                 .into_iter()
                 .map(|batch| (batch.start_slot, batch.count, batch.target)),
             resulting_batches,
+        );
+    }
+
+    #[test]
+    fn test_build_forward_sync_batches_with_peers_with_various_statuses() {
+        let config = Arc::new(Config::mainnet());
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
+        let sampling_columns = HashSet::new();
+
+        sync_manager.add_peer(PeerId::random(), status_message_v1());
+        sync_manager.add_peer(PeerId::random(), status_message_v2(0));
+        sync_manager.add_peer(PeerId::random(), status_message_v2(Slot::MAX));
+
+        let batches = sync_manager.build_forward_sync_batches(&config, 0, 0, 0, &sampling_columns);
+
+        itertools::assert_equal(
+            batches
+                .into_iter()
+                .map(|batch| (batch.start_slot, batch.count, batch.target)),
+            // no batches from peer with earliest_available_slot = Slot::MAX
+            vec![(1, 64, SyncTarget::Block), (65, 64, SyncTarget::Block)],
         );
     }
 
@@ -1749,7 +1786,7 @@ mod tests {
             finalized_root: H256::zero(),
             finalized_epoch: 1,
             head_root: H256::zero(),
-            head_slot: 1,
+            head_slot: 200,
         })
     }
 
@@ -1759,7 +1796,7 @@ mod tests {
             finalized_root: H256::zero(),
             finalized_epoch: 1,
             head_root: H256::zero(),
-            head_slot: 1,
+            head_slot: 200,
             earliest_available_slot,
         })
     }
