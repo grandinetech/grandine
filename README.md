@@ -100,7 +100,7 @@ docker buildx build \
 
 ## Team
 
-Grandine is built by [Grandine core team](https://grandine.io/) led by [Saulius Grigaitis](https://twitter.com/sauliuseth).
+Grandine is built by [Grandine core team](https://grandine.io/) led by [Saulius Grigaitis](https://x.com/sauliuseth).
 We also involve academia in the early stages of new ideas, however, the optimized production code is delivered by the core team.
 
 ## Audits
@@ -109,7 +109,7 @@ Grandine is used in production and the [audits](/audit) have been completed by [
 
 ## Contact
 
-It's best to reach us via [Grandine Discord](https://discord.gg/H9XCdUSyZd) or [Grandine Telegram](https://t.me/+yMHjrJanClozYzQ0). Feel free to join!
+It's best to reach us via [Grandine Discord](https://discord.com/H9XCdUSyZd) or [Grandine Telegram](https://t.me/+yMHjrJanClozYzQ0). Feel free to join!
 
 ## Donate
 
