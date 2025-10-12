@@ -2,7 +2,7 @@
 
 ### Discord
 
-It's best to reach us via [Grandine Discord](https://discord.gg/H9XCdUSyZd). Feel free to join if you have any question!
+It's best to reach us via [Grandine Discord](https://discord.com/H9XCdUSyZd). Feel free to join if you have any question!
 
 ### Commercial support
 
