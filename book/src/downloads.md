@@ -13,4 +13,4 @@ Docker [images](https://hub.docker.com/r/sifrai/grandine/tags) is the best way t
 
 ### Binary
 
-The latest stable binaries are provided on [Github](https://github.com/sifraitech/grandine/tags). Unstable binary builds are not released to Github.
+The latest stable binaries are provided on [Github](https://github.com/grandinetech/grandine/tags). Unstable binary builds are not released to Github.
