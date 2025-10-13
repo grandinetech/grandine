@@ -2180,15 +2180,17 @@ impl<P: Preset> Network<P> {
                     remote.finalized_root(),
                 );
 
-                P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
-                ServiceInboundMessage::GoodbyePeer(
-                    peer_id,
-                    GoodbyeReason::IrrelevantNetwork,
-                    ReportSource::SyncService,
-                )
-                .send(&self.network_to_service_tx);
+                if !Feature::DisableFinalizedRootCheck.is_enabled() {
+                    P2pToSync::RemovePeer(peer_id).send(&self.channels.p2p_to_sync_tx);
+                    ServiceInboundMessage::GoodbyePeer(
+                        peer_id,
+                        GoodbyeReason::IrrelevantNetwork,
+                        ReportSource::SyncService,
+                    )
+                    .send(&self.network_to_service_tx);
 
-                return;
+                    return;
+                }
             }
         } else if matches!(sync_status, SyncStatus::Behind { .. })
             && local.finalized_root() != H256::zero()

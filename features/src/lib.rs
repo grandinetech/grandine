@@ -26,6 +26,7 @@ pub enum Feature {
     DebugBlockProducer,
     DebugEth1,
     DebugP2pMessages,
+    DisableFinalizedRootCheck,
     DumpAggregateAttestations,
     DumpBeaconBlocks,
     DumpBeaconStates,
