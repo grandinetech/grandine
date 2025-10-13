@@ -1014,17 +1014,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 metrics.data_column_sidecar_computation.start_timer()
                             });
 
-                            let cells_and_kzg_proofs =
-                                eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                                    blobs.as_ref(),
-                                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-                                    self.controller.store_config().kzg_backend,
-                                )?;
+                            let block = block.clone_arc();
+                            let kzg_backend = self.controller.store_config().kzg_backend;
 
-                            let data_column_sidecars = eip_7594::construct_data_column_sidecars(
-                                &block,
-                                &cells_and_kzg_proofs,
-                            )?;
+                            let data_column_sidecars = tokio::task::spawn_blocking(move || {
+                                let cells_and_kzg_proofs =
+                                    eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                        blobs.as_ref(),
+                                        block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
+                                        kzg_backend,
+                                    )?;
+
+                                eip_7594::construct_data_column_sidecars(
+                                    &block,
+                                    &cells_and_kzg_proofs,
+                                )
+                            })
+                            .await??;
 
                             prometheus_metrics::stop_and_record(timer);
 
