@@ -310,13 +310,15 @@ impl<P: Preset> Batch<P> {
                     })
                 };
 
-                let action = controller.validate_blob_sidecar_with_state(
-                    blob_sidecar.clone_arc(),
-                    true,
-                    &BlobSidecarOrigin::BackSync,
-                    || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
-                    || Some(head_state.clone_arc()),
-                )?;
+                let action = tokio::task::block_in_place(|| {
+                    controller.validate_blob_sidecar_with_state(
+                        blob_sidecar.clone_arc(),
+                        true,
+                        &BlobSidecarOrigin::BackSync,
+                        || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                        || Some(head_state.clone_arc()),
+                    )
+                })?;
 
                 if !action.accepted() {
                     bail!(Error::BlobNotAccepted::<P> {
@@ -375,14 +377,16 @@ impl<P: Preset> Batch<P> {
                     })
                 };
 
-                let action = controller.validate_data_column_sidecar_with_state(
-                    data_column_sidear.clone_arc(),
-                    true,
-                    &DataColumnSidecarOrigin::BackSync,
-                    validate_block_presence,
-                    || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
-                    || Some(head_state.clone_arc()),
-                )?;
+                let action = tokio::task::block_in_place(|| {
+                    controller.validate_data_column_sidecar_with_state(
+                        data_column_sidear.clone_arc(),
+                        true,
+                        &DataColumnSidecarOrigin::BackSync,
+                        validate_block_presence,
+                        || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                        || Some(head_state.clone_arc()),
+                    )
+                })?;
 
                 if !action.accepted() {
                     bail!(Error::DataColumnNotAccepted::<P> {
