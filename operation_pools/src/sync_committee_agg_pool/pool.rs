@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use bls::traits::Signature as _;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use log::debug;
+use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tokio::sync::RwLock;
@@ -216,7 +216,7 @@ impl<P: Preset> Pool<P> {
             for position_in_subcommittee in positions_in_subcommittee {
                 for aggregate in pool_aggregates.iter_mut() {
                     if aggregate.aggregation_bits[position_in_subcommittee] {
-                        debug!(
+                        debug_with_peers!(
                             "duplicate sync committee message from the same validator \
                             (message: {message:?}, position_in_subcommittee: {position_in_subcommittee})",
                         );

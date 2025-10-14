@@ -8,7 +8,7 @@ use directories::Directories;
 use eth1_api::{Eth1ApiToMetrics, Eth1Metrics, RealController};
 use futures::{channel::mpsc::UnboundedReceiver, future::Either, select, StreamExt as _};
 use helper_functions::misc;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::SyncToMetrics;
 use prometheus_metrics::Metrics;
 use reqwest::{Client, StatusCode};
@@ -80,7 +80,6 @@ impl<P: Preset> MetricsService<P> {
         }
     }
 
-    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
         let MetricsServiceConfig {
@@ -157,7 +156,7 @@ impl<P: Preset> MetricsService<P> {
                         directories
                             .disk_usage()
                             .map_err(|error| {
-                                warn!("unable to fetch Grandine disk usage: {error:?}");
+                                warn_with_peers!("unable to fetch Grandine disk usage: {error:?}");
                                 error
                             })
                             .unwrap_or_default(),
@@ -165,7 +164,7 @@ impl<P: Preset> MetricsService<P> {
 
                     #[cfg(not(target_os = "windows"))]
                     if let Err(error) = update_jemalloc_metrics(&self.metrics) {
-                        warn!("unable to update jemalloc metrics: {error:?}");
+                        warn_with_peers!("unable to update jemalloc metrics: {error:?}");
                     }
 
                     let head_slot = self.controller.head().value.slot();
@@ -186,7 +185,7 @@ impl<P: Preset> MetricsService<P> {
                             let state_opt = match self.controller.state_at_slot(slot) {
                                 Ok(state_opt) => state_opt,
                                 Err(error) => {
-                                    warn!("unable to update epoch metrics: {error:?}");
+                                    warn_with_peers!("unable to update epoch metrics: {error:?}");
                                     continue;
                                 }
                             };
@@ -194,7 +193,7 @@ impl<P: Preset> MetricsService<P> {
                             if let Some(state) = state_opt {
                                 match self.update_epoch_metrics(&state.value) {
                                     Ok(()) => epoch_with_metrics = Some(epoch),
-                                    Err(error) => warn!("unable to update epoch metrics: {error:?}"),
+                                    Err(error) => warn_with_peers!("unable to update epoch metrics: {error:?}"),
                                 }
                             }
                         }
@@ -202,7 +201,7 @@ impl<P: Preset> MetricsService<P> {
                 },
 
                 _ = interval.select_next_some() => {
-                    debug!("sending metrics to external service");
+                    debug_with_peers!("sending metrics to external service");
 
                     if let Some(url) = remote_metrics_url.clone() {
                         refresh_system_stats(&mut system, &mut system_refresh_time);
@@ -221,20 +220,20 @@ impl<P: Preset> MetricsService<P> {
 
                         match response {
                             Ok(response) => {
-                                debug!("received response: {response:#?}");
+                                debug_with_peers!("received response: {response:#?}");
 
                                 match response.status() {
-                                    StatusCode::OK => info!("metrics sent to external service"),
+                                    StatusCode::OK => info_with_peers!("metrics sent to external service"),
                                     status => match response.json::<RemoteError>().await {
-                                        Ok(body) => debug!("received JSON: {status} {body:#?}"),
-                                        Err(error) => debug!(
+                                        Ok(body) => debug_with_peers!("received JSON: {status} {body:#?}"),
+                                        Err(error) => debug_with_peers!(
                                             "unable to receive JSON body: {status} {error:?}"
                                         ),
                                     },
                                 }
                             }
                             Err(error) => {
-                                warn!("received error while sending external metrics: {error:?}");
+                                warn_with_peers!("received error while sending external metrics: {error:?}");
                             }
                         }
                     }

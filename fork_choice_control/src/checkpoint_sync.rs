@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use helper_functions::misc;
 use http_api_utils::{BlockId, StateId};
-use log::info;
+use logging::info_with_peers;
 use mime::APPLICATION_OCTET_STREAM;
 use reqwest::{header::ACCEPT, Client, StatusCode};
 use ssz::SszRead;
@@ -24,7 +24,7 @@ pub async fn load_finalized_from_remote<P: Preset>(
     client: &Client,
     url: &RedactingUrl,
 ) -> Result<FinalizedCheckpoint<P>> {
-    info!("performing checkpoint sync from {url}…");
+    info_with_peers!("performing checkpoint sync from {url}…");
 
     let mut block = fetch_block(config, client, url, BlockId::Finalized)
         .await?
@@ -56,7 +56,7 @@ pub async fn load_finalized_from_remote<P: Preset>(
         .await?
         .ok_or(Error::MissingPostState { block_root })?;
 
-    info!("loaded state at slot {slot} from {url}");
+    info_with_peers!("loaded state at slot {slot} from {url}");
 
     Ok(FinalizedCheckpoint { block, state })
 }

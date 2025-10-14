@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Error as AnyhowError, Result};
 use axum::Router;
+use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::{ApiController, Eth1Api};
@@ -16,12 +17,13 @@ use futures::{
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::ApiMetrics;
 use liveness_tracker::ApiToLiveness;
-use log::info;
+use logging::info_with_peers;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{ApiToP2p, NetworkConfig, SyncToApi, ToSubnetService};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tokio::net::TcpListener;
+use tracing::instrument;
 use types::preset::Preset;
 use validator::{ApiToValidator, ValidatorConfig};
 
@@ -56,9 +58,11 @@ pub struct HttpApi<P: Preset, W: Wait> {
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
     pub channels: Channels<P>,
     pub metrics: Option<Arc<Metrics>>,
+    pub tracing_handle: Option<TracingHandle>,
 }
 
 impl<P: Preset, W: Wait> HttpApi<P, W> {
+    #[instrument(parent = None, skip(self), fields(address = %self.http_api_config.address))]
     pub async fn run(self) -> Result<()> {
         let listener = self.http_api_config.listener().await?;
         self.run_internal(|_, router| router, listener).await
@@ -68,6 +72,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
     // Passing in `AddrIncoming` achieves 2 things:
     // - It ensures that the socket is bound and listening by the time we submit requests.
     // - It allows us to extract the port assigned by binding to port 0.
+    #[instrument(parent = None, skip_all)]
     pub(crate) async fn run_internal(
         self,
         extend_router: impl FnOnce(NormalState<P, W>, Router) -> Router + Send,
@@ -88,6 +93,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             bls_to_execution_change_pool,
             channels,
             metrics,
+            tracing_handle,
         } = self;
 
         let HttpApiConfig {
@@ -125,6 +131,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             api_to_p2p_tx,
             api_to_validator_tx,
             subnet_service_tx,
+            tracing_handle,
         };
 
         let router = extend_router(state.clone(), routing::normal_routes(state));
@@ -143,7 +150,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
 
         let handle_sync_statuses = handle_sync_statuses(is_synced, sync_to_api_rx);
 
-        info!("HTTP server listening on {address}");
+        info_with_peers!("HTTP server listening on {}", address);
 
         select! {
             result = serve_requests.fuse() => result,

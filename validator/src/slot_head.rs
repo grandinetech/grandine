@@ -11,7 +11,7 @@ use helper_functions::{
     signing::{SignForSingleFork, SignForSingleForkAtSlot as _},
 };
 use itertools::Itertools as _;
-use log::warn;
+use logging::warn_with_peers;
 use signer::{Signer, SigningMessage, SigningTriple};
 use slashing_protection::SlashingProtector;
 use tap::Pipe as _;
@@ -205,7 +205,7 @@ impl<P: Preset> SlotHead<P> {
                     Ok(signature_option) => match signature_option {
                         Some(signature) => Some(signature.into()),
                         None => {
-                            warn!(
+                            warn_with_peers!(
                                 "failed to sign beacon block due to slashing protection \
                                 (block: {block:?}, public_key: {public_key:?})",
                             );
@@ -213,13 +213,13 @@ impl<P: Preset> SlotHead<P> {
                         }
                     },
                     Err(_) => {
-                        warn!("Slashing protection returned iterator with different number of elements",);
+                        warn_with_peers!("Slashing protection returned iterator with different number of elements",);
                         None
                     }
                 }
             }
             Err(error) => {
-                warn!(
+                warn_with_peers!(
                     "error while signing beacon block \
                      (error: {error:?}, block: {block:?}, public_key: {public_key:?})",
                 );

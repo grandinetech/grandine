@@ -29,11 +29,12 @@ use fork_choice_store::{
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
-use log::debug;
+use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tracing::instrument;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
@@ -239,6 +240,15 @@ where
     // More or less frequent calls are allowed but may worsen performance and quality of the head.
     // According to the Fork Choice specification, `on_tick` should be called every second,
     // but doing so would be redundant. The fork choice rule does not need a precise timestamp.
+    #[instrument(
+        parent = None,
+        level = "trace",
+        fields(
+            service = "fork_choice"
+        ),
+        name = "fork_choice_control",
+        skip_all
+    )]
     pub fn on_tick(&self, tick: Tick) {
         // Don't spawn a new task because it would have very little to do.
         // Don't check if the tick is newer because `Store` will have to do it anyway.
@@ -268,14 +278,41 @@ where
         .send(&self.mutator_tx)
     }
 
+    #[instrument(
+        parent = None,
+        level = "trace",
+        fields(
+            service = "fork_choice"
+        ),
+        name = "fork_choice_control",
+        skip_all
+    )]
     pub fn on_gossip_block(&self, block: Arc<SignedBeaconBlock<P>>, gossip_id: GossipId) {
         self.spawn_block_task(block, BlockOrigin::Gossip(gossip_id))
     }
 
+    #[instrument(
+        parent = None,
+        level = "trace",
+        fields(
+            service = "fork_choice"
+        ),
+        name = "fork_choice_control",
+        skip_all
+    )]
     pub fn on_requested_block(&self, block: Arc<SignedBeaconBlock<P>>, peer_id: Option<PeerId>) {
         self.spawn_block_task(block, BlockOrigin::Requested(peer_id))
     }
 
+    #[instrument(
+        parent = None,
+        level = "trace",
+        fields(
+            service = "fork_choice"
+        ),
+        name = "fork_choice_control",
+        skip_all
+    )]
     pub fn on_own_block(&self, wait_group: W, block: Arc<SignedBeaconBlock<P>>) {
         self.spawn_block_task_with_wait_group(wait_group, block, BlockOrigin::Own)
     }
@@ -420,6 +457,15 @@ where
         .send(&self.attestation_verifier_tx);
     }
 
+    // #[instrument(
+    //     parent = None,
+    //     level = "trace",
+    //     fields(
+    //         service = "fork_choice"
+    //     ),
+    //     name = "fork_choice_control",
+    //     skip_all
+    // )]
     pub fn on_gossip_singular_attestation(
         &self,
         attestation: Arc<Attestation<P>>,
@@ -451,6 +497,15 @@ where
         })
     }
 
+    // #[instrument(
+    //     parent = None,
+    //     level = "trace",
+    //     fields(
+    //         service = "fork_choice"
+    //     ),
+    //     name = "fork_choice_control",
+    //     skip_all
+    // )]
     pub fn on_singular_attestation(&self, attestation: AttestationItem<P, GossipId>) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
@@ -578,7 +633,7 @@ where
                 .store_snapshot()
                 .accepted_data_column_sidecar(block_header, data_column_sidecar.index)
         {
-            debug!(
+            debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from peer {peer_id} \
                  (index: {}, slot: {})",
                 data_column_sidecar.index,
@@ -714,7 +769,7 @@ where
                 .store_snapshot()
                 .accepted_data_column_sidecar(block_header, data_column_sidecar.index)
         {
-            debug!(
+            debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from {origin:?} \
                  (index: {}, slot: {})",
                 data_column_sidecar.index,
@@ -736,6 +791,15 @@ where
         })
     }
 
+    #[instrument(
+        parent = None,
+        level = "trace",
+        fields(
+            service = "fork_choice"
+        ),
+        name = "fork_choice_control",
+        skip_all
+    )]
     fn spawn_block_task(&self, block: Arc<SignedBeaconBlock<P>>, origin: BlockOrigin) {
         self.spawn_block_task_with_wait_group(self.owned_wait_group(), block, origin)
     }

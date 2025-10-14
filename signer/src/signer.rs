@@ -14,7 +14,7 @@ use futures::{
 };
 use helper_functions::misc;
 use itertools::{izip, Itertools as _};
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use reqwest::Client;
@@ -107,13 +107,13 @@ impl Signer {
         for (url, remote_keys) in keys {
             match remote_keys {
                 Some(keys) => {
-                    info!(
+                    info_with_peers!(
                         "loaded {} validator key(s) from Web3Signer at {url}",
                         keys.len(),
                     );
                 }
                 None => {
-                    warn!(
+                    warn_with_peers!(
                         "Web3Signer at {url} did not return any validator keys. \
                         It will retry to fetch keys again in the next epoch.",
                     );
@@ -301,7 +301,7 @@ impl Snapshot {
 
             if let Some(doppelganger_protection) = &doppelganger_protection {
                 if !doppelganger_protection.is_validator_active(public_key) {
-                    warn!(
+                    warn_with_peers!(
                         "Doppelganger protection prevented validator {public_key:?} from signing a message \
                          since not enough time has passed to ensure there are no duplicate validators participating on network",
                     );

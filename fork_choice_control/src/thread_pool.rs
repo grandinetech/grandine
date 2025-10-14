@@ -17,9 +17,10 @@ use anyhow::Result;
 use derivative::Derivative;
 use derive_more::From;
 use execution_engine::ExecutionEngine;
-use log::trace;
+use logging::trace_with_peers;
 use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use types::preset::Preset;
 
 use crate::{
@@ -65,6 +66,15 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
         Ok(Self { shared })
     }
 
+    #[instrument(
+        parent = None,
+        level = "trace",
+        fields(
+            service = "fork_choice"
+        ),
+        name = "fork_choice_control",
+        skip_all
+    )]
     pub fn spawn(&self, task: impl Spawn<P, E, W>) {
         task.spawn(&mut self.shared.critical.lock());
         self.shared.condvar.notify_one();
@@ -262,7 +272,7 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PersistDataColumnSidecarsTask<P, W> {
 }
 
 fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, W>) {
-    trace!("thread {} starting", thread_name());
+    trace_with_peers!("thread {} starting", thread_name());
 
     'outer: loop {
         let mut critical = shared.critical.lock();
@@ -274,21 +284,21 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
 
             if let Some(task) = critical.high_priority_tasks.pop_front() {
                 drop(critical);
-                trace!("thread {} received high priority task", thread_name());
+                trace_with_peers!("thread {} received high priority task", thread_name());
                 task.run_and_handle_panics();
                 continue 'outer;
             }
 
             if let Some(task) = critical.mid_priority_tasks.pop_front() {
                 drop(critical);
-                trace!("thread {} received mid priority task", thread_name());
+                trace_with_peers!("thread {} received mid priority task", thread_name());
                 task.run_and_handle_panics();
                 continue 'outer;
             }
 
             if let Some(task) = critical.low_priority_tasks.pop_front() {
                 drop(critical);
-                trace!("thread {} received low priority task", thread_name());
+                trace_with_peers!("thread {} received low priority task", thread_name());
                 task.run_and_handle_panics();
                 continue 'outer;
             }
@@ -297,7 +307,7 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
         }
     }
 
-    trace!("thread {} stopping", thread_name());
+    trace_with_peers!("thread {} stopping", thread_name());
 }
 
 // Keeping the `Thread` and its name around as locals in `run_worker` seems to add a small amount of

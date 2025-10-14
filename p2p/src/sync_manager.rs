@@ -1433,7 +1433,6 @@ mod tests {
         rpc::{StatusMessageV1, StatusMessageV2},
         NetworkConfig,
     };
-    use slog::{o, Drain};
     use std::sync::Arc;
     use std_ext::ArcExt;
     use test_case::test_case;
@@ -1445,23 +1444,10 @@ mod tests {
 
     use super::*;
 
-    pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
-        let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-
-        if enabled {
-            slog::Logger::root(drain.filter_level(level).fuse(), o!())
-        } else {
-            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
-        }
-    }
-
     fn build_sync_manager<P: Preset>(chain_config: Arc<Config>) -> SyncManager<P> {
-        let log = build_log(slog::Level::Debug, false);
         let network_config = Arc::new(NetworkConfig::default());
         let network_globals =
-            NetworkGlobals::new_test_globals::<P>(chain_config, vec![], &log, network_config);
+            NetworkGlobals::new_test_globals::<P>(chain_config, vec![], network_config);
         let received_data_column_sidecars = Arc::new(DashMap::new());
         SyncManager::new(network_globals.into(), 100, received_data_column_sidecars)
     }
@@ -1767,11 +1753,10 @@ mod tests {
         peers_custodial: HashMap<PeerId, HashSet<ColumnIndex>>,
         peer_statuses: HashMap<PeerId, StatusMessage>,
     ) -> SyncManager<Minimal> {
-        let log = build_log(slog::Level::Debug, false);
         let chain_config = Arc::new(Config::minimal().rapid_upgrade());
         let network_config = Arc::new(NetworkConfig::default());
         let network_globals =
-            NetworkGlobals::new_test_globals::<Minimal>(chain_config, vec![], &log, network_config);
+            NetworkGlobals::new_test_globals::<Minimal>(chain_config, vec![], network_config);
         let received_data_column_sidecars = Arc::new(DashMap::new());
         let mut sync_manager =
             SyncManager::new(network_globals.into(), 100, received_data_column_sidecars);

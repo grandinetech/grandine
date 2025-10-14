@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
+use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
@@ -34,7 +35,7 @@ use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use metrics::{run_metrics_server, MetricsChannels, MetricsService};
 use operation_pools::{
     AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, Manager,
@@ -75,7 +76,6 @@ pub struct RuntimeConfig {
     pub validator_enabled: bool,
 }
 
-#[expect(clippy::cognitive_complexity)]
 #[expect(clippy::too_many_arguments)]
 #[expect(clippy::too_many_lines)]
 pub async fn run_after_genesis<P: Preset>(
@@ -97,6 +97,7 @@ pub async fn run_after_genesis<P: Preset>(
     metrics_config: MetricsConfig,
     blacklisted_blocks: HashSet<H256>,
     report_validator_performance: bool,
+    tracing_handle: Option<TracingHandle>,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
     restart_tx: UnboundedSender<RestartMessage>,
@@ -128,9 +129,9 @@ pub async fn run_after_genesis<P: Preset>(
     let signer_snapshot = signer.load();
 
     if !signer_snapshot.is_empty() {
-        info!("loaded {} validator key(s)", signer_snapshot.keys().len());
+        info_with_peers!("loaded {} validator key(s)", signer_snapshot.keys().len());
     } else if validator_enabled {
-        warn!("failed to load validator keys");
+        warn_with_peers!("failed to load validator keys");
     }
 
     let (blob_fetcher_to_p2p_tx, blob_fetcher_to_p2p_rx) = mpsc::unbounded();
@@ -701,6 +702,7 @@ pub async fn run_after_genesis<P: Preset>(
         bls_to_execution_change_pool,
         channels: http_api_channels,
         metrics: metrics.clone(),
+        tracing_handle,
     };
 
     let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
@@ -768,12 +770,12 @@ pub async fn run_after_genesis<P: Preset>(
     }?;
 
     if stop_clock_tx.send(()).is_err() {
-        warn!("failed to send the message to stop the clock");
+        warn_with_peers!("failed to send the message to stop the clock");
     }
 
     controller.stop();
 
-    info!("saving current chain before exit…");
+    info_with_peers!("saving current chain before exit…");
 
     Ok(())
 }

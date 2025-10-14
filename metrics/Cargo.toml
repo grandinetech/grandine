@@ -19,7 +19,7 @@ futures = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true, features = ['metrics'] }
 http_api_utils = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 num_threads = { workspace = true }
 p2p = { workspace = true }
 prometheus = { workspace = true }
@@ -34,6 +34,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true, features = ['metrics'] }
 types = { workspace = true }
 

@@ -11,12 +11,14 @@ anyhow = { workspace = true }
 eth1_api = { workspace = true }
 fork_choice_control = { workspace = true }
 helper_functions = { workspace = true }
+logging = { workspace = true }
 log = { workspace = true }
 num-traits = { workspace = true }
 prometheus_metrics = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
