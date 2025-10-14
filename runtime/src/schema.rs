@@ -2,7 +2,7 @@ use std::{io::ErrorKind, path::Path};
 
 use anyhow::{bail, ensure, Result};
 use grandine_version::APPLICATION_NAME;
-use log::info;
+use logging::info_with_peers;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -111,13 +111,13 @@ pub fn initialize(data_directory: impl AsRef<Path>) -> Result<()> {
             if schema_version != SCHEMA_VERSION {
                 write_meta(data_directory)?;
 
-                info!("using schema version {SCHEMA_VERSION} for new data");
+                info_with_peers!("using schema version {SCHEMA_VERSION} for new data");
             }
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {
             write_meta(data_directory)?;
 
-            info!("initialized data directory with schema version {SCHEMA_VERSION}");
+            info_with_peers!("initialized data directory with schema version {SCHEMA_VERSION}");
         }
         Err(error) => bail!(error),
     }

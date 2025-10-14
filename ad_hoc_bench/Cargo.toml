@@ -18,10 +18,11 @@ fork_choice_control = { workspace = true }
 fork_choice_store = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 pubkey_cache = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 
 [target.'cfg(not(windows))'.dependencies]

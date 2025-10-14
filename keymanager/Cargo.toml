@@ -15,7 +15,7 @@ fs-err = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 signer = { workspace = true }
@@ -24,6 +24,7 @@ std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 uuid = { workspace = true }
 validator_key_cache = { workspace = true }

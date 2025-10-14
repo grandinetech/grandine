@@ -9,11 +9,12 @@ anyhow = { workspace = true }
 bls = { workspace = true }
 eip_2335 = { workspace = true }
 fs-err = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 ssz = { workspace = true }
 tap = { workspace = true }
+tracing = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 uuid = { workspace = true }

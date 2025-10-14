@@ -20,8 +20,9 @@ fs-err = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 libmdbx = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 thiserror = { workspace = true }
+tracing ={ workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

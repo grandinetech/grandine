@@ -7,7 +7,7 @@ use bls::PublicKeyBytes;
 use helper_functions::{misc, signing::SignForAllForks};
 use http_api_utils::ETH_CONSENSUS_VERSION;
 use itertools::Itertools as _;
-use log::{debug, info};
+use logging::{debug_with_peers, info_with_peers};
 use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
@@ -177,7 +177,7 @@ impl Api {
                     Ok(())
                 }
                 Err(error) => {
-                    debug!(
+                    debug_with_peers!(
                         "received error in non-JSON register validators request: {error:?}, \
                          retrying in JSON"
                     );
@@ -198,7 +198,9 @@ impl Api {
         >,
         use_json: bool,
     ) -> Result<()> {
-        debug!("registering validators: {validator_registrations:?}, use_json: {use_json}");
+        debug_with_peers!(
+            "registering validators: {validator_registrations:?}, use_json: {use_json}"
+        );
 
         let url = self.url("/eth/v1/builder/validators")?;
         let request = self.client.post(url.into_url());
@@ -215,7 +217,7 @@ impl Api {
         let response = request.send().await?;
         let response = handle_error(response).await?;
 
-        debug!("register_validators response: {response:?}");
+        debug_with_peers!("register_validators response: {response:?}");
 
         Ok(())
     }
@@ -239,7 +241,7 @@ impl Api {
 
         let use_json = self.config.builder_api_format == BuilderApiFormat::Json;
 
-        debug!("getting execution payload header from {url}, use_json: {use_json}");
+        debug_with_peers!("getting execution payload header from {url}, use_json: {use_json}");
 
         let request = self.client.get(url.into_url()).timeout(REQUEST_TIMEOUT);
 
@@ -256,7 +258,7 @@ impl Api {
         let request = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(timestamp) => request.header(DATE_MS_HEADER, format!("{}", timestamp.as_millis())),
             Err(error) => {
-                debug!("unable to calculate timestamp: {error:?}");
+                debug_with_peers!("unable to calculate timestamp: {error:?}");
                 request
             }
         };
@@ -265,13 +267,13 @@ impl Api {
         let response = handle_error(response).await?;
 
         if response.status() == StatusCode::NO_CONTENT {
-            info!("builder has no execution payload header available for slot {slot}");
+            info_with_peers!("builder has no execution payload header available for slot {slot}");
             return Ok(None);
         }
 
         let builder_bid = self.parse_response::<SignedBuilderBid<P>>(response).await?;
 
-        debug!("get_execution_payload_header response: {builder_bid:?}");
+        debug_with_peers!("get_execution_payload_header response: {builder_bid:?}");
 
         validate_phase(chain_config.phase_at_slot::<P>(slot), builder_bid.phase())?;
 
@@ -306,7 +308,7 @@ impl Api {
             }
         }
 
-        info!("received execution payload header from builder for slot {slot}");
+        info_with_peers!("received execution payload header from builder for slot {slot}");
 
         Ok(Some(builder_bid))
     }
@@ -333,7 +335,7 @@ impl Api {
                 .load()
                 .is_some_and(|supported| !supported);
 
-        debug!(
+        debug_with_peers!(
             "posting blinded block to {url} with timeout of {remaining_time:?} \
              before next interval {next_interval:?}, use_json: {use_json}",
         );
@@ -366,7 +368,7 @@ impl Api {
 
         let execution_payload = &response.value;
 
-        debug!("post_blinded_block response: {execution_payload:?}");
+        debug_with_peers!("post_blinded_block response: {execution_payload:?}");
 
         ensure!(
             execution_payload.is_valid_with(block.phase()),
@@ -387,7 +389,9 @@ impl Api {
             },
         );
 
-        info!("received execution payload from builder for block {block_root:?} at slot {slot}");
+        info_with_peers!(
+            "received execution payload from builder for block {block_root:?} at slot {slot}"
+        );
 
         Ok(response)
     }
@@ -414,7 +418,7 @@ impl Api {
                 .load()
                 .is_some_and(|supported| !supported);
 
-        debug!(
+        debug_with_peers!(
             "posting blinded block to {url} with timeout of {remaining_time:?} \
              before next interval {next_interval:?}, use_json: {use_json}",
         );
@@ -441,7 +445,7 @@ impl Api {
         let response = handle_error(response).await?;
 
         if response.status() == StatusCode::ACCEPTED {
-            info!(
+            info_with_peers!(
                 "received successful response from builder for block {block_root:?} at slot {slot}"
             );
 
@@ -460,7 +464,7 @@ impl Api {
     ) -> Result<T> {
         let content_type = response.headers().get(CONTENT_TYPE);
 
-        debug!("received response with content_type: {content_type:?}");
+        debug_with_peers!("received response with content_type: {content_type:?}");
 
         if content_type.is_none()
             || content_type == Some(&HeaderValue::from_static(APPLICATION_JSON.as_ref()))
