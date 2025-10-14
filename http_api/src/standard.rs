@@ -58,6 +58,7 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
+        consts::SyncCommitteeSubnetCount,
         containers::{
             SignedContributionAndProof, SyncCommittee, SyncCommitteeContribution,
             SyncCommitteeMessage,
@@ -3087,6 +3088,13 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
         beacon_block_root,
         subcommittee_index,
     } = query;
+
+    if subcommittee_index >= SyncCommitteeSubnetCount::U64 {
+        return Err(Error::SubcommitteeIndexNotInRange {
+            subcommittee_index,
+            range: 0..SyncCommitteeSubnetCount::U64,
+        });
+    }
 
     let data = sync_committee_agg_pool
         .best_subcommittee_contribution(slot, beacon_block_root, subcommittee_index)
