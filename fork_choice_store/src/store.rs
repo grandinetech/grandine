@@ -52,7 +52,10 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
         primitives::ColumnIndex,
     },
-    gloas::containers::{DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid},
+    gloas::containers::{
+        DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
+        SignedExecutionPayloadEnvelope,
+    },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -233,6 +236,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
     data_column_cache: DataColumnCache<P>,
+    //Stores validated execution payload envelopes
+    execution_payload_envelopes: HashMap<H256, Arc<SignedExecutionPayloadEnvelope<P>>>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
@@ -324,6 +329,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             )),
             storage,
             data_column_cache: DataColumnCache::default(),
+            execution_payload_envelopes: HashMap::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
@@ -389,6 +395,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         data_column_id: DataColumnIdentifier,
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         self.data_column_cache.get(data_column_id)
+    }
+
+    #[must_use]
+    pub fn cached_execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+        self.execution_payload_envelopes.get(&block_root).cloned()
     }
 
     #[must_use]

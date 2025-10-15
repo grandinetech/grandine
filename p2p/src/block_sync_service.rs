@@ -555,6 +555,24 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready();
                         }
+                        P2pToSync::RequestedExecutionPayloadEnvelope(_envelope, _peer_id, _request_id, _request_type) => {
+                            // TODO(EPBS): Implement ExecutionPayloadEnvelope handling
+                            // Need to:
+                            // - Record received response in sync_manager
+                            // - Determine request direction (Forward/Back)
+                            // - Register envelope and call controller.on_requested_execution_payload_envelope()
+                            warn!("ExecutionPayloadEnvelope handling not yet implemented");
+                        }
+                        P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(_peer_id, _request_id) => {
+                            // TODO(EPBS): Implement ByRange request completion
+                            // Need to call sync_manager method to mark request finished
+                            warn!("ExecutionPayloadEnvelopesByRange completion not yet implemented");
+                        }
+                        P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(_peer_id, _request_id) => {
+                            // TODO(EPBS): Implement ByRoot request completion
+                            // Similar to ByRange completion
+                            warn!("ExecutionPayloadEnvelopesByRoot completion not yet implemented");
+                        }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
                                 finalized_checkpoint.epoch);
