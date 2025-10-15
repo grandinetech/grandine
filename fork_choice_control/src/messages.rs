@@ -192,10 +192,9 @@ impl<P: Preset, W> MutatorMessage<P, W> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(bound = "")]
 #[cfg_attr(test, derive(Derivative))]
-#[cfg_attr(test, derivative(Debug(bound = "")))]
 pub enum P2pMessage<P: Preset> {
     Slot(Slot),
     Accept(GossipId),

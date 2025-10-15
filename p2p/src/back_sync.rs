@@ -310,13 +310,15 @@ impl<P: Preset> Batch<P> {
                     })
                 };
 
-                let action = controller.validate_blob_sidecar_with_state(
-                    blob_sidecar.clone_arc(),
-                    true,
-                    &BlobSidecarOrigin::BackSync,
-                    || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
-                    || Some(head_state.clone_arc()),
-                )?;
+                let action = tokio::task::block_in_place(|| {
+                    controller.validate_blob_sidecar_with_state(
+                        blob_sidecar.clone_arc(),
+                        true,
+                        &BlobSidecarOrigin::BackSync,
+                        || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                        || Some(head_state.clone_arc()),
+                    )
+                })?;
 
                 if !action.accepted() {
                     bail!(Error::BlobNotAccepted::<P> {
@@ -375,14 +377,16 @@ impl<P: Preset> Batch<P> {
                     })
                 };
 
-                let action = controller.validate_data_column_sidecar_with_state(
-                    data_column_sidear.clone_arc(),
-                    true,
-                    &DataColumnSidecarOrigin::BackSync,
-                    validate_block_presence,
-                    || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
-                    || Some(head_state.clone_arc()),
-                )?;
+                let action = tokio::task::block_in_place(|| {
+                    controller.validate_data_column_sidecar_with_state(
+                        data_column_sidear.clone_arc(),
+                        true,
+                        &DataColumnSidecarOrigin::BackSync,
+                        validate_block_presence,
+                        || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                        || Some(head_state.clone_arc()),
+                    )
+                })?;
 
                 if !action.accepted() {
                     bail!(Error::DataColumnNotAccepted::<P> {
@@ -432,7 +436,7 @@ impl<P: Preset> Batch<P> {
             if block.message().slot() == GENESIS_SLOT {
                 // if it's a genesis block, return it as is.
                 // It will be validated against our own genesis_block during
-                // final checkpoint vaildation
+                // final checkpoint validation
                 verified_blocks.push(block.clone_arc());
             } else if let Some(parent) = blocks.peek() {
                 debug!("back-sync batch block: {} {:?}", message.slot(), actual);

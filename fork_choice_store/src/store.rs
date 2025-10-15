@@ -485,7 +485,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn exibits_equivocation_on_blobs(
+    pub fn exhibits_equivocation_on_blobs(
         &self,
         slot: Slot,
         proposer_index: ValidatorIndex,
@@ -497,15 +497,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .is_peerdas_activated()
         {
             self.data_column_cache
-                .exibits_equivocation(slot, proposer_index, block_root)
+                .exhibits_equivocation(slot, proposer_index, block_root)
         } else {
             self.blob_cache
-                .exibits_equivocation(slot, proposer_index, block_root)
+                .exhibits_equivocation(slot, proposer_index, block_root)
         }
     }
 
     #[must_use]
-    pub fn exibits_equivocation_on_blocks(
+    pub fn exhibits_equivocation_on_blocks(
         &self,
         slot: Slot,
         proposer_index: ValidatorIndex,
@@ -3765,28 +3765,36 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .unwrap_or(GENESIS_EPOCH)
     }
 
+    pub fn min_checked_blob_availability_epoch(&self) -> Epoch {
+        self.chain_config.deneb_fork_epoch.max(
+            self.tick
+                .epoch::<P>()
+                .checked_sub(self.chain_config.min_epochs_for_blob_sidecars_requests)
+                .unwrap_or(GENESIS_EPOCH),
+        )
+    }
+
+    pub fn min_checked_data_column_availability_epoch(&self) -> Epoch {
+        self.chain_config.fulu_fork_epoch.max(
+            self.tick
+                .epoch::<P>()
+                .checked_sub(
+                    self.chain_config
+                        .min_epochs_for_data_column_sidecars_requests,
+                )
+                .unwrap_or(GENESIS_EPOCH),
+        )
+    }
+
     pub fn min_checked_data_availability_epoch(&self, slot: Slot) -> Epoch {
         if self
             .chain_config
             .phase_at_slot::<P>(slot)
             .is_peerdas_activated()
         {
-            self.chain_config.fulu_fork_epoch.max(
-                self.tick
-                    .epoch::<P>()
-                    .checked_sub(
-                        self.chain_config
-                            .min_epochs_for_data_column_sidecars_requests,
-                    )
-                    .unwrap_or(GENESIS_EPOCH),
-            )
+            self.min_checked_data_column_availability_epoch()
         } else {
-            self.chain_config.deneb_fork_epoch.max(
-                self.tick
-                    .epoch::<P>()
-                    .checked_sub(self.chain_config.min_epochs_for_blob_sidecars_requests)
-                    .unwrap_or(GENESIS_EPOCH),
-            )
+            self.min_checked_blob_availability_epoch()
         }
     }
 

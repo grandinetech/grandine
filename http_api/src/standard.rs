@@ -34,6 +34,7 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use http_api_utils::{BlockId, StateId};
 use itertools::{izip, Either, Itertools as _};
+use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
 use log::{debug, info, warn};
 use operation_pools::{
@@ -71,7 +72,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::{Blob, BlobIndex, KzgProof, VersionedHash},
+        primitives::{Blob, BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::{
         containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
@@ -1240,6 +1241,17 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         .collect::<Result<Vec<_>>>()?;
 
     let blob_sidecars = if version.is_peerdas_activated() {
+        let Some(kzg_commitments) = block
+            .message()
+            .body()
+            .post_deneb()
+            .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+        else {
+            return Ok(EthResponse::json_or_ssz(DynamicList::empty(), &headers)?
+                .execution_optimistic(status.is_optimistic())
+                .finalized(finalized));
+        };
+
         let blobs = construct_blobs_from_data_column_sidecars(
             controller.clone_arc(),
             block.clone_arc(),
@@ -1248,15 +1260,21 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         )
         .await?;
 
-        let blob_count = blobs.len();
-        let blob_sidecars =
-            misc::construct_blob_sidecars(&block, blobs, vec![KzgProof::zero(); blob_count])?;
+        let (blobs, kzg_commitments): (Vec<Blob<P>>, Vec<KzgCommitment>) =
+            izip!(0.., blobs, kzg_commitments)
+                .filter_map(|(index, blob, kzg_commitment)| {
+                    blob_identifiers
+                        .contains(&BlobIdentifier { block_root, index })
+                        .then_some((blob, kzg_commitment))
+                })
+                .unzip();
 
-        blob_sidecars
-            .into_iter()
-            .filter(|blob_sidecar| blob_identifiers.contains(&blob_sidecar.into()))
-            .map(Arc::new)
-            .collect::<Vec<_>>()
+        construct_blob_sidecars_from_blobs_and_commitments(
+            controller.clone_arc(),
+            &block,
+            blobs,
+            kzg_commitments,
+        )?
     } else {
         controller.blob_sidecars_by_ids(blob_identifiers)?
     };
@@ -1388,25 +1406,21 @@ pub async fn publish_block<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
-        let timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+        let signed_beacon_block = Arc::new(signed_beacon_block);
 
-        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-            blobs.unwrap_or_default().as_ref(),
-            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-            controller.store_config().kzg_backend,
-        )?;
-
-        let data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
-
-        prometheus_metrics::stop_and_record(timer);
+        let data_column_sidecars = construct_data_column_sidecars_from_blobs(
+            controller.clone_arc(),
+            signed_beacon_block.clone_arc(),
+            blobs,
+            proofs,
+            metrics,
+        )
+        .await?;
 
         // this is a temporary measure until `/eth/v1/beacon/blocks` is removed as it is no longer
         // possible to deserialize `SignedApiBlock` without phase header correctly as the contents
         // are identical between Electra and Fulu
-        let signed_beacon_block = signed_beacon_block.upgrade();
+        let signed_beacon_block = Arc::unwrap_or_clone(signed_beacon_block).upgrade();
 
         publish_signed_block_with_data_column_sidecar(
             Arc::new(signed_beacon_block),
@@ -1471,20 +1485,14 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
-        let timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-            blobs.unwrap_or_default().as_ref(),
-            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-            controller.store_config().kzg_backend,
-        )?;
-
-        let data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
-
-        prometheus_metrics::stop_and_record(timer);
+        let data_column_sidecars = construct_data_column_sidecars_from_blobs(
+            controller.clone_arc(),
+            signed_beacon_block.clone_arc(),
+            blobs,
+            proofs,
+            metrics,
+        )
+        .await?;
 
         publish_signed_block_with_data_column_sidecar(
             signed_beacon_block,
@@ -1577,23 +1585,19 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         .phase_at_slot::<P>(slot)
         .is_peerdas_activated()
     {
-        let timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+        let signed_beacon_block = Arc::new(signed_beacon_block);
 
-        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-            blobs.unwrap_or_default().as_ref(),
-            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-            controller.store_config().kzg_backend,
-        )?;
-
-        let data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
-
-        prometheus_metrics::stop_and_record(timer);
+        let data_column_sidecars = construct_data_column_sidecars_from_blobs(
+            controller.clone_arc(),
+            signed_beacon_block.clone_arc(),
+            blobs,
+            proofs,
+            metrics,
+        )
+        .await?;
 
         publish_signed_block_v2_with_data_column_sidecar(
-            Arc::new(signed_beacon_block),
+            signed_beacon_block,
             data_column_sidecars,
             query.broadcast_validation.unwrap_or_default(),
             controller,
@@ -3582,8 +3586,10 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
                         StatusCode::OK
                     }
                     BroadcastValidation::ConsensusAndEquivocation => {
-                        if controller.exibits_equivocation(&block) {
-                            return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
+                        if controller.exhibits_equivocation(&block) {
+                            return Err(Error::InvalidBlock(anyhow!(
+                                "block exhibits equivocation"
+                            )));
                         }
 
                         publish_block_to_network(block, &blob_sidecars, &api_to_p2p_tx);
@@ -3675,8 +3681,10 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                         StatusCode::OK
                     }
                     BroadcastValidation::ConsensusAndEquivocation => {
-                        if controller.exibits_equivocation(&block) {
-                            return Err(Error::InvalidBlock(anyhow!("block exibits equivocation")));
+                        if controller.exhibits_equivocation(&block) {
+                            return Err(Error::InvalidBlock(anyhow!(
+                                "block exhibits equivocation"
+                            )));
                         }
 
                         publish_block_to_network_with_data_column_sidecars(
@@ -4113,17 +4121,65 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
 
         blobs_matrix_map
             .into_values()
-            .map(|blob_matrix| {
+            .map(|entries| {
                 ContiguousVector::try_from_iter(
-                    blob_matrix
+                    entries
                         .into_iter()
-                        .flat_map(|matrix| matrix.cell.as_bytes().to_vec().into_iter()),
+                        .flat_map(|entry| entry.cell.as_bytes().to_vec().into_iter()),
                 )
                 .map(ByteVector::from)
                 .map(Blob::<P>::from)
                 .map_err(Into::into)
             })
             .collect::<Result<Vec<_>>>()
+    })
+    .await?
+}
+
+fn construct_blob_sidecars_from_blobs_and_commitments<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    block: &SignedBeaconBlock<P>,
+    blobs: Vec<Blob<P>>,
+    kzg_commitments: Vec<KzgCommitment>,
+) -> Result<Vec<Arc<BlobSidecar<P>>>> {
+    tokio::task::block_in_place(move || {
+        let blob_proofs = blobs
+            .iter()
+            .zip(kzg_commitments.into_iter())
+            .map(|(blob, commitment)| {
+                compute_blob_kzg_proof::<P>(blob, commitment, controller.store_config().kzg_backend)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        misc::construct_blob_sidecars(block, blobs, blob_proofs)
+            .map(|blob_sidecars| blob_sidecars.into_iter().map(Arc::new).collect::<Vec<_>>())
+    })
+}
+
+async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    signed_beacon_block: Arc<SignedBeaconBlock<P>>,
+    blobs: Option<ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>>,
+    proofs: Option<KzgProofs<P>>,
+    metrics: Option<Arc<Metrics>>,
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    tokio::task::spawn_blocking(move || {
+        let timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
+        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+            blobs.unwrap_or_default().as_ref(),
+            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
+            controller.store_config().kzg_backend,
+        )?;
+
+        let data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
+
+        prometheus_metrics::stop_and_record(timer);
+
+        Ok(data_column_sidecars)
     })
     .await?
 }

@@ -17,7 +17,7 @@ pub struct BlobCache<P: Preset> {
 }
 
 impl<P: Preset> BlobCache<P> {
-    pub fn exibits_equivocation(
+    pub fn exhibits_equivocation(
         &self,
         slot: Slot,
         proposer_index: ValidatorIndex,

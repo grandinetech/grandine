@@ -99,6 +99,7 @@ pub struct BlockSyncService<P: Preset> {
     received_block_roots: HashMap<H256, Slot>,
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
     data_dumper: Arc<DataDumper>,
+    network_globals: Arc<NetworkGlobals>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
     sync_to_p2p_tx: UnboundedSender<SyncToP2p<P>>,
@@ -224,7 +225,7 @@ impl<P: Preset> BlockSyncService<P> {
             anchor_checkpoint_provider,
             controller,
             sync_manager: SyncManager::new(
-                network_globals,
+                network_globals.clone_arc(),
                 target_peers,
                 received_data_column_sidecars.clone_arc(),
             ),
@@ -241,6 +242,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_block_roots: HashMap::new(),
             received_data_column_sidecars,
             data_dumper,
+            network_globals,
             fork_choice_to_sync_rx,
             p2p_to_sync_rx,
             sync_to_p2p_tx,
@@ -803,18 +805,20 @@ impl<P: Preset> BlockSyncService<P> {
                             missing_column_indices.iter().join(", "),
                         );
 
-                        let peer_custody_columns_mapping = match self
-                            .sync_manager
-                            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
-                        {
-                            Ok(mapping) => mapping,
-                            Err(error) => {
-                                debug!("retry_sync_batches: {error:?}");
+                        let peer_custody_columns_mapping =
+                            match self.sync_manager.map_peer_custody_columns(
+                                missing_column_indices,
+                                start_slot,
+                                &mut peers_to_request,
+                            ) {
+                                Ok(mapping) => mapping,
+                                Err(error) => {
+                                    debug!("retry_sync_batches: {error:?}");
 
-                                self.sync_manager.retry_batch(request_id, batch, None);
-                                continue;
-                            }
-                        };
+                                    self.sync_manager.retry_batch(request_id, batch, None);
+                                    continue;
+                                }
+                            };
 
                         debug!(
                             "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
@@ -932,7 +936,7 @@ impl<P: Preset> BlockSyncService<P> {
                     head_slot,
                     local_finalized_slot,
                     &sampling_columns,
-                )?
+                )
             }
             SyncDirection::Back => {
                 let data_availability_serve_range_slot = if is_peerdas_activated {
@@ -1034,6 +1038,7 @@ impl<P: Preset> BlockSyncService<P> {
                 let terminus_epoch = self
                     .controller
                     .min_checked_data_availability_epoch(current.slot);
+
                 SyncCheckpoint {
                     slot: misc::compute_start_slot_at_epoch::<P>(terminus_epoch),
                     block_root: H256::zero(),
@@ -1104,6 +1109,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let request_id = self.request_id()?;
+        let peer_id = self.ensure_peer_connected(peer_id);
 
         let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
             return Ok(());
@@ -1142,6 +1148,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let request_id = self.request_id()?;
+        let peer_id = self.ensure_peer_connected(peer_id);
 
         let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
             return Ok(());
@@ -1209,10 +1216,11 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
-        let peer_custody_columns_mapping = match self
-            .sync_manager
-            .map_peer_custody_columns(missing_indices, &mut peers_to_request)
-        {
+        let peer_custody_columns_mapping = match self.sync_manager.map_peer_custody_columns(
+            missing_indices,
+            slot,
+            &mut peers_to_request,
+        ) {
             Ok(mapping) => mapping,
             Err(error) => {
                 debug!("request_needed_data_columns: {error:?}");
@@ -1279,10 +1287,11 @@ impl<P: Preset> BlockSyncService<P> {
         // Find the best peer coverage for these missing columns
         let missing_column_indices = missing_column_by_indices.keys().copied().collect();
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
-        let peer_custody_columns_mapping = match self
-            .sync_manager
-            .map_peer_custody_columns(missing_column_indices, &mut peers_to_request)
-        {
+        let peer_custody_columns_mapping = match self.sync_manager.map_peer_custody_columns(
+            missing_column_indices,
+            head_slot,
+            &mut peers_to_request,
+        ) {
             Ok(mapping) => mapping,
             Err(error) => {
                 debug!("batch_request_missing_data_columns: {error:?}");
@@ -1332,6 +1341,16 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         Ok(())
+    }
+
+    fn ensure_peer_connected(&self, peer_id: Option<PeerId>) -> Option<PeerId> {
+        peer_id
+            .filter(|peer_id| self.network_globals.is_peer_connected(peer_id))
+            .or_else(|| {
+                debug!("Peer {peer_id:?} is no longer connected, will find a new peer");
+
+                None
+            })
     }
 
     fn request_peer_status(&mut self, peer_id: PeerId) -> Result<()> {

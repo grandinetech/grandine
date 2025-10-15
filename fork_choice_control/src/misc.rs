@@ -179,9 +179,8 @@ pub type VerifyAttestationResult<P> =
     Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>;
 
 #[expect(clippy::enum_variant_names)]
-#[derive(IntoStaticStr, Serialize)]
+#[derive(Debug, IntoStaticStr, Serialize)]
 #[strum(serialize_all = "snake_case")]
-#[cfg_attr(test, derive(Debug))]
 pub enum MutatorRejectionReason {
     InvalidAggregateAndProof,
     InvalidAttestation,

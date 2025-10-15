@@ -5879,6 +5879,7 @@ dependencies = [
  "interop",
  "itertools 0.14.0",
  "keymanager",
+ "kzg_utils",
  "liveness_tracker",
  "log",
  "mediatype",

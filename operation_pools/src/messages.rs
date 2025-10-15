@@ -8,7 +8,7 @@ use types::{
 
 use crate::misc::PoolRejectionReason;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub enum PoolToP2pMessage {
     Accept(GossipId),
     Ignore(GossipId),

@@ -16,6 +16,7 @@ use eth2_libp2p::{
         methods::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
             DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
+            RpcErrorResponse, RpcResponse,
         },
         GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
     },
@@ -25,6 +26,7 @@ use eth2_libp2p::{
     NetworkGlobals, PeerAction, PeerId, PubsubMessage, ReportSource, Response, ShutdownReason,
     Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
 };
+use features::Feature;
 use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage};
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
@@ -250,23 +252,31 @@ impl<P: Preset> Network<P> {
         loop {
             select! {
                 _ = gossipsub_parameter_update_interval.select_next_some() => {
+                    let debug_info = message_debug_info("update_gossipsub_parameters");
+
                     self.update_gossipsub_parameters();
+
+                    debug_info.handle();
                 },
 
                 message = self.service_to_network_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         ServiceOutboundMessage::NetworkEvent(network_event) => {
                             self.handle_network_event(network_event)
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.blob_fetcher_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         BlobFetcherToP2p::BlobsNeeded(identifiers, slot, peer_id) => {
                             debug!("blobs needed: {identifiers:?} from {peer_id:?}");
-
-                            let peer_id = self.ensure_peer_connected(peer_id);
 
                             P2pToSync::BlobsNeeded(identifiers, slot, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
@@ -278,9 +288,13 @@ impl<P: Preset> Network<P> {
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.api_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     let success = match message {
                         ApiToP2p::PublishBeaconBlock(beacon_block) => {
                             self.publish_beacon_block(beacon_block);
@@ -335,9 +349,13 @@ impl<P: Preset> Network<P> {
                     if !success {
                         debug!("send to HTTP API failed because the receiver was dropped");
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.pool_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         PoolToP2pMessage::Accept(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Accept);
@@ -358,9 +376,13 @@ impl<P: Preset> Network<P> {
                             self.publish_signed_bls_to_execution_change(signed_bls_to_execution_change);
                         },
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.fork_choice_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         P2pMessage::Slot(slot) => {
                             self.on_slot(slot);
@@ -409,10 +431,6 @@ impl<P: Preset> Network<P> {
                             }
                         }
                         P2pMessage::BlockNeeded(root, peer_id) => {
-                            debug!("block needed: {root:?} from {peer_id:?}");
-
-                            let peer_id = self.ensure_peer_connected(peer_id);
-
                             P2pToSync::BlockNeeded(root, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
@@ -429,9 +447,13 @@ impl<P: Preset> Network<P> {
                             break;
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.validator_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         ValidatorToP2p::Accept(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Accept);
@@ -473,9 +495,13 @@ impl<P: Preset> Network<P> {
                             self.update_data_column_subnets(custody_group_count, backfill_custody_groups);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.sync_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         SyncToP2p::ReportPeer(peer_id, peer_action, report_source, reason) => {
                             self.report_peer(
@@ -513,9 +539,13 @@ impl<P: Preset> Network<P> {
                             self.update_earliest_available_slot(slot);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 message = self.channels.subnet_service_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         SubnetServiceToP2p::UpdateAttestationSubnets(actions) => {
                             self.update_attestation_subnets(actions);
@@ -524,6 +554,8 @@ impl<P: Preset> Network<P> {
                             self.update_sync_committee_subnets(actions);
                         }
                     }
+
+                    debug_info.handle();
                 },
 
                 shutdown_reason = self.shutdown_rx.select_next_some() => match shutdown_reason {
@@ -700,33 +732,46 @@ impl<P: Preset> Network<P> {
             "publishing singular attestation (attestation: {attestation:?}, subnet_id: {subnet_id})",
         );
 
-        match attestation.as_ref() {
-            Attestation::Phase0(_) => {
-                self.publish(PubsubMessage::Attestation(subnet_id, attestation));
-            }
-            Attestation::Electra(attestation) => {
-                let single_attestation = match operation_pools::try_convert_to_single_attestation(
-                    &self.controller,
-                    attestation,
-                ) {
-                    Ok(single_attestation) => single_attestation,
-                    Err(error) => {
-                        warn!(
-                            "cannot convert electra attestation to single attestation: {error:?}"
-                        );
-                        return;
-                    }
-                };
-
-                self.publish(PubsubMessage::SingleAttestation(
+        match Arc::unwrap_or_clone(attestation) {
+            Attestation::Phase0(phase0_attestation) => {
+                self.publish(PubsubMessage::Attestation(
                     subnet_id,
-                    single_attestation,
+                    Attestation::Phase0(phase0_attestation).into(),
                 ));
+            }
+            Attestation::Electra(electra_attestation) => {
+                let network_to_service_tx = self.network_to_service_tx.clone();
+                let controller = self.controller.clone_arc();
+
+                // Attestation conversion may be CPU intensive, so it is done in a separate task.
+                self.dedicated_executor
+                    .spawn(async move {
+                        let single_attestation = match operation_pools::try_convert_to_single_attestation(
+                            &controller,
+                            electra_attestation,
+                        ) {
+                            Ok(single_attestation) => single_attestation,
+                            Err(error) => {
+                                warn!(
+                                    "cannot convert electra attestation to single attestation: {error:?}",
+                                );
+                                return;
+                            }
+                        };
+
+                        let message = PubsubMessage::SingleAttestation(
+                            subnet_id,
+                            single_attestation,
+                        );
+
+                        ServiceInboundMessage::Publish(message).send(&network_to_service_tx);
+                    })
+                    .detach();
             }
             Attestation::Single(single_attestation) => {
                 self.publish(PubsubMessage::SingleAttestation(
                     subnet_id,
-                    *single_attestation,
+                    single_attestation,
                 ));
             }
         }
@@ -1262,6 +1307,26 @@ impl<P: Preset> Network<P> {
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
 
+        let start_epoch = misc::compute_epoch_at_slot::<P>(request.start_slot);
+
+        if start_epoch < self.controller.min_checked_blob_availability_epoch() {
+            debug!(
+                "received invalid request requesting blobs before availability period: \
+                (peer_id: {peer_id}, inbound_request_id: {inbound_request_id:?}, \
+                request: {request:?})",
+            );
+
+            ServiceInboundMessage::SendErrorResponse(
+                peer_id,
+                inbound_request_id,
+                RpcErrorResponse::InvalidRequest,
+                "requested blobs before data availability period",
+            )
+            .send(&self.network_to_service_tx);
+
+            return Ok(());
+        }
+
         let BlobsByRangeRequest { start_slot, count } = request;
 
         let difference = count.min(MAX_FOR_DOS_PREVENTION);
@@ -1325,16 +1390,32 @@ impl<P: Preset> Network<P> {
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
 
+        let start_epoch = misc::compute_epoch_at_slot::<P>(request.start_slot);
+
+        if start_epoch < self.controller.min_checked_data_column_availability_epoch() {
+            debug!(
+                "received invalid request requesting data columns before availability period: \
+                (peer_id: {peer_id}, inbound_request_id: {inbound_request_id:?}, \
+                request: {request:?})",
+            );
+
+            ServiceInboundMessage::SendErrorResponse(
+                peer_id,
+                inbound_request_id,
+                RpcErrorResponse::InvalidRequest,
+                "requested data columns before data availability period",
+            )
+            .send(&self.network_to_service_tx);
+
+            return Ok(());
+        }
+
         let DataColumnsByRangeRequest {
             start_slot,
             count,
             columns,
         } = request;
 
-        // TODO(feature/eip-7594): MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS
-        let start_slot = start_slot.max(misc::compute_start_slot_at_epoch::<P>(
-            self.controller.chain_config().fulu_fork_epoch,
-        ));
         let difference = count.min(MAX_FOR_DOS_PREVENTION);
 
         let end_slot = start_slot
@@ -1410,7 +1491,6 @@ impl<P: Preset> Network<P> {
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
 
-        // TODO(feature/deneb): MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS
         let BlobsByRootRequest { blob_ids } = request;
 
         let controller = self.controller.clone_arc();
@@ -2344,19 +2424,43 @@ impl<P: Preset> Network<P> {
         PEER_LOG_METRICS.set_connected_peer_count(self.network_globals.connected_peers())
     }
 
-    fn ensure_peer_connected(&self, peer_id: Option<PeerId>) -> Option<PeerId> {
-        peer_id
-            .filter(|peer_id| self.network_globals.is_peer_connected(peer_id))
-            .or_else(|| {
-                debug!("Peer {peer_id:?} is no longer connected, will find a new peer");
-
-                None
-            })
-    }
-
     const fn start_of_epoch(epoch: Epoch) -> Slot {
         misc::compute_start_slot_at_epoch::<P>(epoch)
     }
+}
+
+pub struct MessageDebugInfo {
+    pub info: String,
+    pub processing_started_at: Instant,
+}
+
+pub trait MessageDebugInfoHandler {
+    fn handle(&self);
+}
+
+impl MessageDebugInfoHandler for Option<MessageDebugInfo> {
+    fn handle(&self) {
+        let Some(info) = self else {
+            return;
+        };
+
+        let duration_ms = info.processing_started_at.elapsed().as_millis();
+
+        if duration_ms > 10 {
+            warn!("processed P2p message in {duration_ms} ms: {}", info.info);
+        }
+    }
+}
+
+fn message_debug_info(message: &(impl core::fmt::Debug + ?Sized)) -> Option<MessageDebugInfo> {
+    if !Feature::DebugP2pMessages.is_enabled() {
+        return None;
+    }
+
+    Some(MessageDebugInfo {
+        info: format!("{:.1000}", format!("{message:?}")),
+        processing_started_at: Instant::now(),
+    })
 }
 
 #[derive(Debug, Error)]
@@ -2365,6 +2469,7 @@ enum Error {
     EndSlotOverflow { start_slot: u64, difference: u64 },
 }
 
+#[expect(clippy::too_many_lines)]
 fn run_network_service<P: Preset>(
     mut service: Service<P>,
     mut network_to_service_rx: UnboundedReceiver<ServiceInboundMessage<P>>,
@@ -2379,12 +2484,16 @@ fn run_network_service<P: Preset>(
         loop {
             tokio::select! {
                 _ = network_metrics_update_interval.select_next_some(), if metrics_enabled => {
+                    let debug_info = message_debug_info("network_metrics_update_interval");
+
                     eth2_libp2p::metrics::update_discovery_metrics();
                     eth2_libp2p::metrics::update_sync_metrics(service.network_globals());
                     eth2_libp2p::metrics::update_gossipsub_extended_metrics(
                         service.gossipsub(),
                         service.network_globals(),
                     );
+
+                    debug_info.handle();
                 },
 
                 network_event = service.next_event().fuse() => {
@@ -2392,6 +2501,8 @@ fn run_network_service<P: Preset>(
                 }
 
                 message = network_to_service_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
                     match message {
                         ServiceInboundMessage::DiscoverSubnetPeers(subnet_discoveries) => {
                             service.discover_subnet_peers(subnet_discoveries);
@@ -2410,6 +2521,13 @@ fn run_network_service<P: Preset>(
                                 &gossip_id.source,
                                 gossip_id.message_id,
                                 message_acceptance,
+                            );
+                        }
+                        ServiceInboundMessage::SendErrorResponse(peer_id, inbound_request_id, rpc_error_response, reason) => {
+                            service.send_response(
+                                peer_id,
+                                inbound_request_id,
+                                RpcResponse::Error(rpc_error_response, reason.into()),
                             );
                         }
                         ServiceInboundMessage::SendRequest(peer_id, request_id, request) => {
@@ -2461,6 +2579,8 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::Stop => break,
                     }
+
+                    debug_info.handle();
                 }
             }
         }

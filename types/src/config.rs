@@ -4,10 +4,10 @@ use std::{borrow::Cow, collections::BTreeMap};
 use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
+use itertools::Itertools as _;
 use nonzero_ext::nonzero;
 use once_cell::sync::OnceCell;
 use serde::{de::IgnoredAny, Deserialize, Serialize};
-use serde_utils::shared::Sortable;
 use serde_with::{As, DurationMilliSeconds};
 use ssz::{ContiguousList, DynamicList, SszWrite};
 use thiserror::Error;
@@ -161,7 +161,6 @@ pub struct Config {
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blob_sidecars_fulu: u64,
-    #[serde(with = "serde_utils::sorted_list_desc_by_key")]
     pub blob_schedule: Vec<BlobScheduleEntry>,
 
     // Transition
@@ -315,12 +314,6 @@ pub struct BlobScheduleEntry {
     pub epoch: Epoch,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_blobs_per_block: usize,
-}
-
-impl Sortable for BlobScheduleEntry {
-    fn key(&self) -> impl Ord {
-        self.epoch
-    }
 }
 
 // TODO(Grandine Team): Consider adding the linked repositories as submodules and adding
@@ -1039,10 +1032,9 @@ impl Config {
 
     #[must_use]
     pub fn get_blob_schedule_entry(&self, epoch: Epoch) -> BlobScheduleEntry {
-        // There is no need to sort everytime the function called, `blob_schedule` has been sorted by
-        // `epoch` in descending order.
         self.blob_schedule
             .iter()
+            .sorted_by(|a, b| b.epoch.cmp(&a.epoch))
             .find_map(|entry| (epoch >= entry.epoch).then_some(entry.clone()))
             .unwrap_or_else(|| {
                 BlobScheduleEntry::new(self.electra_fork_epoch, self.max_blobs_per_block_electra)

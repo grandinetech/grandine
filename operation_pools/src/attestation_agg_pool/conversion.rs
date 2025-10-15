@@ -80,7 +80,7 @@ pub fn convert_to_electra_attestation<P: Preset>(
 // TODO(feature/electra): properly refactor attestations
 pub fn try_convert_to_single_attestation<P: Preset>(
     controller: &RealController<P>,
-    attestation: &ElectraAttestation<P>,
+    attestation: ElectraAttestation<P>,
 ) -> Result<SingleAttestation> {
     let ElectraAttestation {
         aggregation_bits,
@@ -89,7 +89,7 @@ pub fn try_convert_to_single_attestation<P: Preset>(
         committee_bits,
     } = attestation;
 
-    let committee_index = misc::get_committee_indices::<P>(*committee_bits)
+    let committee_index = misc::get_committee_indices::<P>(committee_bits)
         .next()
         .unwrap_or_default();
 
@@ -105,8 +105,8 @@ pub fn try_convert_to_single_attestation<P: Preset>(
     Ok(SingleAttestation {
         committee_index,
         attester_index,
-        data: *data,
-        signature: *signature,
+        data,
+        signature,
     })
 }
 

@@ -28,6 +28,7 @@ genesis = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }
+kzg_utils = { workspace = true }
 liveness_tracker = { workspace = true }
 log = { workspace = true }
 mediatype = { workspace = true }

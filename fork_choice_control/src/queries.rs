@@ -372,7 +372,7 @@ where
         Ok(None)
     }
 
-    pub fn exibits_equivocation(&self, block: &Arc<SignedBeaconBlock<P>>) -> bool {
+    pub fn exhibits_equivocation(&self, block: &Arc<SignedBeaconBlock<P>>) -> bool {
         let block_slot = block.message().slot();
         let store = self.store_snapshot();
 
@@ -383,8 +383,8 @@ where
         let block_proposer_index = block.message().proposer_index();
         let block_root = block.message().hash_tree_root();
 
-        store.exibits_equivocation_on_blobs(block_slot, block_proposer_index, block_root)
-            || store.exibits_equivocation_on_blocks(block_slot, block_proposer_index, block_root)
+        store.exhibits_equivocation_on_blobs(block_slot, block_proposer_index, block_root)
+            || store.exhibits_equivocation_on_blocks(block_slot, block_proposer_index, block_root)
     }
 
     pub fn check_block_root(&self, block_root: H256) -> Result<Option<WithStatus<H256>>> {
@@ -715,6 +715,15 @@ where
 
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {
         self.store_snapshot().min_checked_block_availability_epoch()
+    }
+
+    pub fn min_checked_blob_availability_epoch(&self) -> Epoch {
+        self.store_snapshot().min_checked_blob_availability_epoch()
+    }
+
+    pub fn min_checked_data_column_availability_epoch(&self) -> Epoch {
+        self.store_snapshot()
+            .min_checked_data_column_availability_epoch()
     }
 
     pub fn min_checked_data_availability_epoch(&self, slot: Slot) -> Epoch {

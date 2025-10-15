@@ -883,7 +883,7 @@
           "refId": "A"
         }
       ],
-      "title": "Discovery Inbound Bandwith",
+      "title": "Discovery Inbound Bandwidth",
       "transparent": true,
       "type": "timeseries"
     },
