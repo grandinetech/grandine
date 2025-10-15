@@ -1,4 +1,4 @@
-use core::error::Error as StdError;
+use core::{error::Error as StdError, ops::Range};
 use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
@@ -17,6 +17,7 @@ use ssz::{ReadError, H256};
 use thiserror::Error;
 use tokio::task::JoinError;
 use types::{
+    altair::primitives::SubcommitteeIndex,
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
     phase0::primitives::Slot,
@@ -140,6 +141,11 @@ pub enum Error {
     StatePreElectra,
     #[error("state is pre-Fulu")]
     StatePreFulu,
+    #[error("subcommittee index: {subcommittee_index} is not in allowed range: {range:?}")]
+    SubcommitteeIndexNotInRange {
+        subcommittee_index: SubcommitteeIndex,
+        range: Range<SubcommitteeIndex>,
+    },
     #[error("target state not found")]
     TargetStateNotFound,
     #[error(transparent)]
@@ -243,6 +249,7 @@ impl Error {
             | Self::StatePreCapella
             | Self::StatePreElectra
             | Self::StatePreFulu
+            | Self::SubcommitteeIndexNotInRange { .. }
             | Self::UnableToPublishBlock
             | Self::VersionedHashNotInBlock { .. } => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
