@@ -66,7 +66,6 @@ jobs:
       run: |
         curl -L https://sp1up.succinct.xyz | bash
         /home/runner/.sp1/bin/sp1up -v 5.2.1 -- token ${{ secrets.GITHUB_TOKEN }}
-        cargo prove --version
 
     - name: Running SP1 test
       run: |
