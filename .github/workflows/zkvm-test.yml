@@ -13,18 +13,24 @@ jobs:
         ]
 
     runs-on: ubuntu-latest
+
     steps:
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-        root-reserve-mb: 2048
+        # leaving 20 GB for zkvm installations
+        root-reserve-mb: 20480
         swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+
     - name: Setup nim for constantine backend
       uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: '2.0.2'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
         parent-nim-install-directory: ${{ runner.temp }}
+
     - name: Install dependencies for constantine backend
       run: |
         sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
@@ -37,31 +43,48 @@ jobs:
         submodules: false
         lfs: true
 
-    - name: Check necessary submodule only
+    - name: Check out necessary submodules only
       run: |
         git submodule update --init dedicated_executor eth2_libp2p
 
-    - name: Install r0vm
+    - name: Installing r0vm
       run: |
         curl -L https://risczero.com/install | bash
+        ls -lah $HOME
+        source /home/runner/.bashrc
+        /home/runner/.risc0/bin/rzup install rust 1.88.0
+        /home/runner/.risc0/bin/rzup install cpp 2024.1.5
+        /home/runner/.risc0/bin/rzup install r0vm 3.0.1
         /home/runner/.risc0/bin/rzup install cargo-risczero 3.0.1
+        cargo risczero --version
 
-    - name: Test zkvm-risc0
-      run: RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "${{ matrix.test_case }}" execute
+    - name: Running r0vm test
+      run: |
+        RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "${{ matrix.test_case }}" execute
 
-    - name: Install SP1
+    - name: Installing SP1
       run: |
         curl -L https://sp1up.succinct.xyz | bash
         /home/runner/.sp1/bin/sp1up -v 5.2.1 -- token ${{ secrets.GITHUB_TOKEN }}
+        cargo prove --version
 
-    - name: zkvm-sp1
-      run: RUST_LOG=info cargo run -p zkvm_host --features sp1 --release -- --test "${{ matrix.test_case }}" execute
+    - name: Running SP1 test
+      run: |
+        RUST_LOG=info cargo run -p zkvm_host --features sp1 --release -- --test "${{ matrix.test_case }}" execute
 
-    - name: Install Brevis Pico
+    - name: Installing Brevis Pico
+      # Use local source install as direct cargo installation fail for pico due to deprecated libs
       run: |
         rustup install nightly-2025-08-04
         rustup component add rust-src --toolchain nightly-2025-08-04
-        cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
+        pushd ./
+        cd ..
+        git clone https://github.com/brevis-network/pico pico
+        cd pico/sdk/cli
+        cargo install --locked --force --path .
+        cargo pico --version
+        popd
 
-    - name: zkvm-pico
-      run: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "${{ matrix.test_case }}" execute
+    - name: Running Brevis Pico test
+      run: |
+        RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "${{ matrix.test_case }}" execute

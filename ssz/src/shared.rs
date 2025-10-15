@@ -124,7 +124,8 @@ pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>>
         // TODO(feature/optimize-ssz-decoding): Benchmark without the early validation if that makes sense.
         let actual = bytes.len() / size;
 
-        if actual > maximum {
+        // Note: ignore the check `actual > maximum` when maximum == 0. Is this proper?
+        if maximum > 0 && actual > maximum {
             return Err(ReadError::ListTooLong { maximum, actual });
         }
 
@@ -144,7 +145,8 @@ pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>>
         // TODO(feature/optimize-ssz-decoding): Benchmark without the early validation if that makes sense.
         let actual = first_offset / BYTES_PER_LENGTH_OFFSET;
 
-        if actual > maximum {
+        // Note: ignore the check `actual > maximum` when maximum == 0. Is this proper?
+        if maximum > 0 && actual > maximum {
             return Err(ReadError::ListTooLong { maximum, actual });
         }
 
