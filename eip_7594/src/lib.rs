@@ -144,12 +144,16 @@ pub fn compute_subnets_for_node<P: Preset>(
 }
 
 /// Verify if the data column sidecar is valid.
-pub fn verify_data_column_sidecar<P: Preset>(data_column_sidecar: &DataColumnSidecar<P>) -> bool {
+pub fn verify_data_column_sidecar<P: Preset>(
+    data_column_sidecar: &DataColumnSidecar<P>,
+    config: &Config,
+) -> bool {
     let DataColumnSidecar {
         index,
         column,
         kzg_commitments,
         kzg_proofs,
+        signed_block_header,
         ..
     } = data_column_sidecar;
 
@@ -160,6 +164,12 @@ pub fn verify_data_column_sidecar<P: Preset>(data_column_sidecar: &DataColumnSid
 
     // A sidecar for zero blobs is invalid
     if kzg_commitments.is_empty() {
+        return false;
+    }
+
+    // Check that the sidecar respects the blob limit
+    let epoch = misc::compute_epoch_at_slot::<P>(signed_block_header.message.slot);
+    if kzg_commitments.len() > config.get_blob_schedule_entry(epoch).max_blobs_per_block {
         return false;
     }
 
