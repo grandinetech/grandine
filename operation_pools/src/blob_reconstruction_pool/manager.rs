@@ -5,10 +5,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
-use types::{
-    phase0::primitives::{Slot, H256},
-    preset::Preset,
-};
+use types::{phase0::primitives::H256, preset::Preset};
 
 use crate::{blob_reconstruction_pool::tasks::ReconstructDataColumnSidecarsTask, misc::PoolTask};
 
@@ -32,10 +29,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         }
     }
 
-    pub fn spawn_reconstruction(&self, wait_group: W, block_root: H256, slot: Slot) {
-        self.controller
-            .mark_sidecar_construction_started(block_root, slot);
-
+    pub fn spawn_reconstruction(&self, wait_group: W, block_root: H256) {
         self.spawn_detached(ReconstructDataColumnSidecarsTask {
             controller: self.controller.clone_arc(),
             wait_group,

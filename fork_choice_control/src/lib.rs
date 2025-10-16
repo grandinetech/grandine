@@ -20,7 +20,8 @@ pub use crate::{
         ValidatorMessage,
     },
     misc::{
-        MutatorRejectionReason, StorageMode, VerifyAggregateAndProofResult, VerifyAttestationResult,
+        MutatorRejectionReason, SidecarsPendingReconstruction, StorageMode,
+        VerifyAggregateAndProofResult, VerifyAttestationResult,
     },
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
