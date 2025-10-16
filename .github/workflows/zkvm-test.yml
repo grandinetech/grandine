@@ -1,0 +1,90 @@
+name: zkvm Build Test
+on: [push]
+
+jobs:
+  zkvm-test:
+    strategy:
+      matrix:
+        test_case: [
+          "consensus spec tests mainnet electra empty block transition",
+          "pectra-devnet-6 without epoch transition"
+        ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+      
+      - name: Setup nim for constantine backend
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.2'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: ${{ runner.temp }}
+      
+      - name: Install dependencies for constantine backend
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            libgmp-dev \
+            llvm
+      
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          lfs: true
+      
+      - name: Check out necessary submodules only
+        run: |
+          git submodule update --init dedicated_executor eth2_libp2p
+      
+      - name: Install dependencies for ZKM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+      
+      - name: Cache ZKM toolchain
+        id: cache-zkm
+        uses: actions/cache@v4
+        with:
+          path: ~/.zkm-toolchain
+          key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-v2
+          restore-keys: |
+            ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
+      
+      - name: Installing ZKM toolchain
+        run: |
+          if [ ! -d "$HOME/.zkm-toolchain" ] || [ ! -f "$HOME/.zkm-toolchain/env" ]; then
+            echo "Installing ZKM toolchain..."
+            curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
+          else
+            echo "ZKM toolchain already installed (from cache)"
+          fi
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Source ZKM environment and verify
+        run: |
+          source ~/.zkm-toolchain/env
+          echo "Checking rustup toolchains:"
+          rustup toolchain list
+          if ! rustup toolchain list | grep -q "nightly-2025-06-30"; then
+            echo "Installing nightly-2025-06-30 toolchain..."
+            rustup toolchain install nightly-2025-06-30-x86_64-unknown-linux-gnu
+          fi
+          rustc --version
+          cargo --version
+      
+      - name: Build zkvm guest
+        run: |
+          source ~/.zkm-toolchain/env
+          cd zkvm/guest/ziren
+          rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
+      
+      - name: Running ZKM test
+        run: |
+          source ~/.zkm-toolchain/env
+          RUST_LOG=info cargo run -p zkvm_host --features ziren --release -- --test "${{ matrix.test_case }}" execute
