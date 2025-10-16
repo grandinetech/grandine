@@ -13,15 +13,17 @@ IGNORED_GLOBS = %w[
   configs/*.yaml
   presets/*/*.yaml
   presets/*/trusted_setups/*.json
+  tests/*/*/light_client/single_merkle_proof/*/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/data_collection/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/eip7805/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/gloas/*/*/*/*/*.{ssz_snappy,yaml}
-  tests/general/phase0/ssz_generic/{progressive_bitlist,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
+  tests/general/phase0/ssz_generic/{progressive_bitlist,progressive_containers,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/containers/{valid,invalid}/{ProgressiveBitsStruct,ProgressiveTestStruct}_*/*.{ssz_snappy,yaml}
   tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
   tests/general/fulu/kzg/compute_verify_cell_kzg_proof_batch_challenge/*/*/*.{ssz_snappy,yaml}
+  tests/general/fulu/ssz_generic/progressive_containers/*/*/*.{ssz_snappy,yaml}
   tests/diagnostics_obj.json{,.lock}
 ].map! { |glob| File.join(SUBMODULE, glob) }
 

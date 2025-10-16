@@ -18,7 +18,7 @@ use types::{
 use super::epoch_intermediates;
 use crate::{
     altair::{self, EpochDeltasForTransition, EpochReport},
-    bellatrix, electra, unphased,
+    electra, unphased,
     unphased::ValidatorSummary,
 };
 
@@ -63,7 +63,7 @@ pub fn process_epoch(
 
     unphased::process_rewards_and_penalties(state, epoch_deltas);
     process_registry_updates(config, state, summaries.as_mut_slice())?;
-    bellatrix::process_slashings::<_, ()>(state, summaries);
+    electra::process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
     electra::process_pending_deposits(config, pubkey_cache, state)?;
     electra::process_pending_consolidations(state)?;
