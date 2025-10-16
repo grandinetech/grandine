@@ -213,7 +213,7 @@ impl<P: Preset> Network<P> {
             let node_id = network_globals.local_enr().node_id().raw();
             let sampling_size = chain_config.sampling_size_custody_groups(custody_group_count);
 
-            Self::update_sampling_columns(&controller, node_id, sampling_size, chain_config)?;
+            Self::update_sampling_columns(chain_config, &controller, node_id, sampling_size)?;
         }
 
         let (network_to_service_tx, network_to_service_rx) = futures::channel::mpsc::unbounded();
@@ -1012,7 +1012,7 @@ impl<P: Preset> Network<P> {
             .send(&self.network_to_service_tx);
 
         let sampling_columns =
-            Self::update_sampling_columns(&self.controller, node_id, sampling_size, config)
+            Self::update_sampling_columns(config, &self.controller, node_id, sampling_size)
                 .expect("should compute node custody groups and columns");
 
         if backfill_custody_groups {
@@ -1032,16 +1032,16 @@ impl<P: Preset> Network<P> {
     }
 
     fn update_sampling_columns(
+        chain_config: &Config,
         controller: &RealController<P>,
         raw_node_id: [u8; 32],
         sampling_size: u64,
-        chain_config: &Config,
     ) -> Result<HashSet<ColumnIndex>> {
-        let custody_groups = get_custody_groups(raw_node_id, sampling_size, chain_config)?;
+        let custody_groups = get_custody_groups(chain_config, raw_node_id, sampling_size)?;
 
         let mut sampling_columns = HashSet::new();
         for custody_index in custody_groups {
-            let columns = compute_columns_for_custody_group::<P>(custody_index, chain_config)?;
+            let columns = compute_columns_for_custody_group::<P>(chain_config, custody_index)?;
             sampling_columns.extend(columns);
         }
         controller.on_store_sampling_columns(sampling_columns.clone());

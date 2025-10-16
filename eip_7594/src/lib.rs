@@ -43,9 +43,9 @@ mod error;
 mod tests;
 
 pub fn get_custody_groups(
+    config: &Config,
     raw_node_id: [u8; 32],
     custody_group_count: u64,
-    config: &Config,
 ) -> Result<HashSet<CustodyIndex>> {
     let number_of_custody_groups = config.number_of_custody_groups;
     ensure!(
@@ -95,8 +95,8 @@ pub fn get_custody_groups(
 }
 
 pub fn compute_columns_for_custody_group<P: Preset>(
-    custody_group: CustodyIndex,
     config: &Config,
+    custody_group: CustodyIndex,
 ) -> Result<impl Iterator<Item = ColumnIndex>> {
     let number_of_custody_groups = config.number_of_custody_groups;
     ensure!(
@@ -118,10 +118,10 @@ pub fn compute_columns_for_custody_group<P: Preset>(
 }
 
 pub fn compute_subnets_from_custody_group<P: Preset>(
-    custody_group: CustodyIndex,
     config: &Config,
+    custody_group: CustodyIndex,
 ) -> Result<impl Iterator<Item = SubnetId> + '_> {
-    let subnets = compute_columns_for_custody_group::<P>(custody_group, config)?
+    let subnets = compute_columns_for_custody_group::<P>(config, custody_group)?
         .map(|column_index| misc::compute_subnet_for_data_column_sidecar(config, column_index))
         .unique();
 
@@ -129,13 +129,13 @@ pub fn compute_subnets_from_custody_group<P: Preset>(
 }
 
 pub fn compute_subnets_for_node<P: Preset>(
+    config: &Config,
     raw_node_id: [u8; 32],
     custody_group_count: u64,
-    config: &Config,
 ) -> Result<HashSet<SubnetId>> {
     let mut subnets = HashSet::new();
-    for custody_group in get_custody_groups(raw_node_id, custody_group_count, config)? {
-        let custody_group_subnets = compute_subnets_from_custody_group::<P>(custody_group, config)?;
+    for custody_group in get_custody_groups(config, raw_node_id, custody_group_count)? {
+        let custody_group_subnets = compute_subnets_from_custody_group::<P>(config, custody_group)?;
 
         subnets.extend(custody_group_subnets);
     }
@@ -145,8 +145,8 @@ pub fn compute_subnets_for_node<P: Preset>(
 
 /// Verify if the data column sidecar is valid.
 pub fn verify_data_column_sidecar<P: Preset>(
-    data_column_sidecar: &DataColumnSidecar<P>,
     config: &Config,
+    data_column_sidecar: &DataColumnSidecar<P>,
 ) -> bool {
     let DataColumnSidecar {
         index,
@@ -399,9 +399,9 @@ pub fn construct_cells_and_kzg_proofs<P: Preset>(
 }
 
 pub fn get_validator_custody_requirement<P: Preset>(
+    config: &Config,
     last_finalized_state: &impl BeaconState<P>,
     validator_indices: &HashSet<ValidatorIndex>,
-    config: &Config,
 ) -> u64 {
     let total_node_balance = validator_indices
         .iter()

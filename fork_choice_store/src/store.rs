@@ -2058,7 +2058,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
         ensure!(
-            verify_data_column_sidecar(&data_column_sidecar, &self.chain_config),
+            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar),
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar
             },
