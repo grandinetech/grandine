@@ -1844,10 +1844,6 @@ where
                     &data_column_sidecar,
                     DataColumnSidecarOrigin::Own,
                 );
-
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.reconstructed_columns.inc();
-                }
             }
 
             if self.store.is_forward_synced() {

@@ -2023,9 +2023,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let last_finalized_state = self.controller.last_finalized_state().value;
         let own_validator_indices = self.own_validator_indices(&last_finalized_state);
         let validator_custody_requirement = eip_7594::get_validator_custody_requirement(
+            &self.chain_config,
             &last_finalized_state,
             &own_validator_indices,
-            &self.chain_config,
         );
 
         let current_sampling_size: u64 = self
