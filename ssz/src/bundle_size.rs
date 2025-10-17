@@ -25,7 +25,7 @@ use crate::{porcelain::SszHash, type_level::MinimumBundleSize};
 /// Bundles were originally named "packs".
 /// The new name was chosen to avoid confusion with SSZ packing.
 ///
-/// [`BYTES_PER_CHUNK`]:    crate::consts::BYTES_PER_CHUNK
+/// [`BYTES_PER_CHUNK`]: crate::consts::BYTES_PER_CHUNK
 /// [`UnhashedBundleSize`]: crate::type_level::UnhashedBundleSize
 ///
 /// [type-level numbers]: typenum
