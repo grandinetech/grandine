@@ -13,3 +13,7 @@ panics = { workspace = true }
 rayon = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = {workspace = true }
+
+[dev-dependencies]
+gag = { workspace = true }
+serial_test = { workspace = true }

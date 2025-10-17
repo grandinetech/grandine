@@ -1,4 +1,5 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
+use tracing as _;
 
 use derive_more::Display;
 
@@ -42,29 +43,9 @@ macro_rules! info_with_peers {
 }
 
 #[macro_export]
-macro_rules! debug_with_peers {
-    ( $( $rest:tt )* ) => {
-        ::tracing::debug!(
-            peers = %$crate::PEER_LOG_METRICS,
-            $( $rest )*
-        )
-    };
-}
-
-#[macro_export]
 macro_rules! warn_with_peers {
     ( $( $rest:tt )* ) => {
         ::tracing::warn!(
-            peers = %$crate::PEER_LOG_METRICS,
-            $( $rest )*
-        )
-    };
-}
-
-#[macro_export]
-macro_rules! trace_with_peers {
-    ( $( $rest:tt )* ) => {
-        ::tracing::trace!(
             peers = %$crate::PEER_LOG_METRICS,
             $( $rest )*
         )
@@ -85,9 +66,137 @@ macro_rules! error_with_peers {
 macro_rules! crit {
     ( $( $rest:tt )* ) => {
         ::tracing::error!(
-            error_type = "crit",
+            target: "crit",
+            type_error = "suspicious behavior",
             peers = %$crate::PEER_LOG_METRICS,
             $( $rest )*
         )
     };
+}
+
+#[macro_export]
+macro_rules! debug_with_peers {
+    ( $( $rest:tt )* ) => {
+        ::tracing::debug!(
+            peers = %$crate::PEER_LOG_METRICS,
+            $( $rest )*
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! trace_with_peers {
+    ( $( $rest:tt )* ) => {
+        ::tracing::trace!(
+            peers = %$crate::PEER_LOG_METRICS,
+            $( $rest )*
+        )
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use binary_utils::{initialize_tracing_logger, TracingHandle};
+    use serial_test::serial;
+    use std::sync::{LazyLock, Mutex};
+
+    static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
+
+    fn init_logger_once() -> TracingHandle {
+        let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
+        if lock.is_none() {
+            let handle = initialize_tracing_logger(module_path!(), false)
+                .expect("Failed to initialize tracing logger");
+            *lock = Some(handle.clone());
+            handle
+        } else {
+            lock.as_ref()
+                .expect("LOGGER should always be initialized")
+                .clone()
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn crit_macro_logs_with_error_type_and_peers() -> anyhow::Result<()> {
+        use gag::BufferRedirect;
+        use std::io::Read;
+
+        let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
+
+        let handle = init_logger_once();
+        handle.modify(|env_filter| {
+            let new_filter = env_filter
+                .clone()
+                .add_directive("crit".parse().expect("Failed to parse"));
+            *env_filter = new_filter;
+        })?;
+
+        PEER_LOG_METRICS.set_connected_peer_count(2);
+        PEER_LOG_METRICS.set_target_peer_count(4);
+
+        crit!("suspicious behavior has occurred");
+
+        let mut output = String::new();
+        buf.read_to_string(&mut output)?;
+
+        assert!(
+            output.contains("suspicious behavior has occurred"),
+            "Here is output:\n{output}"
+        );
+        assert!(output.contains("[2/4]"), "Here is output:\n{output}");
+
+        assert!(
+            output.contains("type_error=\"suspicious behavior\""),
+            "Here is output:\n{output}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn info_with_peers_formats_correctly_various_ways() -> anyhow::Result<()> {
+        use gag::BufferRedirect;
+        use std::io::Read;
+
+        let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
+
+        let _handle = init_logger_once();
+
+        PEER_LOG_METRICS.set_connected_peer_count(2);
+        PEER_LOG_METRICS.set_target_peer_count(4);
+
+        let x1 = "value1";
+        let x2 = "value2";
+        let x3 = "value3";
+
+        info_with_peers!("Plain info message");
+        info_with_peers!("Formatted message: {}", x1);
+        info_with_peers!(field1 = x1, field2 = x2, "Combined message: {}", x3);
+
+        // With trailing comma
+        info_with_peers!(
+            "Trailing comma message: {x3} \
+            because of something",
+        );
+
+        // Just a field, no message text
+        info_with_peers!(field0 = "foo");
+
+        let mut output = String::new();
+        buf.read_to_string(&mut output)?;
+
+        assert!(output.contains("Plain info message"));
+        assert!(output.contains("Formatted message: value1"));
+        assert!(output.contains("Combined message: value3"));
+        assert!(output.contains("[2/4]"));
+        assert!(output.contains("field1=\"value1\""));
+        assert!(output.contains("field2=\"value2\""));
+        assert!(output.contains("Trailing comma message: value3 because of something"));
+        assert!(output.contains("field0=\"foo\""));
+
+        Ok(())
+    }
 }
