@@ -1996,9 +1996,11 @@ name = "binary_utils"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "gag",
  "logging",
  "panics",
  "rayon",
+ "serial_test",
  "tracing",
  "tracing-subscriber 0.3.20",
 ]
@@ -4648,6 +4650,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
+name = "filedescriptor"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e40758ed24c9b2eeb76c35fb0aebc66c626084edd827e07e1552279814c6682d"
+dependencies = [
+ "libc",
+ "thiserror 1.0.69",
+ "winapi",
+]
+
+[[package]]
 name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4990,6 +5003,16 @@ name = "futures-utils-wasm"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42012b0f064e01aa58b545fe3727f90f7dd4020f4a3ea735b50344965f5a57e9"
+
+[[package]]
+name = "gag"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a713bee13966e9fbffdf7193af71d54a6b35a0bb34997cd6c9519ebeb5005972"
+dependencies = [
+ "filedescriptor",
+ "tempfile",
+]
 
 [[package]]
 name = "gcd"
@@ -7237,7 +7260,12 @@ dependencies = [
 name = "logging"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "binary_utils",
  "derive_more 2.0.1",
+ "gag",
+ "serial_test",
+ "tracing",
 ]
 
 [[package]]
