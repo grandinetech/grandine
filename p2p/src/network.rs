@@ -438,7 +438,7 @@ impl<P: Preset> Network<P> {
                             P2pToSync::FinalizedCheckpoint(finalized_checkpoint)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
-                        P2pMessage::HeadState(_state) => {
+                        P2pMessage::HeadChanged(_root) => {
                             // This message is only used in tests
                         }
                         P2pMessage::Stop => {
