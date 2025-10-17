@@ -205,7 +205,7 @@ pub enum P2pMessage<P: Preset> {
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
-    HeadState(#[cfg_attr(test, derivative(Debug = "ignore"))] Arc<BeaconState<P>>),
+    HeadChanged(H256),
     Stop,
 }
 

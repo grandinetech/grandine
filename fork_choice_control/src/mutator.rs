@@ -2309,13 +2309,12 @@ where
         match changes {
             ApplyBlockChanges::CanonicalChainExtended { .. } => {
                 let new_head = self.store.head().clone();
-                let state = new_head.state(&self.store);
 
                 if let Some(metrics) = self.metrics.as_ref() {
                     Self::track_head_metrics(&new_head, metrics);
                 }
 
-                self.send_to_p2p(P2pMessage::HeadState(state));
+                self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
                 if new_head.is_valid() {
                     self.event_channels
@@ -2516,13 +2515,11 @@ where
             old_head.block_root, new_head.block_root,
         );
 
-        let state = new_head.state(&self.store);
-
         if let Some(metrics) = self.metrics.as_ref() {
             Self::track_head_metrics(&new_head, metrics);
         }
 
-        self.send_to_p2p(P2pMessage::HeadState(state));
+        self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
         if new_head.is_valid() {
             // Do not send API events about optimistic blocks.
