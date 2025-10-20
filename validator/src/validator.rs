@@ -2033,19 +2033,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .sampling_columns_count()
             .try_into()
             .expect("sampling size should be able to fit into u64");
+
         let current_custody_requirements =
             current_sampling_size.saturating_div(self.chain_config.columns_per_group::<P>());
+
         if validator_custody_requirement > current_custody_requirements
             || self.last_cgc_update_epoch.is_none()
         {
-            let backfill_custody_groups = self.validator_config.backfill_custody_groups;
-
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
-            ValidatorToP2p::UpdateDataColumnSubnets(
-                validator_custody_requirement,
-                backfill_custody_groups,
-            )
-            .send(&self.p2p_tx);
+            ValidatorToP2p::UpdateDataColumnSubnets(validator_custody_requirement)
+                .send(&self.p2p_tx);
         }
 
         self.last_cgc_update_epoch = Some(current_epoch);

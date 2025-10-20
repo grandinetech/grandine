@@ -633,6 +633,7 @@ pub async fn run_after_genesis<P: Preset>(
         metrics.clone(),
         registry.as_mut(),
         data_dumper.clone_arc(),
+        validator_config.backfill_custody_groups,
     )
     .await?;
 
