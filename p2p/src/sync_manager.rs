@@ -80,16 +80,241 @@ pub enum SyncTarget {
     DataColumnSidecar,
 }
 
+#[derive(Debug, Error)]
+pub enum SyncBatchError {
+    #[error("Cannot set data_columns on Block variant")]
+    BlockVariant,
+
+    #[error("Cannot set data_columns on BlobSidecar variant")]
+    BlobSidecarVariant,
+}
+
 #[derive(Debug, Clone)]
-pub struct SyncBatch<P: Preset> {
-    pub target: SyncTarget,
-    pub direction: SyncDirection,
-    pub peer_id: PeerId,
-    pub start_slot: Slot,
-    pub count: u64,
-    pub retry_count: usize,
-    pub response_received: bool,
-    pub data_columns: Option<Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>>,
+pub enum SyncBatch<P: Preset> {
+    Block {
+        direction: SyncDirection,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+        retry_count: usize,
+        response_received: bool,
+    },
+    BlobSidecar {
+        direction: SyncDirection,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+        retry_count: usize,
+        response_received: bool,
+    },
+    DataColumnSidecar {
+        direction: SyncDirection,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+        retry_count: usize,
+        response_received: bool,
+        data_columns: Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
+    },
+}
+
+impl<P: Preset> SyncBatch<P> {
+    pub fn increment_retry_count(&mut self) {
+        match self {
+            SyncBatch::Block { retry_count, .. }
+            | SyncBatch::BlobSidecar { retry_count, .. }
+            | SyncBatch::DataColumnSidecar { retry_count, .. } => {
+                *retry_count = *retry_count + 1;
+            }
+        }
+    }
+
+    pub fn decrement_retry_count(&mut self) {
+        match self {
+            SyncBatch::Block { retry_count, .. }
+            | SyncBatch::BlobSidecar { retry_count, .. }
+            | SyncBatch::DataColumnSidecar { retry_count, .. } => {
+                *retry_count = retry_count.saturating_sub(1);
+            }
+        }
+    }
+}
+impl<P: Preset> SyncBatch<P> {
+    pub fn new(
+        target: SyncTarget,
+        direction: SyncDirection,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+        data_columns: Option<Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>>,
+    ) -> Self {
+        match target {
+            SyncTarget::Block => Self::Block {
+                direction,
+                peer_id,
+                start_slot,
+                count,
+                retry_count: 0,
+                response_received: false,
+            },
+            SyncTarget::BlobSidecar => Self::BlobSidecar {
+                direction,
+                peer_id,
+                start_slot,
+                count,
+                retry_count: 0,
+                response_received: false,
+            },
+            SyncTarget::DataColumnSidecar => {
+                let data_columns = data_columns.expect("DataColumnSidecar requires data_columns");
+                Self::DataColumnSidecar {
+                    direction,
+                    peer_id,
+                    start_slot,
+                    count,
+                    retry_count: 0,
+                    response_received: false,
+                    data_columns,
+                }
+            }
+        }
+    }
+
+    pub fn get_response_received(&self) -> bool {
+        match self {
+            SyncBatch::Block {
+                response_received, ..
+            } => *response_received,
+            SyncBatch::BlobSidecar {
+                response_received, ..
+            } => *response_received,
+            SyncBatch::DataColumnSidecar {
+                response_received, ..
+            } => *response_received,
+        }
+    }
+
+    pub fn set_response_received(&mut self, new_response_received: bool) {
+        match self {
+            SyncBatch::Block {
+                response_received, ..
+            } => *response_received = new_response_received,
+            SyncBatch::BlobSidecar {
+                response_received, ..
+            } => *response_received = new_response_received,
+            SyncBatch::DataColumnSidecar {
+                response_received, ..
+            } => *response_received = new_response_received,
+        }
+    }
+    pub fn get_direction(&self) -> SyncDirection {
+        match self {
+            SyncBatch::Block { direction, .. } => *direction,
+            SyncBatch::BlobSidecar { direction, .. } => *direction,
+            SyncBatch::DataColumnSidecar { direction, .. } => *direction,
+        }
+    }
+
+    pub fn set_direction(&mut self, new_direction: SyncDirection) {
+        match self {
+            SyncBatch::Block { direction, .. } => *direction = new_direction,
+            SyncBatch::BlobSidecar { direction, .. } => *direction = new_direction,
+            SyncBatch::DataColumnSidecar { direction, .. } => *direction = new_direction,
+        }
+    }
+
+    pub fn get_peer_id(&self) -> PeerId {
+        match self {
+            SyncBatch::Block { peer_id, .. } => *peer_id,
+            SyncBatch::BlobSidecar { peer_id, .. } => *peer_id,
+            SyncBatch::DataColumnSidecar { peer_id, .. } => *peer_id,
+        }
+    }
+
+    pub fn set_peer_id(&mut self, new_peer_id: PeerId) {
+        match self {
+            SyncBatch::Block { peer_id, .. } => *peer_id = new_peer_id,
+            SyncBatch::BlobSidecar { peer_id, .. } => *peer_id = new_peer_id,
+            SyncBatch::DataColumnSidecar { peer_id, .. } => *peer_id = new_peer_id,
+        }
+    }
+    pub fn get_start_slot(&self) -> Slot {
+        match self {
+            SyncBatch::Block { start_slot, .. } => *start_slot,
+            SyncBatch::BlobSidecar { start_slot, .. } => *start_slot,
+            SyncBatch::DataColumnSidecar { start_slot, .. } => *start_slot,
+        }
+    }
+
+    pub fn set_start_slot(&mut self, new_slot: Slot) {
+        match self {
+            SyncBatch::Block { start_slot, .. } => *start_slot = new_slot,
+            SyncBatch::BlobSidecar { start_slot, .. } => *start_slot = new_slot,
+            SyncBatch::DataColumnSidecar { start_slot, .. } => *start_slot = new_slot,
+        }
+    }
+
+    pub fn get_count(&self) -> u64 {
+        match self {
+            SyncBatch::Block { count, .. } => *count,
+            SyncBatch::BlobSidecar { count, .. } => *count,
+            SyncBatch::DataColumnSidecar { count, .. } => *count,
+        }
+    }
+
+    pub fn set_count(&mut self, new_count: u64) {
+        match self {
+            SyncBatch::Block { count, .. } => *count = new_count,
+            SyncBatch::BlobSidecar { count, .. } => *count = new_count,
+            SyncBatch::DataColumnSidecar { count, .. } => *count = new_count,
+        }
+    }
+
+    pub fn get_retry_count(&self) -> usize {
+        match self {
+            SyncBatch::Block { retry_count, .. } => *retry_count,
+            SyncBatch::BlobSidecar { retry_count, .. } => *retry_count,
+            SyncBatch::DataColumnSidecar { retry_count, .. } => *retry_count,
+        }
+    }
+
+    pub fn set_retry_count(&mut self, new_count: usize) {
+        match self {
+            SyncBatch::Block { retry_count, .. } => *retry_count = new_count,
+            SyncBatch::BlobSidecar { retry_count, .. } => *retry_count = new_count,
+            SyncBatch::DataColumnSidecar { retry_count, .. } => *retry_count = new_count,
+        }
+    }
+
+    pub fn get_data_columns(&self) -> Option<Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>> {
+        match self {
+            SyncBatch::DataColumnSidecar { data_columns, .. } => Some(data_columns.clone()),
+            SyncBatch::Block { .. } => None,
+            SyncBatch::BlobSidecar { .. } => None,
+        }
+    }
+
+    pub fn set_data_columns(
+        &mut self,
+        new_data_columns: Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
+    ) -> Result<(), SyncBatchError> {
+        match self {
+            SyncBatch::Block { .. } => Err(SyncBatchError::BlockVariant),
+            SyncBatch::BlobSidecar { .. } => Err(SyncBatchError::BlobSidecarVariant),
+            SyncBatch::DataColumnSidecar { data_columns, .. } => {
+                *data_columns = new_data_columns;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn get_target(&self) -> SyncTarget {
+        match self {
+            SyncBatch::Block { .. } => SyncTarget::Block,
+            SyncBatch::BlobSidecar { .. } => SyncTarget::BlobSidecar,
+            SyncBatch::DataColumnSidecar { .. } => SyncTarget::DataColumnSidecar,
+        }
+    }
 }
 
 pub struct SyncManager<P: Preset> {
@@ -233,32 +458,29 @@ impl<P: Preset> SyncManager<P> {
     ) {
         match new_peer {
             Some(peer_id) => {
-                if matches!(batch.target, SyncTarget::Block | SyncTarget::BlobSidecar) {
+                if matches!(
+                    batch.get_target(),
+                    SyncTarget::Block | SyncTarget::BlobSidecar
+                ) {
                     self.log(
                         Level::Debug,
                         format_args!("retrying batch {batch:?}, new peer: {peer_id}, app_request_id: {app_request_id:?}"),
                     );
 
-                    batch = SyncBatch {
-                        target: batch.target,
-                        direction: batch.direction,
-                        peer_id,
-                        start_slot: batch.start_slot,
-                        count: batch.count,
-                        retry_count: batch.retry_count + 1,
-                        response_received: false,
-                        data_columns: batch.data_columns,
-                    };
+                    batch.increment_retry_count();
+                    batch.set_response_received(false);
                 }
 
-                match batch.target {
-                    SyncTarget::DataColumnSidecar => {
+                match batch {
+                    SyncBatch::DataColumnSidecar { .. } => {
                         self.add_data_columns_request_by_range(app_request_id, batch)
                     }
-                    SyncTarget::BlobSidecar => {
+                    SyncBatch::BlobSidecar { .. } => {
                         self.add_blob_request_by_range(app_request_id, batch)
                     }
-                    SyncTarget::Block => self.add_block_request_by_range(app_request_id, batch),
+                    SyncBatch::Block { .. } => {
+                        self.add_block_request_by_range(app_request_id, batch)
+                    }
                 }
             }
             None => {
@@ -410,15 +632,13 @@ impl<P: Preset> SyncManager<P> {
                                 };
 
                                 for (peer_id, columns) in peer_custody_columns_mapping {
-                                    let batch = SyncBatch {
-                                        target: SyncTarget::DataColumnSidecar,
-                                        direction: SyncDirection::Back,
+                                    let batch = SyncBatch::new(
+                                        SyncTarget::DataColumnSidecar,
+                                        SyncDirection::Back,
                                         peer_id,
                                         start_slot,
                                         count,
-                                        response_received: false,
-                                        retry_count: 0,
-                                        data_columns: ContiguousList::try_from_iter(
+                                        ContiguousList::try_from_iter(
                                             columns.into_iter(),
                                         )
                                         .map(Arc::new)
@@ -426,7 +646,7 @@ impl<P: Preset> SyncManager<P> {
                                             Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
                                         ))
                                         .ok()
-                                    };
+                                    );
 
                                     self.log(
                                         Level::Debug,
@@ -436,16 +656,14 @@ impl<P: Preset> SyncManager<P> {
                                 }
                             }
                         } else if sync_mode.is_default() {
-                            let batch = SyncBatch {
-                                target: SyncTarget::BlobSidecar,
-                                direction: SyncDirection::Back,
-                                peer_id: *next_peer,
+                            let batch = SyncBatch::new(
+                                SyncTarget::BlobSidecar,
+                                SyncDirection::Back,
+                                *next_peer,
                                 start_slot,
                                 count,
-                                response_received: false,
-                                retry_count: 0,
-                                data_columns: None,
-                            };
+                                None,
+                            );
 
                             self.log(
                                 Level::Debug,
@@ -460,16 +678,14 @@ impl<P: Preset> SyncManager<P> {
             }
 
             if sync_mode.is_default() {
-                let batch = SyncBatch {
-                    target: SyncTarget::Block,
-                    direction: SyncDirection::Back,
-                    peer_id: *peer,
+                let batch = SyncBatch::new(
+                    SyncTarget::Block,
+                    SyncDirection::Back,
+                    *peer,
                     start_slot,
                     count,
-                    response_received: false,
-                    retry_count: 0,
-                    data_columns: None,
-                };
+                    None,
+                );
 
                 self.log(
                     Level::Debug,
@@ -683,16 +899,14 @@ impl<P: Preset> SyncManager<P> {
                     for (peer_id, columns) in peer_custody_columns_mapping {
                         match ContiguousList::try_from_iter(columns.into_iter()) {
                             Ok(columns) => {
-                                sync_batches.push(SyncBatch {
-                                    target: SyncTarget::DataColumnSidecar,
-                                    direction: SyncDirection::Forward,
+                                sync_batches.push(SyncBatch::new(
+                                    SyncTarget::DataColumnSidecar,
+                                    SyncDirection::Forward,
                                     peer_id,
                                     start_slot,
                                     count,
-                                    response_received: false,
-                                    retry_count: 0,
-                                    data_columns: Some(columns.into()),
-                                });
+                                    Some(columns.into()),
+                                ));
                             }
                             Err(error) => self.log(
                                 Level::Error,
@@ -704,28 +918,24 @@ impl<P: Preset> SyncManager<P> {
                         }
                     }
                 } else if blob_serve_range_slot < max_slot {
-                    sync_batches.push(SyncBatch {
-                        target: SyncTarget::BlobSidecar,
-                        direction: SyncDirection::Forward,
-                        peer_id: block_peer_id,
+                    sync_batches.push(SyncBatch::new(
+                        SyncTarget::BlobSidecar,
+                        SyncDirection::Forward,
+                        block_peer_id,
                         start_slot,
                         count,
-                        response_received: false,
-                        retry_count: 0,
-                        data_columns: None,
-                    });
+                        None,
+                    ));
                 }
 
-                sync_batches.push(SyncBatch {
-                    target: SyncTarget::Block,
-                    direction: SyncDirection::Forward,
-                    peer_id: block_peer_id,
+                sync_batches.push(SyncBatch::new(
+                    SyncTarget::Block,
+                    SyncDirection::Forward,
+                    block_peer_id,
                     start_slot,
                     count,
-                    response_received: false,
-                    retry_count: 0,
-                    data_columns: None,
-                });
+                    None,
+                ));
 
                 batch_index += 1;
             }
@@ -787,9 +997,9 @@ impl<P: Preset> SyncManager<P> {
                 "add blob request by range (app_request_id: {:?}, peer_id: {}, \
                 range: {:?}, retries: {})",
                 app_request_id,
-                batch.peer_id,
-                (batch.start_slot..(batch.start_slot + batch.count)),
-                batch.retry_count,
+                batch.get_peer_id(),
+                (batch.get_start_slot()..(batch.get_start_slot() + batch.get_count())),
+                batch.get_retry_count(),
             ),
         );
 
@@ -823,9 +1033,9 @@ impl<P: Preset> SyncManager<P> {
                 "add block request by range (app_request_id: {:?}, peer_id: {}, \
                 range: {:?}, retries: {})",
                 app_request_id,
-                batch.peer_id,
-                (batch.start_slot..(batch.start_slot + batch.count)),
-                batch.retry_count,
+                batch.get_peer_id(),
+                (batch.get_start_slot()..(batch.get_start_slot() + batch.get_count())),
+                batch.get_retry_count(),
             ),
         );
 
@@ -849,16 +1059,21 @@ impl<P: Preset> SyncManager<P> {
         app_request_id: AppRequestId,
         batch: SyncBatch<P>,
     ) {
+        let columns_info = batch
+            .get_data_columns()
+            .as_ref()
+            .map(|cols| format!("{cols:?}"))
+            .unwrap_or_else(|| "No Data Columns".to_string());
         self.log(
             Level::Debug,
             format_args!(
                 "add data column request by range (app_request_id: {:?}, peer_id: {}, range: {:?}, \
                 retries: {}, columns: {:?})",
                 app_request_id,
-                batch.peer_id,
-                (batch.start_slot..(batch.start_slot + batch.count)),
-                batch.retry_count,
-                batch.data_columns.as_ref().map(AsRef::as_ref),
+                batch.get_peer_id(),
+                (batch.get_start_slot()..(batch.get_start_slot() + batch.get_count())),
+                batch.get_retry_count(),
+                columns_info,
             ),
         );
 
@@ -936,11 +1151,14 @@ impl<P: Preset> SyncManager<P> {
                 format_args!(
                     "blob sidecars by range request stats: responses received: {}, count: {}, \
                     direction {request_direction:?}, retries: {}",
-                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                    sync_batch.get_response_received(),
+                    sync_batch.get_count(),
+                    sync_batch.get_retry_count(),
                 ),
             );
 
-            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.get_response_received()
+            {
                 self.retry_batch(app_request_id, sync_batch, self.random_peer(true));
             }
         }
@@ -967,13 +1185,17 @@ impl<P: Preset> SyncManager<P> {
                 format_args!(
                     "blocks by range request stats: responses received: {}, count: {}, \
                     direction {request_direction:?}, retries: {}",
-                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                    sync_batch.get_response_received(),
+                    sync_batch.get_count(),
+                    sync_batch.get_retry_count(),
                 ),
             );
 
-            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
-                if misc::compute_epoch_at_slot::<P>(sync_batch.start_slot + sync_batch.count)
-                    < controller.min_checked_block_availability_epoch()
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.get_response_received()
+            {
+                if misc::compute_epoch_at_slot::<P>(
+                    sync_batch.get_start_slot() + sync_batch.get_count(),
+                ) < controller.min_checked_block_availability_epoch()
                 {
                     self.add_peer_to_back_sync_black_list(peer_id);
                 }
@@ -1004,15 +1226,16 @@ impl<P: Preset> SyncManager<P> {
                 format_args!(
                     "data column sidecars by range request stats: responses received: {}, count: {}, \
                     direction {request_direction:?}, retries: {}",
-                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                    sync_batch.get_response_received(), sync_batch.get_count(), sync_batch.get_retry_count(),
                 ),
             );
 
-            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.get_response_received()
+            {
                 // Retry no more than 3 times, remove the peer
-                if sync_batch.retry_count < 3 {
-                    sync_batch.retry_count += 1;
-                    let peer_id = sync_batch.peer_id;
+                if sync_batch.get_retry_count() < 3 {
+                    sync_batch.increment_retry_count();
+                    let peer_id = sync_batch.get_peer_id();
                     self.retry_batch(app_request_id, sync_batch, Some(peer_id));
                 } else {
                     self.retry_batch(app_request_id, sync_batch, None);
@@ -1356,16 +1579,14 @@ impl<P: Preset> SyncManager<P> {
     pub fn add_blobs_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.blob_requests.add_request_by_range(
             AppRequestId::Application(1),
-            SyncBatch {
-                target: SyncTarget::BlobSidecar,
-                direction: SyncDirection::Back,
+            SyncBatch::new(
+                SyncTarget::BlobSidecar,
+                SyncDirection::Back,
                 peer_id,
-                start_slot: 0,
-                count: 64,
-                retry_count: 0,
-                response_received: false,
-                data_columns: None,
-            },
+                0,
+                64,
+                None,
+            ),
         );
     }
 
@@ -1382,16 +1603,7 @@ impl<P: Preset> SyncManager<P> {
     pub fn add_blocks_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.block_requests.add_request_by_range(
             AppRequestId::Application(2),
-            SyncBatch {
-                target: SyncTarget::Block,
-                direction: SyncDirection::Back,
-                peer_id,
-                start_slot: 0,
-                count: 64,
-                retry_count: 0,
-                response_received: false,
-                data_columns: None,
-            },
+            SyncBatch::new(SyncTarget::Block, SyncDirection::Back, peer_id, 0, 64, None),
         );
     }
 
@@ -1403,16 +1615,14 @@ impl<P: Preset> SyncManager<P> {
     pub fn add_data_columns_request_by_range_busy_peer(&mut self, peer_id: PeerId) {
         self.data_column_requests.add_request_by_range(
             AppRequestId::Application(3),
-            SyncBatch {
-                target: SyncTarget::DataColumnSidecar,
-                direction: SyncDirection::Back,
+            SyncBatch::new(
+                SyncTarget::DataColumnSidecar,
+                SyncDirection::Back,
                 peer_id,
-                start_slot: 16,
-                count: 64,
-                retry_count: 0,
-                response_received: false,
-                data_columns: ContiguousList::try_from(vec![0]).map(Arc::new).ok(),
-            },
+                16,
+                64,
+                ContiguousList::try_from(vec![0]).map(Arc::new).ok(),
+            ),
         )
     }
 
@@ -1584,9 +1794,13 @@ mod tests {
         );
 
         itertools::assert_equal(
-            batches
-                .into_iter()
-                .map(|batch| (batch.start_slot, batch.count, batch.target)),
+            batches.into_iter().map(|batch| {
+                (
+                    batch.get_start_slot(),
+                    batch.get_count(),
+                    batch.get_target(),
+                )
+            }),
             resulting_batches,
         );
     }
@@ -1604,9 +1818,13 @@ mod tests {
         let batches = sync_manager.build_forward_sync_batches(&config, 0, 0, 0, &sampling_columns);
 
         itertools::assert_equal(
-            batches
-                .into_iter()
-                .map(|batch| (batch.start_slot, batch.count, batch.target)),
+            batches.into_iter().map(|batch| {
+                (
+                    batch.get_start_slot(),
+                    batch.get_count(),
+                    batch.get_target(),
+                )
+            }),
             // no batches from peer with earliest_available_slot = Slot::MAX
             vec![(1, 64, SyncTarget::Block), (65, 64, SyncTarget::Block)],
         );
@@ -1649,13 +1867,13 @@ mod tests {
 
             let first_batch = batches.first().expect("sync batches should be present");
 
-            assert_eq!(first_batch.direction, SyncDirection::Forward);
-            assert_eq!(first_batch.target, SyncTarget::Block);
+            assert_eq!(first_batch.get_direction(), SyncDirection::Forward);
+            assert_eq!(first_batch.get_target(), SyncTarget::Block);
 
             itertools::assert_equal(
                 batches
                     .into_iter()
-                    .map(|batch| (batch.start_slot, batch.count)),
+                    .map(|batch| (batch.get_start_slot(), batch.get_count())),
                 [(sync_range_from, slots_per_request)],
             );
         }
