@@ -135,6 +135,7 @@ pub struct Network<P: Preset> {
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
     last_nfd_update_epoch: Option<Epoch>,
+    backfill_custody_groups: bool,
 }
 
 impl<P: Preset> Network<P> {
@@ -155,6 +156,7 @@ impl<P: Preset> Network<P> {
         metrics: Option<Arc<Metrics>>,
         libp2p_registry: Option<&mut Registry>,
         data_dumper: Arc<DataDumper>,
+        backfill_custody_groups: bool,
     ) -> Result<Self> {
         let chain_config = controller.chain_config();
         let head_state = controller.head_state().value;
@@ -169,12 +171,8 @@ impl<P: Preset> Network<P> {
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(shutdown_tx);
 
-        let custody_group_count =
+        let mut custody_group_count =
             chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
-
-        if let Some(metrics) = metrics.as_ref() {
-            metrics.set_beacon_custody_groups(custody_group_count);
-        }
 
         let context = Context {
             chain_config: chain_config.clone_arc(),
@@ -185,7 +183,7 @@ impl<P: Preset> Network<P> {
         };
 
         // Box the future to pass `clippy::large_futures`.
-        let (service, network_globals) = Box::pin(Service::new(
+        let (mut service, network_globals) = Box::pin(Service::new(
             chain_config.clone_arc(),
             executor,
             context,
@@ -202,24 +200,63 @@ impl<P: Preset> Network<P> {
             }
         }
 
-        if chain_config.is_peerdas_scheduled() {
-            let custody_group_count = network_globals
-                .local_metadata
-                .read()
-                .custody_group_count()
-                .unwrap_or(custody_group_count);
-            let node_id = network_globals.local_enr().node_id().raw();
-            let sampling_size = chain_config.sampling_size_custody_groups(custody_group_count);
+        let earliest_available_slot = controller.anchor_block().message().slot();
 
-            Self::update_sampling_columns(chain_config, &controller, node_id, sampling_size)?;
+        if chain_config.is_peerdas_scheduled() {
+            // dereference is required to avoid deadlock
+            let metadata = *network_globals.local_metadata.read();
+            let node_id = network_globals.local_enr().node_id().raw();
+
+            if let Some(prev_custody_group_count) = metadata.custody_group_count() {
+                // If the node's custody requirements are increased,
+                // it SHOULD immediately advertise the updated custody_group_count.
+                // It MAY backfill custody groups as a result of this change.
+                if prev_custody_group_count < custody_group_count {
+                    service.update_enr_cgc(custody_group_count);
+
+                    if backfill_custody_groups {
+                        let prev_sampling_size =
+                            chain_config.sampling_size_custody_groups(prev_custody_group_count);
+
+                        let prev_sampling_columns =
+                            Self::sampling_columns(chain_config, node_id, prev_sampling_size)?;
+
+                        let current_sampling_size =
+                            chain_config.sampling_size_custody_groups(custody_group_count);
+
+                        let current_sampling_columns =
+                            Self::sampling_columns(chain_config, node_id, current_sampling_size)?;
+
+                        let backfill_column_indices =
+                            &prev_sampling_columns - &current_sampling_columns;
+
+                        if !backfill_column_indices.is_empty() {
+                            P2pToSync::RequestCustodyGroupBackfill(
+                                backfill_column_indices,
+                                earliest_available_slot,
+                            )
+                            .send(&channels.p2p_to_sync_tx);
+                        }
+                    }
+                }
+
+                custody_group_count = custody_group_count.max(prev_custody_group_count);
+            }
+
+            let sampling_size = chain_config.sampling_size_custody_groups(custody_group_count);
+            let sampling_columns = Self::sampling_columns(chain_config, node_id, sampling_size)?;
+
+            controller.on_store_sampling_columns(sampling_columns);
+        }
+
+        if let Some(metrics) = metrics.as_ref() {
+            metrics.set_beacon_custody_groups(custody_group_count);
         }
 
         let (network_to_service_tx, network_to_service_rx) = futures::channel::mpsc::unbounded();
         let (service_to_network_tx, service_to_network_rx) = futures::channel::mpsc::unbounded();
 
         run_network_service(service, network_to_service_rx, service_to_network_tx);
-
-        let earliest_available_slot = controller.anchor_block().message().slot();
 
         let network = Self {
             network_globals,
@@ -237,6 +274,7 @@ impl<P: Preset> Network<P> {
             data_dumper,
             earliest_available_slot,
             last_nfd_update_epoch: None,
+            backfill_custody_groups,
         };
 
         Ok(network)
@@ -489,8 +527,8 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
-                        ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count, backfill_custody_groups) => {
-                            self.update_data_column_subnets(custody_group_count, backfill_custody_groups);
+                        ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count) => {
+                            self.update_data_column_subnets(custody_group_count);
                         }
                     }
 
@@ -999,11 +1037,7 @@ impl<P: Preset> Network<P> {
         }
     }
 
-    fn update_data_column_subnets(
-        &mut self,
-        custody_group_count: u64,
-        backfill_custody_groups: bool,
-    ) {
+    fn update_data_column_subnets(&mut self, custody_group_count: u64) {
         ServiceInboundMessage::UpdateEnrCgc(custody_group_count).send(&self.network_to_service_tx);
 
         if let Some(metrics) = self.metrics.as_ref() {
@@ -1017,11 +1051,10 @@ impl<P: Preset> Network<P> {
         ServiceInboundMessage::UpdateDataColumnSubnets(sampling_size)
             .send(&self.network_to_service_tx);
 
-        let sampling_columns =
-            Self::update_sampling_columns(config, &self.controller, node_id, sampling_size)
-                .expect("should compute node custody groups and columns");
+        let sampling_columns = Self::sampling_columns(config, node_id, sampling_size)
+            .expect("should compute node custody groups and columns");
 
-        if backfill_custody_groups {
+        if self.backfill_custody_groups {
             let current_sampling_columns = self.controller.sampling_columns();
             let backfill_column_indices = &sampling_columns - &current_sampling_columns;
 
@@ -1035,11 +1068,12 @@ impl<P: Preset> Network<P> {
                 self.update_earliest_available_slot(self.controller.slot());
             }
         }
+
+        self.controller.on_store_sampling_columns(sampling_columns);
     }
 
-    fn update_sampling_columns(
+    fn sampling_columns(
         chain_config: &Config,
-        controller: &RealController<P>,
         raw_node_id: [u8; 32],
         sampling_size: u64,
     ) -> Result<HashSet<ColumnIndex>> {
@@ -1050,7 +1084,6 @@ impl<P: Preset> Network<P> {
             let columns = compute_columns_for_custody_group::<P>(chain_config, custody_index)?;
             sampling_columns.extend(columns);
         }
-        controller.on_store_sampling_columns(sampling_columns.clone());
 
         Ok(sampling_columns)
     }

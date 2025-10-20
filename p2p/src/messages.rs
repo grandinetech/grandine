@@ -205,7 +205,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
-    UpdateDataColumnSubnets(u64, bool),
+    UpdateDataColumnSubnets(u64),
 }
 
 impl<P: Preset> ValidatorToP2p<P> {
