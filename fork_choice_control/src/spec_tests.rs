@@ -13,10 +13,12 @@ use tap::Pipe as _;
 use test_generator::test_resources;
 use typenum::Unsigned as _;
 use types::{
-    combined::{Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
-    fulu::containers::DataColumnSidecar,
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -210,7 +212,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     if let Some(paths) = columns {
                         let data_column_sidecars = paths
                             .into_iter()
-                            .map(|path| case.ssz_default::<DataColumnSidecar<P>>(path));
+                            .map(|path| case.ssz::<_, DataColumnSidecar<P>>(config.as_ref(), path));
 
                         for data_column_sidecar in data_column_sidecars {
                             data_column_sidecar_count += 1;
@@ -304,7 +306,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                     | Phase::Bellatrix
                     | Phase::Capella
                     | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
-                    Phase::Electra | Phase::Fulu => {
+                    Phase::Electra | Phase::Fulu | Phase::Gloas => {
                         AttesterSlashing::Electra(case.ssz(config, file_name))
                     }
                 };

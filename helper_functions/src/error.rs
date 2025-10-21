@@ -38,6 +38,10 @@ pub(crate) enum Error {
     NoActiveValidators,
     #[error("no committee attesters for {index} committee")]
     NoCommitteeAttesters { index: CommitteeIndex },
+    #[error("attestation data index is not zero")]
+    NoneZeroDataIndex,
+    #[error("execution payload availability is out of range")]
+    PayloadAvailabilityOutOfRange,
     #[error("aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}")]
     ParticipantsCountMismatch {
         aggregation_bitlist_length: usize,
@@ -53,6 +57,8 @@ pub(crate) enum Error {
     SubnetIdOverflow,
     #[error("subnet prefix bit count overflowed")]
     SubnetPrefixBitCountOverflow,
+    #[error("validator index is out of range")]
+    ValidatorIndexOutOfRange,
 }
 
 #[derive(Debug, Display)]
@@ -75,8 +81,14 @@ pub enum SignatureKind {
     ContributionAndProof,
     #[display("deposit signature")]
     Deposit,
+    #[display("execution payload bid signature")]
+    ExecutionPayloadBid,
+    #[display("execution payload envelope signature")]
+    ExecutionPayloadEnvelope,
     #[display("collection of multiple signatures")]
     Multi,
+    #[display("payload attestation signature")]
+    PayloadAttestation,
     #[display("RANDAO reveal")]
     Randao,
     #[display("selection proof")]

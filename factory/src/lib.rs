@@ -46,6 +46,7 @@ use types::{
         BeaconBlockBody as ElectraBeaconBlockBody,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
+    gloas::containers::{BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody},
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
     phase0::{
         consts::GENESIS_SLOT,
@@ -406,7 +407,7 @@ pub fn execution_payload<P: Preset>(
             ..CapellaExecutionPayload::default()
         }
         .into(),
-        Phase::Deneb | Phase::Electra | Phase::Fulu => DenebExecutionPayload {
+        Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => DenebExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
@@ -462,7 +463,11 @@ fn block<P: Preset>(
     );
 
     // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
-    if advanced_state.phase() >= Phase::Capella && execution_payload.is_none() {
+    // Starting from Gloas, `execution_payload` is no longer inside BeaconBlock.
+    if advanced_state.phase() >= Phase::Capella
+        && advanced_state.phase() < Phase::Gloas
+        && execution_payload.is_none()
+    {
         execution_payload = Some(self::execution_payload(
             config,
             &advanced_state,
@@ -574,6 +579,21 @@ fn block<P: Preset>(
                 deposits,
                 sync_aggregate,
                 ..FuluBeaconBlockBody::default()
+            },
+        }),
+        Phase::Gloas => BeaconBlock::from(GloasBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            state_root: H256::zero(),
+            body: GloasBeaconBlockBody {
+                randao_reveal,
+                eth1_data,
+                graffiti,
+                attestations: electra_attestations.try_into()?,
+                deposits,
+                sync_aggregate,
+                ..GloasBeaconBlockBody::default()
             },
         }),
     }

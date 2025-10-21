@@ -17,16 +17,14 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use transition_functions::combined;
 use types::{
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::{BeaconState, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
@@ -561,7 +559,7 @@ impl<P: Preset> Storage<P> {
 
             let DataColumnIdentifier { block_root, index } = data_column_id;
 
-            let slot = data_column_sidecar.signed_block_header.message.slot;
+            let slot = data_column_sidecar.slot();
 
             batch.push(serialize(
                 DataColumnSidecarByColumnId(block_root, index),
@@ -588,6 +586,14 @@ impl<P: Preset> Storage<P> {
         let DataColumnIdentifier { block_root, index } = data_column_id;
 
         self.get(DataColumnSidecarByColumnId(block_root, index))
+    }
+
+    pub(crate) fn execution_payload_envelope_by_root(
+        &self,
+        _block_root: H256,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        // TODO(EPBS): Implement database query for execution payload envelopes
+        Ok(None)
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {

@@ -19,12 +19,16 @@ use serde::Serialize;
 use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -62,9 +66,17 @@ pub enum P2pToSync<P: Preset> {
         AppRequestId,
         RPCRequestType,
     ),
+    RequestedExecutionPayloadEnvelope(
+        Arc<SignedExecutionPayloadEnvelope<P>>,
+        PeerId,
+        AppRequestId,
+        RPCRequestType,
+    ),
     BlobsByRangeRequestFinished(AppRequestId),
     BlocksByRangeRequestFinished(PeerId, AppRequestId),
     DataColumnsByRangeRequestFinished(AppRequestId),
+    ExecutionPayloadEnvelopesByRootRequestFinished(PeerId, AppRequestId),
+    ExecutionPayloadEnvelopesByRangeRequestFinished(PeerId, AppRequestId),
     RequestFailed(PeerId),
     FinalizedCheckpoint(Checkpoint),
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
@@ -154,6 +166,8 @@ pub enum SyncToP2p<P: Preset> {
         u64,
         Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
     ),
+    RequestExecutionPayloadEnvelopesByRange(AppRequestId, PeerId, Slot, u64),
+    RequestExecutionPayloadEnvelopesByRoot(AppRequestId, PeerId, Vec<H256>),
     RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnsByRootIdentifier<P>>),
     RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,

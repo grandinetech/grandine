@@ -5,6 +5,7 @@ pub mod capella;
 pub mod electra;
 pub mod error;
 pub mod fork;
+pub mod gloas;
 pub mod misc;
 pub mod mutators;
 pub mod par_utils;

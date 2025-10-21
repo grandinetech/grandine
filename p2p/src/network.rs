@@ -15,8 +15,9 @@ use eth2_libp2p::{
     rpc::{
         methods::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
-            DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
-            RpcErrorResponse, RpcResponse,
+            DataColumnsByRangeRequest, DataColumnsByRootRequest,
+            ExecutionPayloadEnvelopesByRangeRequest, ExecutionPayloadEnvelopesByRootRequest,
+            OldBlocksByRangeRequest, RpcErrorResponse, RpcResponse,
         },
         GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
     },
@@ -49,11 +50,14 @@ use tokio_stream::wrappers::IntervalStream;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
     nonstandard::{Phase, RelativeEpoch, WithStatus},
@@ -529,6 +533,12 @@ impl<P: Preset> Network<P> {
                         SyncToP2p::RequestDataColumnsByRange(request_id, peer_id, start_slot, count, columns) => {
                             self.request_data_columns_by_range(request_id, peer_id, start_slot, count, columns);
                         }
+                        SyncToP2p::RequestExecutionPayloadEnvelopesByRange(request_id, peer_id, start_slot, count) => {
+                            self.request_execution_payload_envelopes_by_range(request_id, peer_id, start_slot, count);
+                        }
+                        SyncToP2p::RequestExecutionPayloadEnvelopesByRoot(request_id, peer_id, identifiers) => {
+                            self.request_execution_payload_envelopes_by_root(request_id, peer_id, identifiers);
+                        }
                         SyncToP2p::RequestPeerStatus(request_id, peer_id) => {
                             self.request_peer_status(request_id, peer_id);
                         }
@@ -703,7 +713,7 @@ impl<P: Preset> Network<P> {
     fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         let subnet_id = misc::compute_subnet_for_data_column_sidecar(
             self.controller.chain_config(),
-            data_column_sidecar.index,
+            data_column_sidecar.index(),
         );
 
         let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
@@ -1136,6 +1146,20 @@ impl<P: Preset> Network<P> {
             RequestType::DataColumnsByRange(request) => {
                 self.handle_data_columns_by_range_request(peer_id, inbound_request_id, request)
             }
+            RequestType::ExecutionPayloadEnvelopesByRange(request) => self
+                .handle_execution_payload_envelopes_by_range_request(
+                    peer_id,
+                    inbound_request_id,
+                    request,
+                ),
+            RequestType::ExecutionPayloadEnvelopesByRoot(request) => {
+                self.handle_execution_payload_envelopes_by_root_request(
+                    peer_id,
+                    inbound_request_id,
+                    request,
+                );
+                Ok(())
+            }
             RequestType::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
                 debug!(
@@ -1296,6 +1320,144 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
+    fn handle_execution_payload_envelopes_by_range_request(
+        &self,
+        peer_id: PeerId,
+        inbound_request_id: InboundRequestId,
+        request: ExecutionPayloadEnvelopesByRangeRequest,
+    ) -> Result<()> {
+        debug!(
+            "received ExecutionPayloadEnvelopesByRange request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
+
+        let ExecutionPayloadEnvelopesByRangeRequest { start_slot, count } = request;
+
+        // Validate Gloas fork activation
+        let gloas_fork_slot =
+            misc::compute_start_slot_at_epoch::<P>(self.controller.chain_config().gloas_fork_epoch);
+
+        let start_slot = start_slot.max(gloas_fork_slot);
+        let difference = count.min(MAX_FOR_DOS_PREVENTION);
+
+        let end_slot = start_slot
+            .checked_add(difference)
+            .ok_or(Error::EndSlotOverflow {
+                start_slot,
+                difference,
+            })?;
+
+        let controller = self.controller.clone_arc();
+        let network_to_service_tx = self.network_to_service_tx.clone();
+
+        self.dedicated_executor
+            .spawn(async move {
+                // TODO(EIP-7732): Call controller.execution_payload_envelopes_by_range(start_slot..end_slot)
+                // This will likely follow a pattern :
+                // 1. Validate request parameters (count, start_slot)
+                // 4. Stream responses back to peer
+                // then send each envelope via ServiceInboundMessage to network_to_service_tx
+                let envelopes =
+                    controller.execution_payload_envelopes_by_range(start_slot..end_slot)?;
+
+                for envelope in envelopes {
+                    debug!(
+                        "sending ExecutionPayloadEnvelopesByRange response chunk \
+                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        slot: {})",
+                        envelope.message.slot,
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        inbound_request_id,
+                        Box::new(Response::ExecutionPayloadEnvelopesByRange(Some(envelope))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+                debug!("terminating ExecutionPayloadEnvelopesByRange response stream");
+
+                // Send stream termination
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    inbound_request_id,
+                    Box::new(Response::ExecutionPayloadEnvelopesByRange(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
+
+        Ok(())
+    }
+
+    fn handle_execution_payload_envelopes_by_root_request(
+        &self,
+        peer_id: PeerId,
+        inbound_request_id: InboundRequestId,
+        request: ExecutionPayloadEnvelopesByRootRequest,
+    ) {
+        debug!(
+            "received ExecutionPayloadEnvelopesByRoot request (peer_id: {peer_id}, \
+            inbound_request_id: {inbound_request_id:?}, request: {request:?})",
+        );
+
+        let block_roots = request.block_roots;
+        let controller = self.controller.clone_arc();
+        let network_to_service_tx = self.network_to_service_tx.clone();
+
+        self.dedicated_executor
+            .spawn(async move {
+                if block_roots.is_empty() {
+                    debug!("ExecutionPayloadEnvelopesByRoot request with empty block_roots");
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        inbound_request_id,
+                        Box::new(Response::ExecutionPayloadEnvelopesByRoot(None)),
+                    )
+                    .send(&network_to_service_tx);
+
+                    return Ok(());
+                }
+
+                let block_roots = block_roots
+                    .into_iter()
+                    .take(MAX_FOR_DOS_PREVENTION.try_into()?);
+                let envelopes = controller.execution_payload_envelopes_by_roots(block_roots)?;
+
+                for envelope in envelopes {
+                    debug!(
+                        "sending ExecutionPayloadEnvelopesByRoot response chunk \
+                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                        block_root: {:?})",
+                        envelope.message.beacon_block_root,
+                    );
+
+                    ServiceInboundMessage::SendResponse(
+                        peer_id,
+                        inbound_request_id,
+                        Box::new(Response::ExecutionPayloadEnvelopesByRoot(Some(envelope))),
+                    )
+                    .send(&network_to_service_tx);
+                }
+
+                debug!("terminating ExecutionPayloadEnvelopesByRoot response stream (TODO stub)");
+
+                // Send stream termination
+                ServiceInboundMessage::SendResponse(
+                    peer_id,
+                    inbound_request_id,
+                    Box::new(Response::ExecutionPayloadEnvelopesByRoot(None)),
+                )
+                .send(&network_to_service_tx);
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
+    }
+
     fn handle_blobs_by_range_request(
         &self,
         peer_id: PeerId,
@@ -1443,7 +1605,7 @@ impl<P: Preset> Network<P> {
                 )?;
 
                 // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
-                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index()));
 
                 for data_column_sidecar in data_column_sidecars {
                     let data_column_identifier: DataColumnIdentifier =
@@ -1784,8 +1946,7 @@ impl<P: Preset> Network<P> {
                 debug!(
                     "received DataColumnsByRange response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
-                    slot: {}, id: {data_column_identifier:?})",
-                    data_column_sidecar.slot(),
+                    data_column_identifier: {data_column_identifier:?})",
                 );
 
                 P2pToSync::RequestedDataColumnSidecar(
@@ -1812,8 +1973,7 @@ impl<P: Preset> Network<P> {
                 debug!(
                     "received DataColumnsByRoot response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
-                    slot: {}, id: {data_column_identifier:?})",
-                    data_column_sidecar.slot(),
+                    data_column_identifier: {data_column_identifier:?})",
                 );
 
                 P2pToSync::RequestedDataColumnSidecar(
@@ -1829,6 +1989,54 @@ impl<P: Preset> Network<P> {
                     "peer {peer_id} terminated DataColumnsByRoot response stream for \
                     app_request_id: {app_request_id:?}"
                 );
+            }
+            Response::ExecutionPayloadEnvelopesByRange(Some(envelope)) => {
+                debug!(
+                    "received ExecutionPayloadEnvelopesByRange response \
+                    (peer_id: {peer_id}, slot: {})",
+                    envelope.message.slot,
+                );
+
+                P2pToSync::RequestedExecutionPayloadEnvelope(
+                    envelope,
+                    peer_id,
+                    app_request_id,
+                    RPCRequestType::Range,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::ExecutionPayloadEnvelopesByRange(None) => {
+                debug!(
+                    "peer {peer_id} terminated ExecutionPayloadEnvelopesByRange response stream"
+                );
+
+                P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(peer_id, app_request_id)
+                    .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::ExecutionPayloadEnvelopesByRoot(Some(envelope)) => {
+                debug!(
+                    "received ExecutionPayloadEnvelopesByRoot response chunk \
+                    (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
+                    block_root: {:?})",
+                    envelope.message.beacon_block_root,
+                );
+
+                P2pToSync::RequestedExecutionPayloadEnvelope(
+                    envelope,
+                    peer_id,
+                    app_request_id,
+                    RPCRequestType::Root,
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            Response::ExecutionPayloadEnvelopesByRoot(None) => {
+                debug!(
+                    "peer {peer_id} terminated ExecutionPayloadEnvelopesByRoot response stream \
+                    (app_request_id: {app_request_id:?})"
+                );
+
+                P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(peer_id, app_request_id)
+                    .send(&self.channels.p2p_to_sync_tx);
             }
             Response::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)
@@ -2260,6 +2468,50 @@ impl<P: Preset> Network<P> {
         );
 
         self.request(peer_id, app_request_id, RequestType::BlobsByRoot(request));
+    }
+
+    fn request_execution_payload_envelopes_by_range(
+        &self,
+        app_request_id: AppRequestId,
+        peer_id: PeerId,
+        start_slot: Slot,
+        count: u64,
+    ) {
+        let request = ExecutionPayloadEnvelopesByRangeRequest { start_slot, count };
+
+        debug!(
+            "sending ExecutionPayloadEnvelopesByRange request (app_request_id: {app_request_id:?}, \
+            peer_id: {peer_id}, request: {request:?})",
+        );
+
+        self.request(
+            peer_id,
+            app_request_id,
+            RequestType::ExecutionPayloadEnvelopesByRange(request),
+        );
+    }
+
+    fn request_execution_payload_envelopes_by_root(
+        &self,
+        app_request_id: AppRequestId,
+        peer_id: PeerId,
+        block_roots: Vec<H256>,
+    ) {
+        let request = ExecutionPayloadEnvelopesByRootRequest::new(
+            self.controller.chain_config(),
+            block_roots.into_iter(),
+        );
+
+        debug!(
+            "sending ExecutionPayloadEnvelopesByRoot request (app_request_id: {app_request_id:?}, \
+            peer_id: {peer_id}, request: {request:?})",
+        );
+
+        self.request(
+            peer_id,
+            app_request_id,
+            RequestType::ExecutionPayloadEnvelopesByRoot(request),
+        );
     }
 
     fn request_blocks_by_range(

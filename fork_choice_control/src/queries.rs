@@ -17,12 +17,10 @@ use std_ext::ArcExt;
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
-    combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -518,6 +516,65 @@ where
         self.blob_sidecars_by_ids(blob_ids)
     }
 
+    pub fn execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let snapshot = self.snapshot();
+        let storage = self.storage();
+
+        // 1. Check unfinalized
+        if let Some(envelope) = snapshot.cached_execution_payload_envelope(block_root) {
+            return Ok(Some(envelope));
+        }
+
+        // 2. Fallback to database (stub for now)
+        storage.execution_payload_envelope_by_root(block_root)
+    }
+
+    pub fn execution_payload_envelopes_by_range(
+        &self,
+        range: Range<Slot>,
+    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        // 1. Get canonical chain blocks first
+        let canonical_chain_blocks = self.blocks_by_range(range)?;
+
+        // 2. Get envelope for each block_root (if exists)
+        let envelopes = canonical_chain_blocks
+            .iter()
+            .filter_map(|BlockWithRoot { root, .. }| {
+                self.execution_payload_envelope_by_root(*root)
+                    .ok()
+                    .flatten()
+            })
+            .collect();
+
+        Ok(envelopes)
+    }
+
+    pub fn execution_payload_envelopes_by_roots(
+        &self,
+        block_roots: impl IntoIterator<Item = H256> + Send,
+    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let snapshot = self.snapshot();
+        let storage = self.storage();
+
+        let envelopes = block_roots
+            .into_iter()
+            .filter_map(|block_root| {
+                // Check cache then fallback to database
+                match snapshot.cached_execution_payload_envelope(block_root) {
+                    Some(envelope) => Some(Ok(envelope)),
+                    None => storage
+                        .execution_payload_envelope_by_root(block_root)
+                        .transpose(),
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(envelopes)
+    }
+
     pub fn blocks_by_root(
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,
@@ -767,16 +824,27 @@ where
         parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        self.store_snapshot()
-            .validate_data_column_sidecar_with_state(
-                data_column_sidecar,
-                block_seen,
-                origin,
-                validate_block_presence,
-                parent_fn,
-                state_fn,
-                None,
-            )
+        match Arc::unwrap_or_clone(data_column_sidecar) {
+            DataColumnSidecar::Fulu(data_column_sidecar) => self
+                .store_snapshot()
+                .validate_fulu_data_column_sidecar_with_state(
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    validate_block_presence,
+                    parent_fn,
+                    state_fn,
+                    None,
+                ),
+            DataColumnSidecar::Gloas(data_column_sidecar) => self
+                .store_snapshot()
+                .validate_gloas_data_column_sidecar_with_state(
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    None,
+                ),
+        }
     }
 }
 
@@ -1141,6 +1209,15 @@ impl<P: Preset> Snapshot<'_, P> {
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         self.store_snapshot
             .cached_data_column_sidecar_by_id(data_column_id)
+    }
+
+    #[must_use]
+    pub(crate) fn cached_execution_payload_envelope(
+        &self,
+        block_root: H256,
+    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+        self.store_snapshot
+            .cached_execution_payload_envelope_by_root(block_root)
     }
 }
 

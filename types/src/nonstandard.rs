@@ -19,13 +19,13 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, DataColumnSidecar, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::containers::DataColumnIdentifier,
     phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
     preset::Preset,
 };
@@ -61,6 +61,7 @@ pub enum Phase {
     Deneb,
     Electra,
     Fulu,
+    Gloas,
 }
 
 impl Phase {
@@ -607,6 +608,7 @@ mod tests {
             Phase::Deneb,
             Phase::Electra,
             Phase::Fulu,
+            Phase::Gloas,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);
