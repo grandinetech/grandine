@@ -40,6 +40,7 @@ use logging::{
     debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
     PEER_LOG_METRICS,
 };
+use tracing::debug;
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -60,7 +61,6 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},

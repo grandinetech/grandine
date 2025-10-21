@@ -26,6 +26,7 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use tracing::debug;
 use prometheus_metrics::Metrics;
 use ssz::{ContiguousList, SszReadDefault};
 use std_ext::ArcExt as _;
@@ -98,6 +99,7 @@ pub struct BlockSyncService<P: Preset> {
     received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+    received_envelope_roots: HashMap<H256, Slot>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
@@ -241,6 +243,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_blob_sidecars,
             received_block_roots: HashMap::new(),
             received_data_column_sidecars,
+            received_envelope_roots: HashMap::new(),
             data_dumper,
             network_globals,
             fork_choice_to_sync_rx,
@@ -555,23 +558,59 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready();
                         }
-                        P2pToSync::RequestedExecutionPayloadEnvelope(_envelope, _peer_id, _request_id, _request_type) => {
-                            // TODO(EPBS): Implement ExecutionPayloadEnvelope handling
-                            // Need to:
-                            // - Record received response in sync_manager
-                            // - Determine request direction (Forward/Back)
-                            // - Register envelope and call controller.on_requested_execution_payload_envelope()
-                            warn!("ExecutionPayloadEnvelope handling not yet implemented");
+                        P2pToSync::RequestedExecutionPayloadEnvelope(envelope, peer_id, request_id, request_type) => {
+                            let block_root = envelope.message.beacon_block_root;
+
+                            self.sync_manager.record_received_execution_payload_envelope_response(
+                                block_root,
+                                peer_id,
+                                request_id,
+                            );
+
+                            let request_direction = match request_type {
+                                RPCRequestType::Root => SyncDirection::Forward,
+                                RPCRequestType::Range => self
+                                    .sync_manager
+                                    .request_direction(request_id)
+                                    .unwrap_or(self.sync_direction),
+                            };
+
+                            match request_direction {
+                                SyncDirection::Forward => {
+                                    let envelope_slot = envelope.message.slot;
+
+                                    if !self.controller.contains_block(block_root)
+                                        && self.register_new_received_envelope(block_root, envelope_slot)
+                                    {
+                                        // TODO(CEPBS-ONTROLLER): Add controller.on_requested_execution_payload_envelope()
+
+                                        debug!(
+                                            "received execution payload envelope (block_root: {block_root:?}, \
+                                             slot: {envelope_slot}, peer_id: {peer_id}, request_id: {request_id:?})"
+                                        );
+                                    }
+                                }
+                                SyncDirection::Back => {
+                                    if let Some(back_sync) = self.back_sync.as_mut() {
+                                        // TODO(BACK_SYNC): Add push_execution_payload_envelope method
+                                        // back_sync.push_execution_payload_envelope(envelope);
+                                        debug!(
+                                            "received execution payload envelope for back sync (block_root: {block_root:?}, \
+                                             peer_id: {peer_id})"
+                                        );
+                                    }
+                                }
+                            }
                         }
-                        P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(_peer_id, _request_id) => {
-                            // TODO(EPBS): Implement ByRange request completion
-                            // Need to call sync_manager method to mark request finished
-                            warn!("ExecutionPayloadEnvelopesByRange completion not yet implemented");
+                        P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(_peer_id, request_id) => {
+                            let request_direction = self.sync_manager.request_direction(request_id);
+
+                            self.sync_manager
+                                .execution_payload_envelopes_by_range_request_finished(request_id, request_direction);
                         }
-                        P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(_peer_id, _request_id) => {
-                            // TODO(EPBS): Implement ByRoot request completion
-                            // Similar to ByRange completion
-                            warn!("ExecutionPayloadEnvelopesByRoot completion not yet implemented");
+                        P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(_peer_id, request_id) => {
+                            self.sync_manager
+                                .execution_payload_envelopes_by_root_request_finished(request_id);
                         }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
@@ -583,6 +622,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
                             }
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
+                            self.received_envelope_roots.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
@@ -634,6 +674,7 @@ impl<P: Preset> BlockSyncService<P> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
         self.request_expired_data_column_range_requests()?;
+        self.request_expired_execution_payload_envelope_range_requests()?;
 
         // Check if batch has finished
         if !self.sync_manager.ready_to_request_by_range() {
@@ -779,7 +820,9 @@ impl<P: Preset> BlockSyncService<P> {
             }
 
             match target {
-                SyncTarget::BlobSidecar | SyncTarget::Block => {
+                SyncTarget::BlobSidecar
+                | SyncTarget::Block
+                | SyncTarget::ExecutionPayloadEnvelope => {
                     let request_id = self.request_id()?;
                     let peer = self
                         .sync_manager
@@ -789,6 +832,11 @@ impl<P: Preset> BlockSyncService<P> {
                         if target == SyncTarget::BlobSidecar {
                             SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count)
                                 .send(&self.sync_to_p2p_tx);
+                        } else if target == SyncTarget::ExecutionPayloadEnvelope {
+                            SyncToP2p::RequestExecutionPayloadEnvelopesByRange(
+                                request_id, peer_id, start_slot, count,
+                            )
+                            .send(&self.sync_to_p2p_tx);
                         } else {
                             SyncToP2p::RequestBlocksByRange(request_id, peer_id, start_slot, count)
                                 .send(&self.sync_to_p2p_tx);
@@ -907,6 +955,16 @@ impl<P: Preset> BlockSyncService<P> {
         self.retry_sync_batches(expired_batches)
     }
 
+    fn request_expired_execution_payload_envelope_range_requests(&mut self) -> Result<()> {
+        let expired_batches = self
+            .sync_manager
+            .expired_execution_payload_envelope_range_batches()
+            .map(|(batch, _)| batch)
+            .collect();
+
+        self.retry_sync_batches(expired_batches)
+    }
+
     fn request_blobs_and_blocks_if_ready(&self) {
         BlockSyncServiceMessage::RequestData.send(&self.self_tx);
     }
@@ -915,6 +973,7 @@ impl<P: Preset> BlockSyncService<P> {
         self.request_expired_blob_range_requests()?;
         self.request_expired_block_range_requests()?;
         self.request_expired_data_column_range_requests()?;
+        self.request_expired_execution_payload_envelope_range_requests()?;
 
         if !self.sync_manager.ready_to_request_by_range() {
             return Ok(());
@@ -1022,6 +1081,15 @@ impl<P: Preset> BlockSyncService<P> {
 
                     SyncToP2p::RequestBlocksByRange(request_id, peer_id, start_slot, count)
                         .send(&self.sync_to_p2p_tx);
+                }
+                SyncTarget::ExecutionPayloadEnvelope => {
+                    self.sync_manager
+                        .add_execution_payload_envelope_request_by_range(request_id, batch);
+
+                    SyncToP2p::RequestExecutionPayloadEnvelopesByRange(
+                        request_id, peer_id, start_slot, count,
+                    )
+                    .send(&self.sync_to_p2p_tx);
                 }
             }
         }
@@ -1177,6 +1245,51 @@ impl<P: Preset> BlockSyncService<P> {
         {
             SyncToP2p::RequestBlockByRoot(request_id, peer_id, block_root)
                 .send(&self.sync_to_p2p_tx);
+        }
+
+        Ok(())
+    }
+
+    fn request_needed_execution_payload_envelope(
+        &mut self,
+        block_root: H256,
+        peer_id: Option<PeerId>,
+    ) -> Result<()> {
+        if !self.is_forward_synced {
+            return Ok(());
+        }
+
+        if !self
+            .sync_manager
+            .ready_to_request_execution_payload_envelope_by_root(block_root, peer_id)
+        {
+            return Ok(());
+        }
+
+        if self.received_envelope_roots.contains_key(&block_root) {
+            debug!(
+                "cannot request ExecutionPayloadEnvelopesByRoot: requested envelope has been received: \
+                 {block_root:?}"
+            );
+            return Ok(());
+        }
+
+        let request_id = self.request_id()?;
+
+        let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
+            return Ok(());
+        };
+
+        if self
+            .sync_manager
+            .add_execution_payload_envelope_request_by_root(block_root, peer_id)
+        {
+            SyncToP2p::RequestExecutionPayloadEnvelopesByRoot(
+                request_id,
+                peer_id,
+                vec![block_root],
+            )
+            .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())
@@ -1416,6 +1529,7 @@ impl<P: Preset> BlockSyncService<P> {
                 self.received_block_roots = HashMap::new();
                 self.received_blob_sidecars.clear();
                 self.received_data_column_sidecars.clear();
+                self.received_envelope_roots = HashMap::new();
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready();
@@ -1460,6 +1574,12 @@ impl<P: Preset> BlockSyncService<P> {
             .is_none()
     }
 
+    fn register_new_received_envelope(&mut self, block_root: H256, slot: Slot) -> bool {
+        self.received_envelope_roots
+            .insert(block_root, slot)
+            .is_none()
+    }
+
     fn track_collection_metrics(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
@@ -1483,6 +1603,13 @@ impl<P: Preset> BlockSyncService<P> {
                 &type_name,
                 "received_data_column_sidecars",
                 self.received_data_column_sidecars.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "received_envelope_roots",
+                self.received_envelope_roots.len(),
             );
         }
     }
