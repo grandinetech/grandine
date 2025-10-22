@@ -434,10 +434,6 @@ serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0', features = ['compress'] }
-slog = { version = '2', features = ['max_level_trace'] }
-slog-async = '2'
-slog-stdlog = '4'
-slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 sp1-helper = '5.2.1'
@@ -463,7 +459,8 @@ tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
-tracing-subscriber = { version = '0.3', features = ['env-filter'] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-test = "0.2"
 triomphe = '0.1'
 tynm = '0.2'
 typenum = '1'

@@ -3,7 +3,7 @@ use core::net::SocketAddr;
 use anyhow::Result;
 use eth2_libp2p::{ListenAddress, NetworkConfig};
 use igd_next::{Gateway, PortMappingProtocol, SearchOptions};
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 
 pub struct PortMappings {
     udp_mapping: u16,
@@ -12,7 +12,7 @@ pub struct PortMappings {
 impl Drop for PortMappings {
     fn drop(&mut self) {
         if let Err(error) = self.remove() {
-            warn!("Unable to remove UPnP port mappings: {error}");
+            warn_with_peers!("Unable to remove UPnP port mappings: {error}");
         }
     }
 }
@@ -40,7 +40,9 @@ impl PortMappings {
             "grandine-upnp-udp",
         )?;
 
-        info!("created UPnP mapping for discovery service {local_udp_addr}/{upnp_udp_socket_addr}");
+        info_with_peers!(
+            "created UPnP mapping for discovery service {local_udp_addr}/{upnp_udp_socket_addr}"
+        );
 
         Ok(Self {
             udp_mapping: udp_port,
@@ -56,9 +58,11 @@ impl PortMappings {
 
 fn remove_upnp_mapping(gateway: &Gateway, protocol: PortMappingProtocol, external_port: u16) {
     match gateway.remove_port(protocol, external_port) {
-        Ok(()) => info!("Removed UPnP mapping for {protocol} port {external_port}"),
+        Ok(()) => info_with_peers!("Removed UPnP mapping for {protocol} port {external_port}"),
         Err(error) => {
-            warn!("Unable to remove UPnP mapping for {protocol} port {external_port}: {error}");
+            warn_with_peers!(
+                "Unable to remove UPnP mapping for {protocol} port {external_port}: {error}"
+            );
         }
     }
 }

@@ -1,11 +1,6 @@
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
-use helper_functions::{
-    accessors::{get_beacon_proposer_indices, get_current_epoch, get_next_epoch},
-    electra::{initiate_validator_exit, is_eligible_for_activation_queue},
-    misc::{compute_activation_exit_epoch, vec_of_default},
-    predicates::{is_active_validator, is_eligible_for_activation},
-};
+use helper_functions::accessors::{get_beacon_proposer_indices, get_current_epoch, get_next_epoch};
 use pubkey_cache::PubkeyCache;
 use ssz::{PersistentVector, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
@@ -17,9 +12,8 @@ use types::{
 
 use super::epoch_intermediates;
 use crate::{
-    altair::{self, EpochDeltasForTransition, EpochReport},
+    altair::{self, EpochDeltasForTransition},
     electra, unphased,
-    unphased::ValidatorSummary,
 };
 
 #[cfg(feature = "metrics")]
@@ -62,7 +56,7 @@ pub fn process_epoch(
     );
 
     unphased::process_rewards_and_penalties(state, epoch_deltas);
-    process_registry_updates(config, state, summaries.as_mut_slice())?;
+    electra::process_registry_updates(config, state, summaries.as_mut_slice())?;
     electra::process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
     electra::process_pending_deposits(config, pubkey_cache, state)?;
@@ -101,131 +95,6 @@ fn process_historical_summaries_update<P: Preset>(state: &mut FuluBeaconState<P>
     Ok(())
 }
 
-pub fn epoch_report<P: Preset>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &mut FuluBeaconState<P>,
-) -> Result<EpochReport> {
-    let (statistics, mut summaries, participation) = altair::statistics(state);
-
-    altair::process_justification_and_finalization(state, statistics);
-
-    altair::process_inactivity_updates(
-        config,
-        state,
-        summaries.iter().copied(),
-        participation.iter().copied(),
-    );
-
-    // Rewards and penalties are not applied in the genesis epoch. Return zero deltas for states in
-    // the genesis epoch to avoid making misleading reports. The check cannot be done inside
-    // `epoch_deltas` because some `rewards` test cases compute deltas in the genesis epoch.
-    let epoch_deltas = if unphased::should_process_rewards_and_penalties(state) {
-        epoch_intermediates::epoch_deltas(
-            config,
-            state,
-            statistics,
-            summaries.iter().copied(),
-            participation,
-        )
-    } else {
-        vec_of_default(state)
-    };
-
-    unphased::process_rewards_and_penalties(state, epoch_deltas.iter().copied());
-    process_registry_updates(config, state, summaries.as_mut_slice())?;
-
-    let slashing_penalties = electra::process_slashings(state, summaries.iter().copied());
-    let post_balances = state.balances.into_iter().copied().collect();
-
-    // Do the rest of epoch processing to leave the state valid for further transitions.
-    // This way it can be used to calculate statistics for multiple epochs in a row.
-    unphased::process_eth1_data_reset(state);
-    electra::process_effective_balance_updates(state);
-    unphased::process_slashings_reset(state);
-    unphased::process_randao_mixes_reset(state);
-    unphased::process_historical_roots_update(state)?;
-    altair::process_participation_flag_updates(state);
-    altair::process_sync_committee_updates(pubkey_cache, state)?;
-
-    state.cache.advance_epoch();
-
-    Ok(EpochReport {
-        statistics,
-        summaries,
-        epoch_deltas,
-        slashing_penalties,
-        post_balances,
-    })
-}
-
-fn process_registry_updates<P: Preset>(
-    config: &Config,
-    state: &mut FuluBeaconState<P>,
-    summaries: &mut [impl ValidatorSummary],
-) -> Result<()> {
-    let current_epoch = get_current_epoch(state);
-    let next_epoch = get_next_epoch(state);
-
-    // The indices collected in these do not overlap.
-    // See <https://github.com/protolambda/eth2-docs/tree/de65f38857f1e27ffb6f25107d61e795cf1a5ad7#registry-updates>
-    //
-    // These could be computed in `epoch_intermediates::statistics`, but doing so causes a slowdown.
-    let mut eligible_for_activation_queue = vec![];
-    let mut ejections = vec![];
-    let mut activation_queue = vec![];
-
-    for (validator, validator_index) in state.validators().into_iter().zip(0..) {
-        if is_eligible_for_activation_queue::<P>(validator) {
-            eligible_for_activation_queue.push(validator_index);
-        }
-
-        if is_active_validator(validator, current_epoch)
-            && validator.effective_balance <= config.ejection_balance
-        {
-            ejections.push(validator_index);
-        }
-
-        if is_eligible_for_activation(state, validator) {
-            activation_queue.push((validator_index, validator.activation_eligibility_epoch));
-        }
-    }
-
-    // > Process activation eligibility and ejections
-    for validator_index in eligible_for_activation_queue {
-        state
-            .validators_mut()
-            .get_mut(validator_index)?
-            .activation_eligibility_epoch = next_epoch;
-    }
-
-    for validator_index in ejections {
-        let index = usize::try_from(validator_index)?;
-
-        initiate_validator_exit(config, state, validator_index)?;
-
-        // `process_slashings` depends on `Validator.withdrawable_epoch`,
-        // which may have been modified by `initiate_validator_exit`.
-        // However, no test cases in `consensus-spec-tests` fail if this is absent.
-        summaries[index].update_from(state.validators().get(validator_index)?);
-    }
-
-    // > Activate all eligible validators
-    let activation_exit_epoch = compute_activation_exit_epoch::<P>(current_epoch);
-
-    for validator_index in activation_queue
-        .into_iter()
-        .map(|(validator_index, _)| validator_index)
-    {
-        state
-            .validators_mut()
-            .get_mut(validator_index)?
-            .activation_epoch = activation_exit_epoch;
-    }
-
-    Ok(())
-}
-
 fn process_proposer_lookahead<P: Preset>(
     config: &Config,
     state: &mut FuluBeaconState<P>,
@@ -250,6 +119,7 @@ fn process_proposer_lookahead<P: Preset>(
 
 #[cfg(test)]
 mod spec_tests {
+    use helper_functions::misc::vec_of_default;
     use spec_test_utils::Case;
     use test_generator::test_resources;
     use types::preset::{Mainnet, Minimal};
@@ -503,7 +373,7 @@ mod spec_tests {
         run_case::<P>(case, |_, state| {
             let mut summaries: Vec<ValidatorSummary> = vec_of_default(state);
 
-            process_registry_updates(&P::default_config(), state, summaries.as_mut_slice())
+            electra::process_registry_updates(&P::default_config(), state, summaries.as_mut_slice())
         });
     }
 

@@ -9,7 +9,7 @@ use futures::{
     stream::StreamExt as _,
 };
 use helper_functions::misc;
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use operation_pools::AttestationAggPool;
 use types::{
     phase0::primitives::{Epoch, NodeId, Slot, ValidatorIndex},
@@ -61,7 +61,7 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
                     match message {
                         SubnetMessage::Slot(wait_group, slot) => {
                             if let Err(error) = self.on_slot(slot) {
-                                warn!("failed to advance slot in subnet service: {error}");
+                                warn_with_peers!("failed to advance slot in subnet service: {error}");
                             }
 
                             // `wait_group` must not be dropped before the message is handled.
@@ -93,7 +93,7 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
                     self.update_beacon_committee_subscriptions(current_slot, subscriptions);
 
                 if receiver.send(result).is_err() {
-                    debug!("failed to send response because the receiver was dropped");
+                    debug_with_peers!("failed to send response because the receiver was dropped");
                 }
             }
             ToSubnetService::UpdateSyncCommitteeSubscriptions(current_epoch, subscriptions) => {

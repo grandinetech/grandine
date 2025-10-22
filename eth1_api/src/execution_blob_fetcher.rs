@@ -13,7 +13,7 @@ use futures::{
     StreamExt as _,
 };
 use helper_functions::misc;
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
@@ -99,7 +99,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         let block_root = block.message().hash_tree_root();
 
         if self.controller.contains_block(block_root) {
-            debug!("cannot fetch blobs from EL: block has been imported");
+            debug_with_peers!("cannot fetch blobs from EL: block has been imported");
             return;
         }
 
@@ -118,7 +118,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .collect::<Vec<_>>();
 
             if kzg_commitments.is_empty() {
-                debug!(
+                debug_with_peers!(
                     "cannot fetch blobs from EL: all requested blob sidecars have been received"
                 );
                 return;
@@ -151,7 +151,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             let blob_identifier = BlobIdentifier { block_root, index };
 
                             if self.received_blob_sidecars.contains_key(&blob_identifier) {
-                                debug!(
+                                debug_with_peers!(
                                     "received blob from EL is already known: {blob_identifier:?}, \
                                      slot: {slot}"
                                 );
@@ -165,7 +165,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     proof,
                                 ) {
                                     Ok(blob_sidecar) => {
-                                        debug!(
+                                        debug_with_peers!(
                                             "received blob sidecar from EL: {blob_identifier:?}, \
                                              slot: {slot}"
                                         );
@@ -175,7 +175,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                         self.received_blob_sidecars.insert(blob_identifier, slot);
                                         blob_sidecars.push(Arc::new(blob_sidecar));
                                     }
-                                    Err(error) => warn!(
+                                    Err(error) => warn_with_peers!(
                                         "failed to construct blob sidecar with blob and proof \
                                          received from execution layer: {error:?}"
                                     ),
@@ -183,7 +183,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             }
                         }
                     }
-                    Err(error) => warn!("engine_getBlobsV1 call failed: {error}"),
+                    Err(error) => warn_with_peers!("engine_getBlobsV1 call failed: {error}"),
                 }
 
                 for blob_sidecar in blob_sidecars {
@@ -200,7 +200,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 })
                 .collect::<Vec<_>>();
 
-            debug!("missing blob sidecars after EL: {missing_blob_identifiers:?}");
+            debug_with_peers!("missing blob sidecars after EL: {missing_blob_identifiers:?}");
 
             if !missing_blob_identifiers.is_empty() {
                 BlobFetcherToP2p::BlobsNeeded(missing_blob_identifiers, slot, peer_id)
@@ -223,7 +223,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .controller
                 .is_sidecars_construction_started(&block_root)
         {
-            debug!("cannot fetch blobs from EL: block has been imported, or is being imported");
+            debug_with_peers!(
+                "cannot fetch blobs from EL: block has been imported, or is being imported"
+            );
             return;
         }
 
@@ -238,7 +240,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             .collect::<HashSet<ColumnIndex>>();
 
         if missing_columns_indices.is_empty() {
-            debug!(
+            debug_with_peers!(
                 "cannot fetch blobs from EL: all missing data column sidecars have been received"
             );
             return;
@@ -279,7 +281,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     .map(|BlobAndProofV2 { blob, proofs }| (blob, proofs))
                                     .unzip();
 
-                            debug!(
+                            debug_with_peers!(
                                 "received all {expected_blobs_count} blob sidecars from EL at slot: {slot}",
                             );
 
@@ -342,14 +344,14 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                             Err(error) => {
                                                 controller.mark_sidecar_construction_failed(&block_root);
 
-                                                warn!(
+                                                warn_with_peers!(
                                                     "failed to construct data column sidecars with \
                                                     cells and kzg proofs: {error:?}"
                                                 );
                                             }
                                         }
                                     }
-                                    Err(error) => warn!(
+                                    Err(error) => warn_with_peers!(
                                         "failed to convert blobs received from EL into extended cells: {error:?}"
                                     ),
                                 }
@@ -365,21 +367,21 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     }
                                 }
                                 Err(error) => {
-                                    warn!("failed to reconstruct data columns from EL response: {error:?}")
+                                    warn_with_peers!("failed to reconstruct data columns from EL response: {error:?}")
                                 }
                             }
                         } else {
-                            warn!(
+                            warn_with_peers!(
                                 "EL must response all blobs or null (expected: {}, got: {})",
                                 expected_blobs_count,
                                 blobs_and_proofs.len(),
                             );
                         }
                     } else {
-                        debug!("EL doesn't has all blobs to response back",);
+                        debug_with_peers!("EL doesn't has all blobs to response back",);
                     }
                 }
-                Err(error) => warn!("engine_getBlobsV2 call failed: {error}"),
+                Err(error) => warn_with_peers!("engine_getBlobsV2 call failed: {error}"),
             }
         }
 
@@ -400,7 +402,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 })
                 .collect::<Vec<_>>();
 
-            debug!("missing data columns sidecars: {missing_indices:?} at block {block_root}");
+            debug_with_peers!(
+                "missing data columns sidecars: {missing_indices:?} at block {block_root}"
+            );
 
             if !missing_indices.is_empty() {
                 let columns = ContiguousList::try_from(missing_indices)

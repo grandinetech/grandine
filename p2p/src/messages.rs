@@ -13,7 +13,7 @@ use eth2_libp2p::{
     ReportSource, Response, Subnet, SubnetDiscovery,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
-use log::debug;
+use logging::debug_with_peers;
 use operation_pools::PoolRejectionReason;
 use serde::Serialize;
 use ssz::ContiguousList;
@@ -80,7 +80,7 @@ pub enum P2pToSync<P: Preset> {
 impl<P: Preset> P2pToSync<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to block sync service failed because the receiver was dropped");
+            debug_with_peers!("send to block sync service failed because the receiver was dropped");
         }
     }
 }
@@ -109,7 +109,7 @@ pub enum ApiToP2p<P: Preset> {
 impl<P: Preset> ApiToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to p2p failed because the receiver was dropped");
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
         }
     }
 }
@@ -122,7 +122,7 @@ pub enum SyncToApi {
 impl SyncToApi {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to HTTP API failed because the receiver was dropped");
+            debug_with_peers!("send to HTTP API failed because the receiver was dropped");
         }
     }
 }
@@ -135,7 +135,7 @@ pub enum SyncToMetrics {
 impl SyncToMetrics {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to metrics failed because the receiver was dropped");
+            debug_with_peers!("send to metrics failed because the receiver was dropped");
         }
     }
 }
@@ -163,7 +163,7 @@ pub enum SyncToP2p<P: Preset> {
 impl<P: Preset> SyncToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to p2p failed because the receiver was dropped");
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
         }
     }
 }
@@ -175,7 +175,7 @@ pub enum ArchiverToSync {
 impl ArchiverToSync {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to block sync service failed because the receiver was dropped");
+            debug_with_peers!("send to block sync service failed because the receiver was dropped");
         }
     }
 }
@@ -187,7 +187,7 @@ pub enum BlockSyncServiceMessage {
 impl BlockSyncServiceMessage {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to block sync service failed because the receiver was dropped");
+            debug_with_peers!("send to block sync service failed because the receiver was dropped");
         }
     }
 }
@@ -211,7 +211,7 @@ pub enum ValidatorToP2p<P: Preset> {
 impl<P: Preset> ValidatorToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to p2p failed because the receiver was dropped");
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
         }
     }
 }
@@ -225,7 +225,7 @@ pub enum P2pToValidator<P: Preset> {
 impl<P: Preset> P2pToValidator<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to validator failed because the receiver was dropped");
+            debug_with_peers!("send to validator failed because the receiver was dropped");
         }
     }
 }
@@ -238,7 +238,7 @@ pub enum P2pToSlasher<P: Preset> {
 impl<P: Preset> P2pToSlasher<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to slasher failed because the receiver was dropped");
+            debug_with_peers!("send to slasher failed because the receiver was dropped");
         }
     }
 }
@@ -283,7 +283,7 @@ pub enum ServiceOutboundMessage<P: Preset> {
 impl<P: Preset> ServiceOutboundMessage<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send from network service failed because the receiver was dropped");
+            debug_with_peers!("send from network service failed because the receiver was dropped");
         }
     }
 }
@@ -299,7 +299,7 @@ pub enum SubnetServiceToP2p {
 impl SubnetServiceToP2p {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to p2p failed because the receiver was dropped");
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
         }
     }
 }
@@ -313,7 +313,7 @@ pub enum ToSubnetService {
 impl ToSubnetService {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to subnet service failed because the receiver was dropped");
+            debug_with_peers!("send to subnet service failed because the receiver was dropped");
         }
     }
 }

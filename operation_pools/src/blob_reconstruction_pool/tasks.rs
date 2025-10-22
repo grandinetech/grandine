@@ -2,7 +2,7 @@ use anyhow::Result;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use std::sync::Arc;
 use typenum::Unsigned as _;
@@ -30,17 +30,17 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
         let Ok(available_columns) = controller.data_column_sidecars_by_ids(
             (0..P::NumberOfColumns::U64).map(|index| DataColumnIdentifier { block_root, index }),
         ) else {
-            warn!("failed to retrieve data column sidecar from storage");
+            warn_with_peers!("failed to retrieve data column sidecar from storage");
             return Ok(());
         };
 
         if available_columns.len() == P::NumberOfColumns::USIZE {
-            debug!("no need to reconstruct data columns: {block_root:?}");
+            debug_with_peers!("no need to reconstruct data columns: {block_root:?}");
             return Ok(());
         }
 
         if available_columns.len() * 2 < P::NumberOfColumns::USIZE {
-            warn!(
+            warn_with_peers!(
                 "cannot start reconstruction for block {block_root:?}: \
                 insufficient data columns (available: {})",
                 available_columns.len(),
@@ -49,7 +49,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             return Ok(());
         }
 
-        debug!("starting reconstruction for block: {block_root:?}");
+        debug_with_peers!("starting reconstruction for block: {block_root:?}");
 
         let _columns_reconstruction_timer = metrics
             .as_ref()
@@ -63,7 +63,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
 
         match eip_7594::recover_matrix(&partial_matrix, controller.store_config().kzg_backend) {
             Ok(full_matrix) => {
-                info!("reconstructed missing data columns for block: {block_root:?}");
+                info_with_peers!("reconstructed missing data columns for block: {block_root:?}");
                 controller.on_reconstruction(wait_group, block_root, full_matrix);
 
                 if let Some(metrics) = metrics.as_ref() {
@@ -75,7 +75,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             Err(error) => {
                 controller.mark_sidecar_construction_failed(&block_root);
 
-                warn!(
+                warn_with_peers!(
                     "failed to reconstruct missing data column sidecars for \
                     block_root: {block_root:?}: {error:?}",
                 );

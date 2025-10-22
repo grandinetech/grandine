@@ -13,14 +13,14 @@ features = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
+logging = { workspace = true }
 mime = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true }
 thiserror = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
-tracing = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]

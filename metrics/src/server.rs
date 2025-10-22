@@ -14,7 +14,7 @@ use axum::{
     Router,
 };
 use http_api_utils::{ApiError, ApiMetrics};
-use log::info;
+use logging::info_with_peers;
 use prometheus::TextEncoder;
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -83,7 +83,7 @@ pub async fn run_metrics_server(
 ) -> Result<()> {
     let addr = SocketAddr::from(&config);
 
-    info!("metrics server is listening on {addr}");
+    info_with_peers!("metrics server is listening on {addr}");
 
     let state = MetricsState {
         libp2p_registry: libp2p_registry.map(Arc::new),

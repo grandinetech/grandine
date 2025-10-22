@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
 use derive_more::Debug;
-use log::warn;
+use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use reqwest::Client;
 use types::{phase0::primitives::H256, preset::Preset, redacting_url::RedactingUrl};
@@ -80,7 +80,9 @@ impl Web3Signer {
                         keys.insert(url, Some(remote_keys));
                     }
                 }
-                Err(error) => warn!("failed to load Web3Signer keys from {url}: {error:?}"),
+                Err(error) => {
+                    warn_with_peers!("failed to load Web3Signer keys from {url}: {error:?}")
+                }
             }
         }
 
