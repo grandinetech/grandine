@@ -74,9 +74,7 @@ pub fn initialize_tracing_logger(
         .add_directive(format!("{module_path}=info").parse()?)
         .add_directive(format!("{}=info", module_path!()).parse()?);
 
-    if let Ok(env_filter) =
-        EnvFilter::try_from_env("GRANDINE_LOG").or_else(|_| EnvFilter::try_from_default_env())
-    {
+    if let Ok(env_filter) = EnvFilter::try_from_env("GRANDINE_LOG") {
         for directive in env_filter.to_string().split(',') {
             filter = filter.add_directive(directive.parse()?)
         }
