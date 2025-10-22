@@ -292,7 +292,6 @@ arc-swap = '1'
 assert-json-diff = '2'
 async-channel = '1'
 async-trait = '0.1'
-asynchronous-codec = '0.7'
 axum = { version = '0.8' }
 axum-extra = { version = '0.10', features = ['typed-header', 'query'] }
 base64 = '0.22'
@@ -344,7 +343,7 @@ fs_extra = '1'
 futures = '0.3'
 futures-ticker = '0.0.3'
 futures-timer = '3'
-gag = "1"
+gag = '1'
 generic-array = { version = '0.14', features = ['serde'] }
 getrandom = '0.3'
 git-version = '0.3'
@@ -372,7 +371,7 @@ jwt-simple = { version = '0.12', default-features = false, features = ['pure-rus
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 lazy_static = '1'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = '6f8e7258f4733279080e4bd8345ce50538a40d6e' }
-libp2p = { version = '0.55', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
+libp2p = { version = '0.56', default-features = false, features = ['metrics', 'dns', 'ecdsa', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp'] }
 libp2p-mplex = '0.43'
 libp2p-identity = { version = '0.2.10', features = ['peerid'] }
 local-ip-address = '0.6'
@@ -397,10 +396,8 @@ primitive-types = '0.12'
 proc-macro-crate = '3'
 proc-macro2 = '1'
 prometheus = '0.14'
-prometheus-client = '0.22'
+prometheus-client = '0.23'
 psutil = '3'
-quick-protobuf = '0.8'
-quick-protobuf-codec = '0.3'
 quickcheck = '1'
 quickcheck_macros = '1'
 quote = '1'
@@ -422,7 +419,7 @@ rust-kzg-mcl = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-zkcrypto = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 scrypt = '0.11'
 semver = '1'
-serial_test = "3"
+serial_test = '3'
 serde = { version = '1', features = ['derive', 'rc'] }
 serde-aux = '4'
 serde_json = { version = '1', features = ['preserve_order'] }
@@ -452,7 +449,7 @@ testing_logger = '0.1'
 thiserror = '2'
 tikv-jemalloc-ctl = { version = '0.6', features = ['stats'] }
 tikv-jemallocator = { version = '0.6', features = ['stats', 'background_threads_runtime_support'] }
-tiny-keccak = '2'
+tiny-keccak = { version = '2', features = ['keccak'] }
 tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
 tokio-io-timeout = '1'
 tokio-stream = { version = '0.1', features = ['sync'] }
@@ -460,7 +457,7 @@ tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry", "chrono"] }
+tracing-subscriber = { version = "0.3", features = ['chrono', 'env-filter', 'fmt', 'registry'] }
 tracing-test = "0.2"
 triomphe = '0.1'
 tynm = '0.2'
@@ -471,7 +468,6 @@ unwrap_none = '0.1'
 url = '2'
 uuid = { version = '1', features = ['serde', 'v4'] }
 variant_count = '1'
-void = '1'
 web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 xz2 = { version = "0.1" }
@@ -506,7 +502,7 @@ features = { path = 'features' }
 fork_choice_control = { path = 'fork_choice_control' }
 fork_choice_store = { path = 'fork_choice_store' }
 genesis = { path = 'genesis' }
-gossipsub = { path = 'eth2_libp2p/gossipsub', features = ['serde'] }
+gossipsub = { package = 'libp2p-gossipsub', git = 'https://github.com/sigp/rust-libp2p.git', rev = '5acdf89a65d64098f9346efa5769e57bcd19dea9', features = ['metrics', 'serde'] }
 grandine_version = { path = 'grandine_version' }
 hashing = { path = 'hashing' }
 helper_functions = { path = 'helper_functions' }
@@ -604,6 +600,7 @@ lto = false
 # `geth` responds to invalid payloads with objects containing `method` and `params`.
 # We had to fork `jsonrpc` because it does not allow nonstandard members.
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
+quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '681f413312404ab6e51f0b46f39b0075c6f4ebfd' }
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0' }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
