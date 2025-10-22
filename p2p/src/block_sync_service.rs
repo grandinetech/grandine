@@ -55,7 +55,7 @@ use crate::{
         ArchiverToSync, BlockSyncServiceMessage, P2pToSync, SyncToApi, SyncToMetrics, SyncToP2p,
     },
     misc::{PeerReportReason, RPCRequestType},
-    sync_manager::{SyncBatch, SyncManager, SyncTarget},
+    sync_manager::{SyncBatch, SyncManager},
 };
 
 const LATEST_FINALIZED_BACK_SYNC_CHECKPOINT_KEY: &str = "latest_finalized_back_sync_checkpoint";
@@ -708,35 +708,15 @@ impl<P: Preset> BlockSyncService<P> {
         let sampling_columns = self.controller.sampling_columns();
 
         for batch in batches {
-            let (direction, peer_id, mut start_slot, mut count) = match batch {
-                SyncBatch::Block {
-                    direction,
-                    peer_id,
-                    start_slot,
-                    count,
-                    ..
-                }
-                | SyncBatch::BlobSidecar {
-                    direction,
-                    peer_id,
-                    start_slot,
-                    count,
-                    ..
-                }
-                | SyncBatch::DataColumnSidecar {
-                    direction,
-                    peer_id,
-                    start_slot,
-                    count,
-                    ..
-                } => (direction, peer_id, start_slot, count),
-            };
-            let target = batch.get_target();
+            let direction = batch.get_direction();
+            let peer_id = batch.get_peer_id();
+            let mut start_slot = batch.get_start_slot();
+            let mut count = batch.get_count();
 
             let mut should_penalize_peer = true;
 
-            if direction == SyncDirection::Back && target == SyncTarget::BlobSidecar
-                || target == SyncTarget::DataColumnSidecar
+            if direction == SyncDirection::Back && matches!(batch, SyncBatch::BlobSidecar { .. })
+                || matches!(batch, SyncBatch::DataColumnSidecar { .. })
             {
                 let chain_config = self.controller.chain_config();
                 let data_serve_range_slot = if chain_config
@@ -777,15 +757,15 @@ impl<P: Preset> BlockSyncService<P> {
                 .send(&self.sync_to_p2p_tx);
             }
 
-            match target {
-                SyncTarget::BlobSidecar | SyncTarget::Block => {
+            match batch {
+                SyncBatch::BlobSidecar { .. } | SyncBatch::Block { .. } => {
                     let request_id = self.request_id()?;
                     let peer = self
                         .sync_manager
                         .random_peer(direction == SyncDirection::Back);
 
                     if let Some(peer_id) = peer {
-                        if target == SyncTarget::BlobSidecar {
+                        if matches!(batch, SyncBatch::BlobSidecar { .. }) {
                             SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count)
                                 .send(&self.sync_to_p2p_tx);
                         } else {
@@ -796,74 +776,74 @@ impl<P: Preset> BlockSyncService<P> {
 
                     self.sync_manager.retry_batch(request_id, batch, peer);
                 }
-                SyncTarget::DataColumnSidecar => {
-                    if let Some(ref data_columns) = batch.get_data_columns() {
-                        let mut request_id = self.request_id()?;
-                        let missing_indices = self.sync_manager.missing_column_indices_by_range(
-                            &sampling_columns,
+                SyncBatch::DataColumnSidecar {
+                    ref data_columns, ..
+                } => {
+                    let mut request_id = self.request_id()?;
+                    let missing_indices = self.sync_manager.missing_column_indices_by_range(
+                        &sampling_columns,
+                        start_slot,
+                        count,
+                    );
+
+                    let missing_column_indices = data_columns
+                        .iter()
+                        .filter(|index| missing_indices.contains(index))
+                        .copied()
+                        .collect::<HashSet<_>>();
+
+                    if missing_column_indices.is_empty() {
+                        continue;
+                    }
+
+                    debug!(
+                        "requesting columns ({}): [{}] at start slot: {start_slot}",
+                        missing_column_indices.len(),
+                        missing_column_indices.iter().join(", "),
+                    );
+
+                    let peer_custody_columns_mapping =
+                        match self.sync_manager.map_peer_custody_columns(
+                            missing_column_indices,
                             start_slot,
-                            count,
-                        );
+                            &mut peers_to_request,
+                        ) {
+                            Ok(mapping) => mapping,
+                            Err(error) => {
+                                debug!("retry_sync_batches: {error:?}");
 
-                        let missing_column_indices = data_columns
-                            .iter()
-                            .filter(|index| missing_indices.contains(index))
-                            .copied()
-                            .collect::<HashSet<_>>();
-
-                        if missing_column_indices.is_empty() {
-                            continue;
-                        }
-
-                        debug!(
-                            "requesting columns ({}): [{}] at start slot: {start_slot}",
-                            missing_column_indices.len(),
-                            missing_column_indices.iter().join(", "),
-                        );
-
-                        let peer_custody_columns_mapping =
-                            match self.sync_manager.map_peer_custody_columns(
-                                missing_column_indices,
-                                start_slot,
-                                &mut peers_to_request,
-                            ) {
-                                Ok(mapping) => mapping,
-                                Err(error) => {
-                                    debug!("retry_sync_batches: {error:?}");
-
-                                    self.sync_manager.retry_batch(request_id, batch, None);
-                                    continue;
-                                }
-                            };
-
-                        debug!(
-                            "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
-                            new peers: [{peer_custody_columns_mapping:?}]",
-                            peer_custody_columns_mapping.len(),
-                        );
-
-                        for (peer_id, columns) in peer_custody_columns_mapping {
-                            let columns = ContiguousList::try_from_iter(columns.into_iter())
-                                .map(Arc::new)
-                                .expect("column indices must not be more than NUMBER_OF_COLUMNS");
-
-                            let mut batch = batch.clone();
-                            batch.set_peer_id(peer_id);
-                            batch.increment_retry_count();
-                            if let Err(e) = batch.set_data_columns(columns.clone_arc()) {
-                                error!("Failed to set data columns for batch {:?}: {}", batch, e);
+                                self.sync_manager.retry_batch(request_id, batch, None);
+                                continue;
                             }
+                        };
 
-                            SyncToP2p::RequestDataColumnsByRange(
-                                request_id, peer_id, start_slot, count, columns,
-                            )
-                            .send(&self.sync_to_p2p_tx);
+                    debug!(
+                        "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
+                        new peers: [{peer_custody_columns_mapping:?}]",
+                        peer_custody_columns_mapping.len(),
+                    );
 
-                            self.sync_manager
-                                .retry_batch(request_id, batch, Some(peer_id));
+                    for (peer_id, columns) in peer_custody_columns_mapping {
+                        let columns = ContiguousList::try_from_iter(columns.into_iter())
+                            .map(Arc::new)
+                            .expect("column indices must not be more than NUMBER_OF_COLUMNS");
 
-                            request_id = self.request_id()?;
+                        let mut batch = batch.clone();
+                        batch.set_peer_id(peer_id);
+                        batch.increment_retry_count();
+                        if let Err(e) = batch.set_data_columns(columns.clone_arc()) {
+                            error!("Failed to set data columns for batch {:?}: {}", batch, e);
                         }
+
+                        SyncToP2p::RequestDataColumnsByRange(
+                            request_id, peer_id, start_slot, count, columns,
+                        )
+                        .send(&self.sync_to_p2p_tx);
+
+                        self.sync_manager
+                            .retry_batch(request_id, batch, Some(peer_id));
+
+                        request_id = self.request_id()?;
                     }
                 }
             }
@@ -984,30 +964,13 @@ impl<P: Preset> BlockSyncService<P> {
     fn request_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         for batch in batches {
             let request_id = self.request_id()?;
-            let (peer_id, mut start_slot, mut count) = match batch {
-                SyncBatch::Block {
-                    peer_id,
-                    start_slot,
-                    count,
-                    ..
-                }
-                | SyncBatch::BlobSidecar {
-                    peer_id,
-                    start_slot,
-                    count,
-                    ..
-                }
-                | SyncBatch::DataColumnSidecar {
-                    peer_id,
-                    start_slot,
-                    count,
-                    ..
-                } => (peer_id, start_slot, count),
-            };
-            let target = batch.get_target();
 
-            match target {
-                SyncTarget::DataColumnSidecar => {
+            let peer_id = batch.get_peer_id();
+            let start_slot = batch.get_start_slot();
+            let count = batch.get_count();
+
+            match batch {
+                SyncBatch::DataColumnSidecar { .. } => {
                     let columns = batch.get_data_columns().clone().unwrap_or_default();
 
                     self.sync_manager
@@ -1018,14 +981,14 @@ impl<P: Preset> BlockSyncService<P> {
                     )
                     .send(&self.sync_to_p2p_tx);
                 }
-                SyncTarget::BlobSidecar => {
+                SyncBatch::BlobSidecar { .. } => {
                     self.sync_manager
                         .add_blob_request_by_range(request_id, batch);
 
                     SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count)
                         .send(&self.sync_to_p2p_tx);
                 }
-                SyncTarget::Block => {
+                SyncBatch::Block { .. } => {
                     self.sync_manager
                         .add_block_request_by_range(request_id, batch);
 

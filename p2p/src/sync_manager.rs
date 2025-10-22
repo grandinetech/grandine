@@ -459,8 +459,8 @@ impl<P: Preset> SyncManager<P> {
         match new_peer {
             Some(peer_id) => {
                 if matches!(
-                    batch.get_target(),
-                    SyncTarget::Block | SyncTarget::BlobSidecar
+                    batch,
+                    SyncBatch::Block { .. } | SyncBatch::BlobSidecar { .. }
                 ) {
                     self.log(
                         Level::Debug,
