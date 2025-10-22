@@ -76,12 +76,16 @@ pub enum Error {
     InvalidAttesterSlashing(#[source] AnyhowError),
     #[error("invalid blob index {0}")]
     InvalidBlobIndex(BlobIndex),
+    #[error("invalid blob sidecar")]
+    InvalidBlobSidecar(#[source] AnyhowError),
     #[error("invalid block ID")]
     InvalidBlockId(#[source] AnyhowError),
     #[error("invalid block")]
     InvalidBlock(#[source] AnyhowError),
     #[error("invalid bytes body")]
     InvalidBytesBody(#[source] BytesRejection),
+    #[error("invalid data column sidecar")]
+    InvalidDataColumnSidecar(#[source] AnyhowError),
     #[error("invalid ssz bytes")]
     InvalidSszBody(#[source] ReadError),
     #[error("invalid column index {0}")]
@@ -225,10 +229,12 @@ impl Error {
             | Self::InvalidAggregatesAndProofs(_)
             | Self::InvalidAttestations(_)
             | Self::InvalidAttesterSlashing(_)
+            | Self::InvalidBlobSidecar(_)
             | Self::InvalidBlock(_)
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
             | Self::InvalidColumnIndex(_)
+            | Self::InvalidDataColumnSidecar(_)
             | Self::InvalidRequestConsensusHeader(_)
             | Self::InvalidContributionAndProofs(_)
             | Self::InvalidEpoch(_)

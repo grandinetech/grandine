@@ -3539,12 +3539,12 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
         Ok(Some(ValidationOutcome::Accept)) => {
             publish_block_to_network(block, blob_sidecars, api_to_p2p_tx);
         }
-        Ok(Some(ValidationOutcome::Ignore(true))) => {
-            publish_block_to_network(block, blob_sidecars, api_to_p2p_tx);
+        Ok(Some(ValidationOutcome::Ignore(publishable))) => {
+            if publishable {
+                publish_block_to_network(block, blob_sidecars, api_to_p2p_tx);
+            }
+
             return Ok(Some(StatusCode::ACCEPTED));
-        }
-        Ok(Some(ValidationOutcome::Ignore(false))) => {
-            return Err(Error::UnableToPublishBlock);
         }
         Ok(None) => {
             warn_with_peers!(
@@ -3578,16 +3578,16 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
                 api_to_p2p_tx,
             );
         }
-        Ok(Some(ValidationOutcome::Ignore(true))) => {
-            publish_block_to_network_with_data_column_sidecars(
-                block,
-                data_column_sidecars,
-                api_to_p2p_tx,
-            );
+        Ok(Some(ValidationOutcome::Ignore(publishable))) => {
+            if publishable {
+                publish_block_to_network_with_data_column_sidecars(
+                    block,
+                    data_column_sidecars,
+                    api_to_p2p_tx,
+                );
+            }
+
             return Ok(Some(StatusCode::ACCEPTED));
-        }
-        Ok(Some(ValidationOutcome::Ignore(false))) => {
-            return Err(Error::UnableToPublishBlock);
         }
         Ok(None) => {
             warn_with_peers!(
@@ -3658,15 +3658,18 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
             // Vouch submits blocks it constructs to all beacon nodes it is connected to.
             // The blocks often reach our application through gossip faster than through the API.
             let block_root = block.message().hash_tree_root();
+
             info_with_peers!(
                 "block received through HTTP API was ignored (block root: {block_root:?})"
             );
+
             StatusCode::ACCEPTED
         }
         Ok(None) => {
             warn_with_peers!(
                 "received no block validation response for HTTP API (block: {block:?})"
             );
+
             StatusCode::ACCEPTED
         }
         Err(error) => {
@@ -3738,14 +3741,11 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
                         "block received through HTTP API was ignored (block root: {block_root:?})"
                     );
 
-                    if broadcast_validation == BroadcastValidation::Gossip {
-                        StatusCode::ACCEPTED
-                    } else if publishable {
+                    if broadcast_validation != BroadcastValidation::Gossip && publishable {
                         publish_block_to_network(block, &blob_sidecars, &api_to_p2p_tx);
-                        StatusCode::ACCEPTED
-                    } else {
-                        return Err(Error::UnableToPublishBlock);
                     }
+
+                    StatusCode::ACCEPTED
                 }
             }
         }
@@ -3841,18 +3841,15 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                         "block received through HTTP API was ignored (block root: {block_root:?})"
                     );
 
-                    if broadcast_validation == BroadcastValidation::Gossip {
-                        StatusCode::ACCEPTED
-                    } else if publishable {
+                    if broadcast_validation != BroadcastValidation::Gossip && publishable {
                         publish_block_to_network_with_data_column_sidecars(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
                         );
-                        StatusCode::ACCEPTED
-                    } else {
-                        return Err(Error::UnableToPublishBlock);
                     }
+
+                    StatusCode::ACCEPTED
                 }
             }
         }
@@ -4118,13 +4115,8 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
         .into_iter()
         .collect();
 
-    match blob_sidecar_results {
-        Ok(results) => {
-            if results.contains(&ValidationOutcome::Ignore(false)) {
-                return Err(Error::UnableToPublishBlock);
-            }
-        }
-        Err(error) => return Err(Error::InvalidBlock(error)),
+    if let Err(error) = blob_sidecar_results {
+        return Err(Error::InvalidBlobSidecar(error));
     }
 
     Ok(())
@@ -4156,13 +4148,8 @@ async fn submit_data_column_sidecars<P: Preset, W: Wait>(
         .into_iter()
         .collect();
 
-    match results {
-        Ok(results) => {
-            if results.contains(&ValidationOutcome::Ignore(false)) {
-                return Err(Error::UnableToPublishBlock);
-            }
-        }
-        Err(error) => return Err(Error::InvalidBlock(error)),
+    if let Err(error) = results {
+        return Err(Error::InvalidDataColumnSidecar(error));
     }
 
     Ok(())
