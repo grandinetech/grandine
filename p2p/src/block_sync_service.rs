@@ -795,11 +795,11 @@ impl<P: Preset> BlockSyncService<P> {
                         continue;
                     }
 
-                        debug_with_peers!(
-                            "requesting columns ({}): [{}] at start slot: {start_slot}",
-                            missing_column_indices.len(),
-                            missing_column_indices.iter().join(", "),
-                        );
+                    debug_with_peers!(
+                        "requesting columns ({}): [{}] at start slot: {start_slot}",
+                        missing_column_indices.len(),
+                        missing_column_indices.iter().join(", "),
+                    );
 
                     let peer_custody_columns_mapping =
                         match self.sync_manager.map_peer_custody_columns(
@@ -816,11 +816,11 @@ impl<P: Preset> BlockSyncService<P> {
                             }
                         };
 
-                        debug_with_peers!(
-                            "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
+                    debug_with_peers!(
+                        "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
                             new peers: [{peer_custody_columns_mapping:?}]",
-                            peer_custody_columns_mapping.len(),
-                        );
+                        peer_custody_columns_mapping.len(),
+                    );
 
                     for (peer_id, columns) in peer_custody_columns_mapping {
                         let columns = ContiguousList::try_from_iter(columns.into_iter())
