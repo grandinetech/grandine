@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{Local, SecondsFormat};
-use logging::{crit, debug_with_peers};
+use logging::{debug_with_peers, exception};
 use rayon::ThreadPoolBuilder;
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{
@@ -113,7 +113,7 @@ pub fn initialize_tracing_logger(
         .init();
 
     debug_with_peers!("tracing started!");
-    crit!("crit macro is enabled");
+    exception!("exception macro is enabled");
     Ok(TracingHandle(handle))
 }
 
@@ -162,7 +162,7 @@ mod tests {
     #[serial]
     fn initialize_tracing_logger_info_mode() -> Result<()> {
         use gag::BufferRedirect;
-        use logging::{crit, error_with_peers, info_with_peers, warn_with_peers};
+        use logging::{error_with_peers, exception, info_with_peers, warn_with_peers};
         use std::io::Read;
 
         // stdout redirect to buffer
@@ -173,7 +173,7 @@ mod tests {
         info_with_peers!("info_with_peers test message");
         warn_with_peers!("warn_with_peers test message");
         error_with_peers!("error_with_peers test message");
-        crit!("crit test message");
+        exception!("exception test message");
 
         let mut output = String::new();
         buf.read_to_string(&mut output)?;
@@ -191,8 +191,8 @@ mod tests {
             "Error log not found in output:\n{output}",
         );
         assert!(
-            !output.contains("crit test message"),
-            "Output should not contain crit message, but found:\n{output}"
+            !output.contains("exception test message"),
+            "Output should not contain exception message, but found:\n{output}"
         );
         Ok(())
     }
@@ -201,7 +201,7 @@ mod tests {
     #[serial]
     fn initialize_tracing_logger_developer_info_mode() -> Result<()> {
         use gag::BufferRedirect;
-        use logging::{crit, error_with_peers, info_with_peers, warn_with_peers};
+        use logging::{error_with_peers, exception, info_with_peers, warn_with_peers};
         use std::io::Read;
 
         // stdout redirect to buffer
@@ -211,14 +211,14 @@ mod tests {
         handle.modify(|env_filter| {
             let new_filter = env_filter
                 .clone()
-                .add_directive("crit".parse().expect("Failed to parse"));
+                .add_directive("exception".parse().expect("Failed to parse"));
             *env_filter = new_filter;
         })?;
 
         info_with_peers!("info_with_peers test message");
         warn_with_peers!("warn_with_peers test message");
         error_with_peers!("error_with_peers test message");
-        crit!("crit test message");
+        exception!("exception test message");
 
         let mut output = String::new();
         buf.read_to_string(&mut output)?;
@@ -236,18 +236,18 @@ mod tests {
             "Error log not found in output:\n{output}",
         );
         assert!(
-            output.contains("crit test message"),
-            "Crit log not found in output:\n{output}",
+            output.contains("exception test message"),
+            "exception log not found in output:\n{output}",
         );
 
-        // NOTE: This removal of the "crit=error" directive is necessary because the global
+        // NOTE: This removal of the "exception=error" directive is necessary because the global
         // tracing subscriber persists across tests. Without this cleanup, other tests
         // could be affected by the leftover directive, breaking their expected behavior.
         handle.modify(|env_filter| {
             let new_filter = env_filter
                 .to_string()
                 .split(',')
-                .filter(|s| !s.trim().starts_with("crit"))
+                .filter(|s| !s.trim().starts_with("exception"))
                 .map(|s| s.parse().expect("Failed to parse"))
                 .fold(EnvFilter::default(), EnvFilter::add_directive);
             *env_filter = new_filter;
