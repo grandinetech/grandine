@@ -840,9 +840,7 @@ impl<P: Preset> BlockSyncService<P> {
                         let mut batch = batch.clone();
                         batch.set_peer_id(peer_id);
                         batch.increment_retry_count();
-                        if let Err(e) = batch.set_data_columns(columns.clone_arc()) {
-                            error!("Failed to set data columns for batch {:?}: {}", batch, e);
-                        }
+                        batch.set_data_columns(columns.clone_arc())?;
 
                         SyncToP2p::RequestDataColumnsByRange(
                             request_id, peer_id, start_slot, count, columns,
