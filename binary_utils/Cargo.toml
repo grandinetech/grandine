@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
 logging = { workspace = true }
 panics = { workspace = true }
 rayon = { workspace = true }

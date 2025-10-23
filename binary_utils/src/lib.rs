@@ -1,17 +1,23 @@
 use anyhow::Result;
+use chrono::{Local, SecondsFormat};
 use logging::{crit, debug_with_peers};
 use rayon::ThreadPoolBuilder;
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{
     filter::LevelFilter,
     fmt,
+    fmt::{format::Writer, time::FormatTime},
     reload::{self, Handle},
     EnvFilter, Registry,
 };
 use tracing_subscriber::{layer::Layered, prelude::*};
 
 type TracingLayered = Layered<
-    fmt::Layer<Registry, fmt::format::DefaultFields, fmt::format::Format<fmt::format::Compact>>,
+    fmt::Layer<
+        Registry,
+        fmt::format::DefaultFields,
+        fmt::format::Format<fmt::format::Compact, LocalTimer>,
+    >,
     Registry,
 >;
 
@@ -24,6 +30,18 @@ impl TracingHandle {
         F: FnOnce(&mut EnvFilter),
     {
         self.0.modify(f)
+    }
+}
+
+struct LocalTimer;
+
+impl FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut Writer<'_>) -> core::fmt::Result {
+        write!(
+            w,
+            "[{}]",
+            Local::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+        )
     }
 }
 
@@ -82,10 +100,11 @@ pub fn initialize_tracing_logger(
 
     let stdout_layer = fmt::layer::<Registry>()
         .compact()
-        .with_thread_ids(true)
+        .with_thread_ids(false)
         .with_target(true)
         .with_file(false)
         .with_line_number(true)
+        .with_timer(LocalTimer)
         .with_ansi(enable_ansi);
 
     tracing_subscriber::registry()
