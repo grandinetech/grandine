@@ -8,14 +8,9 @@ cd "$(dirname "$0")"
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
 git submodule update --init       \
-    ../../consensus-spec-tests    \
     ../../eth2_libp2p             \
     ../../grandine-snapshot-tests \
     ../../slashing-protection-interchange-tests
-(
-    cd ../../consensus-spec-tests
-    git lfs pull
-)
 
 curl                     \
     --fail               \
@@ -34,6 +29,12 @@ curl                     \
 (
     cd ../..
     cargo fmt -- --check
+)
+
+# download consensus spec tests if not exist.
+(
+  cd ../..
+  ./scripts/download_spec_tests.sh
 )
 
 ./clippy.bash --deny warnings
