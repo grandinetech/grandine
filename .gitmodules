@@ -10,9 +10,6 @@
 [submodule "slashing-protection-interchange-tests"]
 	path = slashing-protection-interchange-tests
 	url = https://github.com/eth2-clients/slashing-protection-interchange-tests.git
-[submodule "consensus-spec-tests"]
-	path = consensus-spec-tests
-	url = https://github.com/ethereum/consensus-spec-tests.git
 [submodule "hive"]
 	path = hive
 	url = https://github.com/grandinetech/hive.git
