@@ -345,6 +345,7 @@ fs_extra = '1'
 futures = '0.3'
 futures-ticker = '0.0.3'
 futures-timer = '3'
+gag = "1"
 generic-array = { version = '0.14', features = ['serde'] }
 getrandom = '0.3'
 git-version = '0.3'
@@ -422,6 +423,7 @@ rust-kzg-mcl = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-zkcrypto = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 scrypt = '0.11'
 semver = '1'
+serial_test = "3"
 serde = { version = '1', features = ['derive', 'rc'] }
 serde-aux = '4'
 serde_json = { version = '1', features = ['preserve_order'] }
@@ -459,7 +461,7 @@ tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry", "chrono"] }
 tracing-test = "0.2"
 triomphe = '0.1'
 tynm = '0.2'

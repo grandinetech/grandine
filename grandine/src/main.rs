@@ -365,6 +365,7 @@ fn try_main() -> Result<()> {
         .map_err(GrandineArgs::clap_error)?;
 
     info_with_peers!("starting beacon node");
+
     config.report();
 
     let GrandineConfig {

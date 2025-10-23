@@ -8,3 +8,10 @@ workspace = true
 
 [dependencies]
 derive_more = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+binary_utils = { workspace = true }
+gag = { workspace = true }
+serial_test = { workspace = true }
