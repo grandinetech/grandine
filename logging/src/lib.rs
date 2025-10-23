@@ -63,10 +63,10 @@ macro_rules! error_with_peers {
 }
 
 #[macro_export]
-macro_rules! crit {
+macro_rules! exception {
     ( $( $rest:tt )* ) => {
         ::tracing::error!(
-            target: "crit",
+            target: "exception",
             type_error = "suspicious behavior",
             peers = %$crate::PEER_LOG_METRICS,
             $( $rest )*
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn crit_macro_logs_with_error_type_and_peers() -> anyhow::Result<()> {
+    fn exception_macro_logs_with_error_type_and_peers() -> anyhow::Result<()> {
         use gag::BufferRedirect;
         use std::io::Read;
 
@@ -129,14 +129,14 @@ mod tests {
         handle.modify(|env_filter| {
             let new_filter = env_filter
                 .clone()
-                .add_directive("crit".parse().expect("Failed to parse"));
+                .add_directive("exception".parse().expect("Failed to parse"));
             *env_filter = new_filter;
         })?;
 
         PEER_LOG_METRICS.set_connected_peer_count(2);
         PEER_LOG_METRICS.set_target_peer_count(4);
 
-        crit!("suspicious behavior has occurred");
+        exception!("suspicious behavior has occurred");
 
         let mut output = String::new();
         buf.read_to_string(&mut output)?;
