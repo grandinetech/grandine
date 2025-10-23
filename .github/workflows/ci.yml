@@ -23,54 +23,55 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - name: Maximize build space
-      if: runner.os == 'Linux'
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 2048
-        swap-size-mb: 1024
-    - name: Disable autocrlf (Windows)
-      if: runner.os == 'Windows'
-      run: git config --global core.autocrlf false
-    - name: Setup nim for constantine backend
-      if: runner.os != 'Macos'
-      uses: jiro4989/setup-nim-action@v2
-      with:
-        nim-version: '2.0.2'
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-        parent-nim-install-directory: ${{ runner.temp }}
-    - name: Install dependencies for constantine backend
-      if: runner.os == 'Linux'
-      run: |
-        sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
-          --no-install-recommends -yq \
-          libgmp-dev \
-          llvm
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-        lfs: true
-    - name: Run cargo build
-      run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
-    - name: Check if code is formatted (Linux)
-      if: runner.os == 'Linux'
-      run: cargo fmt --check
-    - name: Run Clippy (Linux)
-      if: runner.os == 'Linux'
-      run: scripts/ci/clippy.bash --deny warnings
-    # It's a known issue that networking tests randomly fails on Macos
-    - name: Run tests
-      if: runner.os == 'Macos'
-      run: cargo test --release --no-fail-fast --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- --skip behaviour --skip common
-    # For debugging on window-specific error
-    - name: Run tests
-      if: runner.os != 'Macos'
-      run: cargo test --release --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
-      env:
-        KZG_BACKEND: ${{ matrix.default_kzg_backend }}
-    - name: Run other kzg backend tests
-      if: matrix.test_kzg_backends != ''
-      run: ${{ matrix.test_kzg_backends }}
-    - name: Check consensus-spec-tests coverage (Linux)
-      if: runner.os == 'Linux'
-      run: scripts/ci/consensus-spec-tests-coverage.rb
+      - name: Maximize build space
+        if: runner.os == 'Linux'
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 1024
+      - name: Disable autocrlf (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - name: Setup nim for constantine backend
+        if: runner.os != 'Macos'
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "2.0.2"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: ${{ runner.temp }}
+      - name: Install dependencies for constantine backend
+        if: runner.os == 'Linux'
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            libgmp-dev \
+            llvm
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Run cargo build
+        run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
+      - name: Check if code is formatted (Linux)
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+      - name: Download consensus-spec-tests
+        run: bash scripts/download_spec_tests.sh
+      - name: Run Clippy (Linux)
+        if: runner.os == 'Linux'
+        run: scripts/ci/clippy.bash --deny warnings
+      # It's a known issue that networking tests randomly fails on Macos
+      - name: Run tests
+        if: runner.os == 'Macos'
+        run: cargo test --release --no-fail-fast --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- --skip behaviour --skip common
+      # For debugging on window-specific error
+      - name: Run tests
+        if: runner.os != 'Macos'
+        run: cargo test --release --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
+        env:
+          KZG_BACKEND: ${{ matrix.default_kzg_backend }}
+      - name: Run other kzg backend tests
+        if: matrix.test_kzg_backends != ''
+        run: ${{ matrix.test_kzg_backends }}
+      - name: Check consensus-spec-tests coverage (Linux)
+        if: runner.os == 'Linux'
+        run: scripts/ci/consensus-spec-tests-coverage.rb
