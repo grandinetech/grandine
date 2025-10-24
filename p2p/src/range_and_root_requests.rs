@@ -46,7 +46,7 @@ impl<K: Hash + Eq + Clone, P: Preset> RangeAndRootRequests<K, P> {
         self.requests_by_range
             .value_order()
             .filter(|(_, time)| time.elapsed() < REQUEST_BY_RANGE_TIMEOUT)
-            .map(|(sync_batch, _)| sync_batch.peer_id)
+            .map(|(sync_batch, _)| sync_batch.get_peer_id())
     }
 
     pub fn record_received_response(
@@ -56,7 +56,7 @@ impl<K: Hash + Eq + Clone, P: Preset> RangeAndRootRequests<K, P> {
         app_request_id: AppRequestId,
     ) {
         if let Some((batch, _)) = self.requests_by_range.cache_get_mut(&app_request_id) {
-            batch.response_received = true;
+            batch.set_response_received(true);
             return;
         }
 
@@ -125,8 +125,8 @@ impl<K: Hash + Eq + Clone, P: Preset> RangeAndRootRequests<K, P> {
             .filter(|key| {
                 self.requests_by_range
                     .cache_get(key)
-                    .map(|(batch, _)| &batch.peer_id)
-                    == Some(peer_id)
+                    .map(|(batch, _)| batch.get_peer_id())
+                    == Some(*peer_id)
             })
             .collect_vec();
 
@@ -139,7 +139,7 @@ impl<K: Hash + Eq + Clone, P: Preset> RangeAndRootRequests<K, P> {
     pub fn request_direction(&mut self, app_request_id: AppRequestId) -> Option<SyncDirection> {
         self.requests_by_range
             .cache_get(&app_request_id)
-            .map(|(batch, _)| batch.direction)
+            .map(|(batch, _)| batch.get_direction())
     }
 
     pub fn request_by_range_count(&mut self) -> usize {
