@@ -425,8 +425,17 @@ impl Database {
 
                 let mut cursor = transaction.cursor(&database)?;
 
-                cursor
-                    .set_key(end)
+                let first = if let Some((is_next, key, value)) = cursor.set_lowerbound(end)? {
+                    if is_next {
+                        cursor.prev()
+                    } else {
+                        Ok(Some((key, value)))
+                    }
+                } else {
+                    cursor.last()
+                };
+
+                first
                     .transpose()
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.prev().transpose()))
@@ -529,12 +538,17 @@ impl Database {
 
                 let mut cursor = transaction.cursor(&database)?;
 
-                cursor
-                    .set_key(key.as_ref())
-                    .transpose()
-                    .or_else(|| cursor.prev().transpose())
-                    .transpose()?
-                    .map(decompress_pair)
+                if let Some((is_next, key, value)) =
+                    cursor.set_lowerbound::<Vec<u8>, Cow<[u8]>>(key.as_ref())?
+                {
+                    if is_next {
+                        cursor.prev()?.map(decompress_pair)
+                    } else {
+                        Some(Ok((key, decompress(&value)?)))
+                    }
+                } else {
+                    cursor.last()?.map(decompress_pair)
+                }
             }
             DatabaseKind::InMemory { map } => map
                 .lock()
