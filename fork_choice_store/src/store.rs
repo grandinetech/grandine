@@ -2192,11 +2192,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
 
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+            let verify_result =
+                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
+                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                        data_column_sidecar: data_column_sidecar.clone_arc(),
+                        error,
+                    })?;
+
+            ensure!(
+                verify_result,
+                Error::DataColumnSidecarInvalidKzgProofs {
                     data_column_sidecar: data_column_sidecar.clone_arc(),
-                    error,
-                })?;
+                    error: anyhow!("invalid KZG proofs verification result"),
+                }
+            );
         }
 
         if !origin.is_from_back_sync() {
