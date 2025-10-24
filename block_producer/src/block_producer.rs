@@ -34,7 +34,7 @@ use ssz::{BitList, BitVector, ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
-use transition_functions::{capella, electra, unphased};
+use transition_functions::{capella, electra, gloas, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -71,6 +71,10 @@ use types::{
         ExecutionRequests,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
+    gloas::containers::{
+        BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
+        SignedExecutionPayloadBid,
+    },
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
@@ -467,6 +471,13 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 state,
                 exit,
             ),
+            // TODO: (gloas): change to `electra::validate_voluntary_exit`
+            BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
+                &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
+                state,
+                exit,
+            ),
         };
 
         let outcome = match result {
@@ -756,8 +767,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // We define this explicitly instead of using struct update syntax to ensure
         // we fill all fields when constructing a block.
         let state_root = H256::zero();
+        let phase = self.beacon_state.phase();
 
-        match self.beacon_state.phase() {
+        match phase {
             Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
                 slot,
                 proposer_index,
@@ -848,7 +860,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     blob_kzg_commitments: ContiguousList::default(),
                 },
             }),
-            Phase::Electra | Phase::Fulu => {
+            Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
                 let mut results: Vec<(
                     AttestationData,
@@ -902,8 +914,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 let attestations = ContiguousList::try_from_iter(attestations)?;
 
-                if self.beacon_state.phase() == Phase::Electra {
-                    BeaconBlock::from(ElectraBeaconBlock {
+                match phase {
+                    Phase::Electra => BeaconBlock::from(ElectraBeaconBlock {
                         slot,
                         proposer_index,
                         parent_root,
@@ -923,9 +935,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             blob_kzg_commitments: ContiguousList::default(),
                             execution_requests: ExecutionRequests::default(),
                         },
-                    })
-                } else {
-                    BeaconBlock::from(FuluBeaconBlock {
+                    }),
+                    Phase::Fulu => BeaconBlock::from(FuluBeaconBlock {
                         slot,
                         proposer_index,
                         parent_root,
@@ -945,7 +956,35 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             blob_kzg_commitments: ContiguousList::default(),
                             execution_requests: ExecutionRequests::default(),
                         },
-                    })
+                    }),
+                    // TODO: (gloas): prepare `signed_execution_payload_bid` and `payload_attestations`
+                    // * signed_execution_payload_bid: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#constructing-the-new-signed_execution_payload_bid-field-in-beaconblockbody
+                    // * payload_attestations: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#constructing-the-new-payload_attestations-field-in-beaconblockbody
+                    Phase::Gloas => BeaconBlock::from(GloasBeaconBlock {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root,
+                        body: GloasBeaconBlockBody {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings,
+                            attester_slashings: self.prepare_attester_slashings_electra().await,
+                            attestations,
+                            deposits,
+                            voluntary_exits,
+                            sync_aggregate,
+                            bls_to_execution_changes,
+                            signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
+                            payload_attestations: ContiguousList::default(),
+                        },
+                    }),
+                    _ => {
+                        return Err(AnyhowError::msg(
+                            "post-electra building block with incorrect phase",
+                        ));
+                    }
                 }
             }
         }
@@ -1541,6 +1580,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
                 PayloadAttributes::Fulu(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
+            }
+            BeaconState::Gloas(state) => {
+                let (withdrawals, _, _) = gloas::get_expected_withdrawals(state)?;
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
+                PayloadAttributes::Gloas(PayloadAttributesV3 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,

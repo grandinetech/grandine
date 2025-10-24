@@ -5,7 +5,7 @@ use anyhow::Result;
 use bls::{traits::SignatureBytes as _, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentList, PersistentVector};
+use ssz::{BitVector, PersistentList, PersistentVector};
 use std_ext::ArcExt as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -29,6 +29,10 @@ use types::{
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
     fulu::beacon_state::BeaconState as FuluBeaconState,
+    gloas::{
+        beacon_state::BeaconState as GloasBeaconState,
+        containers::{BuilderPendingPayment, ExecutionPayloadBid},
+    },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -783,6 +787,123 @@ pub fn upgrade_to_fulu<P: Preset>(
     })
 }
 
+pub fn upgrade_to_gloas<P: Preset>(
+    config: &Config,
+    pre: FuluBeaconState<P>,
+) -> GloasBeaconState<P> {
+    let epoch = accessors::get_current_epoch(&pre);
+
+    let FuluBeaconState {
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        validators,
+        balances,
+        randao_mixes,
+        slashings,
+        previous_epoch_participation,
+        current_epoch_participation,
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        inactivity_scores,
+        current_sync_committee,
+        next_sync_committee,
+        latest_execution_payload_header,
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        historical_summaries,
+        deposit_requests_start_index,
+        deposit_balance_to_consume,
+        exit_balance_to_consume,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume,
+        earliest_consolidation_epoch,
+        pending_deposits,
+        pending_partial_withdrawals,
+        pending_consolidations,
+        proposer_lookahead,
+        cache,
+    } = pre;
+
+    let fork = Fork {
+        previous_version: fork.current_version,
+        current_version: config.gloas_fork_version,
+        epoch,
+    };
+
+    GloasBeaconState {
+        // > Versioning
+        genesis_time,
+        genesis_validators_root,
+        slot,
+        fork,
+        // > History
+        latest_block_header,
+        block_roots,
+        state_roots,
+        historical_roots,
+        // > Eth1
+        eth1_data,
+        eth1_data_votes,
+        eth1_deposit_index,
+        // > Registry
+        validators,
+        balances,
+        // > Randomness
+        randao_mixes,
+        // > Slashings
+        slashings,
+        // > Participation
+        previous_epoch_participation,
+        current_epoch_participation,
+        // > Finality
+        justification_bits,
+        previous_justified_checkpoint,
+        current_justified_checkpoint,
+        finalized_checkpoint,
+        // > Inactivity
+        inactivity_scores,
+        // > Sync
+        current_sync_committee,
+        next_sync_committee,
+        // > Execution
+        latest_execution_payload_bid: ExecutionPayloadBid::default(),
+        // > Withdrawals
+        next_withdrawal_index,
+        next_withdrawal_validator_index,
+        // > Deep history valid from Capella onwards
+        historical_summaries,
+        deposit_requests_start_index,
+        deposit_balance_to_consume,
+        exit_balance_to_consume,
+        earliest_exit_epoch,
+        consolidation_balance_to_consume,
+        earliest_consolidation_epoch,
+        pending_deposits,
+        pending_partial_withdrawals,
+        pending_consolidations,
+        proposer_lookahead,
+        // > ePBS states introduced in Gloas
+        execution_payload_availability: BitVector::new(true),
+        builder_pending_payments: PersistentVector::repeat_element(BuilderPendingPayment::default()),
+        builder_pending_withdrawals: PersistentList::default(),
+        latest_block_hash: latest_execution_payload_header.block_hash,
+        latest_withdrawals_root: H256::zero(),
+        // Cache
+        cache,
+    }
+}
+
 fn initialize_proposer_lookahead<P: Preset>(
     config: &Config,
     state: &ElectraBeaconState<P>,
@@ -867,6 +988,16 @@ mod spec_tests {
         run_fulu_case::<Minimal>(case);
     }
 
+    #[test_resources("consensus-spec-tests/tests/mainnet/gloas/fork/*/*/*")]
+    fn gloas_mainnet(case: Case) {
+        run_gloas_case::<Mainnet>(case);
+    }
+
+    #[test_resources("consensus-spec-tests/tests/minimal/gloas/fork/*/*/*")]
+    fn gloas_minimal(case: Case) {
+        run_gloas_case::<Minimal>(case);
+    }
+
     fn run_altair_case<P: Preset>(case: Case) {
         let pre = case.ssz_default("pre");
         let expected_post = case.ssz_default("post");
@@ -921,6 +1052,15 @@ mod spec_tests {
 
         let actual_post = upgrade_to_fulu::<P>(&P::default_config(), pre)
             .expect("upgrade from Electra to Fulu should succeed");
+
+        assert_eq!(actual_post, expected_post);
+    }
+
+    fn run_gloas_case<P: Preset>(case: Case) {
+        let pre = case.ssz_default("pre");
+        let expected_post = case.ssz_default("post");
+
+        let actual_post = upgrade_to_gloas::<P>(&P::default_config(), pre);
 
         assert_eq!(actual_post, expected_post);
     }
