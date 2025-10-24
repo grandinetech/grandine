@@ -2,7 +2,7 @@
 // `unfulfilled_lint_expectations` false positive warning.
 // Declaring this for the whole module as a temporary workaround. Using `expect` here triggers
 // the same warning.
-// TODO(Grandine Team): consider removing this workaround when upgrading from Rust 1.82.0.
+// TODO(Grandine Team): consider removing this workaround when upgrading from Rust 1.90.0.
 //
 // `ExplainedProposerSlashing.reason` is used for logging through the `Debug` impl.
 // `ExplainedAttesterSlashing.reason` is used for logging through the `Debug` impl.

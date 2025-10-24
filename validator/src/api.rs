@@ -138,7 +138,7 @@ impl ApiError for Error {
 }
 
 impl Error {
-    const fn body(&self) -> ErrorResponse {
+    const fn body(&self) -> ErrorResponse<'_> {
         ErrorResponse { message: self }
     }
 

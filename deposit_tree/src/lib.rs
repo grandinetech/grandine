@@ -175,10 +175,6 @@ enum Error {
     },
 }
 
-#[expect(
-    clippy::range_plus_one,
-    reason = "False positive. See <https://github.com/rust-lang/rust-clippy/issues/3307>."
-)]
 #[cfg(test)]
 mod tests {
     use pubkey_cache::PubkeyCache;

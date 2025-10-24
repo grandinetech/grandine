@@ -12,6 +12,6 @@ pub trait ApiError {
         self.sources().format(": ")
     }
 
-    // `StdError::sources` is not stable as of Rust 1.82.0.
+    // `StdError::sources` is not stable as of Rust 1.90.0.
     fn sources(&self) -> impl Iterator<Item = &dyn StdError>;
 }

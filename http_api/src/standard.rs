@@ -1320,9 +1320,7 @@ pub async fn blobs<P: Preset, W: Wait>(
     let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
-    let mut requested_indices = None;
-
-    if let Some(versioned_hashes) = query.versioned_hashes {
+    let requested_indices = if let Some(versioned_hashes) = query.versioned_hashes {
         let Some(kzg_commitments) = block
             .message()
             .body()
@@ -1351,8 +1349,10 @@ pub async fn blobs<P: Preset, W: Wait>(
             indices.insert(u64::try_from(index).expect("position should fit in u64"));
         }
 
-        requested_indices = Some(indices);
-    }
+        Some(indices)
+    } else {
+        None
+    };
 
     let blobs = if version.is_peerdas_activated() {
         let blobs = construct_blobs_from_data_column_sidecars(

@@ -800,7 +800,7 @@ impl SlashingProtector {
         transaction.commit().map_err(Into::into)
     }
 
-    fn transaction(&mut self) -> Result<Transaction> {
+    fn transaction(&mut self) -> Result<Transaction<'_>> {
         self.connection
             .transaction_with_behavior(TransactionBehavior::Exclusive)
             .map_err(Into::into)

@@ -106,7 +106,7 @@ impl<P: Preset> Storage<P> {
         &self,
         client: &Client,
         state_load_strategy: StateLoadStrategy<P>,
-    ) -> Result<(StateStorage<P>, bool)> {
+    ) -> Result<(StateStorage<'_, P>, bool)> {
         let anchor_block;
         let anchor_state;
         let unfinalized_blocks: UnfinalizedBlocks<P>;
@@ -230,7 +230,7 @@ impl<P: Preset> Storage<P> {
         Ok((state_storage, loaded_from_remote))
     }
 
-    fn load_latest_state(&self) -> Result<OptionalStateStorage<P>> {
+    fn load_latest_state(&self) -> Result<OptionalStateStorage<'_, P>> {
         if let Some((state, block, blocks)) = self.load_state_and_blocks_from_checkpoint()? {
             Ok(OptionalStateStorage::Full((state, block, blocks)))
         } else {
@@ -819,7 +819,7 @@ impl<P: Preset> Storage<P> {
         .context(Error::DependentRootLookupFailed)
     }
 
-    fn load_state_and_blocks_from_checkpoint(&self) -> Result<Option<StateStorage<P>>> {
+    fn load_state_and_blocks_from_checkpoint(&self) -> Result<Option<StateStorage<'_, P>>> {
         if let Some(checkpoint) = self.load_state_checkpoint()? {
             let StateCheckpoint {
                 block_root, state, ..
@@ -868,7 +868,10 @@ impl<P: Preset> Storage<P> {
         Ok(None)
     }
 
-    fn load_state_by_iteration(&self, start_from_slot: Slot) -> Result<OptionalStateStorage<P>> {
+    fn load_state_by_iteration(
+        &self,
+        start_from_slot: Slot,
+    ) -> Result<OptionalStateStorage<'_, P>> {
         let results = self
             .database
             .iterator_descending(..=BlockRootBySlot(start_from_slot).to_string())?;
@@ -941,7 +944,7 @@ impl<P: Preset> Storage<P> {
         Ok(None)
     }
 
-    fn blocks_by_roots(&self, block_roots: Vec<H256>) -> UnfinalizedBlocks<P> {
+    fn blocks_by_roots(&self, block_roots: Vec<H256>) -> UnfinalizedBlocks<'_, P> {
         Box::new(block_roots.into_iter().map(|block_root| {
             if let Some(block) = self.finalized_block_by_root(block_root)? {
                 return Ok(block);

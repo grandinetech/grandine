@@ -1184,7 +1184,6 @@ impl<P: Preset> SyncManager<P> {
         self.peers_custodial.insert(peer_id, custody_columns);
     }
 
-    #[expect(clippy::unwrap_or_default)]
     pub fn missing_column_indices_by_root(
         &self,
         controller: &RealController<P>,
