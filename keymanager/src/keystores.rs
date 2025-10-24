@@ -274,7 +274,7 @@ impl KeystoreManager {
 
     async fn key_storage_mut(
         &self,
-    ) -> Result<MappedMutexGuard<Option<ValidatorKeyCache>, ValidatorKeyCache>> {
+    ) -> Result<MappedMutexGuard<'_, Option<ValidatorKeyCache>, ValidatorKeyCache>> {
         let storage_guard = self.storage.lock().await;
 
         let loaded_or_default_storage = match &self.persistence_config {

@@ -1767,19 +1767,18 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 match payload_id {
                     PayloadIdEntry::Cached(_) => {
-                        let mut payload_id = None;
-
-                        if let Some(payload_attributes) =
+                        let payload_id = if let Some(payload_attributes) =
                             self.prepare_execution_payload_attributes().await?
                         {
-                            payload_id = self
-                                .prepare_execution_payload(
-                                    snapshot.safe_execution_payload_hash(),
-                                    snapshot.finalized_execution_payload_hash(),
-                                    payload_attributes,
-                                )
-                                .await?;
-                        }
+                            self.prepare_execution_payload(
+                                snapshot.safe_execution_payload_hash(),
+                                snapshot.finalized_execution_payload_hash(),
+                                payload_attributes,
+                            )
+                            .await?
+                        } else {
+                            None
+                        };
 
                         if let Some(payload_id) = payload_id {
                             info_with_peers!(

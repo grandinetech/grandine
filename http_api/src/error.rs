@@ -276,7 +276,7 @@ impl Error {
         }
     }
 
-    fn body(&self) -> EthErrorResponse {
+    fn body(&self) -> EthErrorResponse<'_> {
         EthErrorResponse {
             code: self.status_code().as_u16(),
             message: self,

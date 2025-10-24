@@ -227,6 +227,10 @@ pub fn process_registry_updates<P: Preset>(
     Ok(())
 }
 
+#[expect(
+    clippy::useless_let_if_seq,
+    reason = "assignments with multiple variables are more readable with conditional affectation"
+)]
 pub fn process_pending_deposits<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

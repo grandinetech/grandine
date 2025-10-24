@@ -1254,7 +1254,6 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    #[expect(clippy::unwrap_or_default)]
     fn batch_request_missing_data_columns(&mut self) -> Result<()> {
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();

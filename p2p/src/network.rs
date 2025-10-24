@@ -681,11 +681,10 @@ impl<P: Preset> Network<P> {
         let chain_config = controller.chain_config().as_ref();
 
         let next_fork_version;
-        let next_fork_epoch;
 
-        if let Some(next_phase) = chain_config.next_phase_at_slot::<P>(slot) {
+        let next_fork_epoch = if let Some(next_phase) = chain_config.next_phase_at_slot::<P>(slot) {
             next_fork_version = chain_config.version(next_phase);
-            next_fork_epoch = chain_config.fork_epoch(next_phase);
+            chain_config.fork_epoch(next_phase)
         } else {
             // > If no future fork is planned,
             // > set `next_fork_version = current_fork_version` to signal this fact
@@ -698,11 +697,11 @@ impl<P: Preset> Network<P> {
             //
             // > If no future fork is planned,
             // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
-            next_fork_epoch = fork_context
+            fork_context
                 .next_fork()
                 .map(|(_, _, fork_epoch)| fork_epoch)
-                .unwrap_or(FAR_FUTURE_EPOCH);
-        }
+                .unwrap_or(FAR_FUTURE_EPOCH)
+        };
 
         EnrForkId {
             fork_digest: fork_context.current_fork_digest(),
