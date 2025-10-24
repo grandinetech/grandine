@@ -22,6 +22,7 @@ use types::{
     fulu::containers::{
         BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
     },
+    gloas::containers::BeaconBlock as GloasBeaconBlock,
     phase0::{
         containers::{
             AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
@@ -151,6 +152,13 @@ impl<P: Preset> From<&FuluBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
     }
 }
 
+impl<P: Preset> From<&GloasBeaconBlock<P>> for SigningMessage<'_, P> {
+    fn from(block: &GloasBeaconBlock<P>) -> Self {
+        let block_header = block.to_header();
+        Self::BeaconBlock(SigningBlock::Gloas { block_header })
+    }
+}
+
 impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<'block, P> {
     fn from(block: &'block CombinedBeaconBlock<P>) -> Self {
         match block {
@@ -161,6 +169,7 @@ impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<
             CombinedBeaconBlock::Deneb(block) => block.into(),
             CombinedBeaconBlock::Electra(block) => block.into(),
             CombinedBeaconBlock::Fulu(block) => block.into(),
+            CombinedBeaconBlock::Gloas(block) => block.into(),
         }
     }
 }
@@ -207,6 +216,7 @@ pub enum SigningBlock<'block, P: Preset> {
     Deneb { block_header: BeaconBlockHeader },
     Electra { block_header: BeaconBlockHeader },
     Fulu { block_header: BeaconBlockHeader },
+    Gloas { block_header: BeaconBlockHeader },
 }
 
 impl<P: Preset> SigningBlock<'_, P> {
@@ -218,7 +228,8 @@ impl<P: Preset> SigningBlock<'_, P> {
             | SigningBlock::Capella { block_header }
             | SigningBlock::Deneb { block_header }
             | SigningBlock::Electra { block_header }
-            | SigningBlock::Fulu { block_header } => block_header.slot,
+            | SigningBlock::Fulu { block_header }
+            | SigningBlock::Gloas { block_header } => block_header.slot,
         }
     }
 }

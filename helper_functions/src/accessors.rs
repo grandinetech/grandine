@@ -44,7 +44,7 @@ use types::{
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
     traits::{
         Attestation, AttesterSlashing, BeaconState, IndexedAttestation as _, PostAltairBeaconState,
-        PostElectraBeaconState,
+        PostElectraBeaconState, PostFuluBeaconState,
     },
 };
 
@@ -459,7 +459,10 @@ pub fn get_beacon_proposer_index<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
 ) -> Result<ValidatorIndex> {
-    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+    if let Some(proposer_lookahead) = state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
+    {
         proposer_lookahead
             .get(state.slot() % P::SlotsPerEpoch::U64)
             .copied()
@@ -500,7 +503,10 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
 
-    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+    if let Some(proposer_lookahead) = state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
+    {
         match relative_epoch {
             RelativeEpoch::Current => {
                 return proposer_lookahead

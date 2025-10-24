@@ -232,7 +232,7 @@ pub struct SignedBlsToExecutionChange {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct Withdrawal {
     #[serde(with = "serde_utils::string_or_native")]
