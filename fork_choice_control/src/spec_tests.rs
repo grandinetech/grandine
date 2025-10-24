@@ -171,7 +171,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
     let pubkey_cache = Arc::new(PubkeyCache::default());
 
     let tick_at_time = |time| {
-        Tick::at_time(config, time, genesis_time)
+        Tick::at_time::<P>(config, time, genesis_time)
             .expect("configurations used in tests have valid values of SECONDS_PER_SLOT")
     };
 

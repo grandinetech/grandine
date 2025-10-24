@@ -69,6 +69,14 @@ impl<P: Preset> SlotHead<P> {
         accessors::get_beacon_proposer_index(&self.config, &self.beacon_state)
     }
 
+    pub fn next_proposer_index(&self) -> Result<ValidatorIndex> {
+        accessors::get_beacon_proposer_index_at_slot(
+            &self.config,
+            &self.beacon_state,
+            self.slot() + 1,
+        )
+    }
+
     pub fn beacon_committee(&self, committee_index: CommitteeIndex) -> Result<IndexSlice<'_>> {
         accessors::beacon_committee(&self.beacon_state, self.slot(), committee_index)
     }

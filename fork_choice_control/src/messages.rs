@@ -11,7 +11,8 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin,
+    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, PayloadAttestationAction,
+    PayloadAttestationOrigin,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -24,6 +25,7 @@ use types::{
         containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
+    gloas::containers::PayloadAttestationMessage,
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -149,6 +151,11 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
         slot: Slot,
     },
+    PayloadAttestation {
+        wait_group: W,
+        result: Result<PayloadAttestationAction>,
+        origin: PayloadAttestationOrigin,
+    },
     PreprocessedBeaconState {
         state: Arc<BeaconState<P>>,
     },
@@ -245,6 +252,7 @@ pub enum ValidatorMessage<P: Preset, W> {
     Tick(W, Tick),
     Head(W, ChainLink<P>),
     ValidAttestation(W, Arc<Attestation<P>>),
+    ValidPayloadAttestation(W, Arc<PayloadAttestationMessage>),
     PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),
     Stop,
 }

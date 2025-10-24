@@ -30,6 +30,7 @@ pub enum PoolRejectionReason {
     InvalidAttesterSlashing,
     InvalidBlsToExecutionChange,
     InvalidContributionAndProof,
+    InvalidPayloadAttestationMessage,
     InvalidProposerSlashing,
     InvalidSyncCommitteeMessage,
     InvalidVoluntaryExit,
