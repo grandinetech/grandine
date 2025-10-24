@@ -10,6 +10,7 @@ pub use crate::{
     manager::Manager,
     messages::{PoolToLivenessMessage, PoolToP2pMessage},
     misc::{Origin, PoolAdditionOutcome, PoolRejectionReason},
+    payload_attestation_agg_pool::Manager as PayloadAttestationAggPool,
     sync_committee_agg_pool::Manager as SyncCommitteeAggPool,
 };
 
@@ -40,6 +41,15 @@ mod bls_to_execution_change_pool;
 mod manager;
 mod messages;
 mod misc;
+
+mod payload_attestation_agg_pool {
+    pub use manager::Manager;
+
+    mod manager;
+    mod pool;
+    mod tasks;
+    mod types;
+}
 
 mod sync_committee_agg_pool {
     pub use manager::Manager;

@@ -23,6 +23,7 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
+    gloas::containers::PayloadAttestationMessage,
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
@@ -473,6 +474,80 @@ impl AttesterSlashingOrigin {
     }
 }
 
+#[derive(Debug, AsRefStr)]
+pub enum PayloadAttestationOrigin {
+    Gossip(GossipId),
+    Api(OneshotSender<Result<ValidationOutcome>>),
+    Block(H256),
+    Own,
+}
+
+impl PayloadAttestationOrigin {
+    #[must_use]
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        match self {
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, Some(sender)),
+            Self::Own | Self::Block(_) => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(&self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id.clone()),
+            Self::Own | Self::Block(_) | Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn verify_signatures(&self) -> bool {
+        match self {
+            Self::Gossip(_) | Self::Api(_) => true,
+            Self::Block(_) => false,
+            Self::Own => !Feature::TrustOwnAttestationSignatures.is_enabled(),
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_block(&self) -> bool {
+        matches!(self, Self::Block(_))
+    }
+
+    #[must_use]
+    pub const fn should_generate_event(&self) -> bool {
+        matches!(self, Self::Gossip(_) | Self::Api(_))
+    }
+
+    #[must_use]
+    pub const fn send_to_validator(&self) -> bool {
+        matches!(self, Self::Gossip(_) | Self::Api(_))
+    }
+
+    #[must_use]
+    pub const fn metrics_label(&self) -> &str {
+        match self {
+            Self::Gossip(_) => "Gossip",
+            Self::Own => "Own",
+            Self::Api(_) => "Api",
+            Self::Block(_) => "Block",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum BlobSidecarOrigin {
     Api(Option<OneshotSender<Result<ValidationOutcome>>>),
@@ -706,6 +781,13 @@ impl<P: Preset> DataColumnSidecarAction<P> {
     pub const fn ignored(&self) -> bool {
         matches!(self, Self::Ignore(_))
     }
+}
+
+#[derive(Debug)]
+pub enum PayloadAttestationAction {
+    Accept(Arc<PayloadAttestationMessage>),
+    Ignore(Publishable),
+    DelayUntilBlock(Arc<PayloadAttestationMessage>, H256),
 }
 
 pub enum PartialBlockAction {

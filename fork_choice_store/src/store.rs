@@ -54,7 +54,7 @@ use types::{
     },
     gloas::containers::{
         DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
-        SignedExecutionPayloadEnvelope,
+        IndexedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -86,7 +86,7 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
-    AttestationOrigin,
+    AttestationOrigin, PayloadAttestationAction, PayloadAttestationOrigin,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -2427,6 +2427,111 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     metrics,
                 ),
         }
+    }
+
+    pub fn validate_payload_attestation(
+        &self,
+        payload_attestation: Arc<PayloadAttestationMessage>,
+        origin: &PayloadAttestationOrigin,
+        skip_signatures_verification: bool,
+    ) -> Result<PayloadAttestationAction> {
+        let data = payload_attestation.data;
+        let block_root = data.beacon_block_root;
+        let validator_index = payload_attestation.validator_index;
+
+        if !origin.is_from_block() {
+            // [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. data.slot == current_slot
+            if data.slot != self.slot() {
+                return Ok(PayloadAttestationAction::Ignore(true));
+            }
+        }
+
+        // [IGNORE] The payload_attestation_message is the first valid message received from the
+        // validator with index payload_attestation_message.validate_index
+        // TODO: (gloas): check if the first valid message
+
+        // [REJECT] The message's block data.beacon_block_root passes validation.
+        // Part 1/2:
+        ensure!(
+            !self.rejected_block_roots.contains(&block_root),
+            Error::<P>::PayloadAttestationInvalidBlock {
+                payload_attestation
+            },
+        );
+
+        // [IGNORE] The message's block data.beacon_block_root has been seen (via gossip or non-gossip sources)
+        // (a client MAY queue attestation for processing once the block is retrieved. Note a client might want to request payload after).
+        let Some(chain_link) = self.chain_link(block_root) else {
+            return Ok(PayloadAttestationAction::DelayUntilBlock(
+                payload_attestation,
+                block_root,
+            ));
+        };
+
+        // [REJECT] The message's block data.beacon_block_root passes validation.
+        // Part 2/2:
+        ensure!(
+            !chain_link.payload_status.is_invalid(),
+            Error::<P>::PayloadAttestationInvalidBlock {
+                payload_attestation
+            },
+        );
+
+        // [REJECT] The message's validator index is within the payload committee in get_ptc(state, data.slot).
+        // The state is the head state corresponding to processing the block up to the current slot as determined by the fork choice.
+        let Some(ref state) = chain_link.state else {
+            return Ok(PayloadAttestationAction::DelayUntilBlock(
+                payload_attestation,
+                block_root,
+            ));
+        };
+
+        // This seems to be the same as above check with current slot
+        if data.slot != state.slot() {
+            return Ok(PayloadAttestationAction::Ignore(true));
+        }
+
+        // TODO: (gloas): cache ptc members for the slot
+        let Ok(ptc_members) = accessors::ptc_for_slot(state, data.slot) else {
+            return Ok(PayloadAttestationAction::Ignore(false));
+        };
+
+        ensure!(
+            ptc_members.contains(&validator_index),
+            Error::<P>::PayloadAttestationNotInCommittee {
+                payload_attestation,
+                validator_index,
+                slot: data.slot,
+            }
+        );
+
+        if !skip_signatures_verification && origin.verify_signatures() {
+            let attesting_indices = ContiguousList::try_from(vec![validator_index])
+                .expect("a validator index should fit in list of PTC size");
+
+            let indexed_payload_attestation = IndexedPayloadAttestation {
+                attesting_indices,
+                data,
+                signature: payload_attestation.signature,
+            };
+
+            // [REJECT] payload_attestation_message.signature is valid with respect to the validator's public key.
+            ensure!(
+                predicates::validate_constructed_indexed_payload_attestation(
+                    &self.chain_config,
+                    &self.pubkey_cache,
+                    state,
+                    &indexed_payload_attestation,
+                    SingleVerifier,
+                )
+                .is_ok(),
+                Error::<P>::PayloadAttestationValidationError {
+                    payload_attestation
+                }
+            );
+        }
+
+        Ok(PayloadAttestationAction::Accept(payload_attestation))
     }
 
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)

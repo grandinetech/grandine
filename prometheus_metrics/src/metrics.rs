@@ -81,6 +81,7 @@ pub struct Metrics {
     // Mutator
     mutator_attestations: IntCounterVec,
     mutator_aggregate_and_proofs: IntCounterVec,
+    mutator_payload_attestations: IntCounterVec,
 
     pub block_insertion_times: Histogram,
     pub block_processing_times: Histogram,
@@ -138,10 +139,15 @@ pub struct Metrics {
     pub bls_pool_discard_old_changes_times: Histogram,
     pub bls_pool_handle_external_change_times: Histogram,
 
+    pub payload_att_pool_insert_message_times: Histogram,
+    pub payload_att_pool_aggregate_own_messages_times: Histogram,
+    pub payload_att_pool_handle_slot_times: Histogram,
+
     // Fork choice tasks
     pub fc_block_task_times: HistogramVec,
     pub fc_aggregate_and_proof_task_times: HistogramVec,
     pub fc_attestation_task_times: HistogramVec,
+    pub fc_payload_attestation_task_times: HistogramVec,
 
     pub fc_blob_sidecar_task_times: Histogram,
     pub fc_data_column_sidecar_task_times: Histogram,
@@ -411,6 +417,14 @@ impl Metrics {
                 &["type"],
             )?,
 
+            mutator_payload_attestations: IntCounterVec::new(
+                opts!(
+                    "MUTATOR_PAYLOAD_ATTESTATIONS",
+                    "Counter for different payload attestations (delayed/ignored etc) for Mutator",
+                ),
+                &["type"],
+            )?,
+
             block_insertion_times: Histogram::with_opts(histogram_opts!(
                 "MUTATOR_BLOCK_INSERTION_TIMES",
                 "Mutator Block insertion times (from submission)",
@@ -611,6 +625,21 @@ impl Metrics {
                 "Bls to Execution changes pool handle exertnal change times",
             ))?,
 
+            payload_att_pool_insert_message_times: Histogram::with_opts(histogram_opts!(
+                "PAYLOAD_ATT_POOL_INSERT_MESSAGE_TIMES",
+                "Payload attestation agg pool insert message task times"),
+            )?,
+
+            payload_att_pool_aggregate_own_messages_times: Histogram::with_opts(histogram_opts!(
+                "PAYLOAD_ATT_POOL_AGGREGATE_OWN_MESSAGES_TIMES",
+                "Payload attestation agg pool aggregate own messages task times"),
+            )?,
+
+            payload_att_pool_handle_slot_times: Histogram::with_opts(histogram_opts!(
+                "PAYLOAD_ATT_POOL_HANDLE_SLOT_TIMES",
+                "Payload attestation agg pool handle slot times",
+            ))?,
+
             // Fork choice tasks
             fc_block_task_times: HistogramVec::new(
                 histogram_opts!(
@@ -632,6 +661,14 @@ impl Metrics {
                 histogram_opts!(
                     "FC_ATTESTATION_TASK_TIMES",
                     "Forkchoice AttestationTask times",
+                ),
+                &["origin"],
+            )?,
+
+            fc_payload_attestation_task_times: HistogramVec::new(
+                histogram_opts!(
+                    "FC_PAYLOAD_ATTESTATION_TASK_TIMES",
+                    "Forkchoice PayloadAttestationTask times",
                 ),
                 &["origin"],
             )?,
@@ -924,6 +961,7 @@ impl Metrics {
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
+        default_registry.register(Box::new(self.mutator_payload_attestations.clone()))?;
         default_registry.register(Box::new(self.block_insertion_times.clone()))?;
         default_registry.register(Box::new(self.block_processing_times.clone()))?;
         default_registry.register(Box::new(self.block_post_processing_times.clone()))?;
@@ -988,9 +1026,15 @@ impl Metrics {
         default_registry.register(Box::new(self.sync_pool_handle_slot_times.clone()))?;
         default_registry.register(Box::new(self.bls_pool_discard_old_changes_times.clone()))?;
         default_registry.register(Box::new(self.bls_pool_handle_external_change_times.clone()))?;
+        default_registry.register(Box::new(
+            self.payload_att_pool_aggregate_own_messages_times.clone(),
+        ))?;
+        default_registry.register(Box::new(self.payload_att_pool_insert_message_times.clone()))?;
+        default_registry.register(Box::new(self.payload_att_pool_handle_slot_times.clone()))?;
         default_registry.register(Box::new(self.fc_block_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_aggregate_and_proof_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_attestation_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_payload_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_persist_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_data_column_sidecar_task_times.clone()))?;
@@ -1261,6 +1305,20 @@ impl Metrics {
             Err(error) => {
                 warn_with_peers!(
                     "unable to register mutator aggregate_and_proof for {labels:?}: {error:?}"
+                )
+            }
+        }
+    }
+
+    pub fn register_mutator_payload_attestation(&self, labels: &[&str]) {
+        match self
+            .mutator_payload_attestations
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register mutator payload attestation for {labels:?}: {error:?}"
                 )
             }
         }

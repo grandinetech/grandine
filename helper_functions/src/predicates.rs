@@ -468,23 +468,23 @@ pub fn validate_received_indexed_payload_attestation<P: Preset>(
     validate_indexed_payload_attestation(config, pubkey_cache, state, attestation, verifier, true)
 }
 
-// > Check if ``indexed_payload_attestation`` is not empty,
-// has sorted and unique indices and has a valid aggregate signature.
+// > Check if ``indexed_payload_attestation`` is non-empty,
+// has sorted indices and has a valid aggregate signature.
 fn validate_indexed_payload_attestation<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &impl BeaconState<P>,
     attestation: &IndexedPayloadAttestation<P>,
     mut verifier: impl Verifier,
-    validate_indices_sorted_and_unique: bool,
+    validate_indices_sorted: bool,
 ) -> Result<()> {
     ensure!(
         !attestation.attesting_indices.is_empty(),
         Error::AttestationHasNoAttestingIndices
     );
 
-    if validate_indices_sorted_and_unique {
-        // > Verify indices are sorted and unique
+    if validate_indices_sorted {
+        // > Verify indices are sorted
         ensure!(
             attestation.attesting_indices.is_sorted(),
             Error::AttestingIndicesNotSortedAndUnique,
@@ -506,7 +506,7 @@ fn validate_indexed_payload_attestation<P: Preset>(
                 attestation.data.signing_root(config, state),
                 attestation.signature,
                 public_keys,
-                SignatureKind::Attestation,
+                SignatureKind::PayloadAttestation,
             )
         },
     )?
