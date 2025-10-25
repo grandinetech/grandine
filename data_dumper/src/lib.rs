@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use dedicated_executor::DedicatedExecutor;
 use features::Feature;
-use log::warn;
+use logging::warn_with_peers;
 use ssz::{SszHash as _, SszWrite as _};
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
@@ -88,7 +88,7 @@ impl Inner {
         self.dedicated_executor
             .spawn(async move {
                 if let Err(error) = try_dump_beacon_state(&dump_dir, &state, block_root) {
-                    warn!("failed to dump beacon state to disk: {error:?}");
+                    warn_with_peers!("failed to dump beacon state to disk: {error:?}");
                 }
             })
             .detach();
@@ -104,7 +104,7 @@ impl Inner {
         self.dedicated_executor
             .spawn(async move {
                 if let Err(error) = try_dump_blob_sidecar(&dump_dir, &blob_sidecar) {
-                    warn!("failed to dump blob sidecar to disk: {error:?}");
+                    warn_with_peers!("failed to dump blob sidecar to disk: {error:?}");
                 }
             })
             .detach();
@@ -125,7 +125,7 @@ impl Inner {
                 if let Err(error) =
                     try_dump_aggregate_attestation(&dump_dir, &aggregate.aggregate())
                 {
-                    warn!("failed to dump aggregate attestation to disk: {error:?}");
+                    warn_with_peers!("failed to dump aggregate attestation to disk: {error:?}");
                 }
             })
             .detach();
@@ -141,7 +141,7 @@ impl Inner {
         self.dedicated_executor
             .spawn(async move {
                 if let Err(error) = try_dump_signed_block(&dump_dir, &signed_block) {
-                    warn!("failed to dump signed beacon block to disk: {error:?}");
+                    warn_with_peers!("failed to dump signed beacon block to disk: {error:?}");
                 }
             })
             .detach();

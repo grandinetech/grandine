@@ -9,7 +9,7 @@ use bls::PublicKeyBytes;
 use futures::channel::mpsc::UnboundedSender;
 use helper_functions::{accessors, misc};
 use liveness_tracker::ApiToLiveness;
-use log::warn;
+use logging::warn_with_peers;
 use typenum::Unsigned as _;
 use types::{
     combined::BeaconState,
@@ -116,7 +116,7 @@ impl DoppelgangerProtection {
                             });
                     }
                     None => {
-                        warn!(
+                        warn_with_peers!(
                             "validator with public key {public_key:?} was not found in beacon state!",
                         );
                     }

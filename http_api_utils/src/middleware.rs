@@ -12,7 +12,7 @@ use axum::{
     Extension,
 };
 use http_body_util::BodyExt as _;
-use log::info;
+use logging::info_with_peers;
 use mime::{APPLICATION_JSON, TEXT_EVENT_STREAM};
 
 use crate::{error::Error, misc::Direction};
@@ -36,7 +36,7 @@ where
         .to_bytes();
 
     if let Ok(string) = core::str::from_utf8(&bytes) {
-        info!("{direction} body for {uri}: {string:?}");
+        info_with_peers!("{direction} body for {uri}: {string:?}");
     }
 
     Ok(bytes)

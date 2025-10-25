@@ -25,7 +25,7 @@ use futures::{
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use itertools::Itertools as _;
-use log::{debug, error, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use ssz::{ContiguousList, SszReadDefault};
 use std_ext::ArcExt as _;
@@ -260,7 +260,6 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(service)
     }
 
-    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
         let mut interval =
@@ -284,7 +283,7 @@ impl<P: Preset> BlockSyncService<P> {
                     None => Either::Right(futures::future::pending()),
                 }, if self.archiver_to_sync_rx.is_some() => match message {
                     ArchiverToSync::BackSyncStatesArchived => {
-                        debug!("received back-sync states archived message");
+                        debug_with_peers!("received back-sync states archived message");
 
                         self.finish_back_sync()?;
                         self.controller.on_back_sync_status(true);
@@ -298,7 +297,7 @@ impl<P: Preset> BlockSyncService<P> {
                     SyncMessage::Finalized(block) => {
                         let checkpoint = block.as_ref().into();
 
-                        debug!("saving latest finalized back-sync checkpoint: {checkpoint:?}");
+                        debug_with_peers!("saving latest finalized back-sync checkpoint: {checkpoint:?}");
 
                         save_latest_finalized_back_sync_checkpoint(&self.database, checkpoint)?;
                     }
@@ -414,7 +413,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     metrics.observe_block_duration_to_slot(block_slot_timestamp);
                                 }
 
-                                debug!(
+                                debug_with_peers!(
                                     "received beacon block as gossip (slot: {block_slot}, root: {block_root:?}, \
                                     peer_id: {peer_id})"
                                 );
@@ -505,7 +504,7 @@ impl<P: Preset> BlockSyncService<P> {
 
                                         self.controller.on_requested_data_column_sidecar(data_column_sidecar, block_seen, peer_id);
                                     } else {
-                                        debug!(
+                                        debug_with_peers!(
                                             "received known data column sidecar: {data_column_identifier:?}, \
                                             slot: {data_column_sidecar_slot}, request_id: {request_id:?}"
                                         );
@@ -583,7 +582,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 column_indices,
                                 previous_earliest_available_slot,
                             ) {
-                                warn!("failed to start data column backfill: {error}");
+                                warn_with_peers!("failed to start data column backfill: {error}");
                             }
                         }
                         P2pToSync::Stop => {
@@ -602,7 +601,7 @@ impl<P: Preset> BlockSyncService<P> {
                     match message {
                         BlockSyncServiceMessage::RequestData => {
                             if let Err(error) = self.request_data() {
-                                warn!("unable to request new data from the network: {error:?}");
+                                warn_with_peers!("unable to request new data from the network: {error:?}");
                             }
                         }
                     }
@@ -629,7 +628,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         if let Err(error) = back_sync.verify_blocks(&self.config, &self.database, &self.controller)
         {
-            warn!("error occurred while verifying back-sync data: {error:?}");
+            warn_with_peers!("error occurred while verifying back-sync data: {error:?}");
 
             if let Some(BackSyncError::FinalCheckpointMismatch::<P> { .. }) = error.downcast_ref() {
                 back_sync.remove(&self.database)?;
@@ -648,7 +647,7 @@ impl<P: Preset> BlockSyncService<P> {
         if let Some(back_sync) = self.back_sync.as_mut() {
             back_sync.remove(&self.database)?;
 
-            debug!("finishing back-sync: {:?}", back_sync.data());
+            debug_with_peers!("finishing back-sync: {:?}", back_sync.data());
 
             match back_sync.sync_mode() {
                 BackSyncMode::Default => {
@@ -733,7 +732,7 @@ impl<P: Preset> BlockSyncService<P> {
                 };
 
                 if start_slot + count < data_serve_range_slot {
-                    debug!(
+                    debug_with_peers!(
                         "skipping batch retry: blob back-sync batch is no longer relevant: \
                          {start_slot} + {count} < {data_serve_range_slot}"
                     );
@@ -799,7 +798,7 @@ impl<P: Preset> BlockSyncService<P> {
                             continue;
                         }
 
-                        debug!(
+                        debug_with_peers!(
                             "requesting columns ({}): [{}] at start slot: {start_slot}",
                             missing_column_indices.len(),
                             missing_column_indices.iter().join(", "),
@@ -813,14 +812,14 @@ impl<P: Preset> BlockSyncService<P> {
                             ) {
                                 Ok(mapping) => mapping,
                                 Err(error) => {
-                                    debug!("retry_sync_batches: {error:?}");
+                                    debug_with_peers!("retry_sync_batches: {error:?}");
 
                                     self.sync_manager.retry_batch(request_id, batch, None);
                                     continue;
                                 }
                             };
 
-                        debug!(
+                        debug_with_peers!(
                             "retrying batch {batch:?}, request_id: {request_id:?}, mappings: {:?}, \
                             new peers: [{peer_custody_columns_mapping:?}]",
                             peer_custody_columns_mapping.len(),
@@ -1083,7 +1082,7 @@ impl<P: Preset> BlockSyncService<P> {
         );
 
         if slot < blob_serve_slot {
-            debug!(
+            debug_with_peers!(
                 "Ignoring needed blob sidecar request: slot: {slot} < blob_serve_slot: {blob_serve_slot}"
             );
             return Ok(());
@@ -1101,7 +1100,7 @@ impl<P: Preset> BlockSyncService<P> {
             .collect::<Vec<_>>();
 
         if identifiers.is_empty() {
-            debug!(
+            debug_with_peers!(
                 "cannot request BlobSidecarsByRoot: all requested blob sidecars have been received",
             );
 
@@ -1139,7 +1138,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         if self.received_block_roots.contains_key(&block_root) {
-            debug!(
+            debug_with_peers!(
                 "cannot request BeaconBlocksByRoot: requested block has been received:\
                  {block_root:?}"
             );
@@ -1176,7 +1175,7 @@ impl<P: Preset> BlockSyncService<P> {
         );
 
         if slot < data_column_serve_range_slot {
-            debug!(
+            debug_with_peers!(
                 "Ignoring needed data column sidecar request: slot: {slot} < data_column_serve_range_slot: {data_column_serve_range_slot}"
             );
             return Ok(());
@@ -1188,7 +1187,7 @@ impl<P: Preset> BlockSyncService<P> {
         } = data_columns_by_root;
 
         if self.controller.contains_block(block_root) {
-            debug!("block {block_root:?} already imported into the fork choice");
+            debug_with_peers!("block {block_root:?} already imported into the fork choice");
             return Ok(());
         }
 
@@ -1208,7 +1207,7 @@ impl<P: Preset> BlockSyncService<P> {
             .collect::<HashSet<_>>();
 
         if missing_indices.is_empty() {
-            debug!(
+            debug_with_peers!(
                 "cannot request DataColumnSidecarsByRoot: all requested data column sidecars have been received",
             );
 
@@ -1223,7 +1222,7 @@ impl<P: Preset> BlockSyncService<P> {
         ) {
             Ok(mapping) => mapping,
             Err(error) => {
-                debug!("request_needed_data_columns: {error:?}");
+                debug_with_peers!("request_needed_data_columns: {error:?}");
                 return Ok(());
             }
         };
@@ -1241,7 +1240,7 @@ impl<P: Preset> BlockSyncService<P> {
                 .sync_manager
                 .add_data_columns_request_by_root(data_columns_by_root, peer_id)
             {
-                debug!("add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})");
+                debug_with_peers!("add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})");
 
                 SyncToP2p::RequestDataColumnsByRoot(
                     request_id,
@@ -1294,7 +1293,7 @@ impl<P: Preset> BlockSyncService<P> {
         ) {
             Ok(mapping) => mapping,
             Err(error) => {
-                debug!("batch_request_missing_data_columns: {error:?}");
+                debug_with_peers!("batch_request_missing_data_columns: {error:?}");
                 return Ok(());
             }
         };
@@ -1329,7 +1328,7 @@ impl<P: Preset> BlockSyncService<P> {
                 .collect::<Vec<_>>();
 
             if !by_roots_request.is_empty() {
-                debug!(
+                debug_with_peers!(
                     "sending batched DataColumnsByRoot request to {peer_id}: {} blocks, {} total columns",
                     by_roots_request.len(),
                     by_roots_request.iter().map(|r| r.columns.len()).sum::<usize>()
@@ -1347,7 +1346,7 @@ impl<P: Preset> BlockSyncService<P> {
         peer_id
             .filter(|peer_id| self.network_globals.is_peer_connected(peer_id))
             .or_else(|| {
-                debug!("Peer {peer_id:?} is no longer connected, will find a new peer");
+                debug_with_peers!("Peer {peer_id:?} is no longer connected, will find a new peer");
 
                 None
             })
@@ -1365,13 +1364,13 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_back_synced(&mut self, is_back_synced: bool) {
-        debug!("set back-synced: {is_back_synced}");
+        debug_with_peers!("set back-synced: {is_back_synced}");
 
         let was_back_synced = self.is_back_synced;
         self.is_back_synced = is_back_synced;
 
         if was_back_synced != is_back_synced && is_back_synced {
-            info!("back-sync completed");
+            info_with_peers!("back-sync completed");
 
             self.sync_manager.cache_clear();
             self.sync_direction = SyncDirection::Forward;
@@ -1379,7 +1378,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn set_forward_synced(&mut self, is_forward_synced: bool) {
-        debug!("set forward synced: {is_forward_synced}");
+        debug_with_peers!("set forward synced: {is_forward_synced}");
 
         let was_forward_synced = self.is_forward_synced;
         self.is_forward_synced = is_forward_synced;
@@ -1490,7 +1489,7 @@ fn save_latest_finalized_back_sync_checkpoint(
 }
 
 pub fn print_sync_database_info(database: &Database) -> Result<()> {
-    info!(
+    info_with_peers!(
         "latest finalized back-sync checkpoint: {:#?}",
         get_latest_finalized_back_sync_checkpoint(database)?,
     );
@@ -1506,7 +1505,7 @@ pub fn print_sync_database_info(database: &Database) -> Result<()> {
 
         let back_sync = BackSyncData::from_ssz_default(value_bytes)?;
 
-        info!("{} : {back_sync:#?}", String::from_utf8_lossy(&key_bytes));
+        info_with_peers!("{} : {back_sync:#?}", String::from_utf8_lossy(&key_bytes));
     }
 
     Ok(())

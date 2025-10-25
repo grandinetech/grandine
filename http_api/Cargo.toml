@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
+binary_utils ={ workspace = true }
 block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
@@ -30,7 +31,7 @@ http_api_utils = { workspace = true }
 itertools = { workspace = true }
 kzg_utils = { workspace = true }
 liveness_tracker = { workspace = true }
-log = { workspace = true }
+logging ={ workspace = true }
 mediatype = { workspace = true }
 mime = { workspace = true }
 operation_pools = { workspace = true }
@@ -51,6 +52,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower-http = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }

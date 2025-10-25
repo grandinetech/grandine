@@ -29,7 +29,7 @@ hex = { workspace = true }
 hex-literal = { workspace = true }
 itertools = { workspace = true }
 jwt-simple = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 memoffset = { workspace = true }
 panics = { workspace = true }
 prometheus_metrics = { workspace = true }
@@ -42,6 +42,7 @@ static_assertions = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing ={ workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 web3 = { workspace = true }

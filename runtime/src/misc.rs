@@ -8,7 +8,7 @@ use directories::Directories;
 use fork_choice_control::StorageMode;
 use fs_err::PathExt as _;
 use futures::channel::mpsc::UnboundedSender;
-use log::info;
+use logging::info_with_peers;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use prometheus_metrics::Metrics;
 
@@ -151,8 +151,8 @@ impl StorageConfig {
     }
 
     pub fn print_db_sizes(&self) {
-        info!("Eth2 database upper limit: {}", self.db_size.display().si());
-        info!(
+        info_with_peers!("Eth2 database upper limit: {}", self.db_size.display().si());
+        info_with_peers!(
             "Eth1 database upper limit: {}",
             self.eth1_db_size.display().si(),
         );

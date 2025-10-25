@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use genesis::AnchorCheckpointProvider;
-use log::info;
+use logging::info_with_peers;
 use pubkey_cache::PubkeyCache;
 use ssz::{SszHash as _, SszRead, SszWrite as _};
 use std_ext::ArcExt as _;
@@ -148,7 +148,7 @@ fn find_file(input_dir: &Path, file_prefix: &str) -> Result<Option<PathBuf>> {
         });
 
     if path.is_none() {
-        info!("unable to locate file with prefix {file_prefix}, skipping");
+        info_with_peers!("unable to locate file with prefix {file_prefix}, skipping");
     }
 
     Ok(path)

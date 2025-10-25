@@ -7,7 +7,7 @@ use fork_choice_control::Wait;
 use futures::{channel::mpsc::UnboundedReceiver, select, StreamExt as _};
 use helper_functions::{electra, misc, phase0};
 use itertools::Itertools as _;
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use operation_pools::PoolToLivenessMessage;
 use prometheus_metrics::Metrics;
 use types::{
@@ -60,7 +60,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                     match api_message {
                         ApiToLiveness::CheckLiveness(sender, epoch, validator_indices) => {
                             if let Err(error) = sender.send(self.check_liveness(epoch, validator_indices)) {
-                                warn!("unable to send liveness data: {error:?}");
+                                warn_with_peers!("unable to send liveness data: {error:?}");
                             }
                         }
                     }
@@ -70,7 +70,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                     match pool_message {
                         PoolToLivenessMessage::SyncCommitteeMessage(sync_committee_message) => {
                             if let Err(error) = self.process_sync_committee_message(sync_committee_message) {
-                                warn!("Error while tracking liveness from sync committee message: {error:?}");
+                                warn_with_peers!("Error while tracking liveness from sync committee message: {error:?}");
                             }
                         },
                     }
@@ -84,7 +84,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                         ValidatorToLiveness::Head(block, state) => {
                             self.track_collection_metrics();
 
-                            debug!(
+                            debug_with_peers!(
                                 "Tracked epochs: {:?}, Values: {}",
                                 self.live_validators.keys().collect_vec(),
                                 self.live_validators
@@ -94,7 +94,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                             );
 
                             if let Err(error) = self.process_block(&block, &state) {
-                                warn!("Error while tracking liveness from block: {error:?}");
+                                warn_with_peers!("Error while tracking liveness from block: {error:?}");
                             }
                         }
                         ValidatorToLiveness::ValidAttestation(attestation) => {
@@ -104,7 +104,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                                 .map(|state| self.process_attestation(&attestation, &state));
 
                             if let Err(error) = result {
-                                warn!("Error while tracking liveness from attestation: {error:?}");
+                                warn_with_peers!("Error while tracking liveness from attestation: {error:?}");
                             }
                         }
                         ValidatorToLiveness::Stop => break Ok(()),

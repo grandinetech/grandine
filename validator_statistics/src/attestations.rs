@@ -8,7 +8,7 @@ use helper_functions::{
     accessors, misc,
     slot_report::{Assignment, RealSlotReport, SlotReport as _},
 };
-use log::trace;
+use logging::trace_with_peers;
 use prometheus_metrics::Metrics;
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -129,7 +129,7 @@ impl AttestationVotes {
         };
 
         if !attestation_votes.insert_vote(epoch, &head_vote) {
-            trace!("attestation head vote already present: {epoch} {head_vote:?}");
+            trace_with_peers!("attestation head vote already present: {epoch} {head_vote:?}");
         }
 
         let mut attestation_votes = self.attestation_target_votes.write().await;
@@ -141,7 +141,7 @@ impl AttestationVotes {
         };
 
         if !attestation_votes.insert_vote(epoch, &target_vote) {
-            trace!("attestation target vote already present: {epoch} {target_vote:?}");
+            trace_with_peers!("attestation target vote already present: {epoch} {target_vote:?}");
         }
     }
 

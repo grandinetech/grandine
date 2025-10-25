@@ -40,7 +40,7 @@ itertools = { workspace = true }
 libmdbx = { workspace = true }
 keymanager = { workspace = true }
 kzg_utils = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 logging = { workspace = true }
 metrics = { workspace = true }
 p2p = { workspace = true }

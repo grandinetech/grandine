@@ -10,8 +10,10 @@ workspace = true
 anyhow = { workspace = true }
 features = { workspace = true }
 itertools = { workspace = true }
+logging = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 

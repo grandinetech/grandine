@@ -105,7 +105,7 @@ pub fn process_epoch(
 pub fn epoch_report<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    state: &mut ElectraBeaconState<P>,
+    state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
@@ -137,7 +137,7 @@ pub fn epoch_report<P: Preset>(
     process_registry_updates(config, state, summaries.as_mut_slice())?;
 
     let slashing_penalties = process_slashings(state, summaries.iter().copied());
-    let post_balances = state.balances.into_iter().copied().collect();
+    let post_balances = state.balances().into_iter().copied().collect();
 
     // Do the rest of epoch processing to leave the state valid for further transitions.
     // This way it can be used to calculate statistics for multiple epochs in a row.
@@ -149,7 +149,7 @@ pub fn epoch_report<P: Preset>(
     altair::process_participation_flag_updates(state);
     altair::process_sync_committee_updates(pubkey_cache, state)?;
 
-    state.cache.advance_epoch();
+    state.cache_mut().advance_epoch();
 
     Ok(EpochReport {
         statistics,
@@ -160,9 +160,9 @@ pub fn epoch_report<P: Preset>(
     })
 }
 
-fn process_registry_updates<P: Preset>(
+pub fn process_registry_updates<P: Preset>(
     config: &Config,
-    state: &mut ElectraBeaconState<P>,
+    state: &mut impl PostElectraBeaconState<P>,
     summaries: &mut [impl ValidatorSummary],
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);

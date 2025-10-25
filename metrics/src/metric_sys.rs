@@ -6,7 +6,7 @@ use {
 };
 #[cfg(target_os = "windows")]
 use {
-    log::debug,
+    logging::debug_with_peers,
     winsafe::{self as w, prelude::*},
 };
 
@@ -57,12 +57,12 @@ pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
     let kernel_seconds = filetime_to_seconds(kernel);
     let user_seconds = filetime_to_seconds(user);
     let cpu_process_seconds_total = kernel_seconds + user_seconds;
-    debug!("CPU time: {:.2} seconds", cpu_process_seconds_total);
+    debug_with_peers!("CPU time: {:.2} seconds", cpu_process_seconds_total);
 
     // Get memory info
     let mem_info = proc.GetProcessMemoryInfo()?;
     let memory_process_bytes = mem_info.WorkingSetSize.try_into()?;
-    debug!("memory usage: {} bytes", memory_process_bytes);
+    debug_with_peers!("memory usage: {} bytes", memory_process_bytes);
 
     Ok(ProcessCpuMetric {
         cpu_process_seconds_total,

@@ -1,14 +1,14 @@
 use core::any::Any;
 
 use anyhow::Error;
-use log::error;
+use logging::error_with_peers;
 
 pub fn log(payload: Box<dyn Any + Send + 'static>) {
     let thread = std::thread::current();
     // Use the same default as the standard library and various third-party crates.
     let name = thread.name().unwrap_or("<unnamed>");
     let error = payload_into_error(payload);
-    error!("thread {name} panicked: {error}");
+    error_with_peers!("thread {name} panicked: {error}");
 }
 
 #[must_use]

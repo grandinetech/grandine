@@ -1,7 +1,7 @@
 use eth2_libp2p::PeerId;
 use execution_engine::EngineGetBlobsParams;
 use futures::channel::mpsc::UnboundedSender;
-use log::debug;
+use logging::debug_with_peers;
 use serde::Serialize;
 use types::{
     deneb::containers::BlobIdentifier, fulu::containers::DataColumnsByRootIdentifier,
@@ -26,7 +26,7 @@ pub enum Eth1ApiToMetrics {
 impl Eth1ApiToMetrics {
     pub(crate) fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to metrics service failed because the receiver was dropped");
+            debug_with_peers!("send to metrics service failed because the receiver was dropped");
         }
     }
 }
@@ -39,7 +39,7 @@ pub enum Eth1ApiToBlobFetcher<P: Preset> {
 impl<P: Preset> Eth1ApiToBlobFetcher<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to blob fetcher failed because the receiver was dropped");
+            debug_with_peers!("send to blob fetcher failed because the receiver was dropped");
         }
     }
 }
@@ -53,7 +53,7 @@ pub enum BlobFetcherToP2p<P: Preset> {
 impl<P: Preset> BlobFetcherToP2p<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
-            debug!("send to p2p failed because the receiver was dropped");
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
         }
     }
 }

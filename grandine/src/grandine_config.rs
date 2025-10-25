@@ -6,7 +6,7 @@ use eth1_api::AuthOptions;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
-use log::info;
+use logging::info_with_peers;
 use p2p::NetworkConfig;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
@@ -116,102 +116,104 @@ impl GrandineConfig {
         } = storage_config;
 
         match predefined_network {
-            Some(network) => info!("network: {network}"),
-            None => info!(
+            Some(network) => info_with_peers!("network: {network}"),
+            None => info_with_peers!(
                 "network: custom with {} preset and {} configuration",
-                chain_config.preset_base, chain_config.config_name,
+                chain_config.preset_base,
+                chain_config.config_name,
             ),
         }
 
-        info!("storage mode: {:?}", storage_config.storage_mode);
-        info!("data directory: {}", data_dir.display());
+        info_with_peers!("storage mode: {:?}", storage_config.storage_mode);
+        info_with_peers!("data directory: {}", data_dir.display());
 
         self.storage_config.print_db_sizes();
 
-        info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
-        info!("graffiti: {graffiti:?}");
+        info_with_peers!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
+        info_with_peers!("graffiti: {graffiti:?}");
 
         if *disable_blockprint_graffiti {
-            info!("blockprint graffiti disabled");
+            info_with_peers!("blockprint graffiti disabled");
         }
 
-        info!("HTTP API address: {}", http_api_config.address);
+        info_with_peers!("HTTP API address: {}", http_api_config.address);
 
         if let Some(metrics_server_config) = &metrics_config.metrics_server_config {
-            info!(
+            info_with_peers!(
                 "metrics server address: {}",
                 SocketAddr::from(metrics_server_config),
             );
         }
 
         if let Some(metrics_service_config) = &metrics_config.metrics_service_config {
-            info!(
+            info_with_peers!(
                 "metrics service configured with {:?} update interval",
                 metrics_service_config.metrics_update_interval,
             );
         }
 
         if let Some(validator_api_config) = validator_api_config.as_ref() {
-            info!("validator API address: {}", validator_api_config.address);
+            info_with_peers!("validator API address: {}", validator_api_config.address);
         } else {
-            info!("validator API disabled");
+            info_with_peers!("validator API disabled");
         }
 
-        info!("archival interval: {archival_epoch_interval} epochs");
-        info!("slasher enabled: {slashing_enabled}");
+        info_with_peers!("archival interval: {archival_epoch_interval} epochs");
+        info_with_peers!("slasher enabled: {slashing_enabled}");
 
         if let Some(client_version) = &network_config.identify_agent_version {
-            info!("client version: {client_version}");
+            info_with_peers!("client version: {client_version}");
         }
 
         if !network_config.trusted_peers.is_empty() {
-            info!("trusted peers: {:?}", network_config.trusted_peers);
+            info_with_peers!("trusted peers: {:?}", network_config.trusted_peers);
         }
 
         if let Some(slot) = state_slot {
-            info!("force state slot: {slot}");
+            info_with_peers!("force state slot: {slot}");
         }
 
         if let Some(builder_config) = builder_config {
-            info!(
+            info_with_peers!(
                 "using external block builder (API URL: {}, format: {}, \
                 default_builder_boost_factor: {default_builder_boost_factor})",
-                builder_config.builder_api_url, builder_config.builder_api_format,
+                builder_config.builder_api_url,
+                builder_config.builder_api_format,
             );
         }
 
         if let Some(checkpoint_sync_url) = checkpoint_sync_url {
-            info!("checkpoint sync url: {checkpoint_sync_url}");
+            info_with_peers!("checkpoint sync url: {checkpoint_sync_url}");
         }
 
         if !web3signer_config.urls.is_empty() {
-            info!(
+            info_with_peers!(
                 "using Web3Signer API to sign validator messages (API URLs: [{}])",
                 web3signer_config.urls.iter().format(", "),
             );
         }
 
         if *slashing_enabled {
-            info!("slasher history limit: {slashing_history_limit}");
+            info_with_peers!("slasher history limit: {slashing_history_limit}");
         }
 
-        info!("suggested fee recipient: {suggested_fee_recipient}");
-        info!("back-sync enabled: {back_sync_enabled}");
+        info_with_peers!("suggested fee recipient: {suggested_fee_recipient}");
+        info_with_peers!("back-sync enabled: {back_sync_enabled}");
 
         if *use_validator_key_cache {
-            info!("using validator key cache");
+            info_with_peers!("using validator key cache");
         }
 
         if *withhold_data_columns_publishing {
-            info!("withholding data column sidecars publishing");
+            info_with_peers!("withholding data column sidecars publishing");
         }
 
         if *disable_engine_getblobs {
-            info!("running without engine_getBlobs integration");
+            info_with_peers!("running without engine_getBlobs integration");
         }
 
         if *sync_without_reconstruction {
-            info!("sync with reconstruction disabled");
+            info_with_peers!("sync with reconstruction disabled");
         }
     }
 }

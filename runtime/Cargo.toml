@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 attestation_verifier = { workspace = true }
+binary_utils ={ workspace = true }
 block_producer = { workspace = true }
 builder_api = { workspace = true }
 bytesize = { workspace = true }
@@ -31,7 +32,7 @@ helper_functions = { workspace = true }
 http_api = { workspace = true }
 keymanager = { workspace = true }
 liveness_tracker = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 metrics = { workspace = true }
 nonzero_ext = { workspace = true }
 num_cpus = { workspace = true }
@@ -49,6 +50,7 @@ slashing_protection = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }
 validator = { workspace = true }
 validator_statistics = { workspace = true }

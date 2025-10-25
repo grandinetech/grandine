@@ -14,10 +14,11 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{
         sse::{Event as ServerSentEvent, KeepAlive},
-        IntoResponse as _, Response, Sse,
+        IntoResponse, Response, Sse,
     },
     Json,
 };
+use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{traits::SignatureBytes as _, PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
@@ -36,7 +37,7 @@ use http_api_utils::{BlockId, StateId};
 use itertools::{izip, Either, Itertools as _};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
     convert_to_electra_attestation, AttestationAggPool, BlsToExecutionChangePool, Origin,
     PoolAdditionOutcome, SyncCommitteeAggPool,
@@ -54,6 +55,7 @@ use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::time::timeout;
 use tokio_stream::wrappers::BroadcastStream;
+use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -243,6 +245,12 @@ pub struct ExpectedWithdrawalsQuery {
 #[serde(deny_unknown_fields)]
 pub struct PublishBlockQuery {
     broadcast_validation: Option<BroadcastValidation>,
+}
+
+#[derive(Deserialize)]
+pub struct LogLevelRequest {
+    target: String,
+    level: String,
 }
 
 #[expect(clippy::struct_field_names)]
@@ -1390,6 +1398,15 @@ pub async fn blobs<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/blocks`
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api"
+    ),
+    name = "http_api",
+    skip_all,
+)]
 pub async fn publish_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
@@ -1448,6 +1465,16 @@ pub async fn publish_block<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/blinded_blocks`
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+        block_slot = %signed_blinded_block.message().slot()
+    ),
+    name = "http_api",
+    skip_all,
+)]
 pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
@@ -1472,7 +1499,6 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .result;
 
     let (message, signature) = signed_blinded_block.split();
-
     let signed_beacon_block = message
         .with_execution_payload(execution_payload)
         .map_err(AnyhowError::new)?
@@ -1920,6 +1946,15 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/attestations`
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+    ),
+    name = "http_api",
+    skip_all
+)]
 pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -2009,7 +2044,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
             }
             Ok(ValidationOutcome::Ignore(_)) => {}
             Err(error) => {
-                debug!(
+                debug_with_peers!(
                     "external sync committee message rejected \
                      (error: {error}, message: {message:?}, subnet_id: {subnet_id})",
                 );
@@ -2678,6 +2713,16 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/blinded_blocks/{slot}`
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+        slot = %slot
+    ),
+    name = "http_api",
+    skip_all,
+)]
 pub async fn validator_blinded_block<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
@@ -2702,7 +2747,9 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
         // accessors::get_beacon_proposer_index can only fail if head state has no active validators.
-        warn!("failed to produce blinded beacon block: head state has no active validators");
+        warn_with_peers!(
+            "failed to produce blinded beacon block: head state has no active validators"
+        );
         return Err(Error::UnableToProduceBlindedBlock);
     };
 
@@ -2743,6 +2790,17 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/validator/blocks/{slot}`
+#[expect(clippy::type_complexity)]
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+        slot = %slot
+    ),
+    name = "http_api",
+    skip_all,
+)]
 pub async fn validator_block<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
@@ -2817,7 +2875,9 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
         // accessors::get_beacon_proposer_index can only fail if head state has no active validators.
-        warn!("failed to produce blinded beacon block: head state has no active validators");
+        warn_with_peers!(
+            "failed to produce blinded beacon block: head state has no active validators"
+        );
         return Err(Error::UnableToProduceBeaconBlock);
     };
 
@@ -2868,7 +2928,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let consensus_block_value = block_rewards
         .map(|rewards| Uint256::from_u64(rewards.total) * WEI_IN_GWEI)
         .or_else(|| {
-            warn!(
+            warn_with_peers!(
                 "unable to calculate block rewards for validator block {:?} at slot {slot}",
                 signed_beacon_block.message().hash_tree_root(),
             );
@@ -2883,6 +2943,17 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/attestation_data`
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+        slot = %query.slot,
+        committee_index = %query.committee_index
+    ),
+    name = "http_api",
+    skip_all,
+)]
 pub async fn validator_attestation_data<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -2960,7 +3031,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
                     Ok(Event::Block(block_event)) => block_event,
                     Ok(_) => continue,
                     Err(error) => {
-                        debug!("error receiving block event: {error:?}");
+                        debug_with_peers!("error receiving block event: {error:?}");
                         continue;
                     }
                 };
@@ -2972,7 +3043,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         })
         .await
         {
-            debug!("timeout while waiting for block event: {error:?}");
+            debug_with_peers!("timeout while waiting for block event: {error:?}");
             return Err(Error::HeadIsOptimistic);
         }
     }
@@ -3295,6 +3366,37 @@ pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
 }
 
+/// `POST /eth/v2/debug/tracing/log_level`
+pub async fn post_log_level(
+    State(handle): State<Option<TracingHandle>>,
+    Json(req): Json<LogLevelRequest>,
+) -> impl IntoResponse {
+    let directive_str = format!("{}={}", req.target, req.level);
+
+    match directive_str.parse() {
+        Ok(directive) => {
+            if let Some(handle) = handle {
+                if let Err(e) = handle.modify(|filter| {
+                    let old = core::mem::take(filter);
+                    *filter = old.add_directive(directive);
+                }) {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("failed to reload filter: {e}"),
+                    );
+                }
+                (StatusCode::OK, "log level updated".to_owned())
+            } else {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "tracing not available".to_owned(),
+                )
+            }
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, format!("invalid directive: {e}")),
+    }
+}
+
 fn state_validators<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
@@ -3359,6 +3461,16 @@ fn state_validators<P: Preset, W: Wait>(
         .finalized(finalized))
 }
 
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+        block_root = %block.message().hash_tree_root()
+    ),
+    name = "http_api",
+    skip_all,
+)]
 async fn publish_signed_block<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,
@@ -3391,15 +3503,21 @@ async fn publish_signed_block<P: Preset, W: Wait>(
             // Vouch submits blocks it constructs to all beacon nodes it is connected to.
             // The blocks often reach our application through gossip faster than through the API.
             let block_root = block.message().hash_tree_root();
-            info!("block received through HTTP API was ignored (block root: {block_root:?})");
+            info_with_peers!(
+                "block received through HTTP API was ignored (block root: {block_root:?})"
+            );
             StatusCode::ACCEPTED
         }
         Ok(None) => {
-            warn!("received no block validation response for HTTP API (block: {block:?})");
+            warn_with_peers!(
+                "received no block validation response for HTTP API (block: {block:?})"
+            );
             StatusCode::ACCEPTED
         }
         Err(error) => {
-            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
+            warn_with_peers!(
+                "received invalid block through HTTP API (block: {block:?}, error: {error})"
+            );
             StatusCode::ACCEPTED
         }
     };
@@ -3429,7 +3547,7 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
             return Err(Error::UnableToPublishBlock);
         }
         Ok(None) => {
-            warn!(
+            warn_with_peers!(
                 "received no block validation response for gossip validation via HTTP API \
                 (block: {block:?})"
             );
@@ -3472,7 +3590,7 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
             return Err(Error::UnableToPublishBlock);
         }
         Ok(None) => {
-            warn!(
+            warn_with_peers!(
                 "received no block validation response for gossip validation via HTTP API \
                 (block: {block:?})"
             );
@@ -3540,15 +3658,21 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
             // Vouch submits blocks it constructs to all beacon nodes it is connected to.
             // The blocks often reach our application through gossip faster than through the API.
             let block_root = block.message().hash_tree_root();
-            info!("block received through HTTP API was ignored (block root: {block_root:?})");
+            info_with_peers!(
+                "block received through HTTP API was ignored (block root: {block_root:?})"
+            );
             StatusCode::ACCEPTED
         }
         Ok(None) => {
-            warn!("received no block validation response for HTTP API (block: {block:?})");
+            warn_with_peers!(
+                "received no block validation response for HTTP API (block: {block:?})"
+            );
             StatusCode::ACCEPTED
         }
         Err(error) => {
-            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
+            warn_with_peers!(
+                "received invalid block through HTTP API (block: {block:?}, error: {error})"
+            );
             StatusCode::ACCEPTED
         }
     };
@@ -3610,7 +3734,7 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
                     // The blocks often reach our application through gossip faster than through the API.
                     let block_root = block.message().hash_tree_root();
 
-                    info!(
+                    info_with_peers!(
                         "block received through HTTP API was ignored (block root: {block_root:?})"
                     );
 
@@ -3626,7 +3750,9 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
             }
         }
         Ok(None) => {
-            warn!("received no block validation response for HTTP API (block: {block:?})");
+            warn_with_peers!(
+                "received no block validation response for HTTP API (block: {block:?})"
+            );
 
             if broadcast_validation == BroadcastValidation::Gossip {
                 StatusCode::ACCEPTED
@@ -3635,7 +3761,9 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
             }
         }
         Err(error) => {
-            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
+            warn_with_peers!(
+                "received invalid block through HTTP API (block: {block:?}, error: {error})"
+            );
 
             if broadcast_validation == BroadcastValidation::Gossip {
                 StatusCode::ACCEPTED
@@ -3709,7 +3837,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                     // The blocks often reach our application through gossip faster than through the API.
                     let block_root = block.message().hash_tree_root();
 
-                    info!(
+                    info_with_peers!(
                         "block received through HTTP API was ignored (block root: {block_root:?})"
                     );
 
@@ -3729,7 +3857,9 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
             }
         }
         Ok(None) => {
-            warn!("received no block validation response for HTTP API (block: {block:?})");
+            warn_with_peers!(
+                "received no block validation response for HTTP API (block: {block:?})"
+            );
             if broadcast_validation == BroadcastValidation::Gossip {
                 StatusCode::ACCEPTED
             } else {
@@ -3737,7 +3867,9 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
             }
         }
         Err(error) => {
-            warn!("received invalid block through HTTP API (block: {block:?}, error: {error})");
+            warn_with_peers!(
+                "received invalid block through HTTP API (block: {block:?}, error: {error})"
+            );
             if broadcast_validation == BroadcastValidation::Gossip {
                 StatusCode::ACCEPTED
             } else {
@@ -3845,6 +3977,15 @@ fn build_attestation_item<P: Preset, W: Wait>(
     ))
 }
 
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api"
+    ),
+    name = "http_api",
+    skip_all,
+)]
 async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     event_channels: Arc<EventChannels<P>>,
@@ -3892,7 +4033,9 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
         .flat_map(|(target_state_result, attestations)| {
             let target_state = target_state_result
                 .map_err(|error| {
-                    warn!("attestations submitted to beacon node were rejected: {error}");
+                    warn_with_peers!(
+                        "attestations submitted to beacon node were rejected: {error}"
+                    );
                     error
                 })
                 .ok();
@@ -4052,7 +4195,7 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
                     Ok(Event::Block(block_event)) => block_event,
                     Ok(_) => continue,
                     Err(error) => {
-                        debug!("error receiving block event: {error:?}");
+                        debug_with_peers!("error receiving block event: {error:?}");
                         continue;
                     }
                 };
@@ -4062,7 +4205,7 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
         })
         .await
         {
-            debug!("timeout while waiting for block events: {error:?}");
+            debug_with_peers!("timeout while waiting for block events: {error:?}");
         }
     }
 

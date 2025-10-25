@@ -9,7 +9,7 @@ use std::{
 use anyhow::{bail, Result};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, SecretKeyBytes};
 use eip_2335::Crypto;
-use log::info;
+use logging::info_with_peers;
 use sha2::{Digest as _, Sha256};
 use ssz::{ContiguousList, Ssz, SszReadDefault as _, SszWrite as _};
 use tap::Pipe as _;
@@ -60,7 +60,7 @@ impl ValidatorKeyCache {
 
         self.load_from_file(&self.concatenate_passwords(), &self.file_name())?;
 
-        info!("validator key cache loaded");
+        info_with_peers!("validator key cache loaded");
 
         Ok(())
     }
@@ -70,7 +70,7 @@ impl ValidatorKeyCache {
         let crypto_bytes = match fs_err::read(file_path) {
             Ok(bytes) => Zeroizing::new(bytes),
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                info!("validator key cache not found");
+                info_with_peers!("validator key cache not found");
                 return Ok(());
             }
             Err(error) => bail!(error),
@@ -127,7 +127,7 @@ impl ValidatorKeyCache {
     pub fn save(&self) -> Result<()> {
         self.save_to_file(&self.concatenate_passwords(), &self.file_name())?;
 
-        info!("validator key cache saved");
+        info_with_peers!("validator key cache saved");
 
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use dedicated_executor::DedicatedExecutor;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use web3::{
     api::{Eth, Namespace as _},
     helpers::CallFuture,
@@ -27,7 +27,7 @@ pub fn spawn_exchange_capabilities_and_versions_task(
     dedicated_executor
         .spawn(async move {
             if let Err(error) = exchange_capabilities_and_versions(&eth1_api).await {
-                warn!("failed to exchange capabilities and client versions: {error:?}");
+                warn_with_peers!("failed to exchange capabilities and client versions: {error:?}");
             }
         })
         .detach();
@@ -60,12 +60,12 @@ async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
                 eth1_api.on_ok_response(endpoint);
                 endpoint.set_capabilities(capabilities);
 
-                info!("updated capabilities for eth1 endpoint: {}", endpoint.url());
+                info_with_peers!("updated capabilities for eth1 endpoint: {}", endpoint.url());
 
                 if supports_client_version {
                     exchange_client_versions(eth1_api, &api, endpoint).await?;
                 } else {
-                    debug!(
+                    debug_with_peers!(
                         "cannot get client version: {} does not support \
                         {ENGINE_GET_CLIENT_VERSION_V1}",
                         endpoint.url(),
@@ -75,7 +75,7 @@ async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
             Err(error) => {
                 eth1_api.on_error_response(endpoint);
 
-                warn!(
+                warn_with_peers!(
                     "unable to update capabilities for eth1 endpoint: {} {error:?}",
                     endpoint.url(),
                 );
@@ -104,7 +104,7 @@ async fn exchange_client_versions(
             eth1_api.on_ok_response(endpoint);
             endpoint.set_client_versions(client_versions);
 
-            info!(
+            info_with_peers!(
                 "updated client version for eth1 endpoint: {}",
                 endpoint.url()
             );
@@ -112,7 +112,7 @@ async fn exchange_client_versions(
         Err(error) => {
             eth1_api.on_error_response(endpoint);
 
-            warn!(
+            warn_with_peers!(
                 "unable to update client version for eth1 endpoint: {} {error:?}",
                 endpoint.url(),
             );

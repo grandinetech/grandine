@@ -201,7 +201,8 @@ pub mod electra {
     };
     pub(crate) use epoch_processing::{
         epoch_report, process_effective_balance_updates, process_epoch,
-        process_pending_consolidations, process_pending_deposits, process_slashings,
+        process_pending_consolidations, process_pending_deposits, process_registry_updates,
+        process_slashings,
     };
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
@@ -223,7 +224,7 @@ pub mod electra {
 pub mod fulu {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
-    pub(crate) use epoch_processing::{epoch_report, process_epoch};
+    pub(crate) use epoch_processing::process_epoch;
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
 

@@ -5,7 +5,7 @@ use chrono::{Local, TimeZone as _};
 use eth1_api::{DepositEvent, Eth1Block};
 use futures::stream::{Stream, TryStreamExt as _};
 use genesis::Incremental;
-use log::info;
+use logging::info_with_peers;
 use pubkey_cache::PubkeyCache;
 use ssz::{SszRead as _, SszWrite as _};
 use thiserror::Error;
@@ -56,7 +56,7 @@ pub async fn wait<P: Preset>(
         }
 
         if let Err(error) = incremental.validate() {
-            info!("genesis not triggered: {error}");
+            info_with_peers!("genesis not triggered: {error}");
             continue;
         }
 
@@ -72,7 +72,7 @@ pub async fn wait<P: Preset>(
             .ok_or(Error::GenesisTimeOutOfRange { genesis_time })?;
 
         // Don't log the whole state. It's huge even with the minimal configuration.
-        info!("genesis triggered with genesis time {genesis_time} ({local_date_time})");
+        info_with_peers!("genesis triggered with genesis time {genesis_time} ({local_date_time})");
 
         persist_genesis_state(store_directory.as_path(), &genesis_state)?;
         deposit_tree.last_added_block_number = block.number;

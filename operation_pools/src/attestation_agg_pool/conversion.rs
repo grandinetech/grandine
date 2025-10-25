@@ -4,7 +4,7 @@ use anyhow::{bail, Error as AnyhowError, Result};
 use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
-use log::debug;
+use logging::debug_with_peers;
 use ssz::ReadError;
 use thiserror::Error;
 use typenum::Unsigned as _;
@@ -118,7 +118,7 @@ fn current_state<P: Preset, W: Wait>(controller: &ApiController<P, W>) -> Arc<Be
     match controller.preprocessed_state_at_current_slot() {
         Ok(state) => state,
         Err(error) => {
-            debug!(
+            debug_with_peers!(
                 "failed to get state at current slot for attestation conversion: {error}. \
                  Using head state instead",
             );

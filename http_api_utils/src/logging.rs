@@ -8,7 +8,7 @@ use axum::{
     response::Response,
 };
 use features::Feature;
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use tracing::Span;
 
 use crate::{misc::ApiMetrics, ApiError};
@@ -32,13 +32,13 @@ pub fn log_request(request: &Request<Body>, _span: &Span) {
              inserted by into_make_service_with_connect_info",
         );
 
-        info!("received request ({method} {uri} {version:?}) from {remote}");
+        info_with_peers!("received request ({method} {uri} {version:?}) from {remote}");
     }
 
     if Feature::LogHttpHeaders.is_enabled() {
         let headers = request.headers();
 
-        info!("request headers for ({method} {uri}): {headers:?}");
+        info_with_peers!("request headers for ({method} {uri}): {headers:?}");
     }
 }
 
@@ -73,8 +73,10 @@ pub fn log_response<E: ApiError + Send + Sync + 'static>(
                 ),
                 response.extensions().get::<Arc<E>>(),
             ) {
-                (shared, Some(error)) => info!("{shared} (error: {})", error.format_sources()),
-                (shared, None) => info!("{shared}"),
+                (shared, Some(error)) => {
+                    info_with_peers!("{shared} (error: {})", error.format_sources())
+                }
+                (shared, None) => info_with_peers!("{shared}"),
             }
         }
 
@@ -107,7 +109,7 @@ pub fn log_latency_metrics(api_metrics: &ApiMetrics, response: &Response, latenc
             "OriginalUri response extension should be inserted by insert_response_extensions",
         );
 
-        warn!(
+        warn_with_peers!(
             "Unable to observe HTTP API metrics: \
             MatchedPath response extension is missing for: {original_uri}"
         );

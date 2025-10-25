@@ -8,7 +8,7 @@ use directories::Directories;
 use eth1_api::{Eth1ApiToMetrics, Eth1Metrics, RealController};
 use futures::{channel::mpsc::UnboundedReceiver, future::Either, select, StreamExt as _};
 use helper_functions::misc;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::SyncToMetrics;
 use prometheus_metrics::Metrics;
 use reqwest::{Client, StatusCode};
@@ -80,7 +80,6 @@ impl<P: Preset> MetricsService<P> {
         }
     }
 
-    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
         let MetricsServiceConfig {
@@ -130,79 +129,81 @@ impl<P: Preset> MetricsService<P> {
 
                     self.metrics.metrics_requests_since_last_update.reset();
 
-                    refresh_system_stats(&mut system, &mut system_refresh_time);
+                    tokio::task::block_in_place(|| {
+                        refresh_system_stats(&mut system, &mut system_refresh_time);
 
-                    let grandine = system
-                        .process(grandine_pid)
-                        .expect("the current process should always be available");
+                        let grandine = system
+                            .process(grandine_pid)
+                            .expect("the current process should always be available");
 
-                    let (rx_bytes, tx_bytes) = helpers::get_network_bytes();
+                        let (rx_bytes, tx_bytes) = helpers::get_network_bytes();
 
-                    self.metrics.set_cores(system.cpus().len());
-                    self.metrics.set_used_memory(grandine.memory());
-                    self.metrics.set_rx_bytes(rx_bytes);
-                    self.metrics.set_tx_bytes(tx_bytes);
-                    self.metrics.set_total_cpu_percentage(grandine.cpu_usage());
-                    self.metrics.set_system_cpu_percentage(system.global_cpu_usage());
-                    self.metrics.set_system_total_memory(system.total_memory());
-                    self.metrics.set_system_used_memory(system.used_memory());
+                        self.metrics.set_cores(system.cpus().len());
+                        self.metrics.set_used_memory(grandine.memory());
+                        self.metrics.set_rx_bytes(rx_bytes);
+                        self.metrics.set_tx_bytes(tx_bytes);
+                        self.metrics.set_total_cpu_percentage(grandine.cpu_usage());
+                        self.metrics.set_system_cpu_percentage(system.global_cpu_usage());
+                        self.metrics.set_system_total_memory(system.total_memory());
+                        self.metrics.set_system_used_memory(system.used_memory());
 
-                    let process_metrics = ProcessMetrics::get();
+                        let process_metrics = ProcessMetrics::get();
 
-                    self.metrics.set_grandine_thread_count(process_metrics.thread_count);
-                    self.metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
+                        self.metrics.set_grandine_thread_count(process_metrics.thread_count);
+                        self.metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
 
-                    // Update disk usage
-                    self.metrics.set_disk_usage(
-                        directories
-                            .disk_usage()
-                            .map_err(|error| {
-                                warn!("unable to fetch Grandine disk usage: {error:?}");
-                                error
-                            })
-                            .unwrap_or_default(),
-                    );
+                        // Update disk usage
+                        self.metrics.set_disk_usage(
+                            directories
+                                .disk_usage()
+                                .map_err(|error| {
+                                    warn_with_peers!("unable to fetch Grandine disk usage: {error:?}");
+                                    error
+                                })
+                                .unwrap_or_default(),
+                        );
 
-                    #[cfg(not(target_os = "windows"))]
-                    if let Err(error) = update_jemalloc_metrics(&self.metrics) {
-                        warn!("unable to update jemalloc metrics: {error:?}");
-                    }
+                        #[cfg(not(target_os = "windows"))]
+                        if let Err(error) = update_jemalloc_metrics(&self.metrics) {
+                            warn_with_peers!("unable to update jemalloc metrics: {error:?}");
+                        }
 
-                    let head_slot = self.controller.head().value.slot();
-                    let store_slot = self.controller.slot();
-                    let max_empty_slots = self.controller.store_config().max_empty_slots;
+                        let head_slot = self.controller.head().value.slot();
+                        let store_slot = self.controller.slot();
+                        let max_empty_slots = self.controller.store_config().max_empty_slots;
 
-                    if head_slot + max_empty_slots >= store_slot {
-                        let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
+                        if head_slot + max_empty_slots >= store_slot {
+                            let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
 
-                        let should_update_metrics = epoch_with_metrics
-                            .map(|metrics_present_for_epoch| metrics_present_for_epoch != epoch)
-                            .unwrap_or(true);
+                            let should_update_metrics = epoch_with_metrics
+                                .map(|metrics_present_for_epoch| metrics_present_for_epoch != epoch)
+                                .unwrap_or(true);
 
-                        if should_update_metrics {
-                            // Take state at last slot in epoch
-                            let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
+                            if should_update_metrics {
+                                // Take state at last slot in epoch
+                                let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
 
-                            let state_opt = match self.controller.state_at_slot(slot) {
-                                Ok(state_opt) => state_opt,
-                                Err(error) => {
-                                    warn!("unable to update epoch metrics: {error:?}");
-                                    continue;
-                                }
-                            };
+                                let state_opt = match self.controller.state_at_slot(slot) {
+                                    Ok(state_opt) => state_opt,
+                                    Err(error) => {
+                                        warn_with_peers!("unable to update epoch metrics: {error:?}");
+                                        return;
+                                    }
+                                };
 
-                            if let Some(state) = state_opt {
-                                match self.update_epoch_metrics(&state.value) {
-                                    Ok(()) => epoch_with_metrics = Some(epoch),
-                                    Err(error) => warn!("unable to update epoch metrics: {error:?}"),
+                                if let Some(state) = state_opt {
+                                    match self.update_epoch_metrics(&state.value) {
+                                        Ok(()) => epoch_with_metrics = Some(epoch),
+                                        Err(error) => warn_with_peers!("unable to update epoch metrics: {error:?}"),
+                                    }
                                 }
                             }
                         }
-                    }
+                    })
                 },
 
                 _ = interval.select_next_some() => {
-                    debug!("sending metrics to external service");
+                    debug_with_peers!("sending metrics to external service");
 
                     if let Some(url) = remote_metrics_url.clone() {
                         refresh_system_stats(&mut system, &mut system_refresh_time);
@@ -221,20 +222,20 @@ impl<P: Preset> MetricsService<P> {
 
                         match response {
                             Ok(response) => {
-                                debug!("received response: {response:#?}");
+                                debug_with_peers!("received response: {response:#?}");
 
                                 match response.status() {
-                                    StatusCode::OK => info!("metrics sent to external service"),
+                                    StatusCode::OK => info_with_peers!("metrics sent to external service"),
                                     status => match response.json::<RemoteError>().await {
-                                        Ok(body) => debug!("received JSON: {status} {body:#?}"),
-                                        Err(error) => debug!(
+                                        Ok(body) => debug_with_peers!("received JSON: {status} {body:#?}"),
+                                        Err(error) => debug_with_peers!(
                                             "unable to receive JSON body: {status} {error:?}"
                                         ),
                                     },
                                 }
                             }
                             Err(error) => {
-                                warn!("received error while sending external metrics: {error:?}");
+                                warn_with_peers!("received error while sending external metrics: {error:?}");
                             }
                         }
                     }

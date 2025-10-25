@@ -456,6 +456,7 @@ impl<parameters> BeaconState<P> for implementor {
 pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
     fn previous_epoch_participation(&self) -> &EpochParticipation<P>;
     fn current_epoch_participation(&self) -> &EpochParticipation<P>;
+    fn inactivity_scores(&self) -> &InactivityScores<P>;
     fn current_sync_committee(&self) -> &Arc<Hc<SyncCommittee<P>>>;
     fn next_sync_committee(&self) -> &Arc<Hc<SyncCommittee<P>>>;
 
@@ -513,6 +514,7 @@ impl<parameters> PostAltairBeaconState<P> for implementor {
         [previous_epoch_participation] [EpochParticipation<P>];
         [current_epoch_participation]  [EpochParticipation<P>];
         [current_sync_committee]       [Arc<Hc<SyncCommittee<P>>>];
+        [inactivity_scores]            [InactivityScores<P>];
         [next_sync_committee]          [Arc<Hc<SyncCommittee<P>>>];
     )]
     fn field(&self) -> &return_type {

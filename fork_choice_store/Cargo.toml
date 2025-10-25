@@ -24,7 +24,7 @@ helper_functions = { workspace = true }
 im = { workspace = true }
 itertools = { workspace = true }
 kzg_utils = { workspace = true }
-log = { workspace = true }
+logging = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 serde = { workspace = true }
@@ -35,6 +35,7 @@ std_ext = { workspace = true }
 strum = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 transition_functions = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }

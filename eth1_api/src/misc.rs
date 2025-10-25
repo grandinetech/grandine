@@ -5,7 +5,7 @@ use ethereum_types::H32;
 use fork_choice_control::{AttestationVerifierMessage, Controller};
 use futures::channel::mpsc::UnboundedSender;
 use grandine_version::{APPLICATION_COMMIT, APPLICATION_NAME, APPLICATION_VERSION};
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{endpoints::ClientVersions, eth1_execution_engine::Eth1ExecutionEngine};
@@ -100,7 +100,9 @@ impl<'de> Deserialize<'de> for ClientCode {
                     "PM" => ClientCode::Prysm,
                     "RH" => ClientCode::Reth,
                     other => {
-                        info!("received unknown client code from execution client: {other}");
+                        info_with_peers!(
+                            "received unknown client code from execution client: {other}"
+                        );
                         ClientCode::Unknown(other.to_owned())
                     }
                 })
@@ -205,7 +207,7 @@ impl ClientVersionV1 {
     fn own_commit() -> H32 {
         Self::try_own_commit()
             .inspect_err(|error| {
-                warn!("unable to produce H32 from {APPLICATION_COMMIT}: {error:?}")
+                warn_with_peers!("unable to produce H32 from {APPLICATION_COMMIT}: {error:?}")
             })
             .unwrap_or_default()
     }

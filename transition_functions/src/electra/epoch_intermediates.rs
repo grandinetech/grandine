@@ -8,16 +8,16 @@ use types::{
         TIMELY_HEAD_WEIGHT, TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, WEIGHT_DENOMINATOR,
     },
     config::Config,
-    electra::beacon_state::BeaconState,
     nonstandard::Participation,
     preset::Preset,
+    traits::PostElectraBeaconState,
 };
 
 use crate::altair::{EpochDeltas, Statistics, ValidatorSummary};
 
 pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
     config: &Config,
-    state: &BeaconState<P>,
+    state: &impl PostElectraBeaconState<P>,
     statistics: Statistics,
     summaries: impl IntoIterator<Item = ValidatorSummary>,
     participation: impl IntoIterator<Item = Participation>,
@@ -31,7 +31,7 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
     let head_increments = statistics.previous_epoch_head_participating_balance / increment;
     let active_increments = total_active_balance(state) / increment;
 
-    izip!(summaries, participation, &state.inactivity_scores)
+    izip!(summaries, participation, state.inactivity_scores())
         .map(|(summary, participation, inactivity_score)| {
             let mut deltas = D::default();
 
@@ -102,7 +102,10 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
 mod spec_tests {
     use spec_test_utils::Case;
     use test_generator::test_resources;
-    use types::preset::{Mainnet, Minimal};
+    use types::{
+        electra::beacon_state::BeaconState,
+        preset::{Mainnet, Minimal},
+    };
 
     use crate::{
         altair::{self, EpochDeltasForReport},

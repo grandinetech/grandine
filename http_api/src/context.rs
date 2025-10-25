@@ -369,6 +369,7 @@ impl<P: Preset> Context<P> {
             bls_to_execution_change_pool,
             channels,
             metrics: None,
+            tracing_handle: None,
         };
 
         let test_state = TestState {

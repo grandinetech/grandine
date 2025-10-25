@@ -12,7 +12,7 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     StreamExt as _,
 };
-use log::warn;
+use logging::warn_with_peers;
 use std_ext::ArcExt as _;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
@@ -84,7 +84,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
 
                     if let Some(sender) = sender {
                         if let Err(message) = sender.send(payload_id) {
-                            warn!(
+                            warn_with_peers!(
                                 "sending engine_forkchoiceUpdated result \
                                  failed because the receiver was dropped: {message:?}"
                             );
@@ -110,7 +110,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                             );
                         }
                         Err(error) => {
-                            warn!("engine_newPayload call failed: {error}");
+                            warn_with_peers!("engine_newPayload call failed: {error}");
 
                             features::log!(
                                 DebugEth1,
@@ -123,7 +123,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
 
                     if let Some(sender) = sender {
                         if let Err(message) = sender.send(response) {
-                            warn!(
+                            warn_with_peers!(
                                 "sending engine_newPayload result \
                                 failed because the receiver was dropped: {message:?}"
                             );
@@ -163,11 +163,11 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         match response {
             Ok(response) => {
                 if response.payload_id.is_none() && payload_id_expected {
-                    warn!("payload_id expected but was none: {response:?}");
+                    warn_with_peers!("payload_id expected but was none: {response:?}");
                 }
 
                 if response.payload_status.status.is_invalid() {
-                    warn!(
+                    warn_with_peers!(
                         "engine_forkchoiceUpdated returned INVALID status \
                          (head_eth1_block_hash: {head_eth1_block_hash:?}, \
                           safe_eth1_block_hash: {safe_eth1_block_hash:?}, \
@@ -177,7 +177,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                 }
 
                 if response.payload_status.status.is_syncing() {
-                    warn!(
+                    warn_with_peers!(
                         "engine_forkchoiceUpdated returned SYNCING status \
                          (head_eth1_block_hash: {head_eth1_block_hash:?}, \
                           safe_eth1_block_hash: {safe_eth1_block_hash:?}, \
@@ -189,7 +189,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                 Some(response)
             }
             Err(error) => {
-                warn!("engine_forkchoiceUpdated call failed: {error}");
+                warn_with_peers!("engine_forkchoiceUpdated call failed: {error}");
                 None
             }
         }
@@ -206,7 +206,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         let response = self.api.new_payload(payload, params).await?;
 
         if response.status.is_invalid() {
-            warn!(
+            warn_with_peers!(
                 "engine_newPayload returned INVALID status \
                  (beacon_block_root: {beacon_block_root:?}, \
                   block_number: {block_number}, \
@@ -216,7 +216,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         }
 
         if response.status.is_syncing() {
-            warn!(
+            warn_with_peers!(
                 "engine_newPayload returned SYNCING status \
                  (beacon_block_root: {beacon_block_root:?}, \
                   block_number: {block_number}, \

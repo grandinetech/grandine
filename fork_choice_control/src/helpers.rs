@@ -643,7 +643,7 @@ impl<P: Preset> Context<P> {
     pub fn assert_head_notification_sent(&mut self) {
         assert!(matches!(
             self.next_p2p_message_verbose(),
-            Some(P2pMessage::HeadState(_)),
+            Some(P2pMessage::HeadChanged(_)),
         ));
     }
 
@@ -700,7 +700,7 @@ impl<P: Preset> Context<P> {
             let option = self.next_p2p_message_verbose();
 
             if let Some(
-                P2pMessage::FinalizedCheckpoint(_) | P2pMessage::HeadState(_) | P2pMessage::Stop,
+                P2pMessage::FinalizedCheckpoint(_) | P2pMessage::HeadChanged(_) | P2pMessage::Stop,
             ) = option
             {
                 continue;

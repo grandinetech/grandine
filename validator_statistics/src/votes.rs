@@ -4,7 +4,7 @@ use anyhow::Result;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
-use log::{debug, warn};
+use logging::{debug_with_peers, warn_with_peers};
 use types::{
     altair::containers::SyncCommitteeMessage,
     phase0::primitives::{Epoch, Slot, ValidatorIndex, H256},
@@ -104,7 +104,7 @@ impl ValidatorVotes {
         let mut total_votes = 0;
         let mut vote_summaries: VoteSummaries = BTreeMap::new();
 
-        debug!(
+        debug_with_peers!(
             "{} total votes for {epoch} epoch",
             validator_votes
                 .values()
@@ -227,7 +227,7 @@ pub fn report_attestation_votes(vote_summaries: VoteSummaries) {
     for (summary, validator_indices) in vote_summaries {
         match summary {
             VoteSummary::Correct { slot, total } => {
-                debug!(
+                debug_with_peers!(
                     "{} of {total} validators voted correctly in slot {slot}",
                     validator_indices.len()
                 );
@@ -236,7 +236,7 @@ pub fn report_attestation_votes(vote_summaries: VoteSummaries) {
                 voted_slot,
                 voted_root,
             } => {
-                warn!(
+                warn_with_peers!(
                     "cannot find beacon block that validators {validator_indices:?} voted for \
                     at slot {voted_slot} (voted for block {voted_root:?})",
                 );
@@ -246,7 +246,7 @@ pub fn report_attestation_votes(vote_summaries: VoteSummaries) {
                 voted_root,
                 canonical_root,
             } => {
-                warn!(
+                warn_with_peers!(
                     "validators {validator_indices:?} voted for \
                     non-canonical block {voted_root:?} at slot {voted_slot} \
                     (expected to vote for block {canonical_root:?})",
@@ -258,7 +258,7 @@ pub fn report_attestation_votes(vote_summaries: VoteSummaries) {
                 canonical_root,
                 slot_diff,
             } => {
-                warn!(
+                warn_with_peers!(
                     "validators {validator_indices:?} voted for \
                     outdated head {voted_root:?} (by {slot_diff} slots) at slot {voted_slot} \
                     (expected to vote for block {canonical_root:?})",
@@ -272,7 +272,7 @@ pub fn report_sync_committee_votes(vote_summaries: VoteSummaries) {
     for (summary, validator_indices) in vote_summaries {
         match summary {
             VoteSummary::Correct { slot, total } => {
-                debug!(
+                debug_with_peers!(
                     "{} of {total} validators participated in sync committees \
                     correctly in slot {slot}",
                     validator_indices.len()
@@ -282,7 +282,7 @@ pub fn report_sync_committee_votes(vote_summaries: VoteSummaries) {
                 voted_slot,
                 voted_root,
             } => {
-                warn!(
+                warn_with_peers!(
                     "cannot find beacon block that validators {validator_indices:?} sent \
                     sync committee messages for at slot {voted_slot} \
                     (sent sync committee messages for block {voted_root:?})",
@@ -293,7 +293,7 @@ pub fn report_sync_committee_votes(vote_summaries: VoteSummaries) {
                 voted_root,
                 canonical_root,
             } => {
-                warn!(
+                warn_with_peers!(
                     "validators {validator_indices:?} sent sync committee messages for \
                     non-canonical block {voted_root:?} at slot {voted_slot} \
                     (expected to sent sync committee messages for block {canonical_root:?})",
@@ -305,7 +305,7 @@ pub fn report_sync_committee_votes(vote_summaries: VoteSummaries) {
                 canonical_root,
                 slot_diff,
             } => {
-                warn!(
+                warn_with_peers!(
                     "validators {validator_indices:?} sent sync committee messages for \
                     outdated head {voted_root:?} (by {slot_diff} slots) at slot {voted_slot} \
                     (expected to sent sync committee messages for block {canonical_root:?})",

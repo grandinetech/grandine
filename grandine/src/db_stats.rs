@@ -7,7 +7,7 @@ use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot, SlotBlobId,
     SlotByStateRoot, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
-use log::{info, warn};
+use logging::{info_with_peers, warn_with_peers};
 use runtime::StorageConfig;
 use types::preset::Preset;
 
@@ -42,7 +42,7 @@ impl EntriesInfo {
         let value_size = ByteSize(self.value_size.try_into()?).display().si();
         let total_size = ByteSize(self.total_size().try_into()?).display().si();
 
-        info!(
+        info_with_peers!(
             "{}: {} entries, key_size: {key_size}, value_size: {value_size}, total_size: {total_size}",
             self.title, self.count
         );
@@ -93,12 +93,12 @@ pub fn print<P: Preset>(
         } else if BlockCheckpoint::<P>::has_prefix(&key) {
             block_checkpoint_entries.track(&key, length);
         } else {
-            warn!("unknown database key: {}", String::from_utf8_lossy(&key));
+            warn_with_peers!("unknown database key: {}", String::from_utf8_lossy(&key));
         }
     }
 
     if let Some(db_stats) = storage_database.db_stats()? {
-        info!("{db_stats:?}");
+        info_with_peers!("{db_stats:?}");
     }
 
     let mut entries = [
@@ -119,7 +119,7 @@ pub fn print<P: Preset>(
         entry.print_report()?;
     }
 
-    info!(
+    info_with_peers!(
         "Total size: {}",
         ByteSize(total_size.try_into()?).display().si()
     );

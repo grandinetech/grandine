@@ -11,7 +11,7 @@ use futures::{
     stream::StreamExt,
 };
 use helper_functions::{misc, phase0};
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::P2pToSlasher;
 use thiserror::Error;
 use types::{
@@ -115,7 +115,7 @@ impl<P: Preset> Slasher<P> {
                     };
 
                     if let Err(error) = result {
-                        warn!("{error}");
+                        warn_with_peers!("{error}");
                     }
                 },
 
@@ -129,7 +129,7 @@ impl<P: Preset> Slasher<P> {
     }
 
     fn process_block(&self, block: &SignedBeaconBlock<P>) -> Result<()> {
-        debug!(
+        debug_with_peers!(
             "processing block record \
              (slot: {}, proposer: {}, fork_version: {:?}, state_root: {:?})",
             block.message().slot(),
@@ -139,7 +139,7 @@ impl<P: Preset> Slasher<P> {
         );
 
         if let Some(explained_proposer_slashing) = self.check_block(block)? {
-            info!("proposer slashing constructed: {explained_proposer_slashing:?}");
+            info_with_peers!("proposer slashing constructed: {explained_proposer_slashing:?}");
 
             self.process_proposer_slashing(explained_proposer_slashing.slashing);
         }
@@ -168,7 +168,7 @@ impl<P: Preset> Slasher<P> {
             // TODO(feature/electra): use electra::get_indexed_attestation for electra attestations
             let indexed_attestation = phase0::get_indexed_attestation(&target_state, attestation)?;
 
-            debug!(
+            debug_with_peers!(
                 "processing attestation record \
                  (attesters: {:?}, slot: {}, source: {}, target: {}, fork_version: {:?})",
                 indexed_attestation.attesting_indices,
@@ -181,7 +181,7 @@ impl<P: Preset> Slasher<P> {
             for explained_attester_slashing in
                 self.check_attestation(&indexed_attestation, current_epoch)?
             {
-                info!("attester slashing constructed: {explained_attester_slashing:?}");
+                info_with_peers!("attester slashing constructed: {explained_attester_slashing:?}");
 
                 self.process_attester_slashing(explained_attester_slashing.slashing);
             }

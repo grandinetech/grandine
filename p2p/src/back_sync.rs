@@ -15,7 +15,7 @@ use fork_choice_store::{
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
-use log::{debug, info, warn};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use serde::{Deserialize, Serialize};
 use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use std_ext::ArcExt as _;
@@ -54,7 +54,7 @@ impl<P: Preset> BackSync<P> {
     pub fn load(database: &Database) -> Result<Option<Self>> {
         let data = Data::find(database)?;
 
-        debug!("loaded back-sync: {data:?}");
+        debug_with_peers!("loaded back-sync: {data:?}");
 
         let Some(data) = data else {
             return Ok(None);
@@ -62,7 +62,7 @@ impl<P: Preset> BackSync<P> {
 
         let sync_mode = SyncMode::load(database, data.low.slot)?;
 
-        info!(
+        info_with_peers!(
             "starting {} from {} to {} slot",
             sync_mode.name(),
             data.current.slot,
@@ -121,7 +121,7 @@ impl<P: Preset> BackSync<P> {
             self.batch.push_blob_sidecar(blob_sidecar);
         } else {
             let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
-            debug!("ignoring blob sidecar: {blob_identifier:?}, slot: {slot}");
+            debug_with_peers!("ignoring blob sidecar: {blob_identifier:?}, slot: {slot}");
         }
     }
 
@@ -131,7 +131,7 @@ impl<P: Preset> BackSync<P> {
         if slot <= self.high_slot() && !self.is_finished() {
             self.batch.push_block(block);
         } else {
-            debug!("ignoring block: {slot}");
+            debug_with_peers!("ignoring block: {slot}");
         }
     }
 
@@ -142,7 +142,7 @@ impl<P: Preset> BackSync<P> {
             self.batch.push_data_column_sidecar(data_column_sidecar);
         } else {
             let data_column_id: DataColumnIdentifier = data_column_sidecar.as_ref().into();
-            debug!("ignoring data column sidecar: {data_column_id:?}, slot: {slot}");
+            debug_with_peers!("ignoring data column sidecar: {data_column_id:?}, slot: {slot}");
         }
     }
 
@@ -163,12 +163,12 @@ impl<P: Preset> BackSync<P> {
         sync_tx: UnboundedSender<ArchiverToSync>,
     ) -> Result<()> {
         if !self.is_finished() {
-            debug!("not spawning state archiver: back-sync not yet finished");
+            debug_with_peers!("not spawning state archiver: back-sync not yet finished");
             return Ok(());
         }
 
         if self.archiving {
-            debug!("not spawning state archiver: state archiver already started");
+            debug_with_peers!("not spawning state archiver: state archiver already started");
             return Ok(());
         }
 
@@ -178,7 +178,7 @@ impl<P: Preset> BackSync<P> {
         Builder::new()
             .name("state-archiver".to_owned())
             .spawn(move || {
-                info!("archiving back-synced states from {start_slot} to {end_slot}");
+                info_with_peers!("archiving back-synced states from {start_slot} to {end_slot}");
 
                 match controller.archive_back_sync_states(
                     start_slot,
@@ -186,8 +186,12 @@ impl<P: Preset> BackSync<P> {
                     &anchor_checkpoint_provider,
                     &is_exiting,
                 ) {
-                    Ok(()) => info!("back-sync state archiver thread finished successfully"),
-                    Err(error) => warn!("unable to archive back back-sync states: {error:?}"),
+                    Ok(()) => {
+                        info_with_peers!("back-sync state archiver thread finished successfully")
+                    }
+                    Err(error) => {
+                        warn_with_peers!("unable to archive back back-sync states: {error:?}")
+                    }
                 }
 
                 ArchiverToSync::BackSyncStatesArchived.send(&sync_tx);
@@ -222,7 +226,7 @@ impl<P: Preset> BackSync<P> {
             }
         };
 
-        info!("back-synced to {} slot", checkpoint.slot);
+        info_with_peers!("back-synced to {} slot", checkpoint.slot);
 
         if self.sync_mode.validate_checkpoint_slot() && checkpoint.slot == self.low_slot() {
             let expected = self.data.low;
@@ -245,7 +249,7 @@ impl<P: Preset> BackSync<P> {
         self.data.current = checkpoint;
         self.save(database)?;
 
-        debug!("back-sync batch saved {checkpoint:?}");
+        debug_with_peers!("back-sync batch saved {checkpoint:?}");
 
         Ok(())
     }
@@ -414,7 +418,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
     )> {
-        debug!("verify back-sync batch from: {checkpoint:?}");
+        debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
         let mut next_parent_root = checkpoint.parent_root;
         let mut verified_blob_sidecars = vec![];
@@ -439,7 +443,7 @@ impl<P: Preset> Batch<P> {
                 // final checkpoint validation
                 verified_blocks.push(block.clone_arc());
             } else if let Some(parent) = blocks.peek() {
-                debug!("back-sync batch block: {} {:?}", message.slot(), actual);
+                debug_with_peers!("back-sync batch block: {} {:?}", message.slot(), actual);
 
                 ensure!(
                     actual == next_parent_root,
@@ -488,7 +492,7 @@ impl<P: Preset> Batch<P> {
             checkpoint = earliest_block.as_ref().into();
         }
 
-        debug!("next batch checkpoint: {checkpoint:?}");
+        debug_with_peers!("next batch checkpoint: {checkpoint:?}");
 
         Ok((
             checkpoint,
@@ -512,7 +516,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
     )> {
-        debug!("verify back-sync batch from: {checkpoint:?}");
+        debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
         let mut verified_data_column_sidecars = vec![];
 
@@ -596,7 +600,7 @@ impl<P: Preset> Batch<P> {
             checkpoint = earliest_block.as_ref().into();
         }
 
-        debug!("next batch checkpoint: {checkpoint:?}");
+        debug_with_peers!("next batch checkpoint: {checkpoint:?}");
 
         Ok((checkpoint, vec![], vec![], verified_data_column_sidecars))
     }

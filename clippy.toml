@@ -1,4 +1,8 @@
 avoid-breaking-exported-api = false
+
+# Debugging macros with peers inflate complexity counts, so the threshold is higher.
+cognitive-complexity-threshold = 100
+
 doc-valid-idents = [
     '..',
     'Eth1Data',

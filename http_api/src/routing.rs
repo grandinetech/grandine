@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
 use eth1_api::{ApiController, Eth1Api};
@@ -35,9 +36,9 @@ use crate::{
         node_peer_count, node_peers, node_syncing_status, node_version, pool_attestations,
         pool_attestations_v2, pool_attester_slashings, pool_attester_slashings_v2,
         pool_bls_to_execution_changes, pool_proposer_slashings, pool_voluntary_exits,
-        post_state_validator_balances, post_state_validators, publish_blinded_block,
-        publish_blinded_block_v2, publish_block, publish_block_v2, state_committees,
-        state_finality_checkpoints, state_fork, state_pending_consolidations,
+        post_log_level, post_state_validator_balances, post_state_validators,
+        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
+        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
         state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_pool_attestations, submit_pool_attestations_v2,
@@ -87,6 +88,7 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
     pub api_to_validator_tx: UnboundedSender<ApiToValidator<P>>,
     pub subnet_service_tx: UnboundedSender<ToSubnetService>,
+    pub tracing_handle: Option<TracingHandle>,
 }
 
 // The `FromRef` derive macro cannot handle type parameters as of `axum` version 0.6.7.
@@ -196,6 +198,12 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for UnboundedSender<ToSubnet
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Option<Arc<Metrics>> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.metrics.clone()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Option<TracingHandle> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.tracing_handle.clone()
     }
 }
 
@@ -490,6 +498,7 @@ fn eth_v2_debug_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     Router::new()
         .route("/eth/v2/debug/beacon/states/{state_id}", get(beacon_state))
         .route("/eth/v2/debug/beacon/heads", get(beacon_heads))
+        .route("/eth/v2/debug/tracing/log_level", post(post_log_level))
 }
 
 fn eth_v1_node_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {

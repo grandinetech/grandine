@@ -17,9 +17,10 @@ fork_choice_store = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
+logging ={ workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 rayon = { workspace = true }
 std_ext = { workspace = true }
+tracing = { workspace = true }
 types = { workspace = true }

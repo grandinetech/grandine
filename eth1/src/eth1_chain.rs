@@ -8,7 +8,7 @@ use futures::{
     channel::mpsc::UnboundedSender,
     stream::{Stream, TryStreamExt as _},
 };
-use log::{debug, error};
+use logging::{debug_with_peers, error_with_peers};
 use prometheus_metrics::Metrics;
 use reqwest::Client;
 use std_ext::ArcExt as _;
@@ -157,7 +157,7 @@ async fn download_deposits_and_blocks(
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     metrics: Option<Arc<Metrics>>,
 ) -> Result<()> {
-    debug!(
+    debug_with_peers!(
         "started new Eth1 deposit download task (deposit contract {:?})",
         chain_config.deposit_contract_address,
     );
@@ -172,7 +172,7 @@ async fn download_deposits_and_blocks(
     );
 
     loop {
-        debug!("started Eth1 deposit download task");
+        debug_with_peers!("started Eth1 deposit download task");
 
         match download_manager.download_and_store_deposits().await {
             Ok(block_number) => {
@@ -191,7 +191,7 @@ async fn download_deposits_and_blocks(
     }
 
     loop {
-        debug!("started Eth1 block download task");
+        debug_with_peers!("started Eth1 block download task");
 
         if let Err(error) = download_manager.download_and_store_blocks().await {
             handle_error(&error);
@@ -203,9 +203,9 @@ async fn download_deposits_and_blocks(
 
 fn handle_error(error: &AnyhowError) {
     match error.downcast_ref() {
-        Some(DownloadError::ConnectionError) => error!("{error}"),
+        Some(DownloadError::ConnectionError) => error_with_peers!("{error}"),
         // TODO(Grandine Team): This is supposed to be temporary.
         // _ => return Err(error),
-        _ => error!("error while downloading and storing blocks: {error:?}"),
+        _ => error_with_peers!("error while downloading and storing blocks: {error:?}"),
     }
 }

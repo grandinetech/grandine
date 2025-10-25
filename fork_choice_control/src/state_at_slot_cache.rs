@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use cached::{Cached as _, TimedSizedCache};
-use log::warn;
+use logging::warn_with_peers;
 use parking_lot::{Mutex, MutexGuard};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -104,7 +104,7 @@ impl<P: Preset> StateAtSlotCache<P> {
         self.cache.try_lock_for(timeout).ok_or_else(|| {
             let error = CacheLockError::CacheLockTimeout { timeout };
 
-            warn!("{error}");
+            warn_with_peers!("{error}");
 
             anyhow!(error)
         })
@@ -120,7 +120,7 @@ impl<P: Preset> StateAtSlotCache<P> {
         state_entry_mutex.try_lock_for(timeout).ok_or_else(|| {
             let error = CacheLockError::StateEntryLockTimeout { slot, timeout };
 
-            warn!("{error}");
+            warn_with_peers!("{error}");
 
             anyhow!(error)
         })

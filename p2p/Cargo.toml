@@ -39,8 +39,6 @@ rand = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
-slog = { workspace = true }
-slog-stdlog = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
@@ -48,6 +46,7 @@ tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tracing ={ workspace = true }
 transition_functions = { workspace = true }
 try_from_iterator = { workspace = true }
 tynm = { workspace = true }
@@ -56,6 +55,4 @@ types = { workspace = true }
 validator_statistics = { workspace = true }
 
 [dev-dependencies]
-slog-async = { workspace = true }
-slog-term = { workspace = true }
 test-case = { workspace = true }
