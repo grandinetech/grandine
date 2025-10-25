@@ -2354,7 +2354,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=zkcrypto%2Fbls12_381#c383ee94bc6a1c9eba855719521930aedaf95bd6"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=zkcrypto%2Fbls12_381#25526521b2e7de96062c7e105c641a25aa3086c2"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -11722,7 +11722,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#0418a60e8c86cd5105030c54240e9caffa99812a"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#b81d7d671955d86534d5f4da545d132cce4b9e6f"
 dependencies = [
  "cfg-if",
  "cpufeatures",

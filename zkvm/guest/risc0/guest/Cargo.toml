@@ -18,3 +18,6 @@ serde = { version = "1.0", features = ["derive"] }
 ssz = { path = '../../../../ssz' }
 transition_functions = { path = '../../../../transition_functions' }
 types = { path = '../../../../types' }
+
+# specify sha2 library need to activate `zkvm-risc0` feature
+sha2 = { git = 'https://github.com/jimmychu0807/grandine-universal-precompiles.git', branch = 'RustCrypto-hashes/sha2-v0.10.9', features = ['compress', 'zkvm-risc0'] }
