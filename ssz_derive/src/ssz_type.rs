@@ -134,7 +134,7 @@ impl SszType {
         Ok(())
     }
 
-    fn split_for_impl(&self) -> (ImplGenerics, TypeGenerics, Option<WhereClause>) {
+    fn split_for_impl(&self) -> (ImplGenerics<'_>, TypeGenerics<'_>, Option<WhereClause>) {
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
 
         let where_clause = self

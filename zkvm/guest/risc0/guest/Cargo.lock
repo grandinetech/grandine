@@ -107,7 +107,7 @@ dependencies = [
  "digest",
  "fnv",
  "merlin",
- "sha2",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -485,7 +485,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_utils",
- "sha2",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "ssz",
  "static_assertions",
  "typenum",
@@ -495,7 +495,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.0#6f2b1f2a5f76c3bc843d371c1c2655077ce4d0e5"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=zkcrypto%2Fbls12_381#25526521b2e7de96062c7e105c641a25aa3086c2"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -508,6 +508,7 @@ dependencies = [
  "risc0-bigint2",
  "sp1-lib",
  "subtle",
+ "zkm-lib",
 ]
 
 [[package]]
@@ -904,12 +905,13 @@ dependencies = [
  "futures",
  "im",
  "itertools 0.14.0",
- "log",
+ "logging",
  "reth-libmdbx",
  "snap",
  "std_ext",
  "tap",
  "thiserror 2.0.16",
+ "tracing",
  "unwrap_none",
 ]
 
@@ -1191,11 +1193,12 @@ dependencies = [
  "futures",
  "hex",
  "libp2p-identity",
- "log",
+ "logging",
  "serde",
  "serde_utils",
  "ssz",
  "thiserror 2.0.16",
+ "tracing",
  "typenum",
  "types",
 ]
@@ -1205,7 +1208,9 @@ name = "features"
 version = "0.0.0"
 dependencies = [
  "log",
+ "logging",
  "parse-display",
+ "tracing",
  "variant_count",
 ]
 
@@ -1470,7 +1475,7 @@ dependencies = [
  "ethereum-types",
  "generic-array",
  "hex-literal 1.0.0",
- "sha2",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
 ]
 
 [[package]]
@@ -1499,7 +1504,7 @@ dependencies = [
  "rayon",
  "rc-box",
  "serde",
- "sha2",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "shuffling",
  "ssz",
  "static_assertions",
@@ -1881,7 +1886,7 @@ dependencies = [
  "hkdf",
  "multihash",
  "quick-protobuf",
- "sha2",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.16",
  "tracing",
 ]
@@ -1913,6 +1918,13 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
+name = "logging"
+version = "0.0.0"
+dependencies = [
+ "derive_more",
+]
 
 [[package]]
 name = "malloc_buf"
@@ -2031,6 +2043,7 @@ checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
  "num-traits",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -2079,6 +2092,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nums"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf3c74f925fb8cfc49a8022f2afce48a0683b70f9e439885594e84c5edbf5b01"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2109,12 +2134,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7521838ecab2ddf4f7bc4ceebad06ec02414729598485c1ada516c39900820e8"
 dependencies = [
  "num-bigint",
- "p3-field",
- "p3-mds",
- "p3-poseidon2",
- "p3-symmetric",
+ "p3-field 0.2.3-succinct",
+ "p3-mds 0.2.3-succinct",
+ "p3-poseidon2 0.2.3-succinct",
+ "p3-symmetric 0.2.3-succinct",
  "rand 0.8.5",
  "serde",
+]
+
+[[package]]
+name = "p3-dft"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "itertools 0.13.0",
+ "p3-field 0.1.0",
+ "p3-matrix 0.1.0",
+ "p3-maybe-rayon 0.1.0",
+ "p3-util 0.1.0",
+ "tracing",
 ]
 
 [[package]]
@@ -2123,10 +2161,27 @@ version = "0.2.3-succinct"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46414daedd796f1eefcdc1811c0484e4bced5729486b6eaba9521c572c76761a"
 dependencies = [
- "p3-field",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-util",
+ "p3-field 0.2.3-succinct",
+ "p3-matrix 0.2.3-succinct",
+ "p3-maybe-rayon 0.2.3-succinct",
+ "p3-util 0.2.3-succinct",
+ "tracing",
+]
+
+[[package]]
+name = "p3-field"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "itertools 0.13.0",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "nums",
+ "p3-maybe-rayon 0.1.0",
+ "p3-util 0.1.0",
+ "rand 0.8.5",
+ "serde",
  "tracing",
 ]
 
@@ -2139,9 +2194,38 @@ dependencies = [
  "itertools 0.12.1",
  "num-bigint",
  "num-traits",
- "p3-util",
+ "p3-util 0.2.3-succinct",
  "rand 0.8.5",
  "serde",
+]
+
+[[package]]
+name = "p3-koala-bear"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "p3-field 0.1.0",
+ "p3-mds 0.1.0",
+ "p3-monty-31",
+ "p3-poseidon2 0.1.0",
+ "p3-symmetric 0.1.0",
+ "rand 0.8.5",
+ "serde",
+]
+
+[[package]]
+name = "p3-matrix"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "itertools 0.13.0",
+ "p3-field 0.1.0",
+ "p3-maybe-rayon 0.1.0",
+ "p3-util 0.1.0",
+ "rand 0.8.5",
+ "serde",
+ "tracing",
+ "transpose",
 ]
 
 [[package]]
@@ -2151,13 +2235,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e4de3f373589477cb735ea58e125898ed20935e03664b4614c7fac258b3c42f"
 dependencies = [
  "itertools 0.12.1",
- "p3-field",
- "p3-maybe-rayon",
- "p3-util",
+ "p3-field 0.2.3-succinct",
+ "p3-maybe-rayon 0.2.3-succinct",
+ "p3-util 0.2.3-succinct",
  "rand 0.8.5",
  "serde",
  "tracing",
 ]
+
+[[package]]
+name = "p3-maybe-rayon"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 
 [[package]]
 name = "p3-maybe-rayon"
@@ -2167,17 +2256,66 @@ checksum = "c3968ad1160310296eb04f91a5f4edfa38fe1d6b2b8cd6b5c64e6f9b7370979e"
 
 [[package]]
 name = "p3-mds"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "itertools 0.13.0",
+ "p3-dft 0.1.0",
+ "p3-field 0.1.0",
+ "p3-matrix 0.1.0",
+ "p3-symmetric 0.1.0",
+ "p3-util 0.1.0",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "p3-mds"
 version = "0.2.3-succinct"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2356b1ed0add6d5dfbf7a338ce534a6fde827374394a52cec16a0840af6e97c9"
 dependencies = [
  "itertools 0.12.1",
- "p3-dft",
- "p3-field",
- "p3-matrix",
- "p3-symmetric",
- "p3-util",
+ "p3-dft 0.2.3-succinct",
+ "p3-field 0.2.3-succinct",
+ "p3-matrix 0.2.3-succinct",
+ "p3-symmetric 0.2.3-succinct",
+ "p3-util 0.2.3-succinct",
  "rand 0.8.5",
+]
+
+[[package]]
+name = "p3-monty-31"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "itertools 0.13.0",
+ "num-bigint",
+ "p3-dft 0.1.0",
+ "p3-field 0.1.0",
+ "p3-matrix 0.1.0",
+ "p3-maybe-rayon 0.1.0",
+ "p3-mds 0.1.0",
+ "p3-poseidon2 0.1.0",
+ "p3-symmetric 0.1.0",
+ "p3-util 0.1.0",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "tracing",
+ "transpose",
+]
+
+[[package]]
+name = "p3-poseidon2"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "gcd",
+ "p3-field 0.1.0",
+ "p3-mds 0.1.0",
+ "p3-symmetric 0.1.0",
+ "rand 0.8.5",
+ "serde",
 ]
 
 [[package]]
@@ -2187,10 +2325,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da1eec7e1b6900581bedd95e76e1ef4975608dd55be9872c9d257a8a9651c3a"
 dependencies = [
  "gcd",
- "p3-field",
- "p3-mds",
- "p3-symmetric",
+ "p3-field 0.2.3-succinct",
+ "p3-mds 0.2.3-succinct",
+ "p3-symmetric 0.2.3-succinct",
  "rand 0.8.5",
+ "serde",
+]
+
+[[package]]
+name = "p3-symmetric"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "itertools 0.13.0",
+ "p3-field 0.1.0",
  "serde",
 ]
 
@@ -2201,7 +2349,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edb439bea1d822623b41ff4b51e3309e80d13cadf8b86d16ffd5e6efb9fdc360"
 dependencies = [
  "itertools 0.12.1",
- "p3-field",
+ "p3-field 0.2.3-succinct",
+ "serde",
+]
+
+[[package]]
+name = "p3-util"
+version = "0.1.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
+dependencies = [
+ "lock_api",
  "serde",
 ]
 
@@ -2425,11 +2582,12 @@ dependencies = [
  "anyhow",
  "features",
  "futures",
- "log",
+ "logging",
  "once_cell",
  "prometheus",
  "tokio",
  "tokio-stream",
+ "tracing",
  "types",
 ]
 
@@ -2477,10 +2635,11 @@ dependencies = [
  "bls",
  "dashmap",
  "database",
- "log",
+ "logging",
  "prometheus_metrics",
  "ssz",
  "std_ext",
+ "tracing",
  "tynm",
  "typenum",
  "types",
@@ -2852,7 +3011,7 @@ dependencies = [
  "risc0-core",
  "risc0-zkvm-platform",
  "serde",
- "sha2",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "stability",
  "tracing",
 ]
@@ -2881,7 +3040,7 @@ dependencies = [
  "rrs-lib",
  "semver",
  "serde",
- "sha2",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "stability",
  "tracing",
 ]
@@ -2910,12 +3069,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bls",
+ "bls-zkcrypto",
  "database",
  "enum-iterator",
  "pubkey_cache",
  "risc0-zkvm",
  "risc0-zkvm-platform",
  "serde",
+ "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "ssz",
  "transition_functions",
  "types",
@@ -3105,7 +3266,18 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.0#bd34a0d4d68c814f060946cbb801eba1f4be3598"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#b81d7d671955d86534d5f4da545d132cce4b9e6f"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -3194,11 +3366,11 @@ dependencies = [
  "lazy_static",
  "num-bigint",
  "p3-baby-bear",
- "p3-field",
- "p3-poseidon2",
- "p3-symmetric",
+ "p3-field 0.2.3-succinct",
+ "p3-poseidon2 0.2.3-succinct",
+ "p3-symmetric 0.2.3-succinct",
  "serde",
- "sha2",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3280,6 +3452,12 @@ dependencies = [
  "easy-ext",
  "triomphe",
 ]
+
+[[package]]
+name = "strength_reduce"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
 name = "strsim"
@@ -3635,6 +3813,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "transpose"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
+dependencies = [
+ "num-integer",
+ "strength_reduce",
+]
+
+[[package]]
 name = "triomphe"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3681,6 +3869,7 @@ dependencies = [
  "hex",
  "hex-literal 1.0.0",
  "im",
+ "itertools 0.14.0",
  "nonzero_ext",
  "once_cell",
  "primitive-types",
@@ -4217,4 +4406,34 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "zkm-lib"
+version = "1.2.0"
+source = "git+https://github.com/ProjectZKM/Ziren.git#8793fceda3771c25e7ea67daf9ce357fd891e620"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "serde",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zkm-primitives",
+]
+
+[[package]]
+name = "zkm-primitives"
+version = "1.2.0"
+source = "git+https://github.com/ProjectZKM/Ziren.git#8793fceda3771c25e7ea67daf9ce357fd891e620"
+dependencies = [
+ "bincode",
+ "hex",
+ "lazy_static",
+ "num-bigint",
+ "p3-field 0.1.0",
+ "p3-koala-bear",
+ "p3-monty-31",
+ "p3-poseidon2 0.1.0",
+ "p3-symmetric 0.1.0",
+ "serde",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

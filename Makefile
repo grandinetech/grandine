@@ -15,3 +15,6 @@ release:
 
 test: download-spec-tests
 	cargo test --release $(EXCLUDES)
+
+build-zkvm-pico:
+	cargo +nightly-2025-08-04 build --release -p zkvm_host --features pico

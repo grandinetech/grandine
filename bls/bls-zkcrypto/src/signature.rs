@@ -54,8 +54,14 @@ impl SignatureTrait for Signature {
     type PublicKey = PublicKey;
 
     fn verify(&self, message: impl AsRef<[u8]>, public_key: &Self::PublicKey) -> bool {
+        #[cfg(not(feature = "zkvm-pico"))]
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             [message.as_ref()],
+            DOMAIN_SEPARATION_TAG,
+        );
+        #[cfg(feature = "zkvm-pico")]
+        let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
+            message.as_ref(),
             DOMAIN_SEPARATION_TAG,
         );
 
@@ -83,8 +89,14 @@ impl SignatureTrait for Signature {
             .into_iter()
             .fold(G1Projective::identity(), |acc, pk| acc + pk.as_raw());
 
+        #[cfg(not(feature = "zkvm-pico"))]
         let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
             [message.as_ref()],
+            DOMAIN_SEPARATION_TAG,
+        );
+        #[cfg(feature = "zkvm-pico")]
+        let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
+            message.as_ref(),
             DOMAIN_SEPARATION_TAG,
         );
 
@@ -124,8 +136,14 @@ impl SignatureTrait for Signature {
         let mut lhs = pairing(&G1Affine::generator(), &G2Affine::identity());
 
         for i in 0..sigs.len() {
+            #[cfg(not(feature = "zkvm-pico"))]
             let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
                 [msgs[i]],
+                DOMAIN_SEPARATION_TAG,
+            );
+            #[cfg(feature = "zkvm-pico")]
+            let h = <G2Projective as HashToCurve<ExpandMsgXmd<Sha256>>>::hash_to_curve(
+                msgs[i],
                 DOMAIN_SEPARATION_TAG,
             );
 
