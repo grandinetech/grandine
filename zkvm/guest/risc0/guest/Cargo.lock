@@ -905,12 +905,13 @@ dependencies = [
  "futures",
  "im",
  "itertools 0.14.0",
- "log",
+ "logging",
  "reth-libmdbx",
  "snap",
  "std_ext",
  "tap",
  "thiserror 2.0.16",
+ "tracing",
  "unwrap_none",
 ]
 
@@ -1192,11 +1193,12 @@ dependencies = [
  "futures",
  "hex",
  "libp2p-identity",
- "log",
+ "logging",
  "serde",
  "serde_utils",
  "ssz",
  "thiserror 2.0.16",
+ "tracing",
  "typenum",
  "types",
 ]
@@ -1206,7 +1208,9 @@ name = "features"
 version = "0.0.0"
 dependencies = [
  "log",
+ "logging",
  "parse-display",
+ "tracing",
  "variant_count",
 ]
 
@@ -1916,6 +1920,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
+name = "logging"
+version = "0.0.0"
+dependencies = [
+ "derive_more",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2571,11 +2582,12 @@ dependencies = [
  "anyhow",
  "features",
  "futures",
- "log",
+ "logging",
  "once_cell",
  "prometheus",
  "tokio",
  "tokio-stream",
+ "tracing",
  "types",
 ]
 
@@ -2623,10 +2635,11 @@ dependencies = [
  "bls",
  "dashmap",
  "database",
- "log",
+ "logging",
  "prometheus_metrics",
  "ssz",
  "std_ext",
+ "tracing",
  "tynm",
  "typenum",
  "types",
