@@ -25,5 +25,5 @@ tempfile = { workspace = true }
 tracing = { workspace = true }
 types = { workspace = true }
 
-[target.'cfg(not(windows))'.dependencies]
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 tikv-jemalloc-ctl = { workspace = true }
