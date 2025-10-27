@@ -2051,9 +2051,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
-        // Ignore non-sampling data column sidecars
+        // Validate data column sidecars submitted via beacon API even
+        // if they are not part of the sampling group.
+        // This ensures that correct data columns are published to the network.
+        let mut is_non_sampled_with_full_validation = false;
+
+        // Ignore non-sampling data column sidecars unless they are submitted to beacon API
+        // for publishing after proposal
         if !self.sampling_columns.contains(&data_column_sidecar.index) {
-            return Ok(DataColumnSidecarAction::Ignore(false));
+            if origin.is_from_api() {
+                is_non_sampled_with_full_validation = true;
+            } else {
+                return Ok(DataColumnSidecarAction::Ignore(false));
+            }
         }
 
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
@@ -2223,6 +2233,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     computed,
                 }
             );
+        }
+
+        if is_non_sampled_with_full_validation {
+            return Ok(DataColumnSidecarAction::Ignore(true));
         }
 
         Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
