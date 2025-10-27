@@ -7261,11 +7261,7 @@ dependencies = [
 name = "logging"
 version = "0.0.0"
 dependencies = [
- "anyhow",
- "binary_utils",
  "derive_more 2.0.1",
- "gag",
- "serial_test",
  "tracing",
 ]
 

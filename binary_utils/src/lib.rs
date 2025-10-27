@@ -3,23 +3,23 @@ use chrono::{Local, SecondsFormat};
 use logging::{debug_with_peers, exception};
 use rayon::ThreadPoolBuilder;
 use std::io::{self, IsTerminal};
+use tracing::{Event, Subscriber};
 use tracing_subscriber::{
     filter::LevelFilter,
     fmt,
-    fmt::{format::Writer, time::FormatTime},
+    fmt::{
+        format::{FormatEvent, FormatFields, Writer},
+        time::FormatTime,
+    },
+    layer::Layered,
+    prelude::*,
+    registry::LookupSpan,
     reload::{self, Handle},
     EnvFilter, Registry,
 };
-use tracing_subscriber::{layer::Layered, prelude::*};
 
-type TracingLayered = Layered<
-    fmt::Layer<
-        Registry,
-        fmt::format::DefaultFields,
-        fmt::format::Format<fmt::format::Compact, LocalTimer>,
-    >,
-    Registry,
->;
+type TracingLayered =
+    Layered<fmt::Layer<Registry, fmt::format::DefaultFields, AlignedFormatter>, Registry>;
 
 #[derive(Clone)]
 pub struct TracingHandle(Handle<EnvFilter, TracingLayered>);
@@ -39,9 +39,66 @@ impl FormatTime for LocalTimer {
     fn format_time(&self, w: &mut Writer<'_>) -> core::fmt::Result {
         write!(
             w,
-            "[{}]",
+            "{}",
             Local::now().to_rfc3339_opts(SecondsFormat::Millis, true)
         )
+    }
+}
+
+struct AlignedFormatter {
+    enable_ansi: bool,
+}
+
+impl AlignedFormatter {
+    const fn new(enable_ansi: bool) -> Self {
+        Self { enable_ansi }
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for AlignedFormatter
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &fmt::FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> core::fmt::Result {
+        use tracing_subscriber::fmt::time::FormatTime;
+
+        let timer = LocalTimer;
+        write!(writer, "[")?;
+        timer.format_time(&mut writer)?;
+        write!(writer, "] ")?;
+
+        let level = *event.metadata().level();
+        write!(writer, "{:<7} ", color_level(level, self.enable_ansi))?;
+
+        let target = event.metadata().target();
+        let line = event.metadata().line().unwrap_or(0);
+        let file_display = format!("[{target}:{line}]");
+
+        write!(writer, "{file_display: <55} ")?;
+
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+
+        writeln!(writer)
+    }
+}
+
+fn color_level(level: tracing::Level, enable_ansi: bool) -> String {
+    if !enable_ansi {
+        return format!("{level:<5}",);
+    }
+
+    match level {
+        tracing::Level::TRACE => format!("\x1b[90m{: <5}\x1b[0m", "TRACE"),
+        tracing::Level::DEBUG => format!("\x1b[34m{: <5}\x1b[0m", "DEBUG"),
+        tracing::Level::INFO => format!("\x1b[32m{: <5}\x1b[0m", "INFO"),
+        tracing::Level::WARN => format!("\x1b[33m{: <5}\x1b[0m", "WARN"),
+        tracing::Level::ERROR => format!("\x1b[31m{: <5}\x1b[0m", "ERROR"),
     }
 }
 
@@ -98,14 +155,7 @@ pub fn initialize_tracing_logger(
 
     let enable_ansi = always_write_style || io::stdout().is_terminal();
 
-    let stdout_layer = fmt::layer::<Registry>()
-        .compact()
-        .with_thread_ids(false)
-        .with_target(true)
-        .with_file(false)
-        .with_line_number(true)
-        .with_timer(LocalTimer)
-        .with_ansi(enable_ansi);
+    let stdout_layer = fmt::layer::<Registry>().event_format(AlignedFormatter::new(enable_ansi));
 
     tracing_subscriber::registry()
         .with(stdout_layer)
