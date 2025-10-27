@@ -29,7 +29,7 @@ use fork_choice_control::{Event, EventChannels, ForkChoiceContext, ForkTip, Topi
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::{
     channel::{mpsc::UnboundedSender, oneshot::Receiver as OneshotReceiver},
-    stream::{FuturesOrdered, FuturesUnordered, Stream, StreamExt as _},
+    stream::{FuturesOrdered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
@@ -3478,8 +3478,7 @@ async fn publish_signed_block<P: Preset, W: Wait>(
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
-
-    submit_blob_sidecars(controller.clone_arc(), &blob_sidecars).await?;
+    let blob_sidecars = submit_blob_sidecars(controller.clone_arc(), blob_sidecars).await?;
 
     if let Some(status_code) = publish_beacon_block_with_gossip_checks(
         controller.clone_arc(),
@@ -3634,7 +3633,8 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    submit_data_column_sidecars(controller.clone_arc(), &data_column_sidecars).await?;
+    let data_column_sidecars =
+        submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars).await?;
 
     if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
         controller.clone_arc(),
@@ -3691,8 +3691,7 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
-
-    submit_blob_sidecars(controller.clone_arc(), &blob_sidecars).await?;
+    let blob_sidecars = submit_blob_sidecars(controller.clone_arc(), blob_sidecars).await?;
 
     if broadcast_validation == BroadcastValidation::Gossip {
         if let Some(status_code) = publish_beacon_block_with_gossip_checks(
@@ -3784,7 +3783,8 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
-    submit_data_column_sidecars(controller.clone_arc(), &data_column_sidecars).await?;
+    let data_column_sidecars =
+        submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars).await?;
 
     if broadcast_validation == BroadcastValidation::Gossip {
         if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
@@ -4104,22 +4104,27 @@ async fn submit_blob_sidecar<P: Preset, W: Wait>(
 
 async fn submit_blob_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
-    blob_sidecars: &[Arc<BlobSidecar<P>>],
-) -> Result<(), Error> {
+    blob_sidecars: Vec<Arc<BlobSidecar<P>>>,
+) -> Result<Vec<Arc<BlobSidecar<P>>>, Error> {
     let blob_sidecar_results: Result<Vec<_>> = blob_sidecars
         .iter()
         .map(|blob_sidecar| submit_blob_sidecar(controller.clone_arc(), blob_sidecar.clone_arc()))
-        .collect::<FuturesUnordered<_>>()
+        .collect::<FuturesOrdered<_>>()
         .collect::<Vec<_>>()
         .await
         .into_iter()
         .collect();
 
-    if let Err(error) = blob_sidecar_results {
-        return Err(Error::InvalidBlobSidecar(error));
+    match blob_sidecar_results {
+        Ok(results) => Ok(blob_sidecars
+            .into_iter()
+            .zip(results.into_iter())
+            .filter_map(|(blob_sidecar, outcome)| {
+                (outcome != ValidationOutcome::Ignore(false)).then_some(blob_sidecar)
+            })
+            .collect::<Vec<_>>()),
+        Err(error) => Err(Error::InvalidBlobSidecar(error)),
     }
-
-    Ok(())
 }
 
 async fn submit_data_column_sidecar<P: Preset, W: Wait>(
@@ -4135,24 +4140,29 @@ async fn submit_data_column_sidecar<P: Preset, W: Wait>(
 
 async fn submit_data_column_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
-    data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
-) -> Result<(), Error> {
+    data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>, Error> {
     let results: Result<Vec<_>> = data_column_sidecars
         .iter()
         .map(|data_column_sidecar| {
             submit_data_column_sidecar(controller.clone_arc(), data_column_sidecar.clone_arc())
         })
-        .collect::<FuturesUnordered<_>>()
+        .collect::<FuturesOrdered<_>>()
         .collect::<Vec<_>>()
         .await
         .into_iter()
         .collect();
 
-    if let Err(error) = results {
-        return Err(Error::InvalidDataColumnSidecar(error));
+    match results {
+        Ok(results) => Ok(data_column_sidecars
+            .into_iter()
+            .zip(results.into_iter())
+            .filter_map(|(data_column_sidecar, outcome)| {
+                (outcome != ValidationOutcome::Ignore(false)).then_some(data_column_sidecar)
+            })
+            .collect::<Vec<_>>()),
+        Err(error) => Err(Error::InvalidDataColumnSidecar(error)),
     }
-
-    Ok(())
 }
 
 async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
