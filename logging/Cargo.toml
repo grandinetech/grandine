@@ -8,3 +8,6 @@ workspace = true
 
 [dependencies]
 derive_more = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]

@@ -1,4 +1,5 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
+use tracing as _;
 
 use derive_more::Display;
 
@@ -42,29 +43,9 @@ macro_rules! info_with_peers {
 }
 
 #[macro_export]
-macro_rules! debug_with_peers {
-    ( $( $rest:tt )* ) => {
-        ::tracing::debug!(
-            peers = %$crate::PEER_LOG_METRICS,
-            $( $rest )*
-        )
-    };
-}
-
-#[macro_export]
 macro_rules! warn_with_peers {
     ( $( $rest:tt )* ) => {
         ::tracing::warn!(
-            peers = %$crate::PEER_LOG_METRICS,
-            $( $rest )*
-        )
-    };
-}
-
-#[macro_export]
-macro_rules! trace_with_peers {
-    ( $( $rest:tt )* ) => {
-        ::tracing::trace!(
             peers = %$crate::PEER_LOG_METRICS,
             $( $rest )*
         )
@@ -82,10 +63,31 @@ macro_rules! error_with_peers {
 }
 
 #[macro_export]
-macro_rules! crit {
+macro_rules! exception {
     ( $( $rest:tt )* ) => {
         ::tracing::error!(
-            error_type = "crit",
+            target: "exception",
+            type_error = "suspicious behavior",
+            peers = %$crate::PEER_LOG_METRICS,
+            $( $rest )*
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! debug_with_peers {
+    ( $( $rest:tt )* ) => {
+        ::tracing::debug!(
+            peers = %$crate::PEER_LOG_METRICS,
+            $( $rest )*
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! trace_with_peers {
+    ( $( $rest:tt )* ) => {
+        ::tracing::trace!(
             peers = %$crate::PEER_LOG_METRICS,
             $( $rest )*
         )

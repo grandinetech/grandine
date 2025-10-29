@@ -1,23 +1,25 @@
 use anyhow::Result;
-use logging::debug_with_peers;
+use chrono::{Local, SecondsFormat};
+use logging::{debug_with_peers, exception};
 use rayon::ThreadPoolBuilder;
 use std::io::{self, IsTerminal};
+use tracing::{Event, Subscriber};
 use tracing_subscriber::{
     filter::LevelFilter,
     fmt,
+    fmt::{
+        format::{FormatEvent, FormatFields, Writer},
+        time::FormatTime,
+    },
+    layer::Layered,
+    prelude::*,
+    registry::LookupSpan,
     reload::{self, Handle},
-    EnvFilter,
+    EnvFilter, Registry,
 };
-use tracing_subscriber::{layer::Layered, prelude::*};
 
-type TracingLayered = Layered<
-    fmt::Layer<
-        tracing_subscriber::Registry,
-        fmt::format::DefaultFields,
-        fmt::format::Format<fmt::format::Compact>,
-    >,
-    tracing_subscriber::Registry,
->;
+type TracingLayered =
+    Layered<fmt::Layer<Registry, fmt::format::DefaultFields, AlignedFormatter>, Registry>;
 
 #[derive(Clone)]
 pub struct TracingHandle(Handle<EnvFilter, TracingLayered>);
@@ -28,6 +30,75 @@ impl TracingHandle {
         F: FnOnce(&mut EnvFilter),
     {
         self.0.modify(f)
+    }
+}
+
+struct LocalTimer;
+
+impl FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut Writer<'_>) -> core::fmt::Result {
+        write!(
+            w,
+            "{}",
+            Local::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+        )
+    }
+}
+
+struct AlignedFormatter {
+    enable_ansi: bool,
+}
+
+impl AlignedFormatter {
+    const fn new(enable_ansi: bool) -> Self {
+        Self { enable_ansi }
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for AlignedFormatter
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &fmt::FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> core::fmt::Result {
+        use tracing_subscriber::fmt::time::FormatTime;
+
+        let timer = LocalTimer;
+        write!(writer, "[")?;
+        timer.format_time(&mut writer)?;
+        write!(writer, "] ")?;
+
+        let level = *event.metadata().level();
+        write!(writer, "{:<7} ", color_level(level, self.enable_ansi))?;
+
+        let target = event.metadata().target();
+        let line = event.metadata().line().unwrap_or(0);
+        let file_display = format!("[{target}:{line}]");
+
+        write!(writer, "{file_display: <55} ")?;
+
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+
+        writeln!(writer)
+    }
+}
+
+fn color_level(level: tracing::Level, enable_ansi: bool) -> String {
+    if !enable_ansi {
+        return format!("{level:<5}",);
+    }
+
+    match level {
+        tracing::Level::TRACE => format!("\x1b[90m{: <5}\x1b[0m", "TRACE"),
+        tracing::Level::DEBUG => format!("\x1b[34m{: <5}\x1b[0m", "DEBUG"),
+        tracing::Level::INFO => format!("\x1b[32m{: <5}\x1b[0m", "INFO"),
+        tracing::Level::WARN => format!("\x1b[33m{: <5}\x1b[0m", "WARN"),
+        tracing::Level::ERROR => format!("\x1b[31m{: <5}\x1b[0m", "ERROR"),
     }
 }
 
@@ -80,23 +151,19 @@ pub fn initialize_tracing_logger(
         }
     }
 
+    let (filter_layer, handle) = reload::Layer::new(filter);
+
     let enable_ansi = always_write_style || io::stdout().is_terminal();
 
-    let (filter_layer, handle) = reload::Layer::new(filter);
+    let stdout_layer = fmt::layer::<Registry>().event_format(AlignedFormatter::new(enable_ansi));
+
     tracing_subscriber::registry()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(true)
-                .with_target(true)
-                .with_file(false)
-                .with_line_number(true)
-                .with_ansi(enable_ansi),
-        )
+        .with(stdout_layer)
         .with(filter_layer)
         .init();
 
     debug_with_peers!("tracing started!");
+    exception!("exception macro is enabled");
     Ok(TracingHandle(handle))
 }
 
@@ -111,6 +178,24 @@ pub fn initialize_rayon() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+    use std::sync::{LazyLock, Mutex};
+
+    static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
+
+    fn init_logger_once() -> TracingHandle {
+        let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
+        if lock.is_none() {
+            let handle = initialize_tracing_logger(module_path!(), false)
+                .expect("Failed to initialize tracing logger");
+            *lock = Some(handle.clone());
+            handle
+        } else {
+            lock.as_ref()
+                .expect("LOGGER should always be initialized")
+                .clone()
+        }
+    }
 
     // The error message will typically not show up in the output even with `--nocapture`.
     // That is because the main thread exits before the Rayon panic handler can log it.
@@ -119,6 +204,207 @@ mod tests {
         initialize_rayon()?;
 
         rayon::spawn(|| panic!());
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn initialize_tracing_logger_info_mode() -> Result<()> {
+        use gag::BufferRedirect;
+        use logging::{error_with_peers, exception, info_with_peers, warn_with_peers};
+        use std::io::Read;
+
+        // stdout redirect to buffer
+        let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
+
+        let _handle = init_logger_once();
+
+        info_with_peers!("info_with_peers test message");
+        warn_with_peers!("warn_with_peers test message");
+        error_with_peers!("error_with_peers test message");
+        exception!("exception test message");
+
+        let mut output = String::new();
+        buf.read_to_string(&mut output)?;
+
+        assert!(
+            output.contains("info_with_peers test message"),
+            "Info log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("warn_with_peers test message"),
+            "Warn log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("error_with_peers test message"),
+            "Error log not found in output:\n{output}",
+        );
+        assert!(
+            !output.contains("exception test message"),
+            "Output should not contain exception message, but found:\n{output}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn initialize_tracing_logger_developer_info_mode() -> Result<()> {
+        use gag::BufferRedirect;
+        use logging::{error_with_peers, exception, info_with_peers, warn_with_peers};
+        use std::io::Read;
+
+        // stdout redirect to buffer
+        let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
+
+        let handle = init_logger_once();
+        handle.modify(|env_filter| {
+            let new_filter = env_filter
+                .clone()
+                .add_directive("exception".parse().expect("Failed to parse"));
+            *env_filter = new_filter;
+        })?;
+
+        info_with_peers!("info_with_peers test message");
+        warn_with_peers!("warn_with_peers test message");
+        error_with_peers!("error_with_peers test message");
+        exception!("exception test message");
+
+        let mut output = String::new();
+        buf.read_to_string(&mut output)?;
+
+        assert!(
+            output.contains("info_with_peers test message"),
+            "Info log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("warn_with_peers test message"),
+            "Warn log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("error_with_peers test message"),
+            "Error log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("exception test message"),
+            "exception log not found in output:\n{output}",
+        );
+
+        // NOTE: This removal of the "exception=error" directive is necessary because the global
+        // tracing subscriber persists across tests. Without this cleanup, other tests
+        // could be affected by the leftover directive, breaking their expected behavior.
+        handle.modify(|env_filter| {
+            let new_filter = env_filter
+                .to_string()
+                .split(',')
+                .filter(|s| !s.trim().starts_with("exception"))
+                .map(|s| s.parse().expect("Failed to parse"))
+                .fold(EnvFilter::default(), EnvFilter::add_directive);
+            *env_filter = new_filter;
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn initialize_tracing_logger_debug_mode() -> Result<()> {
+        use gag::BufferRedirect;
+        use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
+        use std::io::Read;
+
+        let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
+
+        let handle = init_logger_once();
+
+        handle.modify(|env_filter| {
+            let new_filter = env_filter.clone().add_directive(
+                format!("{}=debug", module_path!())
+                    .parse()
+                    .expect("Failed to parse"),
+            );
+            *env_filter = new_filter;
+        })?;
+
+        info_with_peers!("info_with_peers test message");
+        warn_with_peers!("warn_with_peers test message");
+        error_with_peers!("error_with_peers test message");
+        debug_with_peers!("debug_with_peers test message");
+
+        let mut output = String::new();
+        buf.read_to_string(&mut output)?;
+
+        assert!(
+            output.contains("info_with_peers test message"),
+            "Info log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("warn_with_peers test message"),
+            "Warn log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("error_with_peers test message"),
+            "Error log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("debug_with_peers test message"),
+            "Debug log not found in output:\n{output}",
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn initialize_tracing_logger_trace_mode() -> Result<()> {
+        use gag::BufferRedirect;
+        use logging::{
+            debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
+        };
+        use std::io::Read;
+
+        let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
+
+        let handle = init_logger_once();
+
+        handle.modify(|env_filter| {
+            let new_filter = env_filter.clone().add_directive(
+                format!("{}=trace", module_path!())
+                    .parse()
+                    .expect("Failed to parse"),
+            );
+            *env_filter = new_filter;
+        })?;
+
+        info_with_peers!("info_with_peers test message");
+        warn_with_peers!("warn_with_peers test message");
+        error_with_peers!("error_with_peers test message");
+        debug_with_peers!("debug_with_peers test message");
+        trace_with_peers!("trace_with_peers test message");
+
+        let mut output = String::new();
+        buf.read_to_string(&mut output)?;
+
+        assert!(
+            output.contains("info_with_peers test message"),
+            "Info log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("warn_with_peers test message"),
+            "Warn log not found in output:\n{output}"
+        );
+        assert!(
+            output.contains("error_with_peers test message"),
+            "Error log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("debug_with_peers test message"),
+            "Debug log not found in output:\n{output}",
+        );
+        assert!(
+            output.contains("trace_with_peers test message"),
+            "Trace log not found in output:\n{output}",
+        );
 
         Ok(())
     }
