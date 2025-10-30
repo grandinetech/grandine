@@ -1,0 +1,39 @@
+[package]
+name = "c_grandine"
+edition = { workspace = true }
+
+[lib]
+name = "grandine"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+allocator = { workspace = true }
+anyhow = { workspace = true }
+bls = { workspace = true }
+clap = { workspace = true }
+eth1_api = { workspace = true, features = ["embed"] }
+execution_engine = { workspace = true }
+kzg_utils = { workspace = true }
+runtime = { workspace = true, features = [
+    "network-goerli",
+    "network-mainnet",
+    "network-sepolia",
+    "network-shadow",
+    "network-holesky",
+] }
+libc = "0.2.2"
+log = { workspace = true }
+primitive-types = { workspace = true }
+ssz = { workspace = true }
+typenum = { workspace = true }
+try_from_iterator = { workspace = true }
+types = { workspace = true }
+web3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+cbindgen = "0.26.0"
+
+[features]
+default = ["bls/blst", "kzg_utils/blst"]
