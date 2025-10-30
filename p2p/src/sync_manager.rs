@@ -643,6 +643,17 @@ impl<P: Preset> SyncManager<P> {
 
                 max_slot = start_slot + count - 1;
 
+                let block_batch = SyncBatch {
+                    target: SyncTarget::Block,
+                    direction: SyncDirection::Forward,
+                    peer_id: block_peer_id,
+                    start_slot,
+                    count,
+                    response_received: false,
+                    retry_count: 0,
+                    data_columns: None,
+                };
+
                 if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
                     && data_column_serve_range_slot < max_slot
                 {
@@ -650,7 +661,15 @@ impl<P: Preset> SyncManager<P> {
                         self.missing_column_indices_by_range(sampling_columns, start_slot, count);
 
                     if missing_column_indices.is_empty() {
-                        // all columns for this batch are received
+                        self.log(
+                            Level::Debug,
+                            format_args!(
+                                "all columns for this batch {batch_index} have been received: \
+                                {sampling_columns:?}: {start_slot} + {count}",
+                            ),
+                        );
+
+                        sync_batches.push(block_batch);
                         batch_index += 1;
                         continue;
                     }
@@ -716,24 +735,14 @@ impl<P: Preset> SyncManager<P> {
                     });
                 }
 
-                sync_batches.push(SyncBatch {
-                    target: SyncTarget::Block,
-                    direction: SyncDirection::Forward,
-                    peer_id: block_peer_id,
-                    start_slot,
-                    count,
-                    response_received: false,
-                    retry_count: 0,
-                    data_columns: None,
-                });
-
+                sync_batches.push(block_batch);
                 batch_index += 1;
             }
         }
 
         self.log(
             Level::Debug,
-            format_args!("new sync batches count: {}", sync_batches.len()),
+            format_args!("{} new sync batches: {sync_batches:?}", sync_batches.len()),
         );
 
         if sync_batches.is_empty() {
