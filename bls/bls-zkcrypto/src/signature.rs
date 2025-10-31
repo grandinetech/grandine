@@ -128,9 +128,7 @@ impl SignatureTrait for Signature {
                 [msgs[i]],
                 DOMAIN_SEPARATION_TAG,
             );
-
             agg_sig += sigs[i] * rand_scalars[i];
-
             lhs += pairing(&(pks[i] * rand_scalars[i]).into(), &h.into());
         }
 

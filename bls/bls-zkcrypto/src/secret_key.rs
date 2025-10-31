@@ -70,8 +70,8 @@ impl SecretKeyTrait<SIZE> for SecretKey {
             [message.as_ref()],
             DOMAIN_SEPARATION_TAG,
         );
-        let signature = h * self.as_raw();
 
+        let signature = h * self.as_raw();
         Signature::from(signature)
     }
 }

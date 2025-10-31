@@ -1,0 +1,20 @@
+[package]
+name = 'zkvm_guest_pico'
+edition = "2024"
+version = "0.1.0"
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = '1.0.93'
+bls = { path = '../../../bls', features = ['zkcrypto'] }
+bls-zkcrypto = { path = '../../../bls/bls-zkcrypto', features = ['zkvm-pico'] }
+enum-iterator = '2'
+pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" }
+pubkey_cache = { path = '../../../pubkey_cache' }
+serde = { version = "1.0", features = ["derive"] }
+ssz = { path = '../../../ssz' }
+transition_functions = { path = '../../../transition_functions' }
+types = { path = '../../../types' }
+
+# specify sha2 library need to activate `zkvm-pico` feature
+sha2 = { git = 'https://github.com/jimmychu0807/grandine-universal-precompiles.git', branch = 'RustCrypto-hashes/sha2-v0.10.9', features = ['compress', 'zkvm-pico'] }
