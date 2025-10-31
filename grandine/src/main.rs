@@ -353,14 +353,18 @@ fn main() -> ExitCode {
 
 #[expect(clippy::too_many_lines)]
 fn try_main() -> Result<()> {
+    let parsed_args = GrandineArgs::try_parse()?;
+    let data_dir = parsed_args.data_dir();
+
     let log_handle = binary_utils::initialize_tracing_logger(
         module_path!(),
+        &data_dir,
         cfg!(feature = "logger-always-write-style"),
     )?;
 
     binary_utils::initialize_rayon()?;
 
-    let config = GrandineArgs::try_parse()?
+    let config = parsed_args
         .try_into_config()
         .map_err(GrandineArgs::clap_error)?;
 

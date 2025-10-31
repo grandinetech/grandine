@@ -1425,6 +1425,10 @@ impl GrandineArgs {
     pub fn clap_error(message: impl core::fmt::Display) -> ClapError {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
+
+    pub fn data_dir(&self) -> PathBuf {
+        directories::data_directory(self.beacon_node_options.data_dir.as_ref())
+    }
 }
 
 #[derive(Debug, Display)]

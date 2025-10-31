@@ -42,6 +42,7 @@ impl FormatTime for LocalTimer {
 
 pub fn initialize_tracing_logger(
     module_path: &str,
+    data_dir: &Path,
     always_write_style: bool,
 ) -> Result<TracingHandle> {
     let mut filter = EnvFilter::default()
@@ -102,9 +103,14 @@ pub fn initialize_tracing_logger(
         .with_timer(LocalTimer)
         .with_ansi(enable_ansi);
 
-    let log_path = Path::new("exception.log");
+    if !data_dir.exists() {
+        fs::create_dir_all(data_dir)?;
+    }
+
+    let log_path = data_dir.join("exception.log");
+
     if !log_path.exists() {
-        fs::File::create(log_path)?;
+        fs::File::create(&log_path)?;
     }
 
     let file = fs::OpenOptions::new()
@@ -149,16 +155,20 @@ pub fn initialize_rayon() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serial_test::serial;
     use std::sync::{LazyLock, Mutex};
+
+    use serial_test::serial;
+    use tempfile::TempDir;
+
+    use super::*;
 
     static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
 
     fn init_logger_once() -> TracingHandle {
+        let data_dir = TempDir::new().expect("should create a temp data dir");
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
-            let handle = initialize_tracing_logger(module_path!(), false)
+            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
                 .expect("Failed to initialize tracing logger");
             *lock = Some(handle.clone());
             handle
