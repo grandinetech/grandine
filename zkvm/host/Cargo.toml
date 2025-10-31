@@ -52,6 +52,6 @@ pico = [
     "dep:serde_json",
     "dep:pico-sdk",
     "dep:pico-vm",
-    "anyhow",
+    "dep:anyhow",
     "bls-zkcrypto/zkvm-pico",
 ]
