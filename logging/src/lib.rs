@@ -95,17 +95,21 @@ macro_rules! trace_with_peers {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::{LazyLock, Mutex};
+
     use binary_utils::{initialize_tracing_logger, TracingHandle};
     use serial_test::serial;
-    use std::sync::{LazyLock, Mutex};
+    use tempfile::TempDir;
+
+    use super::*;
 
     static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
 
     fn init_logger_once() -> TracingHandle {
+        let data_dir = TempDir::new().expect("should create a temp data dir");
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
-            let handle = initialize_tracing_logger(module_path!(), false)
+            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
                 .expect("Failed to initialize tracing logger");
             *lock = Some(handle.clone());
             handle

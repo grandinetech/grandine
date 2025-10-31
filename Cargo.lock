@@ -2003,6 +2003,7 @@ dependencies = [
  "panics",
  "rayon",
  "serial_test",
+ "tempfile",
  "tracing",
  "tracing-subscriber 0.3.20",
 ]
@@ -7260,6 +7261,7 @@ dependencies = [
  "derive_more 2.0.1",
  "gag",
  "serial_test",
+ "tempfile",
  "tracing",
 ]
 

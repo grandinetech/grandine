@@ -27,9 +27,7 @@ impl Directories {
         } = &mut self;
 
         // `~/.grandine` or `.grandine`
-        if data_dir.is_none() {
-            *data_dir = Some(dirs::home_dir().unwrap_or_default().join(".grandine"));
-        }
+        *data_dir = Some(data_directory(data_dir.as_ref()));
 
         // `~/.grandine/NETWORK_NAME`
         if let Some(data_dir) = data_dir.as_mut() {
@@ -64,4 +62,10 @@ impl Directories {
 
         Ok(store_usage + network_usage)
     }
+}
+
+pub fn data_directory(data_dir: Option<&PathBuf>) -> PathBuf {
+    data_dir
+        .cloned()
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".grandine"))
 }
