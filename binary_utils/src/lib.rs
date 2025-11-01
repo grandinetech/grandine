@@ -1,16 +1,17 @@
 use anyhow::Result;
 use chrono::{Local, SecondsFormat};
-use fs_err as fs;
+use fs_err::{self as fs, File, OpenOptions};
 use logging::{debug_with_peers, exception};
 use rayon::ThreadPoolBuilder;
 use std::{
     io::{self, IsTerminal},
-    path::Path,
+    path::{Path, PathBuf},
+    sync::Mutex,
 };
 use tracing_subscriber::{
     filter::LevelFilter,
     fmt,
-    fmt::{format::Writer, time::FormatTime, writer::BoxMakeWriter},
+    fmt::{format::Writer, time::FormatTime, writer::BoxMakeWriter, MakeWriter},
     prelude::*,
     reload::{self, Handle},
     EnvFilter, Registry,
@@ -37,6 +38,59 @@ impl FormatTime for LocalTimer {
             "[{}]",
             Local::now().to_rfc3339_opts(SecondsFormat::Millis, true)
         )
+    }
+}
+
+struct RotatingWriter {
+    path: PathBuf,
+    max_size: u64,
+    lock: Mutex<()>,
+}
+
+impl RotatingWriter {
+    const fn new(path: PathBuf, max_size: u64) -> Self {
+        Self {
+            path,
+            max_size,
+            lock: Mutex::new(()),
+        }
+    }
+
+    fn open(&self) -> File {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .expect("Failed to open log file")
+    }
+
+    fn rotate_if_needed(&self) {
+        if let Ok(meta) = fs::metadata(&self.path) {
+            if meta.len() >= self.max_size {
+                let backup_path = self.path.with_extension("backup.log");
+
+                if backup_path.exists() {
+                    fs::remove_file(&backup_path).expect("Failed to remove old backup log");
+                }
+
+                fs::rename(&self.path, &backup_path).expect("Failed to rotate log to backup");
+
+                File::create(&self.path).expect("Failed to create new log file");
+            }
+        }
+    }
+}
+
+impl<'a> MakeWriter<'a> for RotatingWriter {
+    type Writer = File;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        let _guard = self
+            .lock
+            .lock()
+            .expect("Failed to acquire lock for writing log");
+        self.rotate_if_needed();
+        self.open()
     }
 }
 
@@ -109,14 +163,7 @@ pub fn initialize_tracing_logger(
 
     let log_path = data_dir.join("exception.log");
 
-    if !log_path.exists() {
-        fs::File::create(&log_path)?;
-    }
-
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)?;
+    let writer = RotatingWriter::new(log_path, 1_000_000_000);
 
     let exception_filter = EnvFilter::default()
         .add_directive(LevelFilter::OFF.into())
@@ -125,10 +172,7 @@ pub fn initialize_tracing_logger(
     let file_layer = fmt::layer()
         .compact()
         .with_ansi(false)
-        .with_writer(BoxMakeWriter::new(move || {
-            file.try_clone()
-                .expect("failed to clone exception.log file writer")
-        }))
+        .with_writer(BoxMakeWriter::new(move || writer.make_writer()))
         .with_timer(LocalTimer)
         .with_target(true)
         .with_file(true)
@@ -162,7 +206,12 @@ mod tests {
 
     use super::*;
 
-    static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
+    struct LoggerWithTempDir {
+        handle: TracingHandle,
+        _temp_dir: TempDir,
+    }
+
+    static LOGGER: LazyLock<Mutex<Option<LoggerWithTempDir>>> = LazyLock::new(|| Mutex::new(None));
 
     fn init_logger_once() -> TracingHandle {
         let data_dir = TempDir::new().expect("should create a temp data dir");
@@ -170,11 +219,15 @@ mod tests {
         if lock.is_none() {
             let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
                 .expect("Failed to initialize tracing logger");
-            *lock = Some(handle.clone());
+            *lock = Some(LoggerWithTempDir {
+                handle: handle.clone(),
+                _temp_dir: data_dir,
+            });
             handle
         } else {
             lock.as_ref()
                 .expect("LOGGER should always be initialized")
+                .handle
                 .clone()
         }
     }
@@ -236,7 +289,6 @@ mod tests {
         use logging::{error_with_peers, exception, info_with_peers, warn_with_peers};
         use std::io::Read;
 
-        // stdout redirect to buffer
         let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
 
         let handle = init_logger_once();
