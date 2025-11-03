@@ -1150,7 +1150,6 @@ enum Error {
 
 #[expect(clippy::too_many_lines)]
 pub fn run(parsed_args: GrandineArgs) -> Result<()> {
-    let parsed_args = GrandineArgs::try_parse()?;
     let data_dir = parsed_args.data_dir();
 
     let log_handle = binary_utils::initialize_tracing_logger(
@@ -1160,6 +1159,8 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
     )?;
 
     binary_utils::initialize_rayon()?;
+
+    let config = parsed_args.try_into_config().map_err(GrandineArgs::clap_error)?;
 
     info_with_peers!("starting beacon node");
 
