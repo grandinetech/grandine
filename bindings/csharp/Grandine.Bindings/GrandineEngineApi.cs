@@ -54,7 +54,16 @@ unsafe internal delegate CResultCEngineGetPayloadV3Response EngineGetPayloadV3De
 unsafe internal delegate CResultCEngineGetPayloadV4Response EngineGetPayloadV4Delegate(byte* payloadId);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+unsafe internal delegate CResultCEngineGetPayloadV5Response EngineGetPayloadV5Delegate(byte* payloadId);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 unsafe internal delegate CResultCVecCOptionCBlobAndProofV1 EngineGetBlobsV1Delegate(byte** versionedHashes, ulong versionedHashesLen);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+unsafe internal delegate CResultCOptionCVecCBlobAndProofV2 EngineGetBlobsV2Delegate(byte** versionedHashes, ulong versionedHashesLen);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+unsafe internal delegate void FreeDelegate(void* ptr);
 
 public class GrandineEngineApi
 {
@@ -70,6 +79,8 @@ public class GrandineEngineApi
     EngineGetPayloadV3Delegate _engine_getPayloadV3;
     EngineGetPayloadV4Delegate _engine_getPayloadV4;
     EngineGetBlobsV1Delegate _engine_getBlobsV1;
+    EngineGetBlobsV2Delegate _engine_getBlobsV2;
+    FreeDelegate _free;
 
     ILogger _logger; 
     IEngineRpcModule _engineRpc;
@@ -94,6 +105,8 @@ public class GrandineEngineApi
             _engine_getPayloadV3 = EngineGetPayloadV3;
             _engine_getPayloadV4 = EngineGetPayloadV4;
             _engine_getBlobsV1 = EngineGetBlobsV1;
+            _engine_getBlobsV2 = EngineGetBlobsV2;
+            _free = Free;
 
             IntPtr engine_newPayloadV1Ptr = Marshal.GetFunctionPointerForDelegate(_engine_newPayloadV1);
             IntPtr engine_newPayloadV2Ptr = Marshal.GetFunctionPointerForDelegate(_engine_newPayloadV2);
@@ -107,6 +120,8 @@ public class GrandineEngineApi
             IntPtr engine_getPayloadV3Ptr = Marshal.GetFunctionPointerForDelegate(_engine_getPayloadV3);
             IntPtr engine_getPayloadV4Ptr = Marshal.GetFunctionPointerForDelegate(_engine_getPayloadV4);
             IntPtr engine_getBlobsV1Ptr = Marshal.GetFunctionPointerForDelegate(_engine_getBlobsV1);
+            IntPtr engine_getBlobsV2Ptr = Marshal.GetFunctionPointerForDelegate(_engine_getBlobsV2);
+            IntPtr freePtr = Marshal.GetFunctionPointerForDelegate(_free);
 
             _adapter = new CEmbedAdapter
             {
@@ -122,12 +137,18 @@ public class GrandineEngineApi
                 engine_get_payload_v3 = (delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV3Response>)engine_getPayloadV3Ptr,
                 engine_get_payload_v4 = (delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV4Response>)engine_getPayloadV4Ptr,
                 engine_get_blobs_v1 = (delegate* unmanaged[Cdecl]<byte**, ulong, CResultCVecCOptionCBlobAndProofV1>)engine_getBlobsV1Ptr,
+                engine_get_blobs_v2 = (delegate* unmanaged[Cdecl]<byte**, ulong, CResultCOptionCVecCBlobAndProofV2>)engine_getBlobsV2Ptr,
+                free = (delegate* unmanaged[Cdecl]<void*, void>)freePtr,
             };
         }
     }
 
     public CEmbedAdapter getAdapter() {
         return this._adapter;
+    }
+
+    unsafe void Free(void* ptr) {
+        Marshal.FreeHGlobal((IntPtr)ptr);
     }
 
     CResultCPayloadStatusV1 EngineNewPayloadV1(CExecutionPayloadV1 payload)
@@ -448,6 +469,170 @@ public class GrandineEngineApi
         };
     }
 
+    unsafe CResultCEngineGetPayloadV5Response EngineGetPayloadV5(byte* payloadId)
+    {
+        _logger.Warn("================================================================= engine_getPayloadV5 =================================================================");
+
+        try
+        {
+            var convertedPayloadId = new ReadOnlySpan<byte>(payloadId, 8).ToArray();
+
+            var payload = _engineRpc.engine_getPayloadV5(convertedPayloadId).Result;
+
+            if (payload.Result != Result.Success)
+            {
+                throw new Exception("unexpected failure");
+            }
+
+            var response = new CEngineGetPayloadV5Response { };
+
+            var exPayload = new CExecutionPayloadV3 { };
+
+            fixed (byte* sourcePtr = payload.Data.ExecutionPayload.ParentHash.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.parent_hash, 32, 32); }
+            fixed (byte* sourcePtr = payload.Data.ExecutionPayload.FeeRecipient.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.fee_recipient, 20, 20); }
+            fixed (byte* sourcePtr = payload.Data.ExecutionPayload.StateRoot.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.state_root, 32, 32); }
+            fixed (byte* sourcePtr = payload.Data.ExecutionPayload.ReceiptsRoot.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.receipts_root, 32, 32); }
+
+            {
+                var bloomLen = payload.Data.ExecutionPayload.LogsBloom.Bytes.Length;
+                IntPtr convBloom = Marshal.AllocHGlobal(bloomLen);
+                Marshal.Copy(payload.Data.ExecutionPayload.LogsBloom.Bytes.ToArray(), 0, convBloom, bloomLen);
+                exPayload.logs_bloom = (byte*)convBloom;
+                exPayload.logs_bloom_len = (ulong)bloomLen;
+            }
+
+            fixed (byte* sourcePtr = payload.Data.ExecutionPayload.PrevRandao.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.prev_randao, 32, 32); }
+            exPayload.block_number = (ulong)payload.Data.ExecutionPayload.BlockNumber;
+            exPayload.gas_limit = (ulong)payload.Data.ExecutionPayload.GasLimit;
+            exPayload.gas_used = (ulong)payload.Data.ExecutionPayload.GasUsed;
+            exPayload.timestamp = payload.Data.ExecutionPayload.Timestamp;
+
+            {
+                var extraDataLen = payload.Data.ExecutionPayload.ExtraData.Length;
+                IntPtr convExtraData = Marshal.AllocHGlobal(extraDataLen);
+                Marshal.Copy(payload.Data.ExecutionPayload.ExtraData.ToArray(), 0, convExtraData, extraDataLen);
+                exPayload.extra_data = (byte*)convExtraData;
+                exPayload.extra_data_len = (ulong)extraDataLen;
+            }
+
+            // fixed (byte* sourcePtr = payload.Data.ExecutionPayload.BaseFeePerGas.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.base_fee_per_gas, 32, 32); }
+            fixed (byte* sourcePtr = payload.Data.ExecutionPayload.BlockHash.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.block_hash, 32, 32); }
+
+            {
+                var transactionsLen = payload.Data.ExecutionPayload.Transactions.Length;
+                IntPtr convTransactions = Marshal.AllocHGlobal(transactionsLen * Marshal.SizeOf<CTransaction>());
+                for (var i = 0; i < transactionsLen; ++i)
+                {
+                    var len = payload.Data.ExecutionPayload.Transactions[i].Length;
+                    var transaction = Marshal.AllocHGlobal(len);
+                    Marshal.Copy(payload.Data.ExecutionPayload.Transactions[i], 0, transaction, len);
+                    Marshal.StructureToPtr(new CTransaction
+                    {
+                        bytes_len = (ulong)len,
+                        bytes = (byte*)transaction,
+                    },
+                        IntPtr.Add(convTransactions, i * Marshal.SizeOf<CTransaction>()),
+                        false
+                    );
+                }
+                ;
+
+                exPayload.transactions = (CTransaction*)convTransactions;
+                exPayload.transactions_len = (ulong)transactionsLen;
+            }
+
+            {
+                var withdrawalsLen = payload.Data.ExecutionPayload.Transactions.Length;
+                IntPtr convWithdrawals = Marshal.AllocHGlobal(withdrawalsLen * Marshal.SizeOf<CWithdrawalV1>());
+                for (var i = 0; i < withdrawalsLen; ++i)
+                {
+                    var withdrawal = new CWithdrawalV1 { };
+
+                    withdrawal.index = payload.Data.ExecutionPayload.Withdrawals[i].Index;
+                    withdrawal.validator_index = payload.Data.ExecutionPayload.Withdrawals[i].ValidatorIndex;
+                    fixed (byte* sourcePtr = payload.Data.ExecutionPayload.Withdrawals[i].Address.Bytes) { Buffer.MemoryCopy(sourcePtr, withdrawal.address, 20, 20); }
+                    withdrawal.amount = (ulong)payload.Data.ExecutionPayload.Withdrawals[i].AmountInGwei;
+
+                    Marshal.StructureToPtr(withdrawal, IntPtr.Add(convWithdrawals, i * Marshal.SizeOf<CWithdrawalV1>()), false);
+                }
+
+                exPayload.withdrawals = (CWithdrawalV1*)convWithdrawals;
+                exPayload.withdrawals_len = (ulong)withdrawalsLen;
+            }
+
+            exPayload.blob_gas_used = (ulong)payload.Data.ExecutionPayload.BlobGasUsed;
+            exPayload.excess_blob_gas = (ulong)payload.Data.ExecutionPayload.ExcessBlobGas;
+
+            response.execution_payload = exPayload;
+
+            fixed (byte* sourcePtr = payload.Data.BlockValue.Bytes) { Buffer.MemoryCopy(sourcePtr, response.block_value, 32, 32); }
+
+            var blobsBundle = new CBlobsBundleV1 { };
+
+            {
+                var commitmentsLen = payload.Data.BlobsBundle.Commitments.Length;
+                var commitments = Marshal.AllocHGlobal(commitmentsLen * Marshal.SizeOf<byte*>());
+
+                for (var i = 0; i < commitmentsLen; ++i)
+                {
+                    var commitment = Marshal.AllocHGlobal(48);
+                    fixed (byte* sourcePtr = payload.Data.BlobsBundle.Commitments[i]) { Buffer.MemoryCopy(sourcePtr, commitment, 48, 48); }
+                    Marshal.StructureToPtr(commitment, IntPtr.Add(commitments, i * Marshal.SizeOf<byte*>()), false);
+                }
+
+                blobsBundle.commitments = (byte**)commitments;
+                blobsBundle.commitments_len = (ulong)commitmentsLen;
+            }
+
+            {
+                var proofsLen = payload.Data.BlobsBundle.Commitments.Length;
+                var proofs = Marshal.AllocHGlobal(proofsLen * Marshal.SizeOf<byte*>());
+
+                for (var i = 0; i < proofsLen; ++i)
+                {
+                    var proof = Marshal.AllocHGlobal(48);
+                    fixed (byte* sourcePtr = payload.Data.BlobsBundle.Commitments[i]) { Buffer.MemoryCopy(sourcePtr, proof, 48, 48); }
+                    Marshal.StructureToPtr(proof, IntPtr.Add(proofs, i * Marshal.SizeOf<byte*>()), false);
+                }
+
+                blobsBundle.proofs = (byte**)proofs;
+                blobsBundle.proofs_len = (ulong)proofsLen;
+            }
+
+            {
+                var blobsLen = payload.Data.BlobsBundle.Commitments.Length;
+                var blobs = Marshal.AllocHGlobal(blobsLen * Marshal.SizeOf<byte*>());
+
+                for (var i = 0; i < blobsLen; ++i)
+                {
+                    var blob = Marshal.AllocHGlobal(4096 * 32);
+                    fixed (byte* sourcePtr = payload.Data.BlobsBundle.Commitments[i]) { Buffer.MemoryCopy(sourcePtr, proof, 4096 * 32, 4096 * 32); }
+                    Marshal.StructureToPtr(blob, IntPtr.Add(blobs, i * Marshal.SizeOf<byte*>()), false);
+                }
+
+                blobsBundle.blobs = (byte**)blobs;
+                blobsBundle.blobs_len = (ulong)blobsLen;
+            }
+
+            exPayload.blobs_bundle = blobsBundle;
+
+            return new CResultCEngineGetPayloadV5Response
+            {
+                error = 0,
+                value = response,
+            };
+        }
+        catch (Exception e)
+        {
+            _logger.Error("Exception " + e);
+
+            return new CResultCEngineGetPayloadV5Response
+            {
+                error = 1
+            };
+        }
+    }
+
     unsafe CResultCVecCOptionCBlobAndProofV1 EngineGetBlobsV1(byte** versionedHashes, ulong versionedHashesLen)
     {
         _logger.Warn("================================================================= engine_getBlobsV1 =================================================================");
@@ -519,5 +704,14 @@ public class GrandineEngineApi
                 error = 1
             };
         }
+    }
+
+    unsafe CResultCOptionCVecCBlobAndProofV2 EngineGetBlobsV2(byte** versionedHashes, ulong versionedHashesLen) {
+        _logger.Error("================================================================= engine_getBlobsV2 =================================================================");
+        
+        return new CResultCOptionCVecCBlobAndProofV2
+        {
+            error = 1
+        };
     }
 }

@@ -1579,6 +1579,7 @@ pub struct CEmbedAdapter {
         versioned_hashes: *const *const u8,
         versioned_hashes_len: u64,
     ) -> CResultCOptionCVecCBlobAndProofV2,
+    free: unsafe extern "C" fn(ptr: *const core::ffi::c_void),
 }
 
 impl eth1_api::EmbedAdapter for CEmbedAdapter {

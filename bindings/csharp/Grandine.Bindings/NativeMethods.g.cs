@@ -402,6 +402,7 @@ namespace Grandine.Native
         public delegate* unmanaged[Cdecl]<byte*, CResultCEngineGetPayloadV5Response> engine_get_payload_v5;
         public delegate* unmanaged[Cdecl]<byte**, ulong, CResultCVecCOptionCBlobAndProofV1> engine_get_blobs_v1;
         public delegate* unmanaged[Cdecl]<byte**, ulong, CResultCOptionCVecCBlobAndProofV2> engine_get_blobs_v2;
+        public delegate* unmanaged[Cdecl]<void*, void> free;
     }
 
 
