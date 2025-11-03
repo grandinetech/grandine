@@ -103,11 +103,47 @@ pub fn initialize_tracing_logger(
         .with_timer(LocalTimer)
         .with_ansi(enable_ansi);
 
+    let registry = tracing_subscriber::registry().with(stdout_layer.with_filter(filter_layer));
+
+    match initialize_exception_log_file(data_dir) {
+        Ok(file) => {
+            let exception_filter = EnvFilter::default()
+                .add_directive(LevelFilter::OFF.into())
+                .add_directive("exception=error".parse()?);
+
+            let file_layer = fmt::layer()
+                .compact()
+                .with_ansi(false)
+                .with_writer(BoxMakeWriter::new(move || {
+                    file.try_clone()
+                        .expect("failed to clone exception.log file writer")
+                }))
+                .with_timer(LocalTimer)
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_filter(exception_filter);
+
+            registry.with(file_layer).init();
+        }
+        Err(error) => {
+            registry.init();
+
+            tracing::error!("failed to initialize exception log file in {data_dir:?}: {error}",);
+        }
+    }
+
+    debug_with_peers!("tracing started!");
+    exception!("exception macro is enabled");
+    Ok(TracingHandle(handle))
+}
+
+fn initialize_exception_log_file(data_dir: &Path) -> Result<fs::File> {
+    let log_path = data_dir.join("exception.log");
+
     if !data_dir.exists() {
         fs::create_dir_all(data_dir)?;
     }
-
-    let log_path = data_dir.join("exception.log");
 
     if !log_path.exists() {
         fs::File::create(&log_path)?;
@@ -118,31 +154,7 @@ pub fn initialize_tracing_logger(
         .append(true)
         .open(log_path)?;
 
-    let exception_filter = EnvFilter::default()
-        .add_directive(LevelFilter::OFF.into())
-        .add_directive("exception=error".parse()?);
-
-    let file_layer = fmt::layer()
-        .compact()
-        .with_ansi(false)
-        .with_writer(BoxMakeWriter::new(move || {
-            file.try_clone()
-                .expect("failed to clone exception.log file writer")
-        }))
-        .with_timer(LocalTimer)
-        .with_target(true)
-        .with_file(true)
-        .with_line_number(true)
-        .with_filter(exception_filter);
-
-    tracing_subscriber::registry()
-        .with(stdout_layer.with_filter(filter_layer))
-        .with(file_layer)
-        .init();
-
-    debug_with_peers!("tracing started!");
-    exception!("exception macro is enabled");
-    Ok(TracingHandle(handle))
+    Ok(file)
 }
 
 pub fn initialize_rayon() -> Result<()> {
