@@ -16,5 +16,4 @@ pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
 
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
 
-// [Pump the Gas](https://pumpthegas.org)
-pub const PREFERRED_EXECUTION_GAS_LIMIT: Gas = 45_000_000;
+pub const PREFERRED_EXECUTION_GAS_LIMIT: Gas = 60_000_000;
