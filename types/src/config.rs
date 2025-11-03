@@ -320,7 +320,7 @@ pub struct BlobScheduleEntry {
 //                      tests that verify built-in configurations match YAML files in them.
 
 impl Config {
-    /// [Mainnet configuration](https://github.com/eth-clients/mainnet/blob/978f1794eada6f85bee76e4d2d5959a5fb8e0cc5/metadata/config.yaml).
+    /// [Mainnet configuration](https://github.com/eth-clients/mainnet/blob/e94bf5f2b5032ddba01d030173be89039f980e28/metadata/config.yaml).
     #[must_use]
     pub fn mainnet() -> Self {
         Self {
@@ -336,11 +336,24 @@ impl Config {
             capella_fork_epoch: 194_048,
             deneb_fork_epoch: 269_568,
             electra_fork_epoch: 364_032,
+            fulu_fork_epoch: 411_392,
 
             // Deposit contract
             deposit_chain_id: 1,
             deposit_contract_address: H160(hex!("00000000219ab540356cBB839Cbe05303d7705Fa")),
             deposit_network_id: 1,
+
+            // Networking
+            blob_schedule: vec![
+                BlobScheduleEntry {
+                    epoch: 412_672,
+                    max_blobs_per_block: 15,
+                },
+                BlobScheduleEntry {
+                    epoch: 419_072,
+                    max_blobs_per_block: 21,
+                },
+            ],
 
             // Transition
             terminal_total_difficulty: Difficulty::from_u128(58_750_000_000_000_000_000_000),
