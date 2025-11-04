@@ -1784,45 +1784,262 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV1Response<types::preset::Mainnet>> {
-        let output = unsafe { (self.engine_get_payload_v1)(payload_id.as_ptr()) };
-        let output: Result<_> = output.into();
-        output.map(|v| v.into())
+        let raw_output = unsafe { (self.engine_get_payload_v1)(payload_id.as_ptr()) };
+        let output: Result<_> = raw_output.into();
+        let output = output.map(|v| v.into())
+
+        if output.is_ok() {
+            unsafe { (self.free)(raw_output.value.logs_bloom) };
+            unsafe { (self.free)(raw_output.value.extra_data) };
+
+            let transactions = unsafe {
+                core::slice::from_raw_parts(
+                    raw_output.value.transactions,
+                    raw_output.value.transactions_len,
+                )
+            };
+            for t in transactions {
+                unsafe { (self.free)(t.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.transactions) };
+        }
+
+        output
     }
 
     fn engine_get_payload_v2(
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV2Response<types::preset::Mainnet>> {
-        let output = unsafe { (self.engine_get_payload_v2)(payload_id.as_ptr()) };
+        let raw_output = unsafe { (self.engine_get_payload_v2)(payload_id.as_ptr()) };
         let output: Result<_> = output.into();
-        output.map(|v| v.into())
+        let output = output.map(|v| v.into())
+
+        if output.is_ok() {
+            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
+            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
+
+            let transactions = unsafe {
+                core::slice::from_raw_parts(
+                    raw_output.value.execution_payload.transactions,
+                    raw_output.value.execution_payload.transactions_len,
+                )
+            };
+            for t in transactions {
+                unsafe { (self.free)(t.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
+            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
+        }
+
+        output
     }
 
     fn engine_get_payload_v3(
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV3Response<types::preset::Mainnet>> {
-        let output = unsafe { (self.engine_get_payload_v3)(payload_id.as_ptr()) };
-        let output: Result<_> = output.into();
-        output.map(|v| v.into())
+        let raw_output = unsafe { (self.engine_get_payload_v3)(payload_id.as_ptr()) };
+        let output: Result<_> = raw_output.into();
+        let output = output.map(|v| v.into());
+
+        if output.is_ok() {
+            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
+            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
+
+            let transactions = unsafe {
+                core::slice::from_raw_parts(
+                    raw_output.value.execution_payload.transactions,
+                    raw_output.value.execution_payload.transactions_len,
+                )
+            };
+            for t in transactions {
+                unsafe { (self.free)(t.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
+            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
+
+            let commitments = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.commitments,
+                    raw_output.value.blobs_bundle.commitments_len,
+                )
+            };
+            for c in commitments {
+                unsafe { (self.free)(c) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.commitments) };
+
+            let proofs = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.proofs,
+                    raw_output.value.blobs_bundle.proofs_len,
+                )
+            };
+            for p in proofs {
+                unsafe { (self.free)(p) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.proofs) };
+
+            let blobs = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.blobs,
+                    raw_output.value.blobs_bundle.blobs_len,
+                )
+            };
+            for b in blobs {
+                unsafe { (self.free)(b) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.blobs) };
+        }
+
+        output
     }
 
     fn engine_get_payload_v4(
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV4Response<types::preset::Mainnet>> {
-        let output = unsafe { (self.engine_get_payload_v4)(payload_id.as_ptr()) };
-        let output: Result<_> = output.into();
-        output.map(|v| v.into())
+        let raw_output = unsafe { (self.engine_get_payload_v4)(payload_id.as_ptr()) };
+        let output: Result<_> = raw_output.into();
+        let output = output.map(|v| v.into());
+
+        if output.is_ok() {
+            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
+            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
+
+            let transactions = unsafe {
+                core::slice::from_raw_parts(
+                    raw_output.value.execution_payload.transactions,
+                    raw_output.value.execution_payload.transactions_len,
+                )
+            };
+            for t in transactions {
+                unsafe { (self.free)(t.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
+            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
+
+            let commitments = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.commitments,
+                    raw_output.value.blobs_bundle.commitments_len,
+                )
+            };
+            for c in commitments {
+                unsafe { (self.free)(c) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.commitments) };
+
+            let proofs = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.proofs,
+                    raw_output.value.blobs_bundle.proofs_len,
+                )
+            };
+            for p in proofs {
+                unsafe { (self.free)(p) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.proofs) };
+
+            let blobs = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.blobs,
+                    raw_output.value.blobs_bundle.blobs_len,
+                )
+            };
+            for b in blobs {
+                unsafe { (self.free)(b) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.blobs) };
+
+            let ex_requests = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.execution_requests.requests,
+                    raw_output.value.execution_requests.requests_len,
+                )
+            };
+
+            for r in ex_requests {
+                unsafe { (self.free)(r.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.execution_requests) };
+        }
+
+        output
     }
 
     fn engine_get_payload_v5(
         &self,
         payload_id: H64,
     ) -> Result<EngineGetPayloadV5Response<Mainnet>> {
-        let output = unsafe { (self.engine_get_payload_v5)(payload_id.as_ptr()) };
-        let output: Result<_> = output.into();
-        output.map(|v| v.into())
+        let raw_output = unsafe { (self.engine_get_payload_v5)(payload_id.as_ptr()) };
+        let output: Result<_> = raw_output.into();
+        let output = output.map(|v| v.into());
+
+        if output.is_ok() {
+            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
+            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
+
+            let transactions = unsafe {
+                core::slice::from_raw_parts(
+                    raw_output.value.execution_payload.transactions,
+                    raw_output.value.execution_payload.transactions_len,
+                )
+            };
+            for t in transactions {
+                unsafe { (self.free)(t.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
+            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
+
+            let commitments = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.commitments,
+                    raw_output.value.blobs_bundle.commitments_len,
+                )
+            };
+            for c in commitments {
+                unsafe { (self.free)(c) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.commitments) };
+
+            let proofs = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.proofs,
+                    raw_output.value.blobs_bundle.proofs_len,
+                )
+            };
+            for p in proofs {
+                unsafe { (self.free)(p) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.proofs) };
+
+            let blobs = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.blobs_bundle.blobs,
+                    raw_output.value.blobs_bundle.blobs_len,
+                )
+            };
+            for b in blobs {
+                unsafe { (self.free)(b) };
+            }
+            unsafe { (self.free)(raw_output.value.blobs_bundle.blobs) };
+
+            let ex_requests = unsafe {
+                std::slice::from_raw_parts(
+                    raw_output.value.execution_requests.requests,
+                    raw_output.value.execution_requests.requests_len,
+                )
+            };
+
+            for r in ex_requests {
+                unsafe { (self.free)(r.bytes) };
+            }
+            unsafe { (self.free)(raw_output.value.execution_requests) };
+        }
+
+        output
     }
 
     fn engine_get_blobs_v1(
@@ -1834,17 +2051,32 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             .map(|hash| hash.0.as_ptr())
             .collect::<Vec<_>>();
 
-        let output = unsafe {
+        let raw_output = unsafe {
             (self.engine_get_blobs_v1)(versioned_hashes.as_ptr(), versioned_hashes.len() as u64)
         };
 
         drop(versioned_hashes);
 
-        let output: Result<_, _> = output.into();
-
-        output.map(|value| {
+        let output: Result<_, _> = raw_output.into();
+        let output = output.map(|value| {
             value.map_convert(|item| -> Option<BlobAndProofV1<Mainnet>> { item.into() })
-        })
+        });
+
+        if output.is_ok() {
+            let items = unsafe { 
+                std::slice::from_raw_parts(raw_output.value.data, raw_output.value.data_len)
+            };
+
+            for i in items {
+                if i.is_something {
+                    unsafe { (self.free)(i.value.blob) };
+                }
+            }
+
+            unsafe { (self.free)(raw_output.value.data) };
+        }
+
+        result
     }
 
     fn engine_get_blobs_v2(
@@ -1856,18 +2088,30 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             .map(|hash| hash.0.as_ptr())
             .collect::<Vec<_>>();
 
-        let output = unsafe {
+        let raw_output = unsafe {
             (self.engine_get_blobs_v2)(versioned_hashes.as_ptr(), versioned_hashes.len() as u64)
         };
 
         drop(versioned_hashes);
 
-        let output: Result<_, _> = output.into();
-
-        output.map(|value| {
+        let output: Result<_, _> = raw_output.into();
+        let output = output.map(|value| {
             let value: Option<CVecCBlobAndProofV2> = value.into();
             value.map(|blobs| blobs.map_convert(|item| -> BlobAndProofV2<Mainnet> { item.into() }))
-        })
+        });
+
+        if raw_output.error == 0 && raw_output.value.is_something {
+            let items = unsafe { std::slice::from_raw_parts(raw_output.value.value.data, raw_output.value.value.data_len) };
+
+            for i in items {
+                unsafe { (self.free)(i.blob) };
+                unsafe { (self.free)(i.proof) };
+            }
+
+            unsafe { (self.free)(raw_output.value.value.data) };
+        }
+
+        output
     }
 }
 
