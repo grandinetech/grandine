@@ -103,7 +103,12 @@ mod tests {
 
     use super::*;
 
-    static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
+    struct LoggerWithTempDir {
+        handle: TracingHandle,
+        _temp_dir: TempDir,
+    }
+
+    static LOGGER: LazyLock<Mutex<Option<LoggerWithTempDir>>> = LazyLock::new(|| Mutex::new(None));
 
     fn init_logger_once() -> TracingHandle {
         let data_dir = TempDir::new().expect("should create a temp data dir");
@@ -111,11 +116,15 @@ mod tests {
         if lock.is_none() {
             let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
                 .expect("Failed to initialize tracing logger");
-            *lock = Some(handle.clone());
+            *lock = Some(LoggerWithTempDir {
+                handle: handle.clone(),
+                _temp_dir: data_dir,
+            });
             handle
         } else {
             lock.as_ref()
                 .expect("LOGGER should always be initialized")
+                .handle
                 .clone()
         }
     }

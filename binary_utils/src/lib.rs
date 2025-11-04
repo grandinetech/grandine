@@ -2,19 +2,24 @@ use anyhow::Result;
 use chrono::{Local, SecondsFormat};
 use fs_err as fs;
 use logging::{debug_with_peers, exception};
+use logroller::{Compression, LogRollerBuilder, Rotation, RotationSize};
 use rayon::ThreadPoolBuilder;
 use std::{
     io::{self, IsTerminal},
     path::Path,
+    sync::OnceLock,
 };
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     filter::LevelFilter,
     fmt,
-    fmt::{format::Writer, time::FormatTime, writer::BoxMakeWriter},
+    fmt::{format::Writer, time::FormatTime},
     prelude::*,
     reload::{self, Handle},
     EnvFilter, Registry,
 };
+
+static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct TracingHandle(Handle<EnvFilter, Registry>);
@@ -105,8 +110,8 @@ pub fn initialize_tracing_logger(
 
     let registry = tracing_subscriber::registry().with(stdout_layer.with_filter(filter_layer));
 
-    match initialize_exception_log_file(data_dir) {
-        Ok(file) => {
+    match initialize_rotating_writer(data_dir) {
+        Ok(non_blocking) => {
             let exception_filter = EnvFilter::default()
                 .add_directive(LevelFilter::OFF.into())
                 .add_directive("exception=error".parse()?);
@@ -114,10 +119,7 @@ pub fn initialize_tracing_logger(
             let file_layer = fmt::layer()
                 .compact()
                 .with_ansi(false)
-                .with_writer(BoxMakeWriter::new(move || {
-                    file.try_clone()
-                        .expect("failed to clone exception.log file writer")
-                }))
+                .with_writer(non_blocking)
                 .with_timer(LocalTimer)
                 .with_target(true)
                 .with_file(true)
@@ -126,10 +128,9 @@ pub fn initialize_tracing_logger(
 
             registry.with(file_layer).init();
         }
-        Err(error) => {
+        Err(e) => {
             registry.init();
-
-            tracing::error!("failed to initialize exception log file in {data_dir:?}: {error}",);
+            tracing::error!("Failed to initialize rotating exception log in {data_dir:?}: {e}");
         }
     }
 
@@ -138,23 +139,23 @@ pub fn initialize_tracing_logger(
     Ok(TracingHandle(handle))
 }
 
-fn initialize_exception_log_file(data_dir: &Path) -> Result<fs::File> {
-    let log_path = data_dir.join("exception.log");
-
+fn initialize_rotating_writer(
+    data_dir: &Path,
+) -> Result<tracing_appender::non_blocking::NonBlocking> {
     if !data_dir.exists() {
         fs::create_dir_all(data_dir)?;
     }
 
-    if !log_path.exists() {
-        fs::File::create(&log_path)?;
-    }
+    let rotator = LogRollerBuilder::new(data_dir, Path::new("exception.log"))
+        .rotation(Rotation::SizeBased(RotationSize::GB(1)))
+        .max_keep_files(5)
+        .compression(Compression::Gzip)
+        .build()?;
 
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)?;
+    let (non_blocking, guard) = tracing_appender::non_blocking(rotator);
+    LOG_GUARD.set(guard).ok();
 
-    Ok(file)
+    Ok(non_blocking)
 }
 
 pub fn initialize_rayon() -> Result<()> {
@@ -174,7 +175,12 @@ mod tests {
 
     use super::*;
 
-    static LOGGER: LazyLock<Mutex<Option<TracingHandle>>> = LazyLock::new(|| Mutex::new(None));
+    struct LoggerWithTempDir {
+        handle: TracingHandle,
+        _temp_dir: TempDir,
+    }
+
+    static LOGGER: LazyLock<Mutex<Option<LoggerWithTempDir>>> = LazyLock::new(|| Mutex::new(None));
 
     fn init_logger_once() -> TracingHandle {
         let data_dir = TempDir::new().expect("should create a temp data dir");
@@ -182,11 +188,15 @@ mod tests {
         if lock.is_none() {
             let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
                 .expect("Failed to initialize tracing logger");
-            *lock = Some(handle.clone());
+            *lock = Some(LoggerWithTempDir {
+                handle: handle.clone(),
+                _temp_dir: data_dir,
+            });
             handle
         } else {
             lock.as_ref()
                 .expect("LOGGER should always be initialized")
+                .handle
                 .clone()
         }
     }
@@ -248,7 +258,6 @@ mod tests {
         use logging::{error_with_peers, exception, info_with_peers, warn_with_peers};
         use std::io::Read;
 
-        // stdout redirect to buffer
         let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
 
         let handle = init_logger_once();
