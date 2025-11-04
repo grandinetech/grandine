@@ -2917,21 +2917,14 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let version = validator_block.value.phase();
     let blinded = validator_block.value.is_blinded();
 
-    // 'Uplift' validator block to signed beacon block for consensus reward calculation
-    let signed_beacon_block = match validator_block.value.clone() {
-        ValidatorBlindedBlock::BeaconBlock(beacon_block) => beacon_block.with_zero_signature(),
-        ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
-            blinded_block.with_default_payload().with_zero_signature()
-        }
-    };
-
     let consensus_block_value = block_rewards
         .map(|rewards| Uint256::from_u64(rewards.total) * WEI_IN_GWEI)
         .or_else(|| {
             warn_with_peers!(
-                "unable to calculate block rewards for validator block {:?} at slot {slot}",
-                signed_beacon_block.message().hash_tree_root(),
+                "unable to calculate block rewards for validator block (blinded: {blinded}) \
+                at slot {slot}",
             );
+
             None
         });
 
