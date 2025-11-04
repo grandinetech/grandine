@@ -26,13 +26,13 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
-use tracing::debug;
 use prometheus_metrics::Metrics;
 use ssz::{ContiguousList, SszReadDefault};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
+use tracing::debug;
 use try_from_iterator::TryFromIterator as _;
 use types::{
     config::Config,

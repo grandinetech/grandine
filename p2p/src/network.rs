@@ -40,7 +40,6 @@ use logging::{
     debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
     PEER_LOG_METRICS,
 };
-use tracing::debug;
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
@@ -48,6 +47,7 @@ use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
+use tracing::debug;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
