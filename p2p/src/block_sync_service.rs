@@ -1275,6 +1275,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         let request_id = self.request_id()?;
+        let peer_id = self.ensure_peer_connected(peer_id);
 
         let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
             return Ok(());
