@@ -14,6 +14,7 @@ use log::error;
 use primitive_types::{H384, U256};
 use runtime::{grandine_args::GrandineArgs, run};
 use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite};
+use std::ffi::c_void;
 use std::{ffi::CStr, sync::Arc};
 use try_from_iterator::TryFromIterator;
 use typenum::marker_traits::Unsigned;
@@ -29,15 +30,26 @@ use web3::types::{Filter, Log, U64};
 macro_rules! impl_c_vec {
     ($type_name:ident, $inner:ty) => {
         impl $type_name {
-            fn convert(&self) -> Vec<$inner> {
-                unsafe { std::slice::from_raw_parts(self.data, self.data_len as usize) }.to_vec()
+            fn convert(&self, free: unsafe extern "C" fn(ptr: *const c_void)) -> Vec<$inner> {
+                let output =
+                    unsafe { std::slice::from_raw_parts(self.data, self.data_len as usize) }
+                        .to_vec();
+                unsafe { (free)(self.data as *const c_void) };
+                output
             }
 
-            fn map_convert<V>(&self, mapper: impl FnMut(&$inner) -> V) -> Vec<V> {
-                unsafe { std::slice::from_raw_parts(self.data, self.data_len as usize) }
-                    .iter()
-                    .map(mapper)
-                    .collect::<Vec<_>>()
+            fn map_convert<V>(
+                &self,
+                mapper: impl FnMut(&$inner) -> V,
+                free: unsafe extern "C" fn(ptr: *const c_void),
+            ) -> Vec<V> {
+                let output =
+                    unsafe { std::slice::from_raw_parts(self.data, self.data_len as usize) }
+                        .iter()
+                        .map(mapper)
+                        .collect::<Vec<_>>();
+                unsafe { (free)(self.data as *const c_void) };
+                output
             }
         }
 
@@ -245,16 +257,19 @@ impl CExecutionPayloadV1 {
             transactions,
         )
     }
-}
 
-impl Into<EngineGetPayloadV1Response<Mainnet>> for CExecutionPayloadV1 {
-    fn into(self) -> EngineGetPayloadV1Response<Mainnet> {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> EngineGetPayloadV1Response<Mainnet> {
         let logs_bloom =
             unsafe { std::slice::from_raw_parts(self.logs_bloom, self.logs_bloom_len as usize) }
                 .to_vec();
         let logs_bloom =
             ByteVector::<<Mainnet as Preset>::BytesPerLogsBloom>::from_ssz_default(&logs_bloom)
                 .unwrap();
+
+        unsafe { (free)(self.logs_bloom as *const c_void) };
 
         let extra_data =
             unsafe { std::slice::from_raw_parts(self.extra_data, self.extra_data_len as usize) };
@@ -263,9 +278,27 @@ impl Into<EngineGetPayloadV1Response<Mainnet>> for CExecutionPayloadV1 {
                 .unwrap(),
         );
 
+        unsafe { (free)(self.extra_data as *const c_void) };
+
         let transactions = unsafe {
             std::slice::from_raw_parts(self.transactions, self.transactions_len as usize)
         };
+
+        let transactions = Arc::new(
+            ContiguousList::try_from_iter(transactions.iter().map(|v| {
+                let data = ByteList::try_from(
+                    unsafe { std::slice::from_raw_parts(v.bytes, v.bytes_len as usize) }.to_vec(),
+                )
+                .unwrap();
+
+                unsafe { (free)(v.bytes as *const c_void) };
+
+                data
+            }))
+            .unwrap(),
+        );
+
+        unsafe { (free)(self.transactions as *const c_void) };
 
         EngineGetPayloadV1Response::<Mainnet> {
             parent_hash: H256(self.parent_hash),
@@ -281,16 +314,7 @@ impl Into<EngineGetPayloadV1Response<Mainnet>> for CExecutionPayloadV1 {
             timestamp: self.timestamp,
             extra_data,
             block_hash: H256(self.block_hash),
-            transactions: Arc::new(
-                ContiguousList::try_from_iter(transactions.iter().map(|v| {
-                    ByteList::try_from(
-                        unsafe { std::slice::from_raw_parts(v.bytes, v.bytes_len as usize) }
-                            .to_vec(),
-                    )
-                    .unwrap()
-                }))
-                .unwrap(),
-            ),
+            transactions,
         }
     }
 }
@@ -387,16 +411,19 @@ impl CExecutionPayloadV2 {
             withdrawals,
         )
     }
-}
 
-impl Into<ExecutionPayloadV2<Mainnet>> for CExecutionPayloadV2 {
-    fn into(self) -> ExecutionPayloadV2<Mainnet> {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> ExecutionPayloadV2<Mainnet> {
         let logs_bloom =
             unsafe { std::slice::from_raw_parts(self.logs_bloom, self.logs_bloom_len as usize) }
                 .to_vec();
         let logs_bloom =
             ByteVector::<<Mainnet as Preset>::BytesPerLogsBloom>::from_ssz_default(&logs_bloom)
                 .unwrap();
+
+        unsafe { (free)(self.logs_bloom as *const c_void) };
 
         let extra_data =
             unsafe { std::slice::from_raw_parts(self.extra_data, self.extra_data_len as usize) };
@@ -405,12 +432,40 @@ impl Into<ExecutionPayloadV2<Mainnet>> for CExecutionPayloadV2 {
                 .unwrap(),
         );
 
+        unsafe { (free)(self.extra_data as *const c_void) };
+
         let transactions = unsafe {
             std::slice::from_raw_parts(self.transactions, self.transactions_len as usize)
         };
 
+        let transactions = Arc::new(
+            ContiguousList::try_from_iter(transactions.iter().map(|v| {
+                let data = ByteList::try_from(
+                    unsafe { std::slice::from_raw_parts(v.bytes, v.bytes_len as usize) }.to_vec(),
+                )
+                .unwrap();
+
+                unsafe { (free)(v.bytes as *const c_void) };
+
+                data
+            }))
+            .unwrap(),
+        );
+
+        unsafe { (free)(self.transactions as *const c_void) };
+
         let withdrawals =
             unsafe { std::slice::from_raw_parts(self.withdrawals, self.withdrawals_len as usize) };
+
+        let withdrawals = ContiguousList::try_from_iter(withdrawals.iter().map(|v| WithdrawalV1 {
+            address: H160(v.address),
+            amount: v.amount,
+            index: v.index,
+            validator_index: v.validator_index,
+        }))
+        .unwrap();
+
+        unsafe { (free)(self.withdrawals as *const c_void) };
 
         ExecutionPayloadV2::<Mainnet> {
             parent_hash: H256(self.parent_hash),
@@ -426,23 +481,8 @@ impl Into<ExecutionPayloadV2<Mainnet>> for CExecutionPayloadV2 {
             timestamp: self.timestamp,
             extra_data,
             block_hash: H256(self.block_hash),
-            transactions: Arc::new(
-                ContiguousList::try_from_iter(transactions.iter().map(|v| {
-                    ByteList::try_from(
-                        unsafe { std::slice::from_raw_parts(v.bytes, v.bytes_len as usize) }
-                            .to_vec(),
-                    )
-                    .unwrap()
-                }))
-                .unwrap(),
-            ),
-            withdrawals: ContiguousList::try_from_iter(withdrawals.iter().map(|v| WithdrawalV1 {
-                address: H160(v.address),
-                amount: v.amount,
-                index: v.index,
-                validator_index: v.validator_index,
-            }))
-            .unwrap(),
+            transactions,
+            withdrawals,
         }
     }
 }
@@ -535,16 +575,19 @@ impl CExecutionPayloadV3 {
             withdrawals,
         )
     }
-}
 
-impl Into<ExecutionPayloadV3<Mainnet>> for CExecutionPayloadV3 {
-    fn into(self) -> ExecutionPayloadV3<Mainnet> {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> ExecutionPayloadV3<Mainnet> {
         let logs_bloom =
             unsafe { std::slice::from_raw_parts(self.logs_bloom, self.logs_bloom_len as usize) }
                 .to_vec();
         let logs_bloom =
             ByteVector::<<Mainnet as Preset>::BytesPerLogsBloom>::from_ssz_default(&logs_bloom)
                 .unwrap();
+
+        unsafe { (free)(self.logs_bloom as *const c_void) };
 
         let extra_data =
             unsafe { std::slice::from_raw_parts(self.extra_data, self.extra_data_len as usize) };
@@ -553,12 +596,38 @@ impl Into<ExecutionPayloadV3<Mainnet>> for CExecutionPayloadV3 {
                 .unwrap(),
         );
 
+        unsafe { (free)(self.extra_data as *const c_void) };
+
         let transactions = unsafe {
             std::slice::from_raw_parts(self.transactions, self.transactions_len as usize)
         };
 
+        let transactions = Arc::new(
+            ContiguousList::try_from_iter(transactions.iter().map(|v| {
+                let data = ByteList::try_from(
+                    unsafe { std::slice::from_raw_parts(v.bytes, v.bytes_len as usize) }.to_vec(),
+                )
+                .unwrap();
+
+                unsafe { (free)(v.bytes as *const c_void) };
+
+                data
+            }))
+            .unwrap(),
+        );
+
         let withdrawals =
             unsafe { std::slice::from_raw_parts(self.withdrawals, self.withdrawals_len as usize) };
+
+        let withdrawals = ContiguousList::try_from_iter(withdrawals.iter().map(|v| WithdrawalV1 {
+            address: H160(v.address),
+            amount: v.amount,
+            index: v.index,
+            validator_index: v.validator_index,
+        }))
+        .unwrap();
+
+        unsafe { (free)(self.withdrawals as *const c_void) };
 
         ExecutionPayloadV3::<Mainnet> {
             parent_hash: H256(self.parent_hash),
@@ -574,23 +643,8 @@ impl Into<ExecutionPayloadV3<Mainnet>> for CExecutionPayloadV3 {
             timestamp: self.timestamp,
             extra_data,
             block_hash: H256(self.block_hash),
-            transactions: Arc::new(
-                ContiguousList::try_from_iter(transactions.iter().map(|v| {
-                    ByteList::try_from(
-                        unsafe { std::slice::from_raw_parts(v.bytes, v.bytes_len as usize) }
-                            .to_vec(),
-                    )
-                    .unwrap()
-                }))
-                .unwrap(),
-            ),
-            withdrawals: ContiguousList::try_from_iter(withdrawals.iter().map(|v| WithdrawalV1 {
-                address: H160(v.address),
-                amount: v.amount,
-                index: v.index,
-                validator_index: v.validator_index,
-            }))
-            .unwrap(),
+            transactions,
+            withdrawals,
             blob_gas_used: self.blob_gas_used,
             excess_blob_gas: self.excess_blob_gas,
         }
@@ -1001,17 +1055,20 @@ impl Clone for CBlobAndProofV2 {
     }
 }
 
-impl From<&CBlobAndProofV2> for BlobAndProofV2<Mainnet> {
-    fn from(value: &CBlobAndProofV2) -> Self {
-        BlobAndProofV2::<Mainnet> {
+impl CBlobAndProofV2 {
+    pub fn into_with_free(
+        &self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> BlobAndProofV2<Mainnet> {
+        let result = BlobAndProofV2::<Mainnet> {
             blob: Box::new(
-                unsafe { core::slice::from_raw_parts(value.blob, BytesPerBlob::<Mainnet>::USIZE) }
+                unsafe { core::slice::from_raw_parts(self.blob, BytesPerBlob::<Mainnet>::USIZE) }
                     .into(),
             ),
             proofs: ContiguousVector::<H384, <Mainnet as Preset>::CellsPerExtBlob>::try_from_iter(
                 unsafe {
                     core::slice::from_raw_parts(
-                        value.proof,
+                        self.proof,
                         <Mainnet as Preset>::CellsPerExtBlob::USIZE,
                     )
                 }
@@ -1019,7 +1076,12 @@ impl From<&CBlobAndProofV2> for BlobAndProofV2<Mainnet> {
                 .map(|v| v.clone().into()),
             )
             .unwrap(),
-        }
+        };
+
+        unsafe { (free)(self.blob as *const c_void) };
+        unsafe { (free)(self.proof as *const c_void) };
+
+        result
     }
 }
 
@@ -1048,13 +1110,16 @@ impl Default for CBlobAndProofV1 {
     }
 }
 
-impl From<&COptionCBlobAndProofV1> for Option<BlobAndProofV1<Mainnet>> {
-    fn from(value: &COptionCBlobAndProofV1) -> Self {
-        if !value.is_something {
+impl COptionCBlobAndProofV1 {
+    pub fn into_with_free(
+        &self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> Option<BlobAndProofV1<Mainnet>> {
+        if !self.is_something {
             None
         } else {
-            let value = &value.value;
-            Some(BlobAndProofV1::<Mainnet> {
+            let value = &self.value;
+            let res = BlobAndProofV1::<Mainnet> {
                 proof: value.proof.clone().into(),
                 blob: Box::new(
                     unsafe {
@@ -1062,7 +1127,11 @@ impl From<&COptionCBlobAndProofV1> for Option<BlobAndProofV1<Mainnet>> {
                     }
                     .into(),
                 ),
-            })
+            };
+
+            unsafe { (free)(value.blob as *const c_void) };
+
+            Some(res)
         }
     }
 }
@@ -1169,8 +1238,11 @@ impl CExecutionRequests {
     }
 }
 
-impl Into<RawExecutionRequests<Mainnet>> for CExecutionRequests {
-    fn into(self) -> RawExecutionRequests<Mainnet> {
+impl CExecutionRequests {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> RawExecutionRequests<Mainnet> {
         let requests =
             unsafe { std::slice::from_raw_parts(self.requests, self.requests_len as usize) };
 
@@ -1184,10 +1256,19 @@ impl Into<RawExecutionRequests<Mainnet>> for CExecutionRequests {
             std::slice::from_raw_parts(requests[2].bytes, requests[2].bytes_len as usize)
         };
 
+        let deposits = ContiguousList::from_ssz_default(deposits).unwrap();
+        let withdrawals = ContiguousList::from_ssz_default(withdrawals).unwrap();
+        let consolidations = ContiguousList::from_ssz_default(consolidations).unwrap();
+
+        for r in requests {
+            unsafe { (free)(r.bytes as *const c_void) };
+        }
+        unsafe { (free)(self.requests as *const c_void) };
+
         ExecutionRequests::<Mainnet> {
-            deposits: ContiguousList::from_ssz_default(deposits).unwrap(),
-            withdrawals: ContiguousList::from_ssz_default(withdrawals).unwrap(),
-            consolidations: ContiguousList::from_ssz_default(consolidations).unwrap(),
+            deposits,
+            withdrawals,
+            consolidations,
         }
         .into()
     }
@@ -1200,11 +1281,14 @@ pub struct CEngineGetPayloadV2Response {
     block_value: [u8; 32],
 }
 
-impl Into<EngineGetPayloadV2Response<Mainnet>> for CEngineGetPayloadV2Response {
-    fn into(self) -> EngineGetPayloadV2Response<Mainnet> {
+impl CEngineGetPayloadV2Response {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> EngineGetPayloadV2Response<Mainnet> {
         EngineGetPayloadV2Response::<Mainnet> {
             block_value: Uint256::from_be_bytes(self.block_value),
-            execution_payload: self.execution_payload.into(),
+            execution_payload: self.execution_payload.into_with_free(free),
         }
     }
 }
@@ -1220,92 +1304,140 @@ pub struct CBlobsBundleV1 {
     blobs_len: u64,
 }
 
-impl Into<BlobsBundleV1<Mainnet>> for CBlobsBundleV1 {
-    fn into(self) -> BlobsBundleV1<Mainnet> {
-        BlobsBundleV1::<Mainnet> {
-            commitments: ContiguousList::try_from_iter(
-                unsafe {
-                    std::slice::from_raw_parts(self.commitments, self.commitments_len as usize)
-                }
+impl CBlobsBundleV1 {
+    fn into_v1_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> BlobsBundleV1<Mainnet> {
+        let commitments = ContiguousList::try_from_iter(
+            unsafe { std::slice::from_raw_parts(self.commitments, self.commitments_len as usize) }
                 .iter()
                 .map(|&v| {
-                    H384(
+                    let data = H384(
                         unsafe { std::slice::from_raw_parts(v, 48) }
                             .try_into()
                             .unwrap(),
-                    )
-                }),
-            )
-            .unwrap(),
-            proofs: ContiguousList::try_from_iter(
-                unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
-                    .iter()
-                    .map(|&v| {
-                        H384(
-                            unsafe { std::slice::from_raw_parts(v, 48) }
-                                .try_into()
-                                .unwrap(),
-                        )
-                    }),
-            )
-            .unwrap(),
-            blobs: ContiguousList::try_from_iter(
-                unsafe { std::slice::from_raw_parts(self.blobs, self.blobs_len as usize) }
-                    .iter()
-                    .map(|&blob| {
-                        let blob = unsafe {
-                            std::slice::from_raw_parts(blob, BytesPerBlob::<Mainnet>::to_usize())
-                        };
+                    );
 
-                        Box::new(ByteVector::from_ssz_default(blob).unwrap())
-                    }),
-            )
-            .unwrap(),
+                    unsafe { (free)(v as *const c_void) };
+
+                    data
+                }),
+        )
+        .unwrap();
+
+        unsafe { (free)(self.commitments as *const c_void) };
+
+        let proofs = ContiguousList::try_from_iter(
+            unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
+                .iter()
+                .map(|&v| {
+                    let data = H384(
+                        unsafe { std::slice::from_raw_parts(v, 48) }
+                            .try_into()
+                            .unwrap(),
+                    );
+
+                    unsafe { (free)(v as *const c_void) };
+
+                    data
+                }),
+        )
+        .unwrap();
+
+        unsafe { (free)(self.proofs as *const c_void) };
+
+        let blobs = ContiguousList::try_from_iter(
+            unsafe { std::slice::from_raw_parts(self.blobs, self.blobs_len as usize) }
+                .iter()
+                .map(|&blob| {
+                    let data = unsafe {
+                        std::slice::from_raw_parts(blob, BytesPerBlob::<Mainnet>::to_usize())
+                    };
+
+                    let data = Box::new(ByteVector::from_ssz_default(data).unwrap());
+
+                    unsafe { (free)(blob as *const c_void) };
+
+                    data
+                }),
+        )
+        .unwrap();
+
+        unsafe { (free)(self.blobs as *const c_void) };
+
+        BlobsBundleV1::<Mainnet> {
+            commitments,
+            proofs,
+            blobs,
         }
     }
-}
 
-impl Into<BlobsBundleV2<Mainnet>> for CBlobsBundleV1 {
-    fn into(self) -> BlobsBundleV2<Mainnet> {
-        BlobsBundleV2::<Mainnet> {
-            commitments: ContiguousList::try_from_iter(
-                unsafe {
-                    std::slice::from_raw_parts(self.commitments, self.commitments_len as usize)
-                }
+    fn into_v2_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> BlobsBundleV2<Mainnet> {
+        let commitments = ContiguousList::try_from_iter(
+            unsafe { std::slice::from_raw_parts(self.commitments, self.commitments_len as usize) }
                 .iter()
                 .map(|&v| {
-                    H384(
+                    let data = H384(
                         unsafe { std::slice::from_raw_parts(v, 48) }
                             .try_into()
                             .unwrap(),
-                    )
-                }),
-            )
-            .unwrap(),
-            proofs: ContiguousList::try_from_iter(
-                unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
-                    .iter()
-                    .map(|&v| {
-                        H384(
-                            unsafe { std::slice::from_raw_parts(v, 48) }
-                                .try_into()
-                                .unwrap(),
-                        )
-                    }),
-            )
-            .unwrap(),
-            blobs: ContiguousList::try_from_iter(
-                unsafe { std::slice::from_raw_parts(self.blobs, self.blobs_len as usize) }
-                    .iter()
-                    .map(|&blob| {
-                        let blob = unsafe {
-                            std::slice::from_raw_parts(blob, BytesPerBlob::<Mainnet>::to_usize())
-                        };
+                    );
 
-                        Box::new(ByteVector::from_ssz_default(blob).unwrap())
-                    }),
-            )
-            .unwrap(),
+                    unsafe { (free)(v as *const c_void) };
+
+                    data
+                }),
+        )
+        .unwrap();
+
+        unsafe { (free)(self.commitments as *const c_void) };
+
+        let proofs = ContiguousList::try_from_iter(
+            unsafe { std::slice::from_raw_parts(self.proofs, self.proofs_len as usize) }
+                .iter()
+                .map(|&v| {
+                    let data = H384(
+                        unsafe { std::slice::from_raw_parts(v, 48) }
+                            .try_into()
+                            .unwrap(),
+                    );
+
+                    unsafe { (free)(v as *const c_void) };
+
+                    data
+                }),
+        )
+        .unwrap();
+
+        unsafe { (free)(self.proofs as *const c_void) };
+
+        let blobs = ContiguousList::try_from_iter(
+            unsafe { std::slice::from_raw_parts(self.blobs, self.blobs_len as usize) }
+                .iter()
+                .map(|&blob| {
+                    let data = unsafe {
+                        std::slice::from_raw_parts(blob, BytesPerBlob::<Mainnet>::to_usize())
+                    };
+
+                    let data = Box::new(ByteVector::from_ssz_default(data).unwrap());
+
+                    unsafe { (free)(blob as *const c_void) };
+
+                    data
+                }),
+        )
+        .unwrap();
+
+        unsafe { (free)(self.blobs as *const c_void) };
+
+        BlobsBundleV2::<Mainnet> {
+            commitments,
+            proofs,
+            blobs,
         }
     }
 }
@@ -1319,11 +1451,14 @@ pub struct CEngineGetPayloadV3Response {
     should_override_builder: bool,
 }
 
-impl Into<EngineGetPayloadV3Response<Mainnet>> for CEngineGetPayloadV3Response {
-    fn into(self) -> EngineGetPayloadV3Response<Mainnet> {
+impl CEngineGetPayloadV3Response {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> EngineGetPayloadV3Response<Mainnet> {
         EngineGetPayloadV3Response::<Mainnet> {
-            execution_payload: self.execution_payload.into(),
-            blobs_bundle: self.blobs_bundle.into(),
+            execution_payload: self.execution_payload.into_with_free(free),
+            blobs_bundle: self.blobs_bundle.into_v1_with_free(free),
             block_value: Uint256::from_be_bytes(self.block_value),
             should_override_builder: self.should_override_builder,
         }
@@ -1340,14 +1475,17 @@ pub struct CEngineGetPayloadV4Response {
     execution_requests: CExecutionRequests,
 }
 
-impl Into<EngineGetPayloadV4Response<Mainnet>> for CEngineGetPayloadV4Response {
-    fn into(self) -> EngineGetPayloadV4Response<Mainnet> {
+impl CEngineGetPayloadV4Response {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> EngineGetPayloadV4Response<Mainnet> {
         EngineGetPayloadV4Response::<Mainnet> {
-            execution_payload: self.execution_payload.into(),
-            blobs_bundle: self.blobs_bundle.into(),
+            execution_payload: self.execution_payload.into_with_free(free),
+            blobs_bundle: self.blobs_bundle.into_v1_with_free(free),
             block_value: Uint256::from_be_bytes(self.block_value),
             should_override_builder: self.should_override_builder,
-            execution_requests: self.execution_requests.into(),
+            execution_requests: self.execution_requests.into_with_free(free),
         }
     }
 }
@@ -1373,14 +1511,17 @@ impl_c_result!(
     CEngineGetPayloadV5Response
 );
 
-impl Into<EngineGetPayloadV5Response<Mainnet>> for CEngineGetPayloadV5Response {
-    fn into(self) -> EngineGetPayloadV5Response<Mainnet> {
+impl CEngineGetPayloadV5Response {
+    fn into_with_free(
+        self,
+        free: unsafe extern "C" fn(ptr: *const c_void),
+    ) -> EngineGetPayloadV5Response<Mainnet> {
         EngineGetPayloadV5Response::<Mainnet> {
-            execution_payload: self.execution_payload.into(),
-            blobs_bundle: self.blobs_bundle.into(),
+            execution_payload: self.execution_payload.into_with_free(free),
+            blobs_bundle: self.blobs_bundle.into_v2_with_free(free),
             block_value: Uint256::from_be_bytes(self.block_value),
             should_override_builder: self.should_override_builder,
-            execution_requests: self.execution_requests.into(),
+            execution_requests: self.execution_requests.into_with_free(free),
         }
     }
 }
@@ -1784,262 +1925,45 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV1Response<types::preset::Mainnet>> {
-        let raw_output = unsafe { (self.engine_get_payload_v1)(payload_id.as_ptr()) };
-        let output: Result<_> = raw_output.into();
-        let output = output.map(|v| v.into())
-
-        if output.is_ok() {
-            unsafe { (self.free)(raw_output.value.logs_bloom) };
-            unsafe { (self.free)(raw_output.value.extra_data) };
-
-            let transactions = unsafe {
-                core::slice::from_raw_parts(
-                    raw_output.value.transactions,
-                    raw_output.value.transactions_len,
-                )
-            };
-            for t in transactions {
-                unsafe { (self.free)(t.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.transactions) };
-        }
-
-        output
+        let output = unsafe { (self.engine_get_payload_v1)(payload_id.as_ptr()) };
+        let output: Result<_> = output.into();
+        output.map(|v| v.into_with_free(self.free))
     }
 
     fn engine_get_payload_v2(
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV2Response<types::preset::Mainnet>> {
-        let raw_output = unsafe { (self.engine_get_payload_v2)(payload_id.as_ptr()) };
+        let output = unsafe { (self.engine_get_payload_v2)(payload_id.as_ptr()) };
         let output: Result<_> = output.into();
-        let output = output.map(|v| v.into())
-
-        if output.is_ok() {
-            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
-            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
-
-            let transactions = unsafe {
-                core::slice::from_raw_parts(
-                    raw_output.value.execution_payload.transactions,
-                    raw_output.value.execution_payload.transactions_len,
-                )
-            };
-            for t in transactions {
-                unsafe { (self.free)(t.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
-            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
-        }
-
-        output
+        output.map(|v| v.into_with_free(self.free))
     }
 
     fn engine_get_payload_v3(
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV3Response<types::preset::Mainnet>> {
-        let raw_output = unsafe { (self.engine_get_payload_v3)(payload_id.as_ptr()) };
-        let output: Result<_> = raw_output.into();
-        let output = output.map(|v| v.into());
-
-        if output.is_ok() {
-            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
-            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
-
-            let transactions = unsafe {
-                core::slice::from_raw_parts(
-                    raw_output.value.execution_payload.transactions,
-                    raw_output.value.execution_payload.transactions_len,
-                )
-            };
-            for t in transactions {
-                unsafe { (self.free)(t.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
-            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
-
-            let commitments = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.commitments,
-                    raw_output.value.blobs_bundle.commitments_len,
-                )
-            };
-            for c in commitments {
-                unsafe { (self.free)(c) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.commitments) };
-
-            let proofs = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.proofs,
-                    raw_output.value.blobs_bundle.proofs_len,
-                )
-            };
-            for p in proofs {
-                unsafe { (self.free)(p) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.proofs) };
-
-            let blobs = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.blobs,
-                    raw_output.value.blobs_bundle.blobs_len,
-                )
-            };
-            for b in blobs {
-                unsafe { (self.free)(b) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.blobs) };
-        }
-
-        output
+        let output = unsafe { (self.engine_get_payload_v3)(payload_id.as_ptr()) };
+        let output: Result<_> = output.into();
+        output.map(|v| v.into_with_free(self.free))
     }
 
     fn engine_get_payload_v4(
         &self,
         payload_id: web3::types::H64,
     ) -> Result<EngineGetPayloadV4Response<types::preset::Mainnet>> {
-        let raw_output = unsafe { (self.engine_get_payload_v4)(payload_id.as_ptr()) };
-        let output: Result<_> = raw_output.into();
-        let output = output.map(|v| v.into());
-
-        if output.is_ok() {
-            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
-            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
-
-            let transactions = unsafe {
-                core::slice::from_raw_parts(
-                    raw_output.value.execution_payload.transactions,
-                    raw_output.value.execution_payload.transactions_len,
-                )
-            };
-            for t in transactions {
-                unsafe { (self.free)(t.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
-            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
-
-            let commitments = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.commitments,
-                    raw_output.value.blobs_bundle.commitments_len,
-                )
-            };
-            for c in commitments {
-                unsafe { (self.free)(c) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.commitments) };
-
-            let proofs = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.proofs,
-                    raw_output.value.blobs_bundle.proofs_len,
-                )
-            };
-            for p in proofs {
-                unsafe { (self.free)(p) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.proofs) };
-
-            let blobs = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.blobs,
-                    raw_output.value.blobs_bundle.blobs_len,
-                )
-            };
-            for b in blobs {
-                unsafe { (self.free)(b) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.blobs) };
-
-            let ex_requests = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.execution_requests.requests,
-                    raw_output.value.execution_requests.requests_len,
-                )
-            };
-
-            for r in ex_requests {
-                unsafe { (self.free)(r.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.execution_requests) };
-        }
-
-        output
+        let output = unsafe { (self.engine_get_payload_v4)(payload_id.as_ptr()) };
+        let output: Result<_> = output.into();
+        output.map(|v| v.into_with_free(self.free))
     }
 
     fn engine_get_payload_v5(
         &self,
         payload_id: H64,
     ) -> Result<EngineGetPayloadV5Response<Mainnet>> {
-        let raw_output = unsafe { (self.engine_get_payload_v5)(payload_id.as_ptr()) };
-        let output: Result<_> = raw_output.into();
-        let output = output.map(|v| v.into());
-
-        if output.is_ok() {
-            unsafe { (self.free)(raw_output.value.execution_payload.logs_bloom) };
-            unsafe { (self.free)(raw_output.value.execution_payload.extra_data) };
-
-            let transactions = unsafe {
-                core::slice::from_raw_parts(
-                    raw_output.value.execution_payload.transactions,
-                    raw_output.value.execution_payload.transactions_len,
-                )
-            };
-            for t in transactions {
-                unsafe { (self.free)(t.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.execution_payload.transactions) };
-            unsafe { (self.free)(raw_output.value.execution_payload.withdrawals) };
-
-            let commitments = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.commitments,
-                    raw_output.value.blobs_bundle.commitments_len,
-                )
-            };
-            for c in commitments {
-                unsafe { (self.free)(c) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.commitments) };
-
-            let proofs = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.proofs,
-                    raw_output.value.blobs_bundle.proofs_len,
-                )
-            };
-            for p in proofs {
-                unsafe { (self.free)(p) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.proofs) };
-
-            let blobs = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.blobs_bundle.blobs,
-                    raw_output.value.blobs_bundle.blobs_len,
-                )
-            };
-            for b in blobs {
-                unsafe { (self.free)(b) };
-            }
-            unsafe { (self.free)(raw_output.value.blobs_bundle.blobs) };
-
-            let ex_requests = unsafe {
-                std::slice::from_raw_parts(
-                    raw_output.value.execution_requests.requests,
-                    raw_output.value.execution_requests.requests_len,
-                )
-            };
-
-            for r in ex_requests {
-                unsafe { (self.free)(r.bytes) };
-            }
-            unsafe { (self.free)(raw_output.value.execution_requests) };
-        }
-
-        output
+        let output = unsafe { (self.engine_get_payload_v5)(payload_id.as_ptr()) };
+        let output: Result<_> = output.into();
+        output.map(|v| v.into_with_free(self.free))
     }
 
     fn engine_get_blobs_v1(
@@ -2059,24 +1983,13 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
 
         let output: Result<_, _> = raw_output.into();
         let output = output.map(|value| {
-            value.map_convert(|item| -> Option<BlobAndProofV1<Mainnet>> { item.into() })
+            value.map_convert(
+                |item| -> Option<BlobAndProofV1<Mainnet>> { item.into_with_free(self.free) },
+                self.free,
+            )
         });
 
-        if output.is_ok() {
-            let items = unsafe { 
-                std::slice::from_raw_parts(raw_output.value.data, raw_output.value.data_len)
-            };
-
-            for i in items {
-                if i.is_something {
-                    unsafe { (self.free)(i.value.blob) };
-                }
-            }
-
-            unsafe { (self.free)(raw_output.value.data) };
-        }
-
-        result
+        output
     }
 
     fn engine_get_blobs_v2(
@@ -2097,19 +2010,13 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         let output: Result<_, _> = raw_output.into();
         let output = output.map(|value| {
             let value: Option<CVecCBlobAndProofV2> = value.into();
-            value.map(|blobs| blobs.map_convert(|item| -> BlobAndProofV2<Mainnet> { item.into() }))
+            value.map(|blobs| {
+                blobs.map_convert(
+                    |item| -> BlobAndProofV2<Mainnet> { item.into_with_free(self.free) },
+                    self.free,
+                )
+            })
         });
-
-        if raw_output.error == 0 && raw_output.value.is_something {
-            let items = unsafe { std::slice::from_raw_parts(raw_output.value.value.data, raw_output.value.value.data_len) };
-
-            for i in items {
-                unsafe { (self.free)(i.blob) };
-                unsafe { (self.free)(i.proof) };
-            }
-
-            unsafe { (self.free)(raw_output.value.value.data) };
-        }
 
         output
     }

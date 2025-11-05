@@ -33,7 +33,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]
-cbindgen = "0.26.0"
+cbindgen = "0.29.2"
 
 [features]
 default = ["bls/blst", "kzg_utils/blst"]
