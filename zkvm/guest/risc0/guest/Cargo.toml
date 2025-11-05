@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 anyhow = '1.0.93'
 bls = { path = '../../../../bls', features = ['zkcrypto'] }
+# Even though there is a warning message during compilation saying the crate is not used,
+# this package is used by `bls` and need `zkvm-risc0` feature activated.
 bls-zkcrypto = { path = '../../../../bls/bls-zkcrypto', features = ['zkvm-risc0'] }
 database = { path = '../../../../database' }
 enum-iterator = '2'
@@ -19,5 +21,5 @@ ssz = { path = '../../../../ssz' }
 transition_functions = { path = '../../../../transition_functions' }
 types = { path = '../../../../types' }
 
-# specify sha2 library need to activate `zkvm-risc0` feature
-sha2 = { git = 'https://github.com/jimmychu0807/grandine-universal-precompiles.git', branch = 'RustCrypto-hashes/sha2-v0.10.9', features = ['compress', 'zkvm-risc0'] }
+# Specify sha2 library to activate `zkvm-pico` feature
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', branch = 'RustCrypto-hashes/sha2-v0.10.9', features = ['compress', 'zkvm-risc0'] }

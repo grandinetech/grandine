@@ -404,7 +404,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_utils",
- "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "ssz",
  "static_assertions",
  "typenum",
@@ -427,7 +427,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=zkcrypto%2Fbls12_381#fee68c64a3495e3db56d0e6f4a5b5deba4c3354e"
+source = "git+https://github.com/grandinetech/universal-precompiles.git?branch=zkcrypto%2Fbls12_381-6bb9695#dfe056b1cde164284237b53abc0ffc903a2247a1"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -1702,7 +1702,7 @@ dependencies = [
  "ethereum-types",
  "generic-array",
  "hex-literal",
- "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
 ]
 
 [[package]]
@@ -1731,7 +1731,7 @@ dependencies = [
  "rayon",
  "rc-box",
  "serde",
- "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "shuffling",
  "ssz",
  "static_assertions",
@@ -2215,6 +2215,7 @@ name = "logging"
 version = "0.0.0"
 dependencies = [
  "derive_more 2.0.1",
+ "tracing",
 ]
 
 [[package]]
@@ -4090,7 +4091,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#b81d7d671955d86534d5f4da545d132cce4b9e6f"
+source = "git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#0d3a38727bfb18559da146321d84dba1ca6be007"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -5484,7 +5485,7 @@ dependencies = [
  "pico-sdk",
  "pubkey_cache",
  "serde",
- "sha2 0.10.9 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
  "ssz",
  "transition_functions",
  "types",
