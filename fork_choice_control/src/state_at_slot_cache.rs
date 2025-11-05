@@ -98,7 +98,7 @@ impl<P: Preset> StateAtSlotCache<P> {
             .pipe(Ok)
     }
 
-    fn try_lock_cache(&self) -> Result<MutexGuard<Cache<P>>> {
+    fn try_lock_cache(&self) -> Result<MutexGuard<'_, Cache<P>>> {
         let timeout = self.try_lock_timeout;
 
         self.cache.try_lock_for(timeout).ok_or_else(|| {

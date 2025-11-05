@@ -25,8 +25,9 @@ pub use crate::{
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
     storage::{
-        get, save, BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot,
-        SlotBlobId, SlotByStateRoot, StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage,
+        get, save, BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot,
+        DataColumnSidecarByColumnId, FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot,
+        SlotColumnId, StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage,
         UnfinalizedBlockByRoot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},

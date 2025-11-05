@@ -1301,7 +1301,9 @@ impl GrandineArgs {
             .collect::<Vec<_>>();
 
         // enabling these features here, because it being used in below network config conversion
-        features.iter().for_each(|feature| feature.enable());
+        for feature in &features {
+            feature.enable();
+        }
 
         let auth_options = AuthOptions {
             secrets_path: jwt_secret,
@@ -1422,6 +1424,10 @@ impl GrandineArgs {
     #[must_use]
     pub fn clap_error(message: impl core::fmt::Display) -> ClapError {
         Self::command().error(ErrorKind::ValueValidation, message)
+    }
+
+    pub fn data_dir(&self) -> PathBuf {
+        directories::data_directory(self.beacon_node_options.data_dir.as_ref())
     }
 }
 
@@ -1773,7 +1779,7 @@ mod tests {
 
         assert_eq!(
             config.http_api_config.address,
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234),
         );
     }
 
@@ -1848,7 +1854,7 @@ mod tests {
                 .validator_api_config
                 .as_ref()
                 .map(|config| config.address),
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234)),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 1234)),
         );
     }
 

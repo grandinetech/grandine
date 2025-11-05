@@ -278,7 +278,7 @@ impl<P: Preset> StateCache<P> {
         self.try_lock_cache()?.get(&block_root).cloned().pipe(Ok)
     }
 
-    fn try_lock_cache(&self) -> Result<MutexGuard<HashMap<H256, StateMapLock<P>>>> {
+    fn try_lock_cache(&self) -> Result<MutexGuard<'_, HashMap<H256, StateMapLock<P>>>> {
         let timeout = self.try_lock_timeout;
 
         self.cache.try_lock_for(timeout).ok_or_else(|| {

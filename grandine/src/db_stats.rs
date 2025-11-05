@@ -4,11 +4,12 @@ use anyhow::Result;
 use bytesize::ByteSize;
 use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
-    BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, FinalizedBlockByRoot, SlotBlobId,
-    SlotByStateRoot, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
+    BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
+    FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId, StateByBlockRoot,
+    StateCheckpoint, UnfinalizedBlockByRoot,
 };
-use logging::{info_with_peers, warn_with_peers};
 use runtime::StorageConfig;
+use tracing::{info, warn};
 use types::preset::Preset;
 
 #[derive(Default, Debug)]
@@ -42,7 +43,7 @@ impl EntriesInfo {
         let value_size = ByteSize(self.value_size.try_into()?).display().si();
         let total_size = ByteSize(self.total_size().try_into()?).display().si();
 
-        info_with_peers!(
+        info!(
             "{}: {} entries, key_size: {key_size}, value_size: {value_size}, total_size: {total_size}",
             self.title, self.count
         );
@@ -58,6 +59,8 @@ pub fn print<P: Preset>(
     let storage_database =
         storage_config.beacon_fork_choice_database(custom_path, DatabaseMode::ReadOnly, None)?;
 
+    info!("collecting beacon_fork_choice database stats..");
+
     let mut total_size = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");
     let mut unfinalized_block_root_entries = EntriesInfo::new("unfinalized_block_roots");
@@ -66,6 +69,9 @@ pub fn print<P: Preset>(
     let mut slot_by_blob_id_entries = EntriesInfo::new("slots_by_blob_id");
     let mut blob_sidecar_by_blob_id_entries = EntriesInfo::new("blob_sidecars_by_blob_id");
     let mut block_root_by_slot_entries = EntriesInfo::new("block_roots_by_slot");
+    let mut slot_by_column_id_entries = EntriesInfo::new("slots_by_column_id");
+    let mut data_column_sidecar_by_column_id =
+        EntriesInfo::new("data_column_sidecars_by_column_id");
     let mut state_checkpoint_entries = EntriesInfo::new("state_checkpoint");
     let mut block_checkpoint_entries = EntriesInfo::new("block_checkpoint");
 
@@ -88,17 +94,21 @@ pub fn print<P: Preset>(
             blob_sidecar_by_blob_id_entries.track(&key, length);
         } else if BlockRootBySlot::has_prefix(&key) {
             block_root_by_slot_entries.track(&key, length);
+        } else if SlotColumnId::has_prefix(&key) {
+            slot_by_column_id_entries.track(&key, length);
+        } else if DataColumnSidecarByColumnId::has_prefix(&key) {
+            data_column_sidecar_by_column_id.track(&key, length);
         } else if StateCheckpoint::<P>::has_prefix(&key) {
             state_checkpoint_entries.track(&key, length);
         } else if BlockCheckpoint::<P>::has_prefix(&key) {
             block_checkpoint_entries.track(&key, length);
         } else {
-            warn_with_peers!("unknown database key: {}", String::from_utf8_lossy(&key));
+            warn!("unknown database key: {}", String::from_utf8_lossy(&key));
         }
     }
 
     if let Some(db_stats) = storage_database.db_stats()? {
-        info_with_peers!("{db_stats:?}");
+        info!("{db_stats:?}");
     }
 
     let mut entries = [
@@ -109,6 +119,8 @@ pub fn print<P: Preset>(
         slot_by_state_root_entries,
         slot_by_blob_id_entries,
         blob_sidecar_by_blob_id_entries,
+        slot_by_column_id_entries,
+        data_column_sidecar_by_column_id,
         state_checkpoint_entries,
         block_checkpoint_entries,
     ];
@@ -119,8 +131,8 @@ pub fn print<P: Preset>(
         entry.print_report()?;
     }
 
-    info_with_peers!(
-        "Total size: {}",
+    info!(
+        "total size: {}",
         ByteSize(total_size.try_into()?).display().si()
     );
 

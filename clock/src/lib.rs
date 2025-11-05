@@ -60,8 +60,8 @@
 //! [`timer`]:         https://crates.io/crates/timer
 //! [`white_rabbit`]:  https://crates.io/crates/white_rabbit
 
-use core::time::Duration;
-use std::time::{Instant, SystemTime};
+use core::{error::Error, time::Duration};
+use std::time::{Instant, SystemTime, SystemTimeError};
 
 use anyhow::Result;
 use enum_iterator::Sequence;
@@ -81,9 +81,36 @@ use types::{
     traits::{BeaconBlock as _, SignedBeaconBlock},
 };
 
-use crate::fake_time::{InstantLike, SystemTimeLike};
-
+#[cfg(test)]
 mod fake_time;
+
+pub trait InstantLike: Sized {
+    fn checked_add(self, duration: Duration) -> Option<Self>;
+}
+
+pub trait SystemTimeLike: Copy {
+    type Error: Error + Send + Sync + 'static;
+
+    const UNIX_EPOCH: Self;
+
+    fn duration_since(self, earlier: Self) -> Result<Duration, Self::Error>;
+}
+
+impl InstantLike for Instant {
+    fn checked_add(self, duration: Duration) -> Option<Self> {
+        Self::checked_add(&self, duration)
+    }
+}
+
+impl SystemTimeLike for SystemTime {
+    type Error = SystemTimeError;
+
+    const UNIX_EPOCH: Self = Self::UNIX_EPOCH;
+
+    fn duration_since(self, earlier: Self) -> Result<Duration, Self::Error> {
+        Self::duration_since(&self, earlier)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Deserialize)]
 pub struct Tick {
@@ -208,7 +235,7 @@ impl Tick {
 
         let next_slot = match kind.next() {
             Some(_) => slot,
-            None => slot.checked_add(1).ok_or(Error::RanOutOfSlots)?,
+            None => slot.checked_add(1).ok_or(ClockError::RanOutOfSlots)?,
         };
 
         let next_kind = enum_iterator::next_cycle(&kind);
@@ -235,7 +262,7 @@ pub enum TickKind {
 
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub enum Error {
+pub enum ClockError {
     #[error("time of next tick overflowed")]
     NextInstantOverflow,
     #[error("ran out of slots")]
@@ -345,7 +372,7 @@ fn next_tick_with_instant<I: InstantLike, S: SystemTimeLike>(
 
     let next_instant = now_instant
         .checked_add(now_to_next_tick)
-        .ok_or(Error::NextInstantOverflow)?;
+        .ok_or(ClockError::NextInstantOverflow)?;
 
     Ok((next_tick, next_instant))
 }

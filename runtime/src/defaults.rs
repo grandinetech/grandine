@@ -14,7 +14,7 @@ pub const DEFAULT_LIBP2P_QUIC_IPV6_PORT: NonZeroU16 = nonzero!(9051_u16);
 pub const DEFAULT_METRICS_PORT: u16 = 5054;
 pub const DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS: u64 = 5;
 pub const DEFAULT_REQUEST_TIMEOUT: u64 = 30000;
-pub const DEFAULT_TARGET_PEERS: usize = 100;
+pub const DEFAULT_TARGET_PEERS: usize = 200;
 pub const DEFAULT_TARGET_SUBNET_PEERS: usize = 3;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1000);
 

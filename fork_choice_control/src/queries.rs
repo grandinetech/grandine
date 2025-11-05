@@ -704,7 +704,7 @@ where
     }
 
     #[must_use]
-    pub fn snapshot(&self) -> Snapshot<P> {
+    pub fn snapshot(&self) -> Snapshot<'_, P> {
         Snapshot {
             pubkey_cache: self.pubkey_cache().clone_arc(),
             store_snapshot: self.store_snapshot(),

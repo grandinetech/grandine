@@ -27,7 +27,6 @@ use std::{
 use anyhow::{anyhow, Error as AnyhowError, Result};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
-use drain_filter_polyfill::VecExt as _;
 use eth2_libp2p::GossipId;
 use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionEngine,
@@ -1921,13 +1920,12 @@ where
         let head_was_optimistic = old_head.is_optimistic();
         let latest_valid_hash = payload_status.latest_valid_hash;
 
-        let mut payload_action = PayloadAction::Accept;
-
-        if let Some(valid_hash) = latest_valid_hash {
-            payload_action = self
-                .store_mut()
-                .update_chain_payload_statuses(valid_hash, Some(execution_block_hash));
-        }
+        let payload_action = if let Some(valid_hash) = latest_valid_hash {
+            self.store_mut()
+                .update_chain_payload_statuses(valid_hash, Some(execution_block_hash))
+        } else {
+            PayloadAction::Accept
+        };
 
         let status = payload_status.status;
 
@@ -3115,7 +3113,6 @@ where
 
         let mut gossip_ids = vec![];
 
-        // Use `drain_filter_polyfill` because `Vec::extract_if` is not stable as of Rust 1.82.0.
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
@@ -3128,7 +3125,7 @@ where
 
             gossip_ids.extend(
                 blocks
-                    .drain_filter(|pending| {
+                    .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.block.message().slot() - 1 <= finalized_slot
                     })
@@ -3143,7 +3140,7 @@ where
 
             gossip_ids.extend(
                 aggregates
-                    .drain_filter(|pending| {
+                    .extract_if(.., |pending| {
                         let epoch = pending
                             .aggregate_and_proof
                             .message()
@@ -3159,7 +3156,7 @@ where
 
             gossip_ids.extend(
                 attestations
-                    .drain_filter(|pending| {
+                    .extract_if(.., |pending| {
                         let epoch = pending.data().target.epoch;
 
                         epoch < previous_epoch
@@ -3170,7 +3167,7 @@ where
             // TODO(feature/deneb): Does the condition and comment apply to blob sidecars?
             gossip_ids.extend(
                 blob_sidecars
-                    .drain_filter(|pending| {
+                    .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.blob_sidecar.signed_block_header.message.slot - 1 <= finalized_slot
                     })
@@ -3179,7 +3176,7 @@ where
 
             gossip_ids.extend(
                 data_column_sidecars
-                    .drain_filter(|pending| {
+                    .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.data_column_sidecar.signed_block_header.message.slot - 1
                             <= finalized_slot
@@ -3205,44 +3202,31 @@ where
     fn prune_waiting_for_checkpoint_states(&mut self) -> Vec<GossipId> {
         let finalized_epoch = self.store.finalized_epoch();
 
-        let mut gossip_ids = vec![];
-
-        // Use `HashMap::retain` because `HashMap::extract_if` is not stable as of Rust 1.82.0.
         self.waiting_for_checkpoint_states
-            .retain(|target, waiting| {
-                let prune = target.epoch < finalized_epoch;
+            .extract_if(|target, _| target.epoch < finalized_epoch)
+            .flat_map(|(_, waiting)| {
+                let WaitingForCheckpointState {
+                    ticks: _,
+                    chain_links,
+                    aggregates,
+                    attestations,
+                } = waiting;
 
-                if prune {
-                    let WaitingForCheckpointState {
-                        ticks: _,
-                        chain_links,
-                        aggregates,
-                        attestations,
-                    } = waiting;
+                let chain_link_ids = chain_links
+                    .into_iter()
+                    .filter_map(|pending| pending.origin.gossip_id());
 
-                    gossip_ids.extend(
-                        core::mem::take(chain_links)
-                            .into_iter()
-                            .filter_map(|pending| pending.origin.gossip_id()),
-                    );
+                let aggregate_ids = aggregates
+                    .into_iter()
+                    .filter_map(|pending| pending.origin.gossip_id());
 
-                    gossip_ids.extend(
-                        core::mem::take(aggregates)
-                            .into_iter()
-                            .filter_map(|pending| pending.origin.gossip_id()),
-                    );
+                let attestation_ids = attestations
+                    .into_iter()
+                    .filter_map(|pending| pending.origin.gossip_id());
 
-                    gossip_ids.extend(
-                        core::mem::take(attestations)
-                            .into_iter()
-                            .filter_map(|pending| pending.origin.gossip_id()),
-                    );
-                }
-
-                !prune
-            });
-
-        gossip_ids
+                chain_link_ids.chain(aggregate_ids).chain(attestation_ids)
+            })
+            .collect()
     }
 
     // Attestations in blocks must be processed just like gossiped ones.

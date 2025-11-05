@@ -601,6 +601,11 @@ impl DataColumnSidecarOrigin {
     }
 
     #[must_use]
+    pub const fn is_from_api(&self) -> bool {
+        matches!(self, Self::Api(_))
+    }
+
+    #[must_use]
     pub const fn is_from_back_sync(&self) -> bool {
         matches!(self, Self::BackSync)
     }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SPEC_VERSION="${SPEC_VERSION:-v1.6.0-beta.1}"
+SPEC_VERSION="${SPEC_VERSION:-v1.6.0}"
 TESTS_DIR="consensus-spec-tests"
 VERSION_FILE="${TESTS_DIR}/.version"
 BASE_URL="https://github.com/ethereum/consensus-specs/releases/download/${SPEC_VERSION}"
@@ -36,7 +36,7 @@ mkdir -p "$TESTS_DIR"
 download_tarball() {
     local tarball_name="$1"
     local download_url="${BASE_URL}/${tarball_name}.tar.gz"
-    
+
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$download_url" | tar -xz -C "$TESTS_DIR"
     elif command -v wget >/dev/null 2>&1; then
@@ -45,7 +45,7 @@ download_tarball() {
         echo "Error: No download tool found. Please install curl or wget."
         exit 1
     fi
-    
+
     echo "  ✓ ${tarball_name}.tar.gz extracted"
 }
 

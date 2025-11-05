@@ -167,7 +167,7 @@ mod tests {
 
     const DEFAULT_GRAFFITI: &str = "Grandine";
     const DEFAULT_FEE_RECIPIENT: ExecutionAddress = ExecutionAddress::repeat_byte(1);
-    const DEFAULT_GAS_LIMIT: Gas = 45_000_000;
+    const DEFAULT_GAS_LIMIT: Gas = 60_000_000;
     const TEST_FEE_RECIPIENT: ExecutionAddress = ExecutionAddress::repeat_byte(2);
     const PUBKEY: PublicKeyBytes = PublicKeyBytes::repeat_byte(1);
 

@@ -3,38 +3,12 @@
 //! [`Instant`]:    std::time::Instant
 //! [`SystemTime`]: std::time::SystemTime
 
-use core::{error::Error, time::Duration};
-use std::time::{Instant, SystemTime, SystemTimeError};
+use core::time::Duration;
+use std::time::{SystemTime, SystemTimeError};
 
 use thiserror::Error;
 
-pub trait InstantLike: Sized {
-    fn checked_add(self, duration: Duration) -> Option<Self>;
-}
-
-pub trait SystemTimeLike: Copy {
-    type Error: Error + Send + Sync + 'static;
-
-    const UNIX_EPOCH: Self;
-
-    fn duration_since(self, earlier: Self) -> Result<Duration, Self::Error>;
-}
-
-impl InstantLike for Instant {
-    fn checked_add(self, duration: Duration) -> Option<Self> {
-        Self::checked_add(&self, duration)
-    }
-}
-
-impl SystemTimeLike for SystemTime {
-    type Error = SystemTimeError;
-
-    const UNIX_EPOCH: Self = Self::UNIX_EPOCH;
-
-    fn duration_since(self, earlier: Self) -> Result<Duration, Self::Error> {
-        Self::duration_since(&self, earlier)
-    }
-}
+use crate::{InstantLike, SystemTimeLike};
 
 /// Time as a [`Duration`] after the Unix epoch.
 ///

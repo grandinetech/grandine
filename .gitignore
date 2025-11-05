@@ -14,3 +14,6 @@ book/deploy
 
 # large files
 consensus-spec-tests/
+
+# exception logs
+exception.log

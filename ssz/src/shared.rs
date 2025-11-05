@@ -114,7 +114,7 @@ pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>>
     }
 
     if let Size::Fixed { size } = T::SIZE {
-        if bytes.len() % size != 0 {
+        if !bytes.len().is_multiple_of(size) {
             return Err(ReadError::ListSizeNotMultiple {
                 list: bytes.len(),
                 element: size,

@@ -3,7 +3,7 @@
 // Having `#[expect(clippy::wrong_self_convention)]` declared directly on violating attributes
 // results in `unfulfilled_lint_expectations` false positive warning.
 // Declaring this for the whole module as a temporary workaround.
-// TODO(Grandine Team): consider removing this workaround when upgrading from Rust 1.82.0.
+// TODO(Grandine Team): consider removing this workaround when upgrading from Rust 1.90.0.
 #![expect(
     clippy::wrong_self_convention,
     reason = "This is needlessly strict. See <https://github.com/rust-lang/rust-clippy/issues/6727>."

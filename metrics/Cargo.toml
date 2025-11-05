@@ -38,11 +38,16 @@ tracing = { workspace = true }
 transition_functions = { workspace = true, features = ['metrics'] }
 types = { workspace = true }
 
-[target.'cfg(not(windows))'.dependencies]
-tikv-jemalloc-ctl = { workspace = true }
+[target.'cfg(target_os = "linux")'.dependencies]
 psutil = { workspace = true }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
+psutil = { workspace = true }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+tikv-jemalloc-ctl = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
 winsafe = { workspace = true }
 
 [dev-dependencies]
