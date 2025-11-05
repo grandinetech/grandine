@@ -791,20 +791,20 @@ impl<P: Preset> SyncManager<P> {
 
                 sync_batches.push(block_batch);
 
-            // Request execution payload envelopes for Gloas-activated slots
-            // Note: Similar to blocks, envelopes are needed for all Gloas slots (not just serve range)
-            if config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
-                sync_batches.push(SyncBatch {
-                    target: SyncTarget::ExecutionPayloadEnvelope,
-                    direction: SyncDirection::Forward,
-                    peer_id: block_peer_id,
-                    start_slot,
-                    count,
-                    response_received: false,
-                    retry_count: 0,
-                    data_columns: None,
-                });
-            }
+                // Request execution payload envelopes for Gloas-activated slots
+                // Note: Similar to blocks, envelopes are needed for all Gloas slots (not just serve range)
+                if config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::ExecutionPayloadEnvelope,
+                        direction: SyncDirection::Forward,
+                        peer_id: block_peer_id,
+                        start_slot,
+                        count,
+                        response_received: false,
+                        retry_count: 0,
+                        data_columns: None,
+                    });
+                }
 
                 batch_index += 1;
             }

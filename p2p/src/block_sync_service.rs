@@ -38,6 +38,7 @@ use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+    nonstandard::Phase,
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Slot, H256},
@@ -443,7 +444,11 @@ impl<P: Preset> BlockSyncService<P> {
                                 SyncDirection::Forward => {
                                     if self.register_new_received_block(block_root, block.message().slot()) {
                                         self.data_dumper.dump_signed_beacon_block(block.clone_arc());
-                                        self.controller.on_requested_block(block, Some(peer_id));
+                                        self.controller.on_requested_block(block.clone_arc(), Some(peer_id));
+
+                                        if self.controller.chain_config().phase_at_slot::<P>(block.message().slot()) >= Phase::Gloas {
+                                            self.request_needed_execution_payload_envelope(block_root, Some(peer_id))?;
+                                        }
                                     }
                                 }
                                 SyncDirection::Back => {

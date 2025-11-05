@@ -683,20 +683,6 @@ pub fn blob_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> 
     compute_start_slot_at_epoch::<P>(epoch)
 }
 
-pub fn execution_payload_envelope_serve_range_slot<P: Preset>(
-    config: &Config,
-    current_slot: Slot,
-) -> Slot {
-    let current_epoch = compute_epoch_at_slot::<P>(current_slot);
-    let epoch = config.gloas_fork_epoch.max(
-        current_epoch
-            .checked_sub(config.min_epochs_for_blob_sidecars_requests)
-            .unwrap_or(GENESIS_EPOCH),
-    );
-
-    compute_start_slot_at_epoch::<P>(epoch)
-}
-
 pub fn construct_blob_sidecar<P: Preset>(
     block: &SignedBeaconBlock<P>,
     signed_block_header: SignedBeaconBlockHeader,
