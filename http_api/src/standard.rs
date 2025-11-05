@@ -3307,21 +3307,35 @@ pub async fn validator_register_validator<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthJson(registrations): EthJson<Vec<SignedValidatorRegistrationV1>>,
 ) -> Result<(), Error> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
-    ApiToValidator::SignedValidatorRegistrations(sender, registrations).send(&api_to_validator_tx);
+    // Decompress signatures in blocking task to avoid blocking tokio executor
+    let (validator_registrations, errors): (Vec<_>, Vec<_>) =
+        tokio::task::spawn_blocking(move || {
+            registrations
+                .into_iter()
+                .enumerate()
+                .map(|(index, registration)| {
+                    let SignedValidatorRegistrationV1 { message, signature } = registration;
 
-    let failures = receiver.await?;
+                    match signature.try_into() {
+                        Ok(signature) => Ok((message, signature)),
+                        Err(error) => Err((index, AnyhowError::new(error))),
+                    }
+                })
+                .partition_result()
+        })
+        .await?;
 
-    if !failures.is_empty() {
-        return Err(Error::InvalidValidatorSignatures(
-            failures
+    if errors.is_empty() {
+        ApiToValidator::ValidatorRegistrations(validator_registrations).send(&api_to_validator_tx);
+        Ok(())
+    } else {
+        Err(Error::InvalidValidatorSignatures(
+            errors
                 .into_iter()
                 .map(|(index, error)| IndexedError { index, error })
                 .collect_vec(),
-        ));
+        ))
     }
-
-    Ok(())
 }
 
 /// `POST /eth/v1/validator/liveness/{epoch}`
