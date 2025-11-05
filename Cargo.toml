@@ -290,21 +290,18 @@ alloy-rlp = '0.3'
 anyhow = { version = '1', features = ['backtrace'] }
 arc-swap = '1'
 assert-json-diff = '2'
-async-channel = '1'
-async-trait = '0.1'
 axum = { version = '0.8' }
-axum-extra = { version = '0.10', features = ['typed-header', 'query'] }
+axum-extra = { version = '0.12', features = ['typed-header', 'query'] }
 base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
 bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
 blst = { version = '0.3', features = ['portable'] }
-bonsai-sdk = '1.4.0'
-borsh = "1.5.7"
+bonsai-sdk = '1.4'
+borsh = '1.5'
 bstr = '1'
 build-time = '0.1'
-bytemuck = '1.23.1'
 byteorder = '1'
 bytes = '1'
 bytesize = { version = '2', features = ['serde'] }
@@ -324,9 +321,9 @@ dashmap = '6.1'
 dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.4'
 derivative = '2'
-derive_more = { version = '2', features = ["full"] }
+derive_more = { version = '2', features = ['full'] }
 dirs = '6'
-discv5 = { version = '0.9', features = ['libp2p'] }
+discv5 = { version = '0.10', features = ['libp2p'] }
 duplicate = '2'
 easy-ext = '1'
 either = '1'
@@ -335,31 +332,28 @@ enum-map = '2'
 enumset = '1'
 env_logger = '0.11'
 ethereum-types = '0.14'
-ff = "0.13.0"
-fixed-hash = '0.8.0'
+ff = '0.13'
+fixed-hash = '0.8'
 fnv = '1'
 fs-err = { version = '3', features = ['tokio'] }
 fs_extra = '1'
 futures = '0.3'
-futures-ticker = '0.0.3'
-futures-timer = '3'
 gag = '1'
-generic-array = { version = '0.14', features = ['serde'] }
-getrandom = '0.3'
+# Temporary freeze until the code is migrated to 1.x
+# generic-array lock path: universal_precompiles -> sha2 -> digest (newer versions migrated to hybrid-array)
+generic-array = { version = '=0.14.7', features = ['serde'] }
 git-version = '0.3'
 glob = '0.3'
 good_lp = { version = '1', default-features = false, features = ['highs'] }
 hash_hasher = '2'
-hashlink = '0.10'
 hex = { version = '0.4', features = ['serde'] }
 hex-literal = '1'
 hmac = '0.12'
 http = '1'
 http-body-util = '0.1'
 httparse = '1'
-httpmock = '0.7'
-hyper = '1'
-igd-next = '0.15'
+httpmock = '0.8'
+igd-next = '0.16'
 # Possible optimization: fork `im` and make it use `triomphe`.
 # It's easy to do, but the amount of memory it saves is negligible.
 im = '15'
@@ -376,9 +370,9 @@ libp2p-mplex = '0.43'
 libp2p-identity = { version = '0.2.10', features = ['peerid'] }
 local-ip-address = '0.6'
 log = '0.4'
-logroller = "0.1.10"
+logroller = '0.1'
 lru = '0.16'
-mediatype = '0.20'
+mediatype = '0.21'
 memoffset = '0.9'
 mime = '0.3'
 nonzero_ext = '0.3'
@@ -403,16 +397,16 @@ quickcheck = '1'
 quickcheck_macros = '1'
 quote = '1'
 rand = '0.8'
-rand_chacha = '0.3.1'
+rand_chacha = '0.3'
 rayon = '1'
 rc-box = '1'
-refinery = { version = '0.8',  features = ['rusqlite'] }
+refinery = { version = '0.9',  features = ['rusqlite'] }
 regex = '1'
 replace_with = '0.1'
 reqwest = { version = '0.12', features = ['json', 'native-tls-vendored'] }
 risc0-build = { version = '2.3.1', features = ['unstable'] }
 risc0-zkvm = { version = '2.3.1', features = ['unstable', 'heap-embedded-alloc'] }
-rusqlite = { version = '0.33', features = ['bundled'] }
+rusqlite = { version = '0.37', features = ['bundled'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-constantine = { git = 'https://github.com/grandinetech/rust-kzg.git' }
@@ -441,12 +435,11 @@ sp1-zkvm = { version = '5.2.1', features = ['embedded'] }
 static_assertions = '1'
 strum = { version = '0.27', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
-sysinfo = '0.36'
+sysinfo = '0.37'
 tap = '1'
 tempfile = '3'
 test-case = '3'
 test-generator = '0.3'
-testing_logger = '0.1'
 thiserror = '2'
 tikv-jemalloc-ctl = { version = '0.6', features = ['stats'] }
 tikv-jemallocator = { version = '0.6', features = ['stats', 'background_threads_runtime_support'] }
@@ -458,9 +451,9 @@ tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
 tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
-tracing-appender = "0.2.3"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry", "chrono"] }
-tracing-test = "0.2"
+tracing-appender = '0.2'
+tracing-subscriber = { version = '0.3', features = ['env-filter', 'fmt', 'registry', 'chrono'] }
+tracing-test = '0.2'
 triomphe = '0.1'
 tynm = '0.2'
 typenum = '1'
@@ -472,7 +465,7 @@ uuid = { version = '1', features = ['serde', 'v4'] }
 variant_count = '1'
 web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
-xz2 = { version = "0.1" }
+xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
 
 allocator = { path = 'allocator' }
