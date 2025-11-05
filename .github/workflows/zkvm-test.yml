@@ -18,7 +18,7 @@ jobs:
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-        # leaving 20 GB for zkvm installations
+        # Leaving 20 GB for zkvm installations
         root-reserve-mb: 20480
         swap-size-mb: 1024
         remove-dotnet: 'true'

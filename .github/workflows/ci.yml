@@ -27,7 +27,8 @@ jobs:
         if: runner.os == 'Linux'
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 2048
+          # Leaving 20 GB for rust crates download and installation under `/tmp`
+          root-reserve-mb: 20480
           swap-size-mb: 1024
       - name: Disable autocrlf (Windows)
         if: runner.os == 'Windows'
