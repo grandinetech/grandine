@@ -9400,7 +9400,7 @@ dependencies = [
 [[package]]
 name = "pico-patch-libs"
 version = "1.1.6"
-source = "git+https://github.com/brevis-network/pico.git#b52a89e4551b3f28086f7aae49505631845bf961"
+source = "git+https://github.com/brevis-network/pico.git#f6a24234c0637ded3cb6ff797cbc2e7a4f679795"
 dependencies = [
  "bincode",
  "serde",
