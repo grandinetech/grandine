@@ -167,7 +167,7 @@ impl Database {
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 if cursor.set::<()>(key.as_ref())?.is_some() {
                     cursor.del(WriteFlags::default())?;
@@ -198,7 +198,7 @@ impl Database {
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 let Some((mut key, ())) = cursor.set_range::<Cow<_>, _>(start)? else {
                     return Ok(());
@@ -299,7 +299,7 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                Some(transaction.db_stat(&database)?)
+                Some(transaction.db_stat(database.dbi())?)
             }
             DatabaseKind::InMemory { map: _ } => None,
         }
@@ -319,7 +319,7 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 core::iter::from_fn(move || cursor.next().transpose())
                     .map(|result| {
@@ -367,7 +367,7 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 cursor
                     .set_range(start)
@@ -423,7 +423,7 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 let first = if let Some((is_next, key, value)) = cursor.set_lowerbound(end)? {
                     if is_next {
@@ -536,7 +536,7 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 if let Some((is_next, key, value)) =
                     cursor.set_lowerbound::<Vec<u8>, Cow<[u8]>>(key.as_ref())?
@@ -575,7 +575,7 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                let mut cursor = transaction.cursor(&database)?;
+                let mut cursor = transaction.cursor(database.dbi())?;
 
                 cursor.set_range(key.as_ref())?.map(decompress_pair)
             }
