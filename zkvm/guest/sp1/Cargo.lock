@@ -226,7 +226,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_utils",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
  "ssz",
  "static_assertions",
  "typenum",
@@ -236,7 +236,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?branch=zkcrypto%2Fbls12_381-6bb9695#dfe056b1cde164284237b53abc0ffc903a2247a1"
+source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.1#673d417a78d34473f503972efb224b97b588d762"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -1063,7 +1063,7 @@ dependencies = [
  "ethereum-types",
  "generic-array",
  "hex-literal",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
 ]
 
 [[package]]
@@ -1092,7 +1092,7 @@ dependencies = [
  "rayon",
  "rc-box",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
  "shuffling",
  "ssz",
  "static_assertions",
@@ -2521,7 +2521,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?branch=RustCrypto-hashes%2Fsha2-v0.10.9#0d3a38727bfb18559da146321d84dba1ca6be007"
+source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1#dab12204de2e6a40f7a4c93b59347f60174c6953"
 dependencies = [
  "cfg-if",
  "cpufeatures",

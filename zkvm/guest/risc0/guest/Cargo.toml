@@ -22,4 +22,4 @@ transition_functions = { path = '../../../../transition_functions' }
 types = { path = '../../../../types' }
 
 # Specify sha2 library to activate `zkvm-pico` feature
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', branch = 'RustCrypto-hashes/sha2-v0.10.9', features = ['compress', 'zkvm-risc0'] }
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1', features = ['compress', 'zkvm-risc0'] }
