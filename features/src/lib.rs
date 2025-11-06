@@ -50,6 +50,7 @@ pub enum Feature {
     TrustOwnAttesterSlashingSignatures,
     TrustOwnBlockSignatures,
     TrustOwnStateRoots,
+    WarnOnFailedServiceHealthChecks,
     WarnOnStateCacheSlotProcessing,
 }
 

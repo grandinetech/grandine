@@ -15,6 +15,7 @@ bls = { workspace = true }
 builder_api = { workspace = true }
 clock = { workspace = true }
 constant_time_eq = { workspace = true }
+debug_info = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 directories = { workspace = true }

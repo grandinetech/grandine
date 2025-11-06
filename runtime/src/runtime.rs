@@ -675,6 +675,7 @@ pub async fn run_after_genesis<P: Preset>(
     let subnet_service = SubnetService::new(
         attestation_agg_pool.clone_arc(),
         network.node_id(),
+        metrics.clone(),
         subnet_service_to_p2p_tx,
         fork_choice_to_subnet_rx,
         subnet_service_rx,
