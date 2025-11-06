@@ -17,6 +17,7 @@ use builder_api::{
     BuilderApi,
 };
 use clock::{Tick, TickKind};
+use debug_info::HealthCheck;
 use derive_more::Display;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
@@ -259,6 +260,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) {
+        let mut health_check = HealthCheck::new("validator");
+
         loop {
             let mut slasher_to_validator_rx = self
                 .slasher_to_validator_rx
@@ -267,6 +270,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .unwrap_or_else(|| EitherFuture::Right(futures::stream::pending()));
 
             select! {
+                _ = health_check.interval.select_next_some() => {
+                    health_check.check();
+                },
+
                 message = self.internal_rx.select_next_some() => match message {
                     InternalMessage::DoppelgangerProtectionResult(result) => {
                         if let Err(error) = result {

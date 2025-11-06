@@ -57,6 +57,7 @@ pub fn initialize_tracing_logger(
         .add_directive("builder_api=info".parse()?)
         .add_directive("data_dumper=info".parse()?)
         .add_directive("database=info".parse()?)
+        .add_directive("debug_info=info".parse()?)
         .add_directive("dedicated_executor=info".parse()?)
         .add_directive("doppelganger_protection=info".parse()?)
         .add_directive("eth1=info".parse()?)

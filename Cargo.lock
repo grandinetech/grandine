@@ -1159,6 +1159,7 @@ name = "attestation_verifier"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "debug_info",
  "dedicated_executor",
  "eth1_api",
  "eth2_libp2p",
@@ -3361,6 +3362,18 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "unwrap_none",
+]
+
+[[package]]
+name = "debug_info"
+version = "0.1.0"
+dependencies = [
+ "features",
+ "futures",
+ "logging",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -7942,6 +7955,7 @@ dependencies = [
  "dashmap",
  "data_dumper",
  "database",
+ "debug_info",
  "dedicated_executor",
  "derive_more 2.0.1",
  "eip_7594",
@@ -12719,6 +12733,7 @@ dependencies = [
  "builder_api",
  "clock",
  "constant_time_eq 0.4.2",
+ "debug_info",
  "derivative",
  "derive_more 2.0.1",
  "directories",

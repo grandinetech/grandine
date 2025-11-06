@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+debug_info = { workspace = true }
 dedicated_executor = { workspace = true }
 eth1_api = { workspace = true }
 eth2_libp2p = { workspace = true }

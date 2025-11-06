@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use data_dumper::DataDumper;
+use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
 use eip_7594::{compute_columns_for_custody_group, get_custody_groups};
 use enum_iterator::Sequence as _;
@@ -282,11 +283,17 @@ impl<P: Preset> Network<P> {
 
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
+        let mut health_check = HealthCheck::new("network");
+
         let mut gossipsub_parameter_update_interval =
             IntervalStream::new(tokio::time::interval(GOSSIPSUB_PARAMETER_UPDATE_INTERVAL)).fuse();
 
         loop {
             select! {
+                _ = health_check.interval.select_next_some() => {
+                    health_check.check();
+                },
+
                 _ = gossipsub_parameter_update_interval.select_next_some() => {
                     let debug_info = message_debug_info("update_gossipsub_parameters");
 
