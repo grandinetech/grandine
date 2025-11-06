@@ -283,7 +283,7 @@ impl<P: Preset> Network<P> {
 
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
-        let mut health_check = HealthCheck::new("network");
+        let mut health_check = HealthCheck::new("network", self.metrics.clone());
 
         let mut gossipsub_parameter_update_interval =
             IntervalStream::new(tokio::time::interval(GOSSIPSUB_PARAMETER_UPDATE_INTERVAL)).fuse();

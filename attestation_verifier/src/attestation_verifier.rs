@@ -100,7 +100,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        let mut health_check = HealthCheck::new("attestation_verifier");
+        let mut health_check = HealthCheck::new("attestation_verifier", self.metrics.clone());
 
         loop {
             select! {

@@ -12,6 +12,7 @@ use futures::{
 use helper_functions::misc;
 use logging::{debug_with_peers, warn_with_peers};
 use operation_pools::AttestationAggPool;
+use prometheus_metrics::Metrics;
 use types::{
     phase0::primitives::{Epoch, NodeId, Slot, ValidatorIndex},
     preset::Preset,
@@ -30,6 +31,7 @@ pub struct SubnetService<P: Preset, W: Wait> {
     attestation_subnets: AttestationSubnets<P>,
     sync_committee_subnets: SyncCommitteeSubnets<P>,
     beacon_committee_subscriptions: BeaconCommitteeSubscriptions,
+    metrics: Option<Arc<Metrics>>,
     p2p_tx: UnboundedSender<SubnetServiceToP2p>,
     fork_choice_rx: UnboundedReceiver<SubnetMessage<W>>,
     rx: UnboundedReceiver<ToSubnetService>,
@@ -40,6 +42,7 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
     pub fn new(
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         node_id: NodeId,
+        metrics: Option<Arc<Metrics>>,
         p2p_tx: UnboundedSender<SubnetServiceToP2p>,
         fork_choice_rx: UnboundedReceiver<SubnetMessage<W>>,
         rx: UnboundedReceiver<ToSubnetService>,
@@ -49,6 +52,7 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
             attestation_subnets: AttestationSubnets::new(node_id),
             sync_committee_subnets: SyncCommitteeSubnets::default(),
             beacon_committee_subscriptions: BeaconCommitteeSubscriptions::default(),
+            metrics,
             p2p_tx,
             fork_choice_rx,
             rx,
@@ -56,7 +60,7 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        let mut health_check = HealthCheck::new("subnet_service");
+        let mut health_check = HealthCheck::new("subnet_service", self.metrics.clone());
 
         loop {
             select! {

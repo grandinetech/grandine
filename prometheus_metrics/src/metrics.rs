@@ -204,6 +204,9 @@ pub struct Metrics {
     pub jemalloc_bytes_mapped: IntGauge,
     pub jemalloc_bytes_retained: IntGauge,
 
+    // Service delay metrics
+    service_delay_times: HistogramVec,
+
     // Tick delay metrics
     tick_delay_times: GaugeVec,
 }
@@ -322,12 +325,12 @@ impl Metrics {
             )?,
 
             data_column_sidecars_submitted_for_processing: IntCounter::new(
-                "beacon_data_column_sidecar_processing_requests_total", 
+                "beacon_data_column_sidecar_processing_requests_total",
                 "Number of data column sidecars submitted for processing"
             )?,
 
             verified_gossip_data_column_sidecar: IntCounter::new(
-                "beacon_data_column_sidecar_processing_successes_total", 
+                "beacon_data_column_sidecar_processing_successes_total",
                 "Number of data column sidecars verified for gossip"
             )?,
 
@@ -337,7 +340,7 @@ impl Metrics {
             ))?,
 
             reconstructed_columns: IntCounter::new(
-                "beacon_data_availability_reconstructed_columns_total", 
+                "beacon_data_availability_reconstructed_columns_total",
                 "Total count of reconstructed columns"
             )?,
 
@@ -857,6 +860,12 @@ impl Metrics {
                  rather than being returned to the operating system",
             )?,
 
+            // Service delay metrics
+            service_delay_times: HistogramVec::new(
+                histogram_opts!("SERVICE_DELAY_TIMES", "Service delay times"),
+                &["service"],
+            )?,
+
             // Tick delay metrics
             tick_delay_times: GaugeVec::new(
                 opts!("TICK_DELAY_TIMES", "Tick delay times"),
@@ -1041,6 +1050,7 @@ impl Metrics {
         default_registry.register(Box::new(self.jemalloc_bytes_resident.clone()))?;
         default_registry.register(Box::new(self.jemalloc_bytes_mapped.clone()))?;
         default_registry.register(Box::new(self.jemalloc_bytes_retained.clone()))?;
+        default_registry.register(Box::new(self.service_delay_times.clone()))?;
         default_registry.register(Box::new(self.tick_delay_times.clone()))?;
 
         Ok(())
@@ -1226,6 +1236,19 @@ impl Metrics {
                 .gossip_block_slot_start_delay_time
                 .observe(duration.as_secs_f64()),
             Err(error) => warn_with_peers!("unable to observe block duration to slot: {error:?}"),
+        }
+    }
+
+    // Service delay metrics
+    pub fn observe_service_delay(&self, service: &str, delay: Duration) {
+        match self
+            .service_delay_times
+            .get_metric_with_label_values(&[service])
+        {
+            Ok(metrics) => metrics.observe(delay.as_secs_f64()),
+            Err(error) => {
+                warn_with_peers!("unable to track service delay time for {service:?}: {error:?}")
+            }
         }
     }
 

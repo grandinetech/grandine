@@ -3371,6 +3371,7 @@ dependencies = [
  "features",
  "futures",
  "logging",
+ "prometheus_metrics",
  "tokio",
  "tokio-stream",
  "tracing",

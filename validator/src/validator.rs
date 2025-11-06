@@ -260,7 +260,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) {
-        let mut health_check = HealthCheck::new("validator");
+        let mut health_check = HealthCheck::new("validator", self.metrics.clone());
 
         loop {
             let mut slasher_to_validator_rx = self

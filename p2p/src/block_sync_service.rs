@@ -263,7 +263,7 @@ impl<P: Preset> BlockSyncService<P> {
 
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
-        let mut health_check = HealthCheck::new("block_sync_service");
+        let mut health_check = HealthCheck::new("block_sync_service", self.metrics.clone());
 
         let mut interval =
             IntervalStream::new(tokio::time::interval(NETWORK_EVENT_INTERVAL)).fuse();
