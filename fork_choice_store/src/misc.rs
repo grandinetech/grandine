@@ -19,10 +19,10 @@ use thiserror::Error;
 use transition_functions::unphased::StateRootPolicy;
 use types::{
     combined::{
-        Attestation, AttestingIndices, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    fulu::containers::DataColumnSidecar,
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},

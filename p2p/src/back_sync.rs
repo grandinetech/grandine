@@ -21,16 +21,13 @@ use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::{PayloadStatus, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
@@ -136,7 +133,7 @@ impl<P: Preset> BackSync<P> {
     }
 
     pub fn push_data_column_sidecar(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
-        let slot = data_column_sidecar.signed_block_header.message.slot;
+        let slot = data_column_sidecar.slot();
 
         if slot <= self.high_slot() && !self.is_finished() {
             self.batch.push_data_column_sidecar(data_column_sidecar);

@@ -329,12 +329,12 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                                     data_columns.into_iter().filter(|column| {
                                                         controller
                                                             .sampling_columns()
-                                                            .contains(&column.index)
+                                                            .contains(&column.index())
                                                     })
                                                 {
                                                     let identifier = DataColumnIdentifier {
                                                         block_root,
-                                                        index: data_column_sidecar.index,
+                                                        index: data_column_sidecar.index(),
                                                     };
 
                                                     received_data_column_sidecars.insert(identifier, slot);

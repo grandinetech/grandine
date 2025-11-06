@@ -69,8 +69,8 @@ use types::{
     },
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
-        Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -78,7 +78,7 @@ use types::{
         primitives::{Blob, BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
     nonstandard::{
@@ -4233,7 +4233,7 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
         if (0..half_columns).any(|index| {
             !data_column_sidecars
                 .iter()
-                .any(|sidecar| sidecar.index == index)
+                .any(|sidecar| sidecar.index() == index)
         }) {
             let partial_matrix = data_column_sidecars
                 .iter()
@@ -4262,7 +4262,7 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
         let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
         for matrix in data_column_sidecars
             .into_iter()
-            .take_while(|sidecar| (0..half_columns).contains(&sidecar.index))
+            .take_while(|sidecar| (0..half_columns).contains(&sidecar.index()))
             .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
         {
             blobs_matrix_map

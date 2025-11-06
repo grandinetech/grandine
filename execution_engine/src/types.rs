@@ -11,10 +11,7 @@ use serde::{
     ser::{Error as _, SerializeSeq as _},
     Deserialize, Deserializer, Serialize,
 };
-use ssz::{
-    ByteList, ByteVector, ContiguousList, ContiguousVector, SszHash as _, SszReadDefault,
-    SszWrite as _,
-};
+use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite as _};
 use typenum::Unsigned;
 use types::{
     bellatrix::{
@@ -25,7 +22,7 @@ use types::{
         containers::{ExecutionPayload as CapellaExecutionPayload, Withdrawal},
         primitives::WithdrawalIndex,
     },
-    combined::{ExecutionPayload, SignedBeaconBlock},
+    combined::{DataColumnSidecar, ExecutionPayload, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, ExecutionPayload as DenebExecutionPayload},
         primitives::{Blob, KzgCommitment, KzgProof},
@@ -33,7 +30,7 @@ use types::{
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::containers::DataColumnIdentifier,
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
         containers::SignedBeaconBlockHeader,
@@ -639,6 +636,7 @@ pub enum PayloadAttributes<P: Preset> {
     Deneb(PayloadAttributesV3<P>),
     Electra(PayloadAttributesV3<P>),
     Fulu(PayloadAttributesV3<P>),
+    Gloas(PayloadAttributesV3<P>),
 }
 
 impl<P: Preset> PayloadAttributes<P> {
@@ -650,6 +648,7 @@ impl<P: Preset> PayloadAttributes<P> {
             Self::Deneb(_) => Phase::Deneb,
             Self::Electra(_) => Phase::Electra,
             Self::Fulu(_) => Phase::Fulu,
+            Self::Gloas(_) => Phase::Gloas,
         }
     }
 }
@@ -1037,7 +1036,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
     pub fn slot(&self) -> Slot {
         match self {
             Self::Block(block) => block.message().slot(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.slot,
+            Self::Sidecar(sidecar) => sidecar.slot(),
         }
     }
 
@@ -1045,15 +1044,17 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
     pub fn block_root(&self) -> H256 {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
+            Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
         }
     }
 
     #[must_use]
-    pub fn signed_block_header(&self) -> SignedBeaconBlockHeader {
+    pub fn signed_block_header(&self) -> Option<SignedBeaconBlockHeader> {
         match self {
-            Self::Block(block) => block.to_header(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header,
+            Self::Block(block) => Some(block.to_header()),
+            Self::Sidecar(sidecar) => sidecar
+                .pre_gloas()
+                .map(|sidecar| sidecar.signed_block_header),
         }
     }
 
@@ -1066,7 +1067,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .body()
                 .post_deneb()
                 .map(PostDenebBeaconBlockBody::blob_kzg_commitments),
-            Self::Sidecar(sidecar) => Some(&sidecar.kzg_commitments),
+            Self::Sidecar(sidecar) => Some(sidecar.kzg_commitments()),
         }
     }
 }

@@ -2,6 +2,7 @@ use core::{
     num::NonZeroU64,
     ops::{Div as _, Range, Shr as _},
 };
+use std::sync::Arc;
 
 use anyhow::{ensure, Result};
 use arithmetic::{U64Ext as _, UsizeExt as _};
@@ -15,7 +16,7 @@ use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
     cache::PackedIndices,
-    combined::{Attestation, SignedBeaconBlock},
+    combined::{Attestation, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::{
         consts::{BlobCommitmentTreeDepth, VERSIONED_HASH_VERSION_KZG},
@@ -25,7 +26,7 @@ use types::{
         },
     },
     fulu::{
-        containers::{DataColumnSidecar, MatrixEntry},
+        containers::MatrixEntry,
         primitives::{BlobCommitmentsInclusionProof, ColumnIndex},
     },
     phase0::{
@@ -61,6 +62,16 @@ pub const fn compute_start_slot_at_epoch<P: Preset>(epoch: Epoch) -> Slot {
 #[must_use]
 pub fn is_epoch_start<P: Preset>(slot: Slot) -> bool {
     slots_since_epoch_start::<P>(slot) == 0
+}
+
+#[must_use]
+pub const fn builder_payment_index_for_current_epoch<P: Preset>(slot: Slot) -> u64 {
+    P::SlotsPerEpoch::U64.saturating_add(slot % P::SlotsPerEpoch::U64)
+}
+
+#[must_use]
+pub const fn builder_payment_index_for_previous_epoch<P: Preset>(slot: Slot) -> u64 {
+    slot % P::SlotsPerEpoch::U64
 }
 
 #[expect(
@@ -783,21 +794,16 @@ pub fn data_column_serve_range_slot<P: Preset>(config: &Config, current_slot: Sl
 }
 
 pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
-    data_column_sidecar: &DataColumnSidecar<P>,
+    data_column_sidecar: &Arc<DataColumnSidecar<P>>,
 ) -> Vec<MatrixEntry<P>> {
-    let DataColumnSidecar {
-        index,
-        column,
-        kzg_proofs,
-        ..
-    } = data_column_sidecar;
-
+    let column = data_column_sidecar.column();
+    let column_index = data_column_sidecar.index();
     let blob_count = column.len() as u64;
 
-    izip!(0..blob_count, column, kzg_proofs)
+    izip!(0..blob_count, column, data_column_sidecar.kzg_proofs())
         .map(|(row_index, cell, kzg_proof)| MatrixEntry {
             row_index,
-            column_index: *index,
+            column_index,
             cell: cell.clone(),
             kzg_proof: *kzg_proof,
         })
@@ -815,9 +821,77 @@ pub fn compute_proposer_indices<P: Preset>(
     (0..P::SlotsPerEpoch::U64)
         .map(|i| {
             let seed = hashing::hash_256_64(seed, start_slot.saturating_add(i));
-            compute_proposer_index(config, state, indices, seed, epoch)
+
+            if state.is_post_gloas() {
+                compute_balance_weighted_selection(state, indices, seed, 1, true)
+                    .map(|validators| validators[0])
+            } else {
+                compute_proposer_index(config, state, indices, seed, epoch)
+            }
         })
         .collect::<Result<_>>()
+}
+
+pub fn compute_balance_weighted_selection<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+    indices: &PackedIndices,
+    seed: H256,
+    size: usize,
+    shuffle_indices: bool,
+) -> Result<Vec<ValidatorIndex>> {
+    let total = indices
+        .len()
+        .try_conv::<u64>()?
+        .pipe(NonZeroU64::new)
+        .ok_or(Error::NoActiveValidators)?;
+
+    let mut selected = vec![];
+    let mut i = 0u64;
+    while selected.len() < size {
+        let mut next_index = (i % total.get())
+            .try_conv::<usize>()
+            .expect("next_index fits in usize because it is less than indices.len()");
+
+        if shuffle_indices {
+            next_index = compute_shuffled_index::<P>(next_index as u64, total, seed)
+                .try_conv::<usize>()
+                .expect("next_index fits in usize because it is less than indices.len()");
+        }
+
+        let candidate_index = indices
+            .get(next_index)
+            .ok_or(Error::ValidatorIndexOutOfRange)?;
+
+        if compute_balance_weighted_acceptance(state, candidate_index, seed, i)? {
+            selected.push(candidate_index);
+        }
+
+        i += 1;
+    }
+
+    Ok(selected)
+}
+
+fn compute_balance_weighted_acceptance<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+    index: ValidatorIndex,
+    seed: H256,
+    i: u64,
+) -> Result<bool> {
+    let max_random_value = u64::from(u16::MAX);
+    let seed = hashing::hash_256_64(seed, i.saturating_div(16));
+    let random_bytes = seed.as_fixed_bytes();
+    let offset = usize::try_from((i % 16) * 2)?;
+    let random_value = u64::from(u16::from_le_bytes([
+        random_bytes[offset],
+        random_bytes[offset + 1],
+    ]));
+    let effective_balance = state
+        .validators()
+        .get(index)
+        .map(|validator| validator.effective_balance)?;
+
+    Ok(effective_balance * max_random_value >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value)
 }
 
 #[cfg(test)]

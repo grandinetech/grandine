@@ -219,7 +219,6 @@ pub fn custom_state_transition<P: Preset>(
             block,
             process_slots,
             state_root_policy,
-            execution_engine,
             verifier,
             slot_report,
         ),
@@ -1027,8 +1026,6 @@ mod spec_tests {
 
     // We do not honor `bls_setting` in the tests here because none of them customize it.
 
-    // TODO: (gloas): enalbe gloas tests after implement `gloas::process_slot` in
-    // slot_processing.rs
     #[duplicate_item(
         glob                                                              function_name             preset    phase;
         ["consensus-spec-tests/tests/mainnet/phase0/sanity/slots/*/*"]    [phase0_mainnet_slots]    [Mainnet] [Phase0];
@@ -1045,8 +1042,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/electra/sanity/slots/*/*"]   [electra_minimal_slots]   [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/fulu/sanity/slots/*/*"]      [fulu_mainnet_slots]      [Mainnet] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/sanity/slots/*/*"]      [fulu_minimal_slots]      [Minimal] [Fulu];
-        // ["consensus-spec-tests/tests/mainnet/gloas/sanity/slots/*/*"]     [gloas_mainnet_slots]     [Mainnet] [Gloas];
-        // ["consensus-spec-tests/tests/minimal/gloas/sanity/slots/*/*"]     [gloas_minimal_slots]     [Minimal] [Gloas];
+        ["consensus-spec-tests/tests/mainnet/gloas/sanity/slots/*/*"]     [gloas_mainnet_slots]     [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/sanity/slots/*/*"]     [gloas_minimal_slots]     [Minimal] [Gloas];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -1098,8 +1095,12 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/fulu/finality/*/*/*"]         [fulu_minimal_finality]      [Minimal] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/random/*/*/*"]           [fulu_minimal_random]        [Minimal] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/sanity/blocks/*/*"]      [fulu_minimal_sanity]        [Minimal] [Fulu];
+        ["consensus-spec-tests/tests/mainnet/gloas/finality/*/*/*"]        [gloas_mainnet_random]       [Mainnet] [Gloas];
+        // ["consensus-spec-tests/tests/mainnet/gloas/random/*/*/*"]          [gloas_mainnet_random]       [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/mainnet/gloas/sanity/blocks/*/*"]     [gloas_mainnet_sanity]       [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/finality/*/*/*"]        [gloas_minimal_random]       [Minimal] [Gloas];
         // ["consensus-spec-tests/tests/minimal/gloas/random/*/*/*"]          [gloas_minimal_random]       [Minimal] [Gloas];
-        // ["consensus-spec-tests/tests/minimal/gloas/sanity/blocks/*/*"]     [gloas_minimal_sanity]       [Minimal] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/sanity/blocks/*/*"]     [gloas_minimal_sanity]       [Minimal] [Gloas];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -1107,8 +1108,6 @@ mod spec_tests {
         run_blocks_case::<preset>(&config, case);
     }
 
-    // TODO: (gloas): enalbe gloas tests after implement `gloas::process_slot` in
-    // slot_processing.rs
     #[duplicate_item(
         glob                                                              function_name                  preset;
         ["consensus-spec-tests/tests/mainnet/altair/transition/*/*/*"]    [altair_mainnet_transition]    [Mainnet];
@@ -1123,8 +1122,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/electra/transition/*/*/*"]   [electra_minimal_transition]   [Minimal];
         ["consensus-spec-tests/tests/mainnet/fulu/transition/*/*/*"]      [fulu_mainnet_transition]      [Mainnet];
         ["consensus-spec-tests/tests/minimal/fulu/transition/*/*/*"]      [fulu_minimal_transition]      [Minimal];
-        // ["consensus-spec-tests/tests/mainnet/gloas/transition/*/*/*"]     [gloas_mainnet_transition]      [Mainnet];
-        // ["consensus-spec-tests/tests/minimal/gloas/transition/*/*/*"]     [gloas_minimal_transition]      [Minimal];
+        ["consensus-spec-tests/tests/mainnet/gloas/transition/*/*/*"]     [gloas_mainnet_transition]      [Mainnet];
+        ["consensus-spec-tests/tests/minimal/gloas/transition/*/*/*"]     [gloas_minimal_transition]      [Minimal];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -1222,7 +1221,8 @@ mod spec_tests {
         blocks: impl IntoIterator<Item = SignedBeaconBlock<P>>,
     ) -> bool {
         // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
-        if state.phase() >= Phase::Capella {
+        // Since Gloas, there is no blinded block processing
+        if state.phase() >= Phase::Capella && state.phase() < Phase::Gloas {
             return true;
         }
 

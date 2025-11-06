@@ -213,7 +213,8 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     type NumberOfColumns: MerkleElements<ColumnIndex> + Eq + Debug + Send + Sync;
 
     // Gloas
-    type PtcSize: MerkleElements<ValidatorIndex>
+    type PtcSize: ContiguousVectorElements<ValidatorIndex>
+        + MerkleElements<ValidatorIndex>
         + BitVectorBits
         + MerkleBits
         + Div<U2, Output: NonZero + Ord + Send + Sync>
