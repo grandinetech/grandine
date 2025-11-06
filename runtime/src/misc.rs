@@ -61,7 +61,8 @@ impl StorageConfig {
         if mode.is_read_only() {
             ensure!(
                 path.fs_err_try_exists()?,
-                "beacon_fork_choice database path does not exist: {path:?}",
+                "beacon_fork_choice database path does not exist: {}",
+                path.display(),
             );
         }
 
@@ -85,7 +86,8 @@ impl StorageConfig {
         if mode.is_read_only() {
             ensure!(
                 path.fs_err_try_exists()?,
-                "pubkey_cache database path does not exist: {path:?}",
+                "pubkey_cache database path does not exist: {}",
+                path.display(),
             );
         }
 
@@ -108,7 +110,8 @@ impl StorageConfig {
         if mode.is_read_only() {
             ensure!(
                 path.fs_err_try_exists()?,
-                "sync database path does not exist: {path:?}",
+                "sync database path does not exist: {}",
+                path.display(),
             );
         }
 
