@@ -361,7 +361,6 @@ fn try_main() -> Result<()> {
         &data_dir,
         cfg!(feature = "logger-always-write-style"),
     )?;
-
     binary_utils::initialize_rayon()?;
 
     let config = parsed_args

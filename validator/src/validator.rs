@@ -445,41 +445,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             sender.send(registered_pubkeys).is_ok()
                         },
-                        ApiToValidator::SignedValidatorRegistrations(sender, registrations) => {
-                            let (registered_validators, errors): (Vec<_>, Vec<_>) = registrations
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, registration)| {
-                                    let SignedValidatorRegistrationV1 {
-                                        message,
-                                        signature,
-                                    } = registration;
-
-                                    match signature.try_into() {
-                                        Ok(signature) => Ok((message, signature)),
-                                        Err(error) => Err((index, AnyhowError::new(error))),
-                                    }
-                                })
-                                .partition_result();
-
-
-                            if errors.is_empty() {
-                                let current_slot = self.controller.slot();
-                                let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
-
-                                let registrations = registered_validators
-                                    .into_iter()
-                                    .map(|registration| (registration.0.pubkey, registration))
-                                    .collect();
-
-                                self.registered_validators
-                                    .entry(current_epoch)
-                                    .and_modify(|map| map.extend(&registrations))
-                                    .or_insert(registrations);
-                            }
-
-                            sender.send(errors).is_ok()
-                        },
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
                             let current_slot = self.controller.slot();
 
@@ -496,6 +461,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 .await;
 
                             sender.send(failures).is_ok()
+                        },
+                        ApiToValidator::ValidatorRegistrations(validator_registrations) => {
+                            let current_slot = self.controller.slot();
+                            let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+
+                            let registrations = validator_registrations
+                                .into_iter()
+                                .map(|registration| (registration.0.pubkey, registration))
+                                .collect();
+
+                            self.registered_validators
+                                .entry(current_epoch)
+                                .and_modify(|map| map.extend(&registrations))
+                                .or_insert(registrations);
+
+                            true
                         }
                     };
 

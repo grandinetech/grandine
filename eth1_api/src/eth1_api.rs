@@ -46,7 +46,8 @@ use crate::{
 };
 
 const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
-const ENGINE_GET_BLOBS_TIMEOUT: Duration = Duration::from_secs(1);
+// In some of our setups 1 second is not enough to get blobs from the execution client
+const ENGINE_GET_BLOBS_TIMEOUT: Duration = Duration::from_secs(2);
 const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
