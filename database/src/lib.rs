@@ -15,7 +15,7 @@ use im::OrdMap;
 #[cfg(not(target_os = "zkvm"))]
 use itertools::Either;
 #[cfg(not(target_os = "zkvm"))]
-use libmdbx::{DatabaseFlags, Environment, Geometry, ObjectLength, Stat, WriteFlags};
+use libmdbx::{DatabaseFlags, Environment, Geometry, Info, ObjectLength, Stat, WriteFlags};
 #[cfg(not(target_os = "zkvm"))]
 use logging::{debug_with_peers, error_with_peers};
 use snap::raw::{Decoder, Encoder};
@@ -301,6 +301,20 @@ impl Database {
 
                 Some(transaction.db_stat(&database)?)
             }
+            DatabaseKind::InMemory { map: _ } => None,
+        }
+        .pipe(Ok)
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    pub fn env_info(&self) -> Result<Option<Info>> {
+        match self.kind() {
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database_name: _,
+                environment,
+                restart_tx: _,
+            } => Some(environment.info()?),
             DatabaseKind::InMemory { map: _ } => None,
         }
         .pipe(Ok)
