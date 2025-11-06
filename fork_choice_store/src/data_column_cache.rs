@@ -3,7 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use ssz::H256;
 use std_ext::ArcExt as _;
 use types::{
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    combined::DataColumnSidecar,
+    fulu::containers::DataColumnIdentifier,
     nonstandard::DataColumnSidecarWithId,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
@@ -18,15 +19,18 @@ impl<P: Preset> DataColumnCache<P> {
     pub fn exhibits_equivocation(
         &self,
         slot: Slot,
-        proposer_index: ValidatorIndex,
+        proposer_index: Option<ValidatorIndex>,
         block_root: H256,
     ) -> bool {
         self.data_columns.iter().any(
             move |(data_column_identifier, (data_column_sidecar, data_column_slot, _))| {
-                let data_column_proposer_index = data_column_sidecar
-                    .signed_block_header
-                    .message
-                    .proposer_index;
+                let data_column_proposer_index =
+                    data_column_sidecar.pre_gloas().map(|data_column_sidecar| {
+                        data_column_sidecar
+                            .signed_block_header
+                            .message
+                            .proposer_index
+                    });
 
                 *data_column_slot == slot
                     && data_column_proposer_index == proposer_index
@@ -40,7 +44,7 @@ impl<P: Preset> DataColumnCache<P> {
     }
 
     pub fn insert(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
-        let slot = data_column_sidecar.signed_block_header.message.slot;
+        let slot = data_column_sidecar.slot();
         let identifier = data_column_sidecar.as_ref().into();
 
         self.data_columns

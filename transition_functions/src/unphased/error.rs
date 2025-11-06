@@ -1,10 +1,11 @@
 use thiserror::Error;
 use types::{
+    bellatrix::primitives::Gas,
     capella::containers::Withdrawal,
     combined::Attestation,
     phase0::{
         containers::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, Validator},
-        primitives::{Epoch, Slot, UnixSeconds, ValidatorIndex, H256},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, ValidatorIndex, H256},
     },
     preset::Preset,
 };
@@ -16,6 +17,8 @@ pub enum Error<P: Preset> {
         data_1: AttestationData,
         data_2: AttestationData,
     },
+    #[error("post-Gloas attestation for current slot with payload presence: {attestation:?}")]
+    AttestationForCurrentSlotWithPayloadPresence { attestation: Attestation<P> },
     #[error(
         "attestation in slot {attestation_slot} is outside \
          inclusion range for state at slot {state_slot}"
@@ -34,13 +37,26 @@ pub enum Error<P: Preset> {
     },
     #[error("attestation votes for a checkpoint in the wrong epoch: {attestation:?}")]
     AttestationTargetsWrongEpoch { attestation: Attestation<P> },
+    #[error("post-Gloas attestation with invalid payload status: {attestation:?}")]
+    AttestationWithInvalidPayloadStatus { attestation: Attestation<P> },
     #[error("post-Electra attestation with invalid (non-zero) committee index: {attestation:?}")]
     AttestationWithNonZeroCommitteeIndex { attestation: Attestation<P> },
+    #[error("bid slot ({in_bid}) does not match block slot ({in_block})")]
+    BidSlotMismatch { in_bid: Slot, in_block: Slot },
+    #[error("bid parent block hash ({in_bid}) does not match in state ({in_state})")]
+    BidParentBlockHashMismatch {
+        in_bid: ExecutionBlockHash,
+        in_state: ExecutionBlockHash,
+    },
+    #[error("bid parent block root ({in_bid:?}) does not match in block ({in_block:?})")]
+    BidParentBlockRootMismatch { in_bid: H256, in_block: H256 },
     #[error("block is not newer than latest block header ({block_slot} <= {block_header_slot})")]
     BlockNotNewerThanLatestBlockHeader {
         block_slot: Slot,
         block_header_slot: Slot,
     },
+    #[error("builder balance is not sufficient (balance: {balance}, payments: {payments})")]
+    BuilderBalanceNotSufficient { balance: Gwei, payments: Gwei },
     #[error("deposit count is incorrect (computed: {computed}, in_block: {in_block})")]
     DepositCountMismatch { computed: u64, in_block: u64 },
     #[error("deposit proof is invalid: {deposit:?}")]
@@ -48,6 +64,25 @@ pub enum Error<P: Preset> {
         // Boxed to pass `clippy::large_enum_variant`.
         deposit: Box<Deposit>,
     },
+    #[error(
+        "blob commitments root in envelope ({in_envelope:?}) does not match in committed bid ({in_state:?})"
+    )]
+    EnvelopeBlobCommitmentsMismatch { in_envelope: H256, in_state: H256 },
+    #[error(
+        "builder index in envelope ({in_envelope}) does not match in committed bid ({in_state})"
+    )]
+    EnvelopeBuilderMismatch {
+        in_envelope: ValidatorIndex,
+        in_state: ValidatorIndex,
+    },
+    #[error("block root in envelope ({in_envelope:?}) does not match in state ({in_state:?})")]
+    EnvelopeBlockRootMismatch { in_envelope: H256, in_state: H256 },
+    #[error("slot in envelope ({in_envelope}) does not match in state ({in_state})")]
+    EnvelopeSlotMismatch { in_envelope: Slot, in_state: Slot },
+    #[error("the execution payload bid is not from builder")]
+    ExecutionPayloadBidNotBuilder,
+    #[error("execution payload bid's signature is invalid")]
+    ExecutionPayloadBidSignatureInvalid,
     #[error(
         "parent hash in execution payload ({in_block:?}) \
          does not match latest execution payload header ({in_state:?})"
@@ -68,8 +103,36 @@ pub enum Error<P: Preset> {
     },
     #[error("no attesters slashed")]
     NoAttestersSlashed,
+    #[error("non zero bid value for self-build block")]
+    NoneZeroBidValue,
     #[error("block parent root ({in_block:?}) does not match latest block header ({computed:?})")]
     ParentRootMismatch { computed: H256, in_block: H256 },
+    #[error(
+        "payload attestation block root ({in_attestation:?}) does not match \
+        parent block root in latest block header ({in_header:?})"
+    )]
+    PayloadAttestationBlockRootMismatch {
+        in_header: H256,
+        in_attestation: H256,
+    },
+    #[error(
+        "payload attestation slot ({in_attestation}) is not the previous slot (state_slot: {state_slot:?})"
+    )]
+    PayloadAttestationNotForPreviousSlot {
+        in_attestation: Slot,
+        state_slot: Slot,
+    },
+    #[error(
+        "block hash in payload ({in_payload:?}) does not match in committed bid ({in_state:?})"
+    )]
+    PayloadBlockHashMismatch {
+        in_payload: ExecutionBlockHash,
+        in_state: ExecutionBlockHash,
+    },
+    #[error("gas limit in payload ({in_payload}) does not match in committed bid ({in_state})")]
+    PayloadGasLimitMismatch { in_payload: Gas, in_state: Gas },
+    #[error("withdrawals root in payload ({in_payload:?}) does not match in state ({in_state:?})")]
+    PayloadWithdrawalsMismatch { in_payload: H256, in_state: H256 },
     #[error("proposer (validator {index}) is slashed")]
     ProposerSlashed { index: ValidatorIndex },
     #[error("proposer index is incorrect (in_block: {in_block}, computed: {computed})")]
@@ -107,6 +170,8 @@ pub enum Error<P: Preset> {
         index: ValidatorIndex,
         exit_epoch: Epoch,
     },
+    #[error("validator {index} is already slashed")]
+    ValidatorAlreadySlashed { index: ValidatorIndex },
     #[error(
         "validator {index} has not been active long enough \
          (activation_epoch: {activation_epoch}, current_epoch: {current_epoch})"

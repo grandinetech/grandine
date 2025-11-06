@@ -475,7 +475,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 state,
                 exit,
             ),
-            BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
+            BeaconState::Gloas(state) => electra::validate_voluntary_exit(
                 &self.producer_context.chain_config,
                 &self.producer_context.pubkey_cache,
                 state,
@@ -968,7 +968,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             execution_requests: ExecutionRequests::default(),
                         },
                     }),
-                    // TODO(gloas): prepare `signed_execution_payload_bid` and `payload_attestations`
+                    // TODO: (gloas): prepare `signed_execution_payload_bid` and `payload_attestations`
+                    // * signed_execution_payload_bid: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#constructing-the-new-signed_execution_payload_bid-field-in-beaconblockbody
+                    // * payload_attestations: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#constructing-the-new-payload_attestations-field-in-beaconblockbody
                     Phase::Gloas => BeaconBlock::from(GloasBeaconBlock {
                         slot,
                         proposer_index,
@@ -1597,28 +1599,24 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     parent_beacon_block_root,
                 })
             }
-            BeaconState::Gloas(_state) => {
-                return Ok(None);
+            BeaconState::Gloas(state) => {
+                let (withdrawals, _, _) = gloas::get_expected_withdrawals(state)?;
 
-                // TODO(gloas): uncomment after `get_expected_withdrawals` implemented
-                // let (withdrawals, _) = gloas::get_expected_withdrawals(state)?;
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
 
-                // let withdrawals = withdrawals
-                //     .into_iter()
-                //     .map_into()
-                //     .pipe(ContiguousList::try_from_iter)?;
-                //
-                // let parent_beacon_block_root =
-                //     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+                let parent_beacon_block_root =
+                    accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
-                // TODO(gloas): add Gloas variant for PayloadAttributes
-                // PayloadAttributes::Fulu(PayloadAttributesV3 {
-                //     timestamp,
-                //     prev_randao,
-                //     suggested_fee_recipient,
-                //     withdrawals,
-                //     parent_beacon_block_root,
-                // })
+                PayloadAttributes::Gloas(PayloadAttributesV3 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                })
             }
         };
 

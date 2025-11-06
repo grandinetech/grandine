@@ -17,12 +17,11 @@ use logging::debug_with_peers;
 use serde::Serialize;
 use tracing::Span;
 use types::{
-    combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
-    deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
     },
+    deneb::containers::{BlobIdentifier, BlobSidecar},
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},

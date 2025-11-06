@@ -1,22 +1,32 @@
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use helper_functions::{
-    accessors::{get_current_epoch, get_next_epoch},
-    electra::is_eligible_for_activation_queue,
+    accessors::{get_builder_payment_quorum_threshold, get_current_epoch, get_next_epoch},
+    electra::{initiate_validator_exit, is_eligible_for_activation_queue},
     misc::{compute_activation_exit_epoch, vec_of_default},
+    mutators::compute_exit_epoch_and_update_churn,
     predicates::{is_active_validator, is_eligible_for_activation},
 };
+use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
+use ssz::{PersistentVector, SszHash as _};
+use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
-    capella::containers::HistoricalSummary, config::Config,
-    gloas::beacon_state::BeaconState as GloasBeaconState, preset::Preset, traits::BeaconState,
+    capella::containers::HistoricalSummary,
+    config::Config,
+    gloas::{
+        beacon_state::BeaconState,
+        containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
+    },
+    preset::{BuilderPendingPaymentsLength, Preset},
+    traits::{BeaconState as _, PostGloasBeaconState},
 };
 
 use super::epoch_intermediates;
 use crate::{
     altair::{self, EpochDeltasForTransition, EpochReport},
-    bellatrix, electra, unphased,
+    electra, fulu, unphased,
     unphased::ValidatorSummary,
 };
 
@@ -26,7 +36,7 @@ use prometheus_metrics::METRICS;
 pub fn process_epoch(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    state: &mut GloasBeaconState<impl Preset>,
+    state: &mut BeaconState<impl Preset>,
 ) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
@@ -61,12 +71,11 @@ pub fn process_epoch(
 
     unphased::process_rewards_and_penalties(state, epoch_deltas);
     process_registry_updates(config, state, summaries.as_mut_slice())?;
-    bellatrix::process_slashings::<_, ()>(state, summaries);
+    electra::process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
-    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
-    // electra::process_pending_deposits(config, pubkey_cache, state)?;
-    // electra::process_pending_consolidations(state)?;
-    // electra::process_effective_balance_updates(state);
+    electra::process_pending_deposits(config, pubkey_cache, state)?;
+    electra::process_pending_consolidations(state)?;
+    electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
 
@@ -76,16 +85,57 @@ pub fn process_epoch(
     altair::process_participation_flag_updates(state);
     altair::process_sync_committee_updates(pubkey_cache, state)?;
 
-    // > [New in Fulu:EIP7917]
-    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
-    // fulu::process_proposer_lookahead(config, state)?;
+    fulu::process_proposer_lookahead(config, state)?;
+
+    process_builder_pending_payments(config, state)?;
 
     state.cache.advance_epoch();
 
     Ok(())
 }
 
-fn process_historical_summaries_update<P: Preset>(state: &mut GloasBeaconState<P>) -> Result<()> {
+fn process_builder_pending_payments<P: Preset>(
+    config: &Config,
+    state: &mut impl PostGloasBeaconState<P>,
+) -> Result<()> {
+    let quorum = get_builder_payment_quorum_threshold(state);
+    let payments = state
+        .builder_pending_payments()
+        .into_iter()
+        .copied()
+        .collect_vec();
+
+    for payment in payments.iter().take(P::SlotsPerEpoch::USIZE) {
+        if payment.weight > quorum {
+            let exit_queue_epoch =
+                compute_exit_epoch_and_update_churn(config, state, payment.withdrawal.amount);
+            let withdrawable_epoch =
+                exit_queue_epoch.saturating_add(config.min_validator_withdrawability_delay);
+
+            state
+                .builder_pending_withdrawals_mut()
+                .push(BuilderPendingWithdrawal {
+                    withdrawable_epoch,
+                    ..payment.withdrawal
+                })?;
+        }
+    }
+
+    *state.builder_pending_payments_mut() = PersistentVector::try_from_iter(
+        payments
+            .into_iter()
+            .skip(P::SlotsPerEpoch::USIZE)
+            .chain(core::iter::repeat_n(
+                BuilderPendingPayment::default(),
+                P::SlotsPerEpoch::USIZE,
+            ))
+            .take(BuilderPendingPaymentsLength::<P>::USIZE),
+    )?;
+
+    Ok(())
+}
+
+fn process_historical_summaries_update<P: Preset>(state: &mut BeaconState<P>) -> Result<()> {
     let next_epoch = get_next_epoch(state);
 
     // > Set historical block root accumulator.
@@ -104,7 +154,7 @@ fn process_historical_summaries_update<P: Preset>(state: &mut GloasBeaconState<P
 pub fn epoch_report<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    state: &mut GloasBeaconState<P>,
+    state: &mut BeaconState<P>,
 ) -> Result<EpochReport> {
     let (statistics, mut summaries, participation) = altair::statistics(state);
 
@@ -141,8 +191,7 @@ pub fn epoch_report<P: Preset>(
     // Do the rest of epoch processing to leave the state valid for further transitions.
     // This way it can be used to calculate statistics for multiple epochs in a row.
     unphased::process_eth1_data_reset(state);
-    // TODO(gloas): update `state` param to be compatible with GloasBeaconState
-    // electra::process_effective_balance_updates(state);
+    electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
     unphased::process_historical_roots_update(state)?;
@@ -162,7 +211,7 @@ pub fn epoch_report<P: Preset>(
 
 fn process_registry_updates<P: Preset>(
     config: &Config,
-    state: &mut GloasBeaconState<P>,
+    state: &mut BeaconState<P>,
     summaries: &mut [impl ValidatorSummary],
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
@@ -203,8 +252,7 @@ fn process_registry_updates<P: Preset>(
     for validator_index in ejections {
         let index = usize::try_from(validator_index)?;
 
-        // TODO(gloas): update `state` param to be compatible with GloasBeaconState
-        // initiate_validator_exit(config, state, validator_index)?;
+        initiate_validator_exit(config, state, validator_index)?;
 
         // `process_slashings` depends on `Validator.withdrawable_epoch`,
         // which may have been modified by `initiate_validator_exit`.
@@ -235,6 +283,8 @@ mod spec_tests {
     use types::preset::{Mainnet, Minimal};
 
     use super::*;
+
+    use crate::altair::ValidatorSummary;
 
     // We do not honor `bls_setting` in epoch processing tests because none of them customize it.
 
@@ -276,20 +326,19 @@ mod spec_tests {
         run_rewards_and_penalties_case::<Minimal>(case);
     }
 
-    // TODO(gloas): uncomment after `gloas::process_epoch` implemented
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/registry_updates/*/*"
-    // )]
-    // fn mainnet_registry_updates(case: Case) {
-    //     run_registry_updates_case::<Mainnet>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/minimal/gloas/epoch_processing/registry_updates/*/*"
-    // )]
-    // fn minimal_registry_updates(case: Case) {
-    //     run_registry_updates_case::<Minimal>(case);
-    // }
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/registry_updates/*/*"
+    )]
+    fn mainnet_registry_updates(case: Case) {
+        run_registry_updates_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/registry_updates/*/*"
+    )]
+    fn minimal_registry_updates(case: Case) {
+        run_registry_updates_case::<Minimal>(case);
+    }
 
     #[test_resources("consensus-spec-tests/tests/mainnet/gloas/epoch_processing/slashings/*/*")]
     fn mainnet_slashings(case: Case) {
@@ -315,20 +364,19 @@ mod spec_tests {
         run_eth1_data_reset_case::<Minimal>(case);
     }
 
-    // TODO(gloas): uncomment after `state` param is compatible with GloasBeaconState
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/effective_balance_updates/*/*"
-    // )]
-    // fn mainnet_effective_balance_updates(case: Case) {
-    //     run_effective_balance_updates_case::<Mainnet>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/minimal/gloas/epoch_processing/effective_balance_updates/*/*"
-    // )]
-    // fn minimal_effective_balance_updates(case: Case) {
-    //     run_effective_balance_updates_case::<Minimal>(case);
-    // }
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/effective_balance_updates/*/*"
+    )]
+    fn mainnet_effective_balance_updates(case: Case) {
+        run_effective_balance_updates_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/effective_balance_updates/*/*"
+    )]
+    fn minimal_effective_balance_updates(case: Case) {
+        run_effective_balance_updates_case::<Minimal>(case);
+    }
 
     #[test_resources(
         "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/slashings_reset/*/*"
@@ -394,48 +442,61 @@ mod spec_tests {
         run_sync_committee_updates_case::<Minimal>(case);
     }
 
-    // TODO(gloas): uncomment the following functions after `state` param is compatible with GloasBeaconState
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/pending_deposits/*/*"
-    // )]
-    // fn mainnet_pending_deposits(case: Case) {
-    //     run_pending_deposits_case::<Mainnet>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/minimal/gloas/epoch_processing/pending_deposits/*/*"
-    // )]
-    // fn minimal_pending_deposits(case: Case) {
-    //     run_pending_deposits_case::<Minimal>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/pending_consolidations/*/*"
-    // )]
-    // fn mainnet_pending_consolidations(case: Case) {
-    //     run_pending_consolidations_case::<Mainnet>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/minimal/gloas/epoch_processing/pending_consolidations/*/*"
-    // )]
-    // fn minimal_pending_consolidations(case: Case) {
-    //     run_pending_consolidations_case::<Minimal>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/proposer_lookahead/*/*"
-    // )]
-    // fn mainnet_process_look(case: Case) {
-    //     run_process_look_case::<Mainnet>(case);
-    // }
-    //
-    // #[test_resources(
-    //     "consensus-spec-tests/tests/minimal/gloas/epoch_processing/proposer_lookahead/*/*"
-    // )]
-    // fn minimal_process_look(case: Case) {
-    //     run_process_look_case::<Minimal>(case);
-    // }
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/pending_deposits/*/*"
+    )]
+    fn mainnet_pending_deposits(case: Case) {
+        run_pending_deposits_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/pending_deposits/*/*"
+    )]
+    fn minimal_pending_deposits(case: Case) {
+        run_pending_deposits_case::<Minimal>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/pending_consolidations/*/*"
+    )]
+    fn mainnet_pending_consolidations(case: Case) {
+        run_pending_consolidations_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/pending_consolidations/*/*"
+    )]
+    fn minimal_pending_consolidations(case: Case) {
+        run_pending_consolidations_case::<Minimal>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/proposer_lookahead/*/*"
+    )]
+    fn mainnet_process_look(case: Case) {
+        run_process_look_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/proposer_lookahead/*/*"
+    )]
+    fn minimal_process_look(case: Case) {
+        run_process_look_case::<Minimal>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/builder_pending_payments/*/*"
+    )]
+    fn mainnet_process_builder_pending_payments(case: Case) {
+        run_process_builder_pending_payments_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/builder_pending_payments/*/*"
+    )]
+    fn minimal_process_builder_pending_payments(case: Case) {
+        run_process_builder_pending_payments_case::<Minimal>(case);
+    }
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
@@ -480,14 +541,13 @@ mod spec_tests {
         });
     }
 
-    // TODO(gloas): uncomment after `gloas::process_epoch` implemented
-    // fn run_registry_updates_case<P: Preset>(case: Case) {
-    //     run_case::<P>(case, |_, state| {
-    //         let mut summaries: Vec<ValidatorSummary> = vec_of_default(state);
-    //
-    //         process_registry_updates(&P::default_config(), state, summaries.as_mut_slice())
-    //     });
-    // }
+    fn run_registry_updates_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |_, state| {
+            let mut summaries: Vec<ValidatorSummary> = vec_of_default(state);
+
+            process_registry_updates(&P::default_config(), state, summaries.as_mut_slice())
+        });
+    }
 
     fn run_slashings_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
@@ -507,14 +567,13 @@ mod spec_tests {
         });
     }
 
-    // TODO(gloas): uncomment after `state` param is compatible with GloasBeaconState
-    // fn run_effective_balance_updates_case<P: Preset>(case: Case) {
-    //     run_case::<P>(case, |_, state| {
-    //         electra::process_effective_balance_updates(state);
-    //
-    //         Ok(())
-    //     });
-    // }
+    fn run_effective_balance_updates_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |_, state| {
+            electra::process_effective_balance_updates(state);
+
+            Ok(())
+        });
+    }
 
     fn run_slashings_reset_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
@@ -548,28 +607,33 @@ mod spec_tests {
         run_case::<P>(case, altair::process_sync_committee_updates);
     }
 
-    // TODO(gloas): uncomment the following functions after `state` param is compatible with GloasBeaconState
-    // fn run_pending_deposits_case<P: Preset>(case: Case) {
-    //     run_case::<P>(case, |pubkey_cache, state| {
-    //         electra::process_pending_deposits(&P::default_config(), pubkey_cache, state)
-    //     });
-    // }
-    //
-    // fn run_pending_consolidations_case<P: Preset>(case: Case) {
-    //     run_case::<P>(case, |_, state| {
-    //         electra::process_pending_consolidations(state)
-    //     })
-    // }
-    //
-    // fn run_process_look_case<P: Preset>(case: Case) {
-    //     run_case::<P>(case, |_, state| {
-    //         fulu::process_proposer_lookahead(&P::default_config(), state)
-    //     })
-    // }
+    fn run_pending_deposits_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |pubkey_cache, state| {
+            electra::process_pending_deposits(&P::default_config(), pubkey_cache, state)
+        });
+    }
+
+    fn run_pending_consolidations_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |_, state| {
+            electra::process_pending_consolidations(state)
+        })
+    }
+
+    fn run_process_look_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |_, state| {
+            fulu::process_proposer_lookahead(&P::default_config(), state)
+        })
+    }
+
+    fn run_process_builder_pending_payments_case<P: Preset>(case: Case) {
+        run_case::<P>(case, |_, state| {
+            process_builder_pending_payments(&P::default_config(), state)
+        })
+    }
 
     fn run_case<P: Preset>(
         case: Case,
-        sub_transition: impl FnOnce(&PubkeyCache, &mut GloasBeaconState<P>) -> Result<()>,
+        sub_transition: impl FnOnce(&PubkeyCache, &mut BeaconState<P>) -> Result<()>,
     ) {
         let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz_default("pre");

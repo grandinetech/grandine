@@ -1069,7 +1069,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     .controller
                                     .sampling_columns()
                                     .into_iter()
-                                    .contains(&data_column_sidecar.index)
+                                    .contains(&data_column_sidecar.index())
                                 {
                                     self.controller.on_own_data_column_sidecar(
                                         wait_group.clone(),

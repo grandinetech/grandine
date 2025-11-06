@@ -1,7 +1,6 @@
 use core::ops::Not as _;
 
 use anyhow::Result;
-use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors, electra,
     error::SignatureKind,
@@ -37,7 +36,6 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
     signed_block: &SignedBeaconBlock<P>,
     process_slots: ProcessSlots,
     state_root_policy: StateRootPolicy,
-    execution_engine: impl ExecutionEngine<P> + Send,
     verifier: V,
     slot_report: impl SlotReport + Send,
 ) -> Result<()> {
@@ -62,7 +60,6 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
             pubkey_cache,
             state,
             &signed_block.message,
-            execution_engine,
             NullVerifier,
             slot_report,
         )?;

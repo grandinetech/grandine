@@ -18,12 +18,9 @@ use thiserror::Error;
 use tracing::instrument;
 use typenum::Unsigned as _;
 use types::{
-    combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -791,16 +788,27 @@ where
         parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        self.store_snapshot()
-            .validate_data_column_sidecar_with_state(
-                data_column_sidecar,
-                block_seen,
-                origin,
-                validate_block_presence,
-                parent_fn,
-                state_fn,
-                None,
-            )
+        match Arc::unwrap_or_clone(data_column_sidecar) {
+            DataColumnSidecar::Fulu(data_column_sidecar) => self
+                .store_snapshot()
+                .validate_fulu_data_column_sidecar_with_state(
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    validate_block_presence,
+                    parent_fn,
+                    state_fn,
+                    None,
+                ),
+            DataColumnSidecar::Gloas(data_column_sidecar) => self
+                .store_snapshot()
+                .validate_gloas_data_column_sidecar_with_state(
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    None,
+                ),
+        }
     }
 }
 

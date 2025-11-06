@@ -40,8 +40,8 @@ use transition_functions::{
 use typenum::Unsigned as _;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, AttestingIndices, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -50,13 +50,14 @@ use types::{
     },
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
+        containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
         primitives::ColumnIndex,
     },
+    gloas::containers::{DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid},
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
-        containers::{AttestationData, BeaconBlockHeader, Checkpoint},
+        containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -224,6 +225,11 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, ValidatorIndex, ColumnIndex),
         HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
     >,
+    accepted_gloas_data_column_sidecars: HashMap<
+        (Slot, H256, ColumnIndex),
+        ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    >,
+    accepted_payload_bids: HashMap<(Slot, H256), ExecutionPayloadBid>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -234,7 +240,6 @@ pub struct Store<P: Preset, S: Storage<P>> {
     blacklisted_blocks: StdHashSet<H256>,
     sampling_columns: StdHashSet<ColumnIndex>,
     sidecars_construction_started: Arc<DashMap<H256, Slot>>,
-    delayed_block_at_slot: HashMap<Slot, H256>,
     requested_blobs_from_el: HashMap<H256, Slot>,
 }
 
@@ -312,6 +317,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
             accepted_blob_sidecars: HashMap::default(),
             accepted_data_column_sidecars: HashMap::default(),
+            accepted_gloas_data_column_sidecars: HashMap::default(),
+            accepted_payload_bids: HashMap::default(),
             blob_cache: BlobCache::default(),
             state_cache: Arc::new(StateCacheProcessor::new(
                 store_config.state_cache_lock_timeout,
@@ -324,7 +331,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             blacklisted_blocks,
             sampling_columns: StdHashSet::default(),
             sidecars_construction_started,
-            delayed_block_at_slot: HashMap::default(),
             requested_blobs_from_el: HashMap::default(),
         }
     }
@@ -492,13 +498,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         proposer_index: ValidatorIndex,
         block_root: H256,
     ) -> bool {
-        if self
-            .chain_config()
-            .phase_at_slot::<P>(slot)
-            .is_peerdas_activated()
-        {
-            self.data_column_cache
-                .exhibits_equivocation(slot, proposer_index, block_root)
+        let phase = self.chain_config().phase_at_slot::<P>(slot);
+        if phase.is_peerdas_activated() {
+            self.data_column_cache.exhibits_equivocation(
+                slot,
+                (phase < Phase::Gloas).then_some(proposer_index),
+                block_root,
+            )
         } else {
             self.blob_cache
                 .exhibits_equivocation(slot, proposer_index, block_root)
@@ -1611,7 +1617,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             }
 
-            if self.phase() >= Phase::Electra {
+            if self.phase() >= Phase::Gloas {
+                ensure!(
+                    index < 2,
+                    Error::AttestationDataInvalidPayloadStatus {
+                        attestation: attestation.clone_arc()
+                    }
+                );
+
+                // This validation is present in the fork choice rule but not the Networking specification.
+                if self.slot() == slot {
+                    ensure!(
+                        index == 0,
+                        Error::AttestationDataPayloadPresenceForCurrentSlot {
+                            attestation: attestation.clone_arc()
+                        }
+                    );
+                }
+            } else if self.phase() >= Phase::Electra {
                 ensure!(
                     index == 0,
                     Error::AttestationDataIndexNotZero {
@@ -2035,9 +2058,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[expect(clippy::too_many_arguments)]
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    pub fn validate_data_column_sidecar_with_state(
+    pub fn validate_fulu_data_column_sidecar_with_state(
         &self,
-        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        fulu_data_column_sidecar: FuluDataColumnSidecar<P>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         validate_block_presence: bool,
@@ -2045,8 +2068,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        let block_header = data_column_sidecar.signed_block_header.message;
+        let block_header = fulu_data_column_sidecar.signed_block_header.message;
+        let block_signature = fulu_data_column_sidecar.signed_block_header.signature;
         let block_root = block_header.hash_tree_root();
+        let data_column_sidecar: Arc<DataColumnSidecar<P>> =
+            Arc::new(fulu_data_column_sidecar.into());
+        let column_index = data_column_sidecar.index();
 
         // No need to validate and import data column sidecars for blocks that are already in fork choice,
         // i.e. already have all the data columns validated
@@ -2063,7 +2090,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // Ignore non-sampling data column sidecars unless they are submitted to beacon API
         // for publishing after proposal
-        if !self.sampling_columns.contains(&data_column_sidecar.index) {
+        if !self.sampling_columns.contains(&data_column_sidecar.index()) {
             if origin.is_from_api() {
                 is_non_sampled_with_full_validation = true;
             } else {
@@ -2081,10 +2108,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
-            let expected = misc::compute_subnet_for_data_column_sidecar(
-                &self.chain_config,
-                data_column_sidecar.index,
-            );
+            let expected =
+                misc::compute_subnet_for_data_column_sidecar(&self.chain_config, column_index);
             ensure!(
                 actual == expected,
                 Error::DataColumnSidecarOnIncorrectSubnet {
@@ -2111,7 +2136,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if self.accepted_data_column_sidecars.contains_key(&(
             block_header.slot,
             block_header.proposer_index,
-            data_column_sidecar.index,
+            column_index,
         )) && !block_seen
         {
             return Ok(DataColumnSidecarAction::Ignore(true));
@@ -2129,11 +2154,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The proposer signature of sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
         SingleVerifier.verify_singular(
-            data_column_sidecar
-                .signed_block_header
-                .message
-                .signing_root(&self.chain_config, &state),
-            data_column_sidecar.signed_block_header.signature,
+            block_header.signing_root(&self.chain_config, &state),
+            block_signature,
             self.pubkey_cache
                 .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
             SignatureKind::BlockInBlobSidecar,
@@ -2198,13 +2220,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         if !origin.is_from_el() {
-            // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
-            ensure!(
-                verify_sidecar_inclusion_proof(&data_column_sidecar, metrics),
-                Error::DataColumnSidecarInvalidInclusionProof {
-                    data_column_sidecar
-                }
-            );
+            if let Some(fulu_data_column_sidecar) = data_column_sidecar.pre_gloas() {
+                // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
+                ensure!(
+                    verify_sidecar_inclusion_proof(fulu_data_column_sidecar, metrics),
+                    Error::DataColumnSidecarInvalidInclusionProof {
+                        data_column_sidecar
+                    }
+                );
+            }
 
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
             let verify_result =
@@ -2248,6 +2272,111 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[instrument(level = "debug", skip_all)]
+    pub fn validate_gloas_data_column_sidecar_with_state(
+        &self,
+        data_column_sidecar: GloasDataColumnSidecar<P>,
+        block_seen: bool,
+        origin: &DataColumnSidecarOrigin,
+        metrics: Option<&Arc<Metrics>>,
+    ) -> Result<DataColumnSidecarAction<P>> {
+        let block_root = data_column_sidecar.beacon_block_root;
+        let column_index = data_column_sidecar.index;
+        let slot = data_column_sidecar.slot;
+        let data_column_sidecar = Arc::new(data_column_sidecar.into());
+
+        // Ignore non-sampling data column sidecars
+        if !self.sampling_columns.contains(&column_index) {
+            return Ok(DataColumnSidecarAction::Ignore(false));
+        }
+
+        let Some(chain_link) = self.chain_link(block_root) else {
+            return Ok(DataColumnSidecarAction::DelayUntilState(
+                data_column_sidecar,
+                block_root,
+            ));
+        };
+
+        // [REJECT] The sidecars's `slot` matches the slot of the block with root `beacon_block_root`.
+        ensure!(
+            data_column_sidecar.slot() == chain_link.slot(),
+            Error::DataColumnSidecarSlotMismatch {
+                data_column_sidecar,
+                block_slot: chain_link.slot(),
+            }
+        );
+
+        // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
+        let Some(payload_bid) = self.accepted_payload_bids.get(&(slot, block_root)) else {
+            return Ok(DataColumnSidecarAction::DelayUntilState(
+                data_column_sidecar,
+                block_root,
+            ));
+        };
+
+        // [REJECT] The hash of the sidecar's kzg_commitments matches the blob_kzg_commitments_root in the corresponding builder's bid for sidecar.beacon_block_root.
+        ensure!(
+            data_column_sidecar.kzg_commitments().hash_tree_root()
+                == payload_bid.blob_kzg_commitments_root,
+            Error::DataColumnSidecarInvalidKzgCommitments {
+                data_column_sidecar
+            }
+        );
+
+        // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
+        ensure!(
+            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar),
+            Error::DataColumnSidecarInvalid {
+                data_column_sidecar
+            },
+        );
+
+        // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
+        if let Some(actual) = origin.subnet_id() {
+            let expected =
+                misc::compute_subnet_for_data_column_sidecar(&self.chain_config, column_index);
+            ensure!(
+                actual == expected,
+                Error::DataColumnSidecarOnIncorrectSubnet {
+                    data_column_sidecar,
+                    expected,
+                    actual,
+                },
+            );
+        }
+
+        // [IGNORE] The sidecar is the first sidecar for the tuple (sidecar.beacon_block_root, sidecar.index) with valid kzg proof
+        // Adjustment: Ignore data column sidecars for unseen blocks only
+        if self.accepted_gloas_data_column_sidecars.contains_key(&(
+            data_column_sidecar.slot(),
+            block_root,
+            column_index,
+        )) && !block_seen
+        {
+            return Ok(DataColumnSidecarAction::Ignore(true));
+        }
+
+        if !origin.is_from_el() {
+            // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
+            let verify_result =
+                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
+                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                        data_column_sidecar: data_column_sidecar.clone_arc(),
+                        error,
+                    })?;
+
+            ensure!(
+                verify_result,
+                Error::DataColumnSidecarInvalidKzgProofs {
+                    data_column_sidecar: data_column_sidecar.clone_arc(),
+                    error: anyhow!("invalid KZG proofs verification result"),
+                }
+            );
+        }
+
+        Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
+    }
+
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -2256,39 +2385,40 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         origin: &DataColumnSidecarOrigin,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        let block_header = data_column_sidecar.signed_block_header.message;
+        match Arc::unwrap_or_clone(data_column_sidecar) {
+            DataColumnSidecar::Fulu(data_column_sidecar) => {
+                let block_header = data_column_sidecar.signed_block_header.message;
 
-        let parent_info = || {
-            self.chain_link(block_header.parent_root)
-                .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
-        };
+                let parent_info = || {
+                    self.chain_link(block_header.parent_root)
+                        .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+                };
 
-        if let Some(state) = state {
-            self.validate_data_column_sidecar_with_state(
-                data_column_sidecar,
-                block_seen,
-                origin,
-                true,
-                parent_info,
-                || Some(state),
-                metrics,
-            )
-        } else {
-            self.validate_data_column_sidecar_with_state(
-                data_column_sidecar,
-                block_seen,
-                origin,
-                true,
-                parent_info,
-                || {
-                    self.state_cache.existing_state_at_slot(
-                        self,
-                        block_header.parent_root,
-                        block_header.slot,
-                    )
-                },
-                metrics,
-            )
+                self.validate_fulu_data_column_sidecar_with_state(
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    true,
+                    parent_info,
+                    || {
+                        state.or_else(|| {
+                            self.state_cache.existing_state_at_slot(
+                                self,
+                                block_header.parent_root,
+                                block_header.slot,
+                            )
+                        })
+                    },
+                    metrics,
+                )
+            }
+            DataColumnSidecar::Gloas(data_column_sidecar) => self
+                .validate_gloas_data_column_sidecar_with_state(
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    metrics,
+                ),
         }
     }
 
@@ -2633,50 +2763,81 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
-        let block_header = data_sidecar.signed_block_header.message;
-        let block_root = block_header.hash_tree_root();
+        if let Some(data_sidecar) = data_sidecar.pre_gloas() {
+            let block_header = data_sidecar.signed_block_header.message;
+            let block_root = block_header.hash_tree_root();
 
-        let commitments = self
-            .accepted_data_column_sidecars
-            .entry((
-                block_header.slot,
-                block_header.proposer_index,
-                data_sidecar.index,
-            ))
-            .or_default();
+            let commitments = self
+                .accepted_data_column_sidecars
+                .entry((
+                    block_header.slot,
+                    block_header.proposer_index,
+                    data_sidecar.index,
+                ))
+                .or_default();
 
-        commitments.insert(block_root, data_sidecar.kzg_commitments.clone());
+            commitments.insert(block_root, data_sidecar.kzg_commitments.clone());
+        } else {
+            let block_root = data_sidecar.beacon_block_root();
+            let column_index = data_sidecar.index();
+
+            self.accepted_gloas_data_column_sidecars.insert(
+                (data_sidecar.slot(), block_root, column_index),
+                data_sidecar.kzg_commitments().clone(),
+            );
+        }
 
         self.data_column_cache.insert(data_sidecar);
     }
 
-    pub fn accepted_data_column_sidecars_count(&self, block_header: BeaconBlockHeader) -> usize {
-        self.accepted_data_column_sidecars
-            .iter()
-            .filter(|((slot, proposer_index, _), commitments)| {
-                *slot == block_header.slot
-                    && *proposer_index == block_header.proposer_index
-                    && commitments.contains_key(&block_header.hash_tree_root())
-            })
-            .count()
+    pub fn accepted_data_column_sidecars_count(
+        &self,
+        block_root: H256,
+        data_column_sidecar: &Arc<DataColumnSidecar<P>>,
+    ) -> usize {
+        if let Some(data_column_sidecar) = data_column_sidecar.pre_gloas() {
+            let block_header = data_column_sidecar.signed_block_header.message;
+
+            self.accepted_data_column_sidecars
+                .iter()
+                .filter(|((slot, proposer_index, _), commitments)| {
+                    *slot == block_header.slot
+                        && *proposer_index == block_header.proposer_index
+                        && commitments.contains_key(&block_root)
+                })
+                .count()
+        } else {
+            self.accepted_gloas_data_column_sidecars
+                .keys()
+                .filter(|(_, root, _)| *root == block_root)
+                .count()
+        }
     }
 
     pub fn accepted_data_column_sidecar(
         &self,
-        block_header: BeaconBlockHeader,
-        index: ColumnIndex,
+        block_root: H256,
+        data_column_sidecar: &Arc<DataColumnSidecar<P>>,
     ) -> bool {
-        let block_root = block_header.hash_tree_root();
+        if let Some(data_column_sidecar) = data_column_sidecar.pre_gloas() {
+            let block_header = data_column_sidecar.signed_block_header.message;
 
-        if let Some(accepted) = self.accepted_data_column_sidecars.get(&(
-            block_header.slot,
-            block_header.proposer_index,
-            index,
-        )) {
-            return accepted.contains_key(&block_root);
+            if let Some(accepted) = self.accepted_data_column_sidecars.get(&(
+                block_header.slot,
+                block_header.proposer_index,
+                data_column_sidecar.index,
+            )) {
+                return accepted.contains_key(&block_root);
+            }
+
+            false
+        } else {
+            self.accepted_gloas_data_column_sidecars.contains_key(&(
+                data_column_sidecar.slot(),
+                block_root,
+                data_column_sidecar.index(),
+            ))
         }
-
-        false
     }
 
     pub fn is_reconstruction_enabled_for(&self, block_root: &H256) -> bool {
@@ -3016,10 +3177,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        self.accepted_gloas_data_column_sidecars
+            .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        self.accepted_payload_bids
+            .retain(|(slot, _), _| finalized_slot <= *slot);
         self.sidecars_construction_started
             .retain(|_, slot| finalized_slot <= *slot);
-        self.delayed_block_at_slot
-            .retain(|slot, _| finalized_slot <= *slot);
         self.requested_blobs_from_el
             .retain(|_, slot| finalized_slot <= *slot);
         self.prune_checkpoint_states();
@@ -3750,6 +3913,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block: &SignedBeaconBlock<P>,
     ) -> Vec<ColumnIndex> {
+        let phase = block.phase();
         let block = block.message();
 
         // `block.phase` has already been checked
@@ -3766,12 +3930,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.sampling_columns
             .iter()
             .filter(|index| {
-                !self
-                    .accepted_data_column_sidecars
-                    .get(&(block.slot(), block.proposer_index(), **index))
-                    .is_some_and(|kzg_commitments| {
-                        kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
-                    })
+                if phase >= Phase::Gloas {
+                    !self
+                        .accepted_gloas_data_column_sidecars
+                        .get(&(block.slot(), block_root, **index))
+                        .is_some_and(|kzg_commitments| {
+                            kzg_commitments == body.blob_kzg_commitments()
+                        })
+                } else {
+                    !self
+                        .accepted_data_column_sidecars
+                        .get(&(block.slot(), block.proposer_index(), **index))
+                        .is_some_and(|kzg_commitments| {
+                            kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
+                        })
+                }
             })
             .copied()
             .collect()
@@ -3885,14 +4058,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn mark_sidecar_construction_failed(&self, block_root: &H256) {
         self.sidecars_construction_started.remove(block_root);
-    }
-
-    pub fn delay_block_at_slot(&mut self, slot: Slot, block_root: H256) {
-        self.delayed_block_at_slot.insert(slot, block_root);
-    }
-
-    pub fn get_delayed_block_at_slot(&self, slot: Slot) -> Option<&H256> {
-        self.delayed_block_at_slot.get(&slot)
     }
 
     pub fn has_requested_blobs_from_el(&self, block_root: &H256) -> bool {

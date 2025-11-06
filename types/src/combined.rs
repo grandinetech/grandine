@@ -61,7 +61,7 @@ use crate::{
             SignedBeaconBlock as DenebSignedBeaconBlock,
             SignedBlindedBeaconBlock as DenebSignedBlindedBeaconBlock,
         },
-        primitives::{KzgCommitment, VersionedHash},
+        primitives::{KzgCommitment, KzgProof, VersionedHash},
     },
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
@@ -83,19 +83,21 @@ use crate::{
         beacon_state::BeaconState as FuluBeaconState,
         containers::{
             BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody,
-            BlindedBeaconBlock as FuluBlindedBeaconBlock,
+            BlindedBeaconBlock as FuluBlindedBeaconBlock, DataColumnIdentifier,
+            DataColumnSidecar as FuluDataColumnSidecar,
             LightClientBootstrap as FuluLightClientBootstrap,
             LightClientFinalityUpdate as FuluLightClientFinalityUpdate,
             LightClientOptimisticUpdate as FuluLightClientOptimisticUpdate,
             LightClientUpdate as FuluLightClientUpdate, SignedBeaconBlock as FuluSignedBeaconBlock,
             SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
         },
+        primitives::{Cell, ColumnIndex},
     },
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         containers::{
-            BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid,
-            LightClientBootstrap as GloasLightClientBootstrap,
+            BeaconBlock as GloasBeaconBlock, DataColumnSidecar as GloasDataColumnSidecar,
+            ExecutionPayloadBid, LightClientBootstrap as GloasLightClientBootstrap,
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate,
@@ -122,7 +124,7 @@ use crate::{
         BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
         BlockBodyWithExecutionRequests, ExecutionPayload as ExecutionPayloadTrait,
         PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
-        PostElectraBeaconState, PostFuluBeaconState, SignedBeaconBlock as _,
+        PostElectraBeaconState, PostFuluBeaconState, PostGloasBeaconState, SignedBeaconBlock as _,
     },
 };
 
@@ -345,7 +347,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Deneb(state) => Some(state),
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 
@@ -357,7 +359,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Deneb(state) => Some(state),
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 
@@ -368,10 +370,11 @@ impl<P: Preset> BeaconState<P> {
             Self::Deneb(state) => Some(state),
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 
+    #[expect(clippy::same_name_method)]
     pub fn post_electra(&self) -> Option<&dyn PostElectraBeaconState<P>> {
         match self {
             Self::Phase0(_)
@@ -381,7 +384,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 
@@ -394,7 +397,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_) => None,
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 
@@ -408,7 +411,21 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_)
             | Self::Electra(_) => None,
             Self::Fulu(state) => Some(state),
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
+        }
+    }
+
+    #[expect(clippy::same_name_method)]
+    pub fn post_gloas(&self) -> Option<&dyn PostGloasBeaconState<P>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 
@@ -672,8 +689,14 @@ impl<P: Preset> SignedBeaconBlock<P> {
     pub fn execution_block_hash(&self) -> Option<ExecutionBlockHash> {
         self.message()
             .body()
-            .with_execution_payload()
-            .map(|body| body.execution_payload().block_hash())
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().message.block_hash)
+            .or_else(|| {
+                self.message()
+                    .body()
+                    .with_execution_payload()
+                    .map(|body| body.execution_payload().block_hash())
+            })
     }
 
     pub fn to_header(&self) -> SignedBeaconBlockHeader {
@@ -1476,6 +1499,7 @@ pub enum ExecutionPayloadHeader<P: Preset> {
     Bellatrix(BellatrixExecutionPayloadHeader<P>),
     Capella(CapellaExecutionPayloadHeader<P>),
     Deneb(DenebExecutionPayloadHeader<P>),
+    Gloas(ExecutionPayloadBid),
 }
 
 impl<P: Preset> ExecutionPayloadHeader<P> {
@@ -1484,6 +1508,7 @@ impl<P: Preset> ExecutionPayloadHeader<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Gloas(_) => Phase::Gloas,
         }
     }
 }
@@ -2105,6 +2130,148 @@ impl<P: Preset> AttesterSlashing<P> {
             Self::Phase0(_) => None,
             Self::Electra(attester_slashing) => Some(attester_slashing),
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum DataColumnSidecar<P: Preset> {
+    Fulu(FuluDataColumnSidecar<P>),
+    Gloas(GloasDataColumnSidecar<P>),
+}
+
+impl<P: Preset> SszSize for DataColumnSidecar<P> {
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+        FuluDataColumnSidecar::<P>::SIZE,
+        GloasDataColumnSidecar::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszRead<Config> for DataColumnSidecar<P> {
+    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 3 varialbe offsets, 1 fixed part before `sidecar.slot`:
+        // - The contents of `sidecar.column_index`.
+        // - The offset of `sidecar.column`.
+        // - The offset of `sidecar.kzg_commitments`.
+        // - The offset of `sidecar.kzg_proofs`.
+        let slot_start = ColumnIndex::SIZE.get() + (Offset::SIZE.get() * 3);
+        let slot_end = slot_start + Slot::SIZE.get();
+        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
+        let slot = Slot::from_ssz_default(slot_bytes)?;
+        let phase = config.phase_at_slot::<P>(slot);
+
+        let sidecar = match phase {
+            Phase::Phase0
+            | Phase::Altair
+            | Phase::Bellatrix
+            | Phase::Capella
+            | Phase::Deneb
+            | Phase::Electra => {
+                return Err(ReadError::Custom {
+                    message: "data column sidecar is not available in pre-Fulu phase",
+                });
+            }
+            Phase::Fulu => Self::Fulu(FuluDataColumnSidecar::from_ssz_default(bytes)?),
+            Phase::Gloas => Self::Gloas(GloasDataColumnSidecar::from_ssz_default(bytes)?),
+        };
+
+        Ok(sidecar)
+    }
+}
+
+impl<P: Preset> SszWrite for DataColumnSidecar<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Fulu(sidecar) => sidecar.write_variable(bytes),
+            Self::Gloas(sidecar) => sidecar.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> SszHash for DataColumnSidecar<P> {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> H256 {
+        match self {
+            Self::Fulu(sidecar) => sidecar.hash_tree_root(),
+            Self::Gloas(sidecar) => sidecar.hash_tree_root(),
+        }
+    }
+}
+
+impl<P: Preset> DataColumnSidecar<P> {
+    pub const fn index(&self) -> ColumnIndex {
+        match self {
+            Self::Fulu(sidecar) => sidecar.index,
+            Self::Gloas(sidecar) => sidecar.index,
+        }
+    }
+
+    pub const fn column(&self) -> &ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock> {
+        match self {
+            Self::Fulu(sidecar) => &sidecar.column,
+            Self::Gloas(sidecar) => &sidecar.column,
+        }
+    }
+
+    pub const fn kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+        match self {
+            Self::Fulu(sidecar) => &sidecar.kzg_commitments,
+            Self::Gloas(sidecar) => &sidecar.kzg_commitments,
+        }
+    }
+
+    pub const fn kzg_proofs(&self) -> &ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock> {
+        match self {
+            Self::Fulu(sidecar) => &sidecar.kzg_proofs,
+            Self::Gloas(sidecar) => &sidecar.kzg_proofs,
+        }
+    }
+
+    pub fn beacon_block_root(&self) -> H256 {
+        match self {
+            Self::Fulu(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
+            Self::Gloas(sidecar) => sidecar.beacon_block_root,
+        }
+    }
+
+    pub const fn slot(&self) -> Slot {
+        match self {
+            Self::Fulu(sidecar) => sidecar.slot(),
+            Self::Gloas(sidecar) => sidecar.slot,
+        }
+    }
+
+    pub const fn pre_gloas(&self) -> Option<&FuluDataColumnSidecar<P>> {
+        match self {
+            Self::Fulu(sidecar) => Some(sidecar),
+            Self::Gloas(_) => None,
+        }
+    }
+
+    pub const fn post_gloas(&self) -> Option<&GloasDataColumnSidecar<P>> {
+        match self {
+            Self::Fulu(_) => None,
+            Self::Gloas(sidecar) => Some(sidecar),
+        }
+    }
+
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Fulu(_) => Phase::Fulu,
+            Self::Gloas(_) => Phase::Gloas,
+        }
+    }
+}
+
+impl<P: Preset> From<&DataColumnSidecar<P>> for DataColumnIdentifier {
+    fn from(sidecar: &DataColumnSidecar<P>) -> Self {
+        let index = sidecar.index();
+        let block_root = sidecar.beacon_block_root();
+
+        Self { block_root, index }
     }
 }
 

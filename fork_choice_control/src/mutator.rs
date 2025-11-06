@@ -53,12 +53,9 @@ use std_ext::ArcExt as _;
 use tracing::{instrument, Span};
 use typenum::Unsigned as _;
 use types::{
-    combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
+    combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -1562,19 +1559,15 @@ where
                     ));
                 }
 
-                if self.store.accepted_data_column_sidecar(
-                    data_column_sidecar.signed_block_header.message,
-                    data_column_sidecar.index,
-                ) {
+                let block_root = data_column_sidecar.beacon_block_root();
+                if self
+                    .store
+                    .accepted_data_column_sidecar(block_root, &data_column_sidecar)
+                {
                     let (_, sender) = origin.split();
 
                     reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
                 } else {
-                    let block_root = data_column_sidecar
-                        .signed_block_header
-                        .message
-                        .hash_tree_root();
-
                     if self.store.is_forward_synced()
                         && !matches!(
                             origin,
@@ -1632,7 +1625,7 @@ where
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
             Ok(DataColumnSidecarAction::DelayUntilState(data_column_sidecar, block_root)) => {
-                let slot = data_column_sidecar.signed_block_header.message.slot;
+                let slot = data_column_sidecar.slot();
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
@@ -1681,7 +1674,12 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilParent(data_column_sidecar)) => {
-                let parent_root = data_column_sidecar.signed_block_header.message.parent_root;
+                let Some(parent_root) = data_column_sidecar
+                    .pre_gloas()
+                    .map(|sidecar| sidecar.signed_block_header.message.parent_root)
+                else {
+                    return;
+                };
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
@@ -1712,7 +1710,7 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar)) => {
-                let slot = data_column_sidecar.signed_block_header.message.slot;
+                let slot = data_column_sidecar.slot();
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
@@ -1854,14 +1852,14 @@ where
         }
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
-        data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+        data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index()));
 
         debug_with_peers!(
             "storing data column sidecars from reconstruction (block: {block_root:?}, columns: {missing_indices:?})",
         );
 
         for data_column_sidecar in data_column_sidecars {
-            if missing_indices.contains(&data_column_sidecar.index) {
+            if missing_indices.contains(&data_column_sidecar.index()) {
                 self.accept_data_column_sidecar(
                     wait_group,
                     &data_column_sidecar,
@@ -2448,15 +2446,16 @@ where
         data_column_sidecar: &Arc<DataColumnSidecar<P>>,
         origin: DataColumnSidecarOrigin,
     ) -> DataColumnSidecarOrigin {
-        let block_header = data_column_sidecar.signed_block_header.message;
-        let block_root = block_header.hash_tree_root();
+        let block_root = data_column_sidecar.beacon_block_root();
 
         self.store_mut()
             .apply_data_column_sidecar(data_column_sidecar.clone_arc());
 
         self.update_store_snapshot();
 
-        let accepted_data_columns = self.store.accepted_data_column_sidecars_count(block_header);
+        let accepted_data_columns = self
+            .store
+            .accepted_data_column_sidecars_count(block_root, data_column_sidecar);
         let reconstruction_enabled = self.store.is_reconstruction_enabled_for(&block_root);
 
         let should_retry_block = if reconstruction_enabled {
@@ -2470,8 +2469,8 @@ where
             accepted data columns: {}, should_retry_block: {should_retry_block}, \
             reconstruction enabled: {reconstruction_enabled}, sampling columns count: {}, \
             reconstruction started: {}, origin: {origin:?}",
-            data_column_sidecar.index,
-            block_header.slot,
+            data_column_sidecar.index(),
+            data_column_sidecar.slot(),
             accepted_data_columns,
             self.store.sampling_columns_count(),
             self.store.is_sidecars_construction_started(&block_root),
@@ -2613,10 +2612,6 @@ where
     }
 
     fn delay_block_until_blobs(&mut self, beacon_block_root: H256, pending_block: PendingBlock<P>) {
-        self.store_mut()
-            .delay_block_at_slot(pending_block.block.message().slot(), beacon_block_root);
-        self.update_store_snapshot();
-
         self.delayed_until_blobs
             .insert(beacon_block_root, pending_block);
     }
@@ -2833,11 +2828,7 @@ where
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
         block_root: H256,
     ) {
-        let slot = pending_data_column_sidecar
-            .data_column_sidecar
-            .signed_block_header
-            .message
-            .slot;
+        let slot = pending_data_column_sidecar.data_column_sidecar.slot();
 
         self.delayed_until_state
             .entry((block_root, slot))
@@ -2850,14 +2841,15 @@ where
         &mut self,
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
     ) {
+        let Some(parent_root) = pending_data_column_sidecar
+            .data_column_sidecar
+            .pre_gloas()
+            .map(|sidecar| sidecar.signed_block_header.message.parent_root)
+        else {
+            return;
+        };
         self.delayed_until_block
-            .entry(
-                pending_data_column_sidecar
-                    .data_column_sidecar
-                    .signed_block_header
-                    .message
-                    .parent_root,
-            )
+            .entry(parent_root)
             .or_default()
             .data_column_sidecars
             .push(pending_data_column_sidecar);
@@ -2868,13 +2860,7 @@ where
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
     ) {
         self.delayed_until_slot
-            .entry(
-                pending_data_column_sidecar
-                    .data_column_sidecar
-                    .signed_block_header
-                    .message
-                    .slot,
-            )
+            .entry(pending_data_column_sidecar.data_column_sidecar.slot())
             .or_default()
             .data_column_sidecars
             .push(pending_data_column_sidecar);
@@ -3060,6 +3046,7 @@ where
                 store_snapshot: self.owned_store(),
                 mutator_tx: self.owned_mutator_tx(),
                 wait_group,
+                block_root: data_column_sidecar.beacon_block_root(),
                 data_column_sidecar,
                 state,
                 block_seen,
@@ -3167,8 +3154,7 @@ where
                 data_column_sidecars
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.data_column_sidecar.signed_block_header.message.slot - 1
-                            <= finalized_slot
+                        pending.data_column_sidecar.slot() - 1 <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -3746,8 +3732,8 @@ where
         }
 
         let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
-            missing_indices.contains(&data_column_sidecar.index)
-                && data_column_sidecar.kzg_commitments == *body.blob_kzg_commitments()
+            missing_indices.contains(&data_column_sidecar.index())
+                && data_column_sidecar.kzg_commitments() == body.blob_kzg_commitments()
         });
 
         if any_pending_columns {
