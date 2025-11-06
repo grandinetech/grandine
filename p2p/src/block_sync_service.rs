@@ -12,6 +12,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use data_dumper::DataDumper;
 use database::{Database, PrefixableKey as _};
+use debug_info::HealthCheck;
 use eth1_api::RealController;
 use eth2_libp2p::{
     service::api_types::AppRequestId, NetworkGlobals, PeerAction, PeerId, ReportSource,
@@ -262,11 +263,17 @@ impl<P: Preset> BlockSyncService<P> {
 
     #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
+        let mut health_check = HealthCheck::new("block_sync_service");
+
         let mut interval =
             IntervalStream::new(tokio::time::interval(NETWORK_EVENT_INTERVAL)).fuse();
 
         loop {
             select! {
+                _ = health_check.interval.select_next_some() => {
+                    health_check.check();
+                },
+
                 _ = interval.select_next_some() => {
                     self.request_blobs_and_blocks_if_ready();
 

@@ -1,21 +1,15 @@
 [package]
 name = 'debug_info'
-edition = { workspace = true }
-authors = ["Grandine <info@grandine.io>"]
+version = '0.1.0'
+edition.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
-bytesize = { workspace = true }
 features = { workspace = true }
 futures = { workspace = true }
-log = { workspace = true }
 logging ={ workspace = true }
-prometheus_metrics = { workspace = true }
-serde = { workspace = true }
-serde_utils = { workspace = true }
-serde_with = { workspace = true }
-sysinfo = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }

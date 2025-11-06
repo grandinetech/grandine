@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
+use debug_info::HealthCheck;
 use fork_choice_control::{SubnetMessage, Wait};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -55,8 +56,14 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
     }
 
     pub async fn run(mut self) -> Result<()> {
+        let mut health_check = HealthCheck::new("subnet_service");
+
         loop {
             select! {
+                _ = health_check.interval.select_next_some() => {
+                    health_check.check();
+                },
+
                 message = self.fork_choice_rx.select_next_some() => {
                     match message {
                         SubnetMessage::Slot(wait_group, slot) => {
