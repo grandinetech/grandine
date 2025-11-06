@@ -624,21 +624,9 @@ where
     ) {
         let block_root = data_column_sidecar.beacon_block_root();
         if !self.store_snapshot().is_forward_synced()
-            && data_column_sidecar
-                .pre_gloas()
-                .map(|sidecar| {
-                    self.store_snapshot().accepted_data_column_sidecar(
-                        sidecar.signed_block_header.message,
-                        sidecar.index,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    self.store_snapshot().accepted_gloas_data_column_sidecar(
-                        data_column_sidecar.slot(),
-                        block_root,
-                        data_column_sidecar.index(),
-                    )
-                })
+            && self
+                .store_snapshot()
+                .accepted_data_column_sidecar(block_root, &data_column_sidecar)
         {
             debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from peer {peer_id} \
@@ -773,21 +761,9 @@ where
         // On the other hand, forward it to the `mutator` to allow distributed publishing if it is synced.
         let block_root = data_column_sidecar.beacon_block_root();
         if !self.store_snapshot().is_forward_synced()
-            && data_column_sidecar
-                .pre_gloas()
-                .map(|sidecar| {
-                    self.store_snapshot().accepted_data_column_sidecar(
-                        sidecar.signed_block_header.message,
-                        sidecar.index,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    self.store_snapshot().accepted_gloas_data_column_sidecar(
-                        data_column_sidecar.slot(),
-                        block_root,
-                        data_column_sidecar.index(),
-                    )
-                })
+            && self
+                .store_snapshot()
+                .accepted_data_column_sidecar(block_root, &data_column_sidecar)
         {
             debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from {origin:?} \

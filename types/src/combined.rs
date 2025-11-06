@@ -425,7 +425,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Deneb(_)
             | Self::Electra(_)
             | Self::Fulu(_) => None,
-            Self::Gloas(_state) => None,
+            Self::Gloas(state) => Some(state),
         }
     }
 

@@ -56,7 +56,7 @@ use types::{
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
-        containers::{AttestationData, BeaconBlockHeader, Checkpoint},
+        containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
@@ -2771,50 +2771,54 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.data_column_cache.insert(data_sidecar);
     }
 
-    pub fn accepted_data_column_sidecars_count(&self, block_header: BeaconBlockHeader) -> usize {
-        self.accepted_data_column_sidecars
-            .iter()
-            .filter(|((slot, proposer_index, _), commitments)| {
-                *slot == block_header.slot
-                    && *proposer_index == block_header.proposer_index
-                    && commitments.contains_key(&block_header.hash_tree_root())
-            })
-            .count()
-    }
+    pub fn accepted_data_column_sidecars_count(
+        &self,
+        block_root: H256,
+        data_column_sidecar: &Arc<DataColumnSidecar<P>>,
+    ) -> usize {
+        if let Some(data_column_sidecar) = data_column_sidecar.pre_gloas() {
+            let block_header = data_column_sidecar.signed_block_header.message;
 
-    pub fn accepted_gloas_data_column_sidecars_count(&self, block_root: H256) -> usize {
-        self.accepted_gloas_data_column_sidecars
-            .keys()
-            .filter(|(_, root, _)| *root == block_root)
-            .count()
+            self.accepted_data_column_sidecars
+                .iter()
+                .filter(|((slot, proposer_index, _), commitments)| {
+                    *slot == block_header.slot
+                        && *proposer_index == block_header.proposer_index
+                        && commitments.contains_key(&block_root)
+                })
+                .count()
+        } else {
+            self.accepted_gloas_data_column_sidecars
+                .keys()
+                .filter(|(_, root, _)| *root == block_root)
+                .count()
+        }
     }
 
     pub fn accepted_data_column_sidecar(
         &self,
-        block_header: BeaconBlockHeader,
-        index: ColumnIndex,
-    ) -> bool {
-        let block_root = block_header.hash_tree_root();
-
-        if let Some(accepted) = self.accepted_data_column_sidecars.get(&(
-            block_header.slot,
-            block_header.proposer_index,
-            index,
-        )) {
-            return accepted.contains_key(&block_root);
-        }
-
-        false
-    }
-
-    pub fn accepted_gloas_data_column_sidecar(
-        &self,
-        slot: Slot,
         block_root: H256,
-        index: ColumnIndex,
+        data_column_sidecar: &Arc<DataColumnSidecar<P>>,
     ) -> bool {
-        self.accepted_gloas_data_column_sidecars
-            .contains_key(&(slot, block_root, index))
+        if let Some(data_column_sidecar) = data_column_sidecar.pre_gloas() {
+            let block_header = data_column_sidecar.signed_block_header.message;
+
+            if let Some(accepted) = self.accepted_data_column_sidecars.get(&(
+                block_header.slot,
+                block_header.proposer_index,
+                data_column_sidecar.index,
+            )) {
+                return accepted.contains_key(&block_root);
+            }
+
+            false
+        } else {
+            self.accepted_gloas_data_column_sidecars.contains_key(&(
+                data_column_sidecar.slot(),
+                block_root,
+                data_column_sidecar.index(),
+            ))
+        }
     }
 
     pub fn is_reconstruction_enabled_for(&self, block_root: &H256) -> bool {

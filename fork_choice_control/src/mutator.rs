@@ -1560,21 +1560,10 @@ where
                 }
 
                 let block_root = data_column_sidecar.beacon_block_root();
-                let is_accepted_sidecar =
-                    if let Some(data_column_sidecar) = data_column_sidecar.pre_gloas() {
-                        self.store.accepted_data_column_sidecar(
-                            data_column_sidecar.signed_block_header.message,
-                            data_column_sidecar.index,
-                        )
-                    } else {
-                        self.store.accepted_gloas_data_column_sidecar(
-                            data_column_sidecar.slot(),
-                            block_root,
-                            data_column_sidecar.index(),
-                        )
-                    };
-
-                if !is_accepted_sidecar {
+                if !self
+                    .store
+                    .accepted_data_column_sidecar(block_root, &data_column_sidecar)
+                {
                     if self.store.is_forward_synced()
                         && !matches!(
                             origin,
@@ -2484,15 +2473,9 @@ where
 
         self.update_store_snapshot();
 
-        let accepted_data_columns =
-            if let Some(data_column_sidecar) = data_column_sidecar.pre_gloas() {
-                self.store.accepted_data_column_sidecars_count(
-                    data_column_sidecar.signed_block_header.message,
-                )
-            } else {
-                self.store
-                    .accepted_gloas_data_column_sidecars_count(block_root)
-            };
+        let accepted_data_columns = self
+            .store
+            .accepted_data_column_sidecars_count(block_root, data_column_sidecar);
         let reconstruction_enabled = self.store.is_reconstruction_enabled_for(&block_root);
 
         let should_retry_block = if reconstruction_enabled {

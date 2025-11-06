@@ -331,8 +331,8 @@ fn get_data_column_sidecars_post_gloas<P: Preset>(
                 column,
                 kzg_commitments: kzg_commitments.clone(),
                 kzg_proofs,
-                beacon_block_root,
                 slot,
+                beacon_block_root,
             }
             .into(),
         ));
