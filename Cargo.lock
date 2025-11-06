@@ -9387,13 +9387,12 @@ checksum = "6b3789b30bd25ba102de4beabd95d21ac45b69b1be7d14522bab988c526d6799"
 
 [[package]]
 name = "reth-libmdbx"
-version = "1.6.0"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=d8451e54e7267f9f1634118d6d279b2216f7e2bb#d8451e54e7267f9f1634118d6d279b2216f7e2bb"
+version = "1.9.0"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=84785f025eac5eed123997454998db77a299e1e5#84785f025eac5eed123997454998db77a299e1e5"
 dependencies = [
  "bitflags 2.10.0",
  "byteorder",
  "derive_more 2.0.1",
- "indexmap 2.12.0",
  "parking_lot",
  "reth-mdbx-sys",
  "smallvec",
@@ -9403,10 +9402,10 @@ dependencies = [
 
 [[package]]
 name = "reth-mdbx-sys"
-version = "1.6.0"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=d8451e54e7267f9f1634118d6d279b2216f7e2bb#d8451e54e7267f9f1634118d6d279b2216f7e2bb"
+version = "1.9.0"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=84785f025eac5eed123997454998db77a299e1e5#84785f025eac5eed123997454998db77a299e1e5"
 dependencies = [
- "bindgen 0.70.1",
+ "bindgen 0.71.1",
  "cc",
 ]
 
