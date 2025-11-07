@@ -1,6 +1,6 @@
 use core::ops::Range;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use itertools::Itertools as _;
 use ssz::{MerkleTree, Ssz, SszHash as _};
 use thiserror::Error;
@@ -166,9 +166,7 @@ enum Error {
         deposit_indices: Range<DepositIndex>,
         proof_indices: Range<DepositIndex>,
     },
-    #[error(
-        "deposit data count ({data_count}) does not match deposit index count ({index_count})"
-    )]
+    #[error("deposit data count ({data_count}) does not match deposit index count ({index_count})")]
     CountMismatch {
         data_count: usize,
         index_count: usize,

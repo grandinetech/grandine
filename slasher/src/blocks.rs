@@ -8,7 +8,7 @@ use types::{
     combined::SignedBeaconBlock,
     phase0::{
         containers::{BeaconBlockHeader, ProposerSlashing},
-        primitives::{Epoch, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,

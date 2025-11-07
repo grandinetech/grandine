@@ -1,14 +1,14 @@
 use core::fmt::Debug;
 
 use duplicate::duplicate_item;
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
 use spec_test_utils::Case;
 use ssz_derive::Ssz;
 use static_assertions::assert_not_impl_any;
 use test_generator::test_resources;
 use typenum::{
-    U0, U1, U1024, U128, U15, U16, U17, U2, U256, U3, U31, U32, U33, U4, U5, U511, U512, U513, U6,
-    U7, U8, U9,
+    U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U15, U16, U17, U31, U32, U33, U128, U256, U511, U512,
+    U513, U1024,
 };
 
 use crate::{

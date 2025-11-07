@@ -28,8 +28,8 @@ use types::{
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
         primitives::{
-            Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot,
-            UnixSeconds, ValidatorIndex, H256,
+            Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
+            UnixSeconds, ValidatorIndex,
         },
     },
     preset::Preset,
@@ -263,16 +263,15 @@ impl<P: Preset> EventChannels<P> {
             warn_with_peers!("unable to send head event: {error}");
         }
 
-        if head.is_valid() {
-            if let Some((_, mut chain_reorg_event)) = self
+        if head.is_valid()
+            && let Some((_, mut chain_reorg_event)) = self
                 .optimistic_reorgs
                 .remove(&(head.block_root, head.slot()))
-            {
-                chain_reorg_event.execution_optimistic = head.is_optimistic();
+        {
+            chain_reorg_event.execution_optimistic = head.is_optimistic();
 
-                if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
-                    warn_with_peers!("unable to send chain reorg event: {error}");
-                }
+            if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
+                warn_with_peers!("unable to send chain reorg event: {error}");
             }
         }
     }

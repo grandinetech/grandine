@@ -26,7 +26,7 @@ use types::{
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
-        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,

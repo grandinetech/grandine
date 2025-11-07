@@ -6,7 +6,7 @@ use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use types::{
-    phase0::primitives::{Slot, H256},
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 

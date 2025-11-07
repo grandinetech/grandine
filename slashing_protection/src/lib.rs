@@ -13,7 +13,7 @@ use ssz::{SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
 use types::{
     combined::BeaconState,
-    phase0::primitives::{Epoch, Slot, H256},
+    phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
 };
 
@@ -547,11 +547,11 @@ impl SlashingProtector {
         }
 
         let min_slot = Self::find_min_slot(&transaction, validator_id)?;
-        if let Some(min_slot) = min_slot {
-            if proposal.slot < min_slot {
-                let error = SlashingValidationError::PastProposal { proposal, min_slot };
-                return Ok(SlashingValidationOutcome::Reject(error));
-            }
+        if let Some(min_slot) = min_slot
+            && proposal.slot < min_slot
+        {
+            let error = SlashingValidationError::PastProposal { proposal, min_slot };
+            return Ok(SlashingValidationOutcome::Reject(error));
         }
 
         Self::store_proposal(&transaction, validator_id, &proposal)?;
@@ -560,7 +560,9 @@ impl SlashingProtector {
 
         debug_with_peers!(
             "inserted block proposal into database (validator_id: {}, slot: {}, signing_root: {:?})",
-            validator_id, proposal.slot, proposal.signing_root,
+            validator_id,
+            proposal.slot,
+            proposal.signing_root,
         );
 
         Ok(SlashingValidationOutcome::Accept)
@@ -700,17 +702,17 @@ impl SlashingProtector {
         &mut self,
         current_epoch: Epoch,
     ) -> Result<Option<SlashingValidationOutcome>> {
-        if let Some(stored_epoch) = self.stored_current_epoch()? {
-            if current_epoch < stored_epoch {
-                let error = SlashingValidationError::PastEpochPropoal {
-                    current_epoch,
-                    stored_epoch,
-                };
+        if let Some(stored_epoch) = self.stored_current_epoch()?
+            && current_epoch < stored_epoch
+        {
+            let error = SlashingValidationError::PastEpochPropoal {
+                current_epoch,
+                stored_epoch,
+            };
 
-                warn_with_peers!("slashing protector rejected current_epoch: {error:?}");
+            warn_with_peers!("slashing protector rejected current_epoch: {error:?}");
 
-                return Ok(Some(SlashingValidationOutcome::Reject(error)));
-            }
+            return Ok(Some(SlashingValidationOutcome::Reject(error)));
         }
 
         Ok(None)
@@ -1019,7 +1021,7 @@ mod tests {
     use duplicate::duplicate_item;
     use hex_literal::hex;
     use pubkey_cache::PubkeyCache;
-    use serde::{de::IgnoredAny, Deserialize};
+    use serde::{Deserialize, de::IgnoredAny};
     use tempfile::{Builder, TempDir};
     use test_case::test_case;
     use test_generator::test_resources;

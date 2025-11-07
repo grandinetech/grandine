@@ -12,43 +12,43 @@ use core::{
 };
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bls::PublicKeyBytes;
 use builder_api::{
     BuilderApiFormat, BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
     DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, PREFERRED_EXECUTION_GAS_LIMIT,
 };
 use bytesize::ByteSize;
-use clap::{error::ErrorKind, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum};
+use clap::{Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind};
 use derivative::Derivative;
 use derive_more::Display;
 use directories::Directories;
 use enum_iterator::Sequence;
 use eth1_api::AuthOptions;
 use eth2_libp2p::{
-    rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig},
     PeerIdSerialized,
+    rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig},
 };
 use features::Feature;
-use fork_choice_control::{StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS};
-use fork_choice_store::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS};
+use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS, StorageMode};
+use fork_choice_store::{DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
 use http_api::HttpApiConfig;
 use itertools::{EitherOrBoth, Itertools as _};
-use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
+use kzg_utils::{DEFAULT_KZG_BACKEND, KzgBackend};
 use logging::{info_with_peers, warn_with_peers};
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use p2p::{Enr, Multiaddr, NetworkConfig};
-use prometheus_metrics::{Metrics, METRICS};
+use prometheus_metrics::{METRICS, Metrics};
 use reqwest::header::HeaderValue;
 use runtime::{
-    MetricsConfig, StorageConfig, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
-    DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT, DEFAULT_LIBP2P_QUIC_IPV4_PORT,
-    DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT, DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS,
-    DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS, DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
+    DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE, DEFAULT_LIBP2P_IPV4_PORT, DEFAULT_LIBP2P_IPV6_PORT,
+    DEFAULT_LIBP2P_QUIC_IPV4_PORT, DEFAULT_LIBP2P_QUIC_IPV6_PORT, DEFAULT_METRICS_PORT,
+    DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS, DEFAULT_REQUEST_TIMEOUT, DEFAULT_TARGET_PEERS,
+    DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT, MetricsConfig, StorageConfig,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use signer::Web3SignerConfig;
 use slasher::SlasherConfig;
@@ -62,7 +62,7 @@ use types::{
     config::Config as ChainConfig,
     nonstandard::Phase,
     phase0::primitives::{
-        Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Slot, H256,
+        Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot,
     },
     preset::PresetName,
     redacting_url::RedactingUrl,

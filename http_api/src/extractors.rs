@@ -10,20 +10,20 @@ use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
 use axum::{
+    Json, RequestExt as _, RequestPartsExt as _,
     body::{Body, Bytes},
     extract::{FromRef, FromRequest, FromRequestParts, Path},
-    http::{request::Parts, Request},
-    Json, RequestExt as _, RequestPartsExt as _,
+    http::{Request, request::Parts},
 };
-use axum_extra::{extract::Query, headers::ContentType, TypedHeader};
+use axum_extra::{TypedHeader, extract::Query, headers::ContentType};
 use block_producer::ProposerData;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
 use http_api_utils::{BlockId, StateId};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use serde::{
-    de::{DeserializeOwned, DeserializeSeed},
     Deserialize,
+    de::{DeserializeOwned, DeserializeSeed},
 };
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};

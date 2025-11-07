@@ -15,7 +15,7 @@ use crate::{
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     phase0::{
         containers::{Eth1Data, PendingAttestation, Validator},
-        primitives::{Gwei, ValidatorIndex, H256},
+        primitives::{Gwei, H256, ValidatorIndex},
     },
     preset::{
         MaxAttestationsPerEpoch, Preset, ProposerLookaheadLength, SlotsPerEth1VotingPeriod,

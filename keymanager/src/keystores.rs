@@ -4,15 +4,15 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{bail, ensure, Result};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
+use anyhow::{Result, bail, ensure};
+use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use eip_2335::Keystore;
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use itertools::Itertools as _;
 use logging::{info_with_peers, warn_with_peers};
 use serde::Serialize;
 use signer::{KeyOrigin, Signer};
-use slashing_protection::{interchange_format::InterchangeFormat, SlashingProtector};
+use slashing_protection::{SlashingProtector, interchange_format::InterchangeFormat};
 use std_ext::ArcExt as _;
 use tap::{Pipe as _, TryConv as _};
 use types::phase0::primitives::H256;
@@ -552,7 +552,9 @@ mod tests {
         }
     "#;
     const KEYSTORE_PASSWORD: &str = "𝔱𝔢𝔰𝔱𝔭𝔞𝔰𝔰𝔴𝔬𝔯𝔡🔑";
-    const PUBKEY_BYTES: [u8; 48] = hex!("9612d7a727c9d0a22e185a1c768478dfe919cada9266988cb32359c11f2b7b27f4ae4040902382ae2910c15e2b420d07");
+    const PUBKEY_BYTES: [u8; 48] = hex!(
+        "9612d7a727c9d0a22e185a1c768478dfe919cada9266988cb32359c11f2b7b27f4ae4040902382ae2910c15e2b420d07"
+    );
 
     fn build_keystore_manager(
         storage_dir: Option<PathBuf>,
@@ -691,9 +693,9 @@ mod tests {
 
         // Test successful delete
 
-        let pubkey_2 = PublicKeyBytes::from(
-            hex!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        );
+        let pubkey_2 = PublicKeyBytes::from(hex!(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ));
 
         let (delete_statuses, exported_interchange) =
             manager.delete(vec![expected_pubkey, pubkey_2]).await?;
@@ -816,9 +818,9 @@ mod tests {
 
         // Test successful delete
 
-        let pubkey_2 = PublicKeyBytes::from(
-            hex!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        );
+        let pubkey_2 = PublicKeyBytes::from(hex!(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ));
 
         let (delete_statuses, exported_interchange) =
             manager.delete(vec![expected_pubkey, pubkey_2]).await?;

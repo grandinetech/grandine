@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use bls::{
-    traits::PublicKey as _, AggregatePublicKey, AggregatePublicKeyBytes, PublicKey, PublicKeyBytes,
-    SignatureBytes,
+    AggregatePublicKey, AggregatePublicKeyBytes, PublicKey, PublicKeyBytes, SignatureBytes,
+    traits::PublicKey as _,
 };
 use serde::Deserialize;
 use spec_test_utils::Case;

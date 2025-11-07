@@ -5,8 +5,8 @@ use core::{
 };
 
 use serde::{
-    de::{Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error, SeqAccess, Visitor},
 };
 use try_from_iterator::TryFromIterator;
 
@@ -58,7 +58,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Result as JsonResult};
+    use serde_json::{Result as JsonResult, json};
 
     use super::*;
 

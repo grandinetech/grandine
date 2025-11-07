@@ -1,6 +1,6 @@
 use core::ops::{Add as _, Rem as _};
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use helper_functions::{
     accessors, misc,
     mutators::{balance, decrease_balance},
