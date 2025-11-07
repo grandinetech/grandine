@@ -2,9 +2,8 @@ use core::num::NonZeroU64;
 use std::sync::Arc;
 
 use blst::{
-    blst_scalar,
+    BLST_ERROR, blst_scalar,
     min_pk::{AggregateSignature as RawAggregateSignature, Signature as RawSignature},
-    BLST_ERROR,
 };
 use derive_more::From;
 use itertools::Itertools as _;
@@ -105,7 +104,7 @@ impl SignatureTrait for Signature {
 
         let randoms = core::iter::repeat_with(|| {
             let mut scalar = blst_scalar::default();
-            let nonzero_bytes = rng.gen::<NonZeroU64>().get().to_le_bytes();
+            let nonzero_bytes = rng.r#gen::<NonZeroU64>().get().to_le_bytes();
             scalar.b[..MULTI_VERIFY_RANDOM_BYTES].copy_from_slice(&nonzero_bytes);
             scalar
         })

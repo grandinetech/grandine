@@ -7,7 +7,7 @@ use hex_literal::hex;
 use itertools::Itertools as _;
 use nonzero_ext::nonzero;
 use once_cell::sync::OnceCell;
-use serde::{de::IgnoredAny, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_with::{As, DurationMilliSeconds};
 use ssz::{ContiguousList, DynamicList, SszWrite};
 use thiserror::Error;
@@ -20,8 +20,8 @@ use crate::{
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         primitives::{
-            ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, NetworkId,
-            Slot, UnixSeconds, Version, H160, H256, H32,
+            ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H32, H160,
+            H256, NetworkId, Slot, UnixSeconds, Version,
         },
     },
     preset::{Preset, PresetName},

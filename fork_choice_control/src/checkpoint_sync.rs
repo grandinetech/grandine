@@ -1,12 +1,12 @@
 use core::time::Duration;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use helper_functions::misc;
 use http_api_utils::{BlockId, StateId};
 use logging::info_with_peers;
 use mime::APPLICATION_OCTET_STREAM;
-use reqwest::{header::ACCEPT, Client, StatusCode};
+use reqwest::{Client, StatusCode, header::ACCEPT};
 use ssz::SszRead;
 use thiserror::Error;
 use types::{

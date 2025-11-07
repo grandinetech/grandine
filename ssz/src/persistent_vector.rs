@@ -12,15 +12,15 @@ use derivative::Derivative;
 use ethereum_types::H256;
 use itertools::Itertools as _;
 use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{Error as _, SeqAccess, Visitor},
     ser::SerializeTuple as _,
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use triomphe::Arc;
 use try_from_iterator::TryFromIterator;
-use typenum::{NonZero, Unsigned, U1, U2, U4};
+use typenum::{NonZero, U1, U2, U4, Unsigned};
 
 use crate::{
     bundle_size::BundleSize,
@@ -427,13 +427,15 @@ impl<'vector, T, B: BundleSize<T>> Iterator for Leaves<'vector, T, B> {
     type Item = &'vector [T];
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.stack.pop().map(|mut node| loop {
-            match node {
-                Node::Internal(left, right) => {
-                    self.stack.push(right);
-                    node = left;
+        self.stack.pop().map(|mut node| {
+            loop {
+                match node {
+                    Node::Internal(left, right) => {
+                        self.stack.push(right);
+                        node = left;
+                    }
+                    Node::Leaf(bundle) => break bundle.as_slice(),
                 }
-                Node::Leaf(bundle) => break bundle.as_slice(),
             }
         })
     }

@@ -1,7 +1,7 @@
 use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc};
 
-use anyhow::{bail, ensure, Context as _, Error as AnyhowError, Result};
+use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
@@ -30,14 +30,14 @@ use types::{
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint},
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{Epoch, Slot, H256},
+        primitives::{Epoch, H256, Slot},
     },
     preset::Preset,
     redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use crate::{checkpoint_sync, StorageMode};
+use crate::{StorageMode, checkpoint_sync};
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 
@@ -129,7 +129,9 @@ impl<P: Preset> Storage<P> {
                         let result = if let Some(checkpoint) =
                             anchor_checkpoint_provider.checkpoint().checkpoint_synced()
                         {
-                            info_with_peers!("anchor checkpoint is already loaded from remote checkpoint sync server");
+                            info_with_peers!(
+                                "anchor checkpoint is already loaded from remote checkpoint sync server"
+                            );
                             Ok(checkpoint)
                         } else {
                             checkpoint_sync::load_finalized_from_remote(&self.config, client, &url)
@@ -722,7 +724,7 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn stored_state(&self, slot: Slot) -> Result<Option<Arc<BeaconState<P>>>> {
         let (mut state, state_block, blocks) = match self.load_state_by_iteration(slot)? {
             OptionalStateStorage::None | OptionalStateStorage::UnfinalizedOnly(_) => {
-                return Ok(None)
+                return Ok(None);
             }
             OptionalStateStorage::Full(state_storage) => state_storage,
         };

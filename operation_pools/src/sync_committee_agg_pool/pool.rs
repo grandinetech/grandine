@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bls::traits::Signature as _;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
@@ -14,7 +14,7 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::BeaconState,
-    phase0::primitives::{Slot, ValidatorIndex, H256},
+    phase0::primitives::{H256, Slot, ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
 };

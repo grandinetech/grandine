@@ -45,21 +45,21 @@ pub mod unphased {
         validate_proposer_slashing, validate_voluntary_exit, validate_voluntary_exit_with_verifier,
     };
     pub use epoch_intermediates::EpochDeltas;
-    pub use slot_processing::{process_slot, ProcessSlots};
+    pub use slot_processing::{ProcessSlots, process_slot};
     pub use state_transition::StateRootPolicy;
 
     pub(crate) use block_processing::{
-        process_block_header, process_block_header_for_gossip, process_eth1_data, process_randao,
-        process_voluntary_exit, validate_attestation_with_verifier, validate_deposits,
-        validate_proposer_slashing_with_verifier, CombinedDeposit,
+        CombinedDeposit, process_block_header, process_block_header_for_gossip, process_eth1_data,
+        process_randao, process_voluntary_exit, validate_attestation_with_verifier,
+        validate_deposits, validate_proposer_slashing_with_verifier,
     };
     pub(crate) use epoch_intermediates::ValidatorSummary;
     pub(crate) use epoch_processing::{
-        process_effective_balance_updates, process_eth1_data_reset,
+        SlashingPenalties, process_effective_balance_updates, process_eth1_data_reset,
         process_historical_roots_update, process_randao_mixes_reset, process_registry_updates,
         process_rewards_and_penalties, process_slashings_reset,
         should_process_justification_and_finalization, should_process_rewards_and_penalties,
-        weigh_justification_and_finalization, SlashingPenalties,
+        weigh_justification_and_finalization,
     };
     pub(crate) use error::Error;
 
@@ -86,7 +86,7 @@ pub mod phase0 {
     pub(crate) use block_processing::{
         count_required_signatures, process_block, process_block_for_gossip, process_deposit_data,
     };
-    pub(crate) use epoch_intermediates::{statistics, StatisticsForTransition};
+    pub(crate) use epoch_intermediates::{StatisticsForTransition, statistics};
     pub(crate) use epoch_processing::{
         epoch_report, process_epoch, process_justification_and_finalization,
     };
@@ -112,7 +112,7 @@ pub mod altair {
         verify_sync_aggregate_signature,
     };
     pub(crate) use epoch_intermediates::{
-        statistics, AltairEpochDeltas as EpochDeltas, EpochDeltasForTransition,
+        AltairEpochDeltas as EpochDeltas, EpochDeltasForTransition, statistics,
     };
     pub(crate) use epoch_processing::{
         epoch_report, process_epoch, process_inactivity_updates,

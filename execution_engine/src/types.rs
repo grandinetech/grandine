@@ -7,9 +7,9 @@ use std::sync::Arc;
 use ethereum_types::H64;
 use libp2p_identity::PeerId;
 use serde::{
+    Deserialize, Deserializer, Serialize,
     de::Visitor,
     ser::{Error as _, SerializeSeq as _},
-    Deserialize, Deserializer, Serialize,
 };
 use ssz::{
     ByteList, ByteVector, ContiguousList, ContiguousVector, SszHash as _, SszReadDefault,
@@ -38,8 +38,8 @@ use types::{
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{
-            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, UnixSeconds,
-            ValidatorIndex, H256,
+            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
+            UnixSeconds, ValidatorIndex,
         },
     },
     preset::Preset,
@@ -857,17 +857,17 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
             N: Unsigned,
             T: SszReadDefault,
         {
-            if let Some(prev_request_type) = prev_request_type {
-                if *prev_request_type >= request_type {
-                    return Err(serde::de::Error::invalid_value(
-                        serde::de::Unexpected::Bytes(bytes.as_ref()),
-                        &format!(
-                            "{} requests to be unique and in ascending order",
-                            request_type.label(),
-                        )
-                        .as_str(),
-                    ));
-                }
+            if let Some(prev_request_type) = prev_request_type
+                && *prev_request_type >= request_type
+            {
+                return Err(serde::de::Error::invalid_value(
+                    serde::de::Unexpected::Bytes(bytes.as_ref()),
+                    &format!(
+                        "{} requests to be unique and in ascending order",
+                        request_type.label(),
+                    )
+                    .as_str(),
+                ));
             }
 
             *prev_request_type = Some(request_type);
@@ -1086,7 +1086,7 @@ impl<P: Preset> From<Arc<DataColumnSidecar<P>>> for BlockOrDataColumnSidecar<P> 
 mod tests {
     use anyhow::Result;
     use hex_literal::hex;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use types::{
         electra::containers::ConsolidationRequest, phase0::primitives::H160, preset::Mainnet,
     };
@@ -1128,8 +1128,8 @@ mod tests {
     }
 
     #[test]
-    fn test_engine_get_payload_v1_response_with_extra_fields_deserialization_and_conversion(
-    ) -> Result<()> {
+    fn test_engine_get_payload_v1_response_with_extra_fields_deserialization_and_conversion()
+    -> Result<()> {
         let json = sample_bellatrix_payload_with_extra_fields_json();
         let response = serde_json::from_value::<EngineGetPayloadV1Response<Mainnet>>(json)?;
         let actual_payload = WithBlobsAndMev::from(response);

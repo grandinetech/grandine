@@ -18,16 +18,16 @@ use types::{
     phase0::{
         consts::GENESIS_EPOCH,
         containers::AttestationData,
-        primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::{Attestation as _, SignedBeaconBlock as _},
 };
 
 use crate::{
+    ValidatorVote,
     statistics::Error,
     votes::{ValidatorVotes, VoteReport},
-    ValidatorVote,
 };
 
 // `AttestationPerformance::for_previous_epoch` has to process slot reports in chronological order.

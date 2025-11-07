@@ -21,8 +21,8 @@ use types::{
 };
 
 use crate::{
-    download_manager::{DownloadManager, Error as DownloadError},
     Eth1Cache,
+    download_manager::{DownloadManager, Error as DownloadError},
 };
 
 const BLOCK_DOWNLOAD_RETRY_INTERVAL: Duration = Duration::from_secs(5);

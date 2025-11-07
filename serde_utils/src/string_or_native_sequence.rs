@@ -9,8 +9,8 @@ use core::{
 
 use itertools::Itertools as _;
 use serde::{
-    de::{Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error, SeqAccess, Visitor},
 };
 use try_from_iterator::TryFromIterator;
 
@@ -61,7 +61,7 @@ pub fn serialize<S: Serializer>(
 #[cfg(test)]
 mod tests {
     use bincode::{DefaultOptions, Options as _, Result as BincodeResult};
-    use serde_json::{json, Result as JsonResult};
+    use serde_json::{Result as JsonResult, json};
 
     use super::*;
 

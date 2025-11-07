@@ -5,8 +5,8 @@ use core::{
 
 use num_traits::Num;
 use serde::{
-    de::{Error as DeserializeError, Visitor},
     Deserializer, Serializer,
+    de::{Error as DeserializeError, Visitor},
 };
 
 use crate::shared;
@@ -59,7 +59,7 @@ pub fn serialize<S: Serializer>(number: impl LowerHex, serializer: S) -> Result<
 #[cfg(test)]
 mod tests {
     use num_traits::{One as _, Zero as _};
-    use serde_json::{value::Serializer, Result, Value};
+    use serde_json::{Result, Value, value::Serializer};
     use ssz::Uint256;
     use test_case::test_case;
 

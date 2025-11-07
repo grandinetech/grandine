@@ -1,7 +1,7 @@
 use core::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use arc_swap::ArcSwap;
 use bls::PublicKeyBytes;
 use helper_functions::{misc, signing::SignForAllForks};
@@ -12,8 +12,8 @@ use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use reqwest::{
-    header::{HeaderValue, ACCEPT, CONTENT_TYPE},
     Client, Response, StatusCode,
+    header::{ACCEPT, CONTENT_TYPE, HeaderValue},
 };
 use serde::de::DeserializeOwned;
 use ssz::{ContiguousList, SszHash as _, SszRead, SszWrite as _};
@@ -25,7 +25,7 @@ use types::{
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{ExecutionBlockHash, Slot, UnixSeconds, H256},
+        primitives::{ExecutionBlockHash, H256, Slot, UnixSeconds},
     },
     preset::Preset,
     redacting_url::RedactingUrl,
@@ -33,10 +33,10 @@ use types::{
 };
 
 use crate::{
+    BuilderApiFormat, BuilderConfig,
     combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
     consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
     unphased::containers::SignedValidatorRegistrationV1,
-    BuilderApiFormat, BuilderConfig,
 };
 
 const DATE_MS_HEADER: &str = "Date-Milliseconds";
@@ -528,8 +528,8 @@ mod tests {
     use types::preset::Mainnet;
 
     use crate::{
-        config::{DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH},
         BuilderApi, BuilderConfig,
+        config::{DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH},
     };
 
     use super::*;

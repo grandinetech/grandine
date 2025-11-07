@@ -17,7 +17,9 @@ pub(crate) enum Error {
     BlobsForPreDenebBlock { root: H256, slot: Slot },
     #[error("committee index is out of bounds")]
     CommitteeIndexOutOfBounds,
-    #[error("aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}")]
+    #[error(
+        "aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}"
+    )]
     CommitteeLengthMismatch {
         aggregation_bitlist_length: usize,
         committee_length: usize,
@@ -38,7 +40,9 @@ pub(crate) enum Error {
     NoActiveValidators,
     #[error("no committee attesters for {index} committee")]
     NoCommitteeAttesters { index: CommitteeIndex },
-    #[error("aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}")]
+    #[error(
+        "aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}"
+    )]
     ParticipantsCountMismatch {
         aggregation_bitlist_length: usize,
         participants_count: usize,
