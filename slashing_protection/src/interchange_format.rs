@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bls::PublicKeyBytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use types::phase0::primitives::{Epoch, Slot, H256};
+use types::phase0::primitives::{Epoch, H256, Slot};
 
 const INTERCHANGE_FORMAT_VERSION: InterchangeFormatVersion = 5;
 

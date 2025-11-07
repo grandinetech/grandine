@@ -1,4 +1,4 @@
-pub use keystores::{load_key_storage, load_key_storage_password, ValidatingPubkey};
+pub use keystores::{ValidatingPubkey, load_key_storage, load_key_storage_password};
 pub use misc::OperationStatus as KeymanagerOperationStatus;
 pub use remote_keys::{ListedRemoteKey, RemoteKey};
 pub use types::bellatrix::primitives::Gas;

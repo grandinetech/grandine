@@ -1,5 +1,5 @@
+use bls_core::{COMPRESSED_SIZE, impl_public_key_bytes};
 use bls12_381::G1Affine;
-use bls_core::{impl_public_key_bytes, COMPRESSED_SIZE};
 use derive_more::derive::AsRef;
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;

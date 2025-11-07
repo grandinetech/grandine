@@ -4,7 +4,7 @@
               See <https://github.com/rust-lang/rust/issues/57274>."
 )]
 
-use features::{log, Feature};
+use features::{Feature, log};
 //use log::Level;
 use tracing_test::traced_test;
 

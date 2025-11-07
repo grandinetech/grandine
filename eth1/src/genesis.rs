@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use chrono::{Local, TimeZone as _};
 use eth1_api::{DepositEvent, Eth1Block};
 use futures::stream::{Stream, TryStreamExt as _};

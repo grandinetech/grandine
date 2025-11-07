@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bls::{PublicKeyBytes, SignatureBytes};
 use helper_functions::{
     accessors::{
@@ -32,7 +32,7 @@ use types::{
             Attestation, AttestationData, BeaconBlockHeader, Deposit, DepositData, DepositMessage,
             ProposerSlashing, SignedVoluntaryExit,
         },
-        primitives::{DepositIndex, ValidatorIndex, H256},
+        primitives::{DepositIndex, H256, ValidatorIndex},
     },
     preset::{Preset, SlotsPerEth1VotingPeriod},
     traits::{

@@ -1,10 +1,10 @@
 use std::{
     alloc::{self, Layout},
-    ffi::{c_char, c_void, CStr},
+    ffi::{CStr, c_char, c_void},
 };
 
 use allocator as _;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::{Error as ClapError, Parser};
 use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
@@ -18,10 +18,10 @@ use types::{
     electra::containers::ExecutionRequests, phase0::primitives::ExecutionBlockNumber,
     preset::Mainnet,
 };
-use web3::types::{BlockNumber, H256, H64};
+use web3::types::{BlockNumber, H64, H256};
 
 use crate::{
-    arrays::{CH256, CH64},
+    arrays::{CH64, CH256},
     containers::{
         CBlobAndProofV1, CBlobAndProofV2, CEngineGetPayloadV2Response, CEngineGetPayloadV3Response,
         CEngineGetPayloadV4Response, CEngineGetPayloadV5Response, CExecutionPayloadV1,
@@ -30,7 +30,7 @@ use crate::{
         CPayloadAttributesV3, CPayloadStatusV1,
     },
     generic::{CErrorMessage, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
-    layout::{repeat_layout, CLayout},
+    layout::{CLayout, repeat_layout},
 };
 
 mod arrays;
@@ -306,7 +306,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn grandine_set_execution_layer_adapter(adapter: CEmbedAdapter) -> CResult<u8> {
     let res = eth1_api::set_adapter(Box::new(adapter));
 
@@ -316,7 +316,7 @@ pub extern "C" fn grandine_set_execution_layer_adapter(adapter: CEmbedAdapter) -
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn grandine_vec_alloc(item_layout: CLayout, size: usize) -> *mut c_void {
     let Ok(item_layout): Result<Layout, _> = item_layout.try_into() else {
         return core::ptr::null_mut();
@@ -333,17 +333,17 @@ pub extern "C" fn grandine_vec_alloc(item_layout: CLayout, size: usize) -> *mut 
 
 /// Copies string to a pointer managed by grandine.
 /// CErrorMessage must be passed back to grandine, where it will be automatically cleaned up.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn grandine_error_message(str: *const c_char) -> CErrorMessage {
     CErrorMessage::new(str)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn grandine_shutdown() {
     shutdown();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn grandine_run(argc: u64, argv: *const *const c_char) -> u64 {
     unsafe fn try_run(argc: u64, argv: *const *const c_char) -> Result<()> {
         let args = std::iter::once("").chain(

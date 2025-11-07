@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, bail};
 use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
@@ -110,10 +110,9 @@ fn current_state<P: Preset, W: Wait>(
     if let Some(state) = controller.state_before_or_at_slot(
         target.root,
         misc::compute_start_slot_at_epoch::<P>(target.epoch),
-    ) {
-        if accessors::get_current_epoch(&state) == target.epoch {
-            return state;
-        }
+    ) && accessors::get_current_epoch(&state) == target.epoch
+    {
+        return state;
     }
 
     match controller.preprocessed_state_at_current_slot_blocking() {

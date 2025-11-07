@@ -1,7 +1,7 @@
 use core::{ops::Mul as _, time::Duration};
 
 use derivative::Derivative;
-use kzg_utils::{KzgBackend, DEFAULT_KZG_BACKEND};
+use kzg_utils::{DEFAULT_KZG_BACKEND, KzgBackend};
 use types::config::Config as ChainConfig;
 
 pub const DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS: u64 = 1500;

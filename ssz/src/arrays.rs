@@ -1,15 +1,15 @@
 // This contains impls for types that correspond to the `BytesN` types from the SSZ specification.
 // They are not basic types, so they are not packed.
 
-use ethereum_types::{H160, H256, H32};
+use ethereum_types::{H32, H160, H256};
 use primitive_types::H384;
 use typenum::{U1, U48};
 
 use crate::{
+    BytesToDepth, MerkleTree,
     error::ReadError,
     porcelain::{SszHash, SszRead, SszSize, SszWrite},
     size::Size,
-    BytesToDepth, MerkleTree,
 };
 
 impl SszSize for H32 {

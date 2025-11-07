@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use anyhow::{bail, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, bail};
 use database::Database;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
@@ -20,11 +20,11 @@ use types::{
 };
 
 use crate::{
-    storage::{
-        get, serialize, BlockRootBySlot, Error, FinalizedBlockByRoot, SlotByStateRoot,
-        StateByBlockRoot,
-    },
     Storage,
+    storage::{
+        BlockRootBySlot, Error, FinalizedBlockByRoot, SlotByStateRoot, StateByBlockRoot, get,
+        serialize,
+    },
 };
 
 const ARCHIVER_CHECKPOINT_KEY: &str = "carchiver";
@@ -54,11 +54,13 @@ impl<P: Preset> Storage<P> {
         let anchor_block_root = anchor_block.message().hash_tree_root();
 
         // check whether archiving was interrupted
-        if let Some(slot) = get_latest_archived_slot(&self.database)? {
-            if self.stored_state(slot)?.is_some() && slot > start_slot && slot <= end_slot {
-                start_slot = slot;
-                info_with_peers!("resuming back-sync archival from {slot} slot");
-            }
+        if let Some(slot) = get_latest_archived_slot(&self.database)?
+            && self.stored_state(slot)?.is_some()
+            && slot > start_slot
+            && slot <= end_slot
+        {
+            start_slot = slot;
+            info_with_peers!("resuming back-sync archival from {slot} slot");
         }
 
         let mut state = if start_slot == anchor_block_slot {
@@ -104,25 +106,25 @@ impl<P: Preset> Storage<P> {
             let append_state = misc::is_epoch_start::<P>(slot)
                 && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
 
-            if let Some(block) = previous_block.as_ref() {
-                if append_state {
-                    debug_with_peers!("back-synced state in {slot} is ready for storage");
+            if let Some(block) = previous_block.as_ref()
+                && append_state
+            {
+                debug_with_peers!("back-synced state in {slot} is ready for storage");
 
-                    let block_root = block.message().hash_tree_root();
+                let block_root = block.message().hash_tree_root();
 
-                    batch.push(serialize(StateByBlockRoot(block_root), &state)?);
-                    batch.push(serialize(ARCHIVER_CHECKPOINT_KEY, slot)?);
+                batch.push(serialize(StateByBlockRoot(block_root), &state)?);
+                batch.push(serialize(ARCHIVER_CHECKPOINT_KEY, slot)?);
 
-                    states_in_batch += 1;
+                states_in_batch += 1;
 
-                    if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
-                        info_with_peers!("archiving back-sync data up to {slot} slot");
+                if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
+                    info_with_peers!("archiving back-sync data up to {slot} slot");
 
-                        self.database.put_batch(batch)?;
+                    self.database.put_batch(batch)?;
 
-                        batch = vec![];
-                        states_in_batch = 0;
-                    }
+                    batch = vec![];
+                    states_in_batch = 0;
                 }
             }
         }

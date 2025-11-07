@@ -11,7 +11,7 @@
 use core::{panic::AssertUnwindSafe, sync::atomic::AtomicBool};
 use std::{
     collections::HashSet,
-    sync::{mpsc::Sender, Arc},
+    sync::{Arc, mpsc::Sender},
     thread::{Builder, JoinHandle},
     time::Instant,
 };
@@ -34,7 +34,7 @@ use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tracing::{instrument, Span};
+use tracing::{Span, instrument};
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
@@ -45,7 +45,7 @@ use types::{
     nonstandard::ValidationOutcome,
     phase0::{
         containers::BeaconBlockHeader,
-        primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
+        primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,

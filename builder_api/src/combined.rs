@@ -284,7 +284,7 @@ impl<P: Preset> ExecutionPayloadAndBlobsBundle<P> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Result, Value};
+    use serde_json::{Result, Value, json};
     use test_case::test_case;
     use types::preset::Mainnet;
 

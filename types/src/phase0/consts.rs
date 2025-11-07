@@ -2,9 +2,9 @@ use core::num::{NonZeroU64, NonZeroUsize};
 
 use hex_literal::hex;
 use nonzero_ext::nonzero;
-use typenum::{U16, U32, U4, U64};
+use typenum::{U4, U16, U32, U64};
 
-use crate::phase0::primitives::{DomainType, Epoch, Slot, H32};
+use crate::phase0::primitives::{DomainType, Epoch, H32, Slot};
 
 pub const ATTESTATION_PROPAGATION_SLOT_RANGE: u64 = 32;
 pub const BASE_REWARDS_PER_EPOCH: NonZeroU64 = nonzero!(4_u64);

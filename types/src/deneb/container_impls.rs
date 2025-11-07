@@ -11,7 +11,7 @@ use crate::{
         },
         primitives::KzgCommitment,
     },
-    phase0::primitives::{Slot, H256},
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 

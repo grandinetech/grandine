@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Result;
-use bls::{traits::Signature as _, PublicKeyBytes};
+use bls::{PublicKeyBytes, traits::Signature as _};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;

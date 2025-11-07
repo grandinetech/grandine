@@ -10,7 +10,7 @@ use std::sync::Arc;
 use allocator as _;
 use criterion::{Criterion, Throughput};
 use easy_ext::ext;
-use eth2_cache_utils::{goerli, holesky, LazyBeaconState};
+use eth2_cache_utils::{LazyBeaconState, goerli, holesky};
 use helper_functions::accessors;
 use operation_pools::AttestationPacker;
 use std_ext::ArcExt as _;

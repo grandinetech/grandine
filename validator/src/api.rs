@@ -9,23 +9,23 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{ensure, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, ensure};
 use axum::{
+    Json, RequestExt as _, RequestPartsExt as _, Router,
     body::Body,
     extract::{
-        rejection::JsonRejection, FromRef, FromRequest, FromRequestParts, Path as RequestPath,
-        State,
+        FromRef, FromRequest, FromRequestParts, Path as RequestPath, State,
+        rejection::JsonRejection,
     },
-    http::{request::Parts, Request, StatusCode},
+    http::{Request, StatusCode, request::Parts},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Json, RequestExt as _, RequestPartsExt as _, Router,
 };
 use axum_extra::{
-    extract::{Query, QueryRejection},
-    headers::{authorization::Bearer, Authorization},
     TypedHeader,
+    extract::{Query, QueryRejection},
+    headers::{Authorization, authorization::Bearer},
 };
 use bls::PublicKeyBytes;
 use constant_time_eq::constant_time_eq;
@@ -39,7 +39,7 @@ use keymanager::{
 };
 use logging::{debug_with_peers, info_with_peers};
 use prometheus_metrics::Metrics;
-use serde::{de::DeserializeOwned, Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 use signer::{Signer, SigningMessage};
 use ssz::H256;
 use std_ext::ArcExt as _;
@@ -878,7 +878,7 @@ mod tests {
     use anyhow::Result as AnyhowResult;
     use axum::extract::rejection::MissingJsonContentType;
     use itertools::Itertools as _;
-    use serde_json::{json, Result, Value};
+    use serde_json::{Result, Value, json};
     use tempfile::{Builder, NamedTempFile};
     use test_case::test_case;
 
@@ -911,10 +911,12 @@ mod tests {
 
     #[test]
     fn test_api_token_load_non_existing_file() {
-        assert!(ApiToken::load(Path::new("nonexisting-token.txt"))
-            .expect_err("opening non-existing file should fail")
-            .to_string()
-            .contains("failed to open file `nonexisting-token.txt`"))
+        assert!(
+            ApiToken::load(Path::new("nonexisting-token.txt"))
+                .expect_err("opening non-existing file should fail")
+                .to_string()
+                .contains("failed to open file `nonexisting-token.txt`")
+        )
     }
 
     #[test]

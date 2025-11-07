@@ -3,7 +3,7 @@ use core::convert::Infallible;
 use thiserror::Error;
 
 use crate::{
-    consts::{Offset, BYTES_PER_LENGTH_OFFSET},
+    consts::{BYTES_PER_LENGTH_OFFSET, Offset},
     uint256::Uint256,
 };
 
@@ -13,9 +13,7 @@ pub enum ReadError {
     FixedSizeMismatch { expected: usize, actual: usize },
     #[error("offset {offset} does not fit in usize")]
     OffsetDoesNotFitInUsize { offset: Offset },
-    #[error(
-        "offsets {start} and {end} are not valid subslice bounds for slice of length {length}"
-    )]
+    #[error("offsets {start} and {end} are not valid subslice bounds for slice of length {length}")]
     OffsetsNotValidSubsliceBounds {
         start: usize,
         end: usize,

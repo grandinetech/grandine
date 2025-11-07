@@ -2,7 +2,7 @@
 
 [package]
 name = 'zkvm_guest_ziren'
-edition = '2021'
+edition = '2024'
 authors = ["Grandine <info@grandine.io>"]
 
 [dependencies]

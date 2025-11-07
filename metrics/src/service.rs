@@ -6,7 +6,7 @@ use bls::PublicKeyBytes;
 use derive_more::Debug;
 use directories::Directories;
 use eth1_api::{Eth1ApiToMetrics, Eth1Metrics, RealController};
-use futures::{channel::mpsc::UnboundedReceiver, future::Either, select, StreamExt as _};
+use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, future::Either, select};
 use helper_functions::misc;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::SyncToMetrics;

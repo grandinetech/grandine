@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use spec_test_utils::Case;
 use ssz::{SszHash, SszReadDefault, SszWrite};
 

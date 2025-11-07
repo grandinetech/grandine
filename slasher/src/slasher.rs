@@ -25,10 +25,10 @@ use types::{
 };
 
 use crate::{
+    SlasherConfig, SlasherToValidator, ValidatorToSlasher,
     attestations::Attestations,
     blocks::Blocks,
     status::{ExplainedAttesterSlashing, ExplainedProposerSlashing},
-    SlasherConfig, SlasherToValidator, ValidatorToSlasher,
 };
 
 #[derive(Debug, Error)]

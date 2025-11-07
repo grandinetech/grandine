@@ -1,7 +1,7 @@
 use core::cmp::Ordering;
 
 use anyhow::Result;
-use bls::{traits::SignatureBytes as _, SignatureBytes};
+use bls::{SignatureBytes, traits::SignatureBytes as _};
 use types::{
     config::Config,
     electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},

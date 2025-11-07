@@ -6,7 +6,7 @@ use blst::min_pk::SecretKey as RawSecretKey;
 
 use super::{
     public_key::PublicKey,
-    secret_key_bytes::{SecretKeyBytes, SIZE},
+    secret_key_bytes::{SIZE, SecretKeyBytes},
     signature::Signature,
 };
 

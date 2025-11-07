@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
 use axum::{
+    Router,
     extract::{FromRef, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Router,
 };
 use http_api_utils::{ApiError, ApiMetrics};
 use logging::info_with_peers;

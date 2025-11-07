@@ -10,7 +10,7 @@
 use core::time::Duration;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use cached::{Cached as _, TimedSizedCache};
 use logging::warn_with_peers;
 use parking_lot::{Mutex, MutexGuard};
@@ -182,9 +182,11 @@ mod tests {
 
         match result {
             Err(error) => {
-                assert!(error
-                    .to_string()
-                    .contains("could not obtain state at slot cache lock"))
+                assert!(
+                    error
+                        .to_string()
+                        .contains("could not obtain state at slot cache lock")
+                )
             }
             _ => panic!("expected an error due to lock timeout"),
         }

@@ -20,7 +20,7 @@ use types::{
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
-        primitives::{Slot, UnixSeconds, H256},
+        primitives::{H256, Slot, UnixSeconds},
     },
     preset::{Mainnet, Minimal, Preset},
     traits::{BeaconState as _, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},

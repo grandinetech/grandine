@@ -3,7 +3,7 @@ use core::num::NonZeroU64;
 use hex_literal::hex;
 use nonzero_ext::nonzero;
 use static_assertions::const_assert_eq;
-use typenum::{assert_type_eq, U1, U105, U2, U20, U22, U23, U24, U4, U54, U55};
+use typenum::{U1, U2, U4, U20, U22, U23, U24, U54, U55, U105, assert_type_eq};
 
 use crate::{
     phase0::primitives::{DomainType, H32},

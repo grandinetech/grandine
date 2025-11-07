@@ -115,11 +115,7 @@ impl Size {
 }
 
 const fn min_usize(a: usize, b: usize) -> usize {
-    if a < b {
-        a
-    } else {
-        b
-    }
+    if a < b { a } else { b }
 }
 
 #[cfg(test)]

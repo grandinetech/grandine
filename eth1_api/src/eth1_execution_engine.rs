@@ -19,7 +19,7 @@ use types::{
 };
 use web3::types::U64;
 
-use crate::{eth1_api::Eth1Api, WithClientVersions};
+use crate::{WithClientVersions, eth1_api::Eth1Api};
 
 #[derive(Constructor)]
 pub struct Eth1ExecutionEngine<P: Preset> {

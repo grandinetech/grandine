@@ -7,8 +7,8 @@ use crate::{
     phase0::{
         consts::DepositContractTreeDepth,
         primitives::{
-            CommitteeIndex, DepositIndex, Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex,
-            Version, H256,
+            CommitteeIndex, DepositIndex, Epoch, ExecutionBlockHash, Gwei, H256, Slot,
+            ValidatorIndex, Version,
         },
     },
     preset::Preset,

@@ -16,7 +16,9 @@ pub enum Error {
     PasswordCountMismatch,
     #[error("key is read-only")]
     ReadOnly,
-    #[error("password for decrypting keystores is missing, run Grandine with --keystore-storage-password-file to provide it")]
+    #[error(
+        "password for decrypting keystores is missing, run Grandine with --keystore-storage-password-file to provide it"
+    )]
     StoragePasswordNotProvided,
 }
 

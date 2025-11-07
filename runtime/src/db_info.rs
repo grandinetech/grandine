@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 use database::DatabaseMode;
 
-use crate::commands::AppDatabase;
 use crate::StorageConfig;
+use crate::commands::AppDatabase;
 pub fn print(
     storage_config: &StorageConfig,
     database: AppDatabase,

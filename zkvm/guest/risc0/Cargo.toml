@@ -1,6 +1,6 @@
 [package]
 name = 'zkvm_guest_risc0'
-edition = { workspace = true }
+edition = '2024'
 authors = ["Grandine <info@grandine.io>"]
 
 [lints]

@@ -5,6 +5,7 @@ use test_generator::test_resources;
 use types::{fulu::primitives::Cell, preset::Mainnet};
 
 use crate::{
+    KzgBackend,
     eip_4844::{
         blob_to_kzg_commitment, compute_blob_kzg_proof, compute_kzg_proof, verify_blob_kzg_proof,
         verify_blob_kzg_proof_batch, verify_kzg_proof,
@@ -14,7 +15,6 @@ use crate::{
         verify_cell_kzg_proof_batch,
     },
     spec_tests::{containers, utils::deserialize},
-    KzgBackend,
 };
 
 fn available_backends() -> impl Iterator<Item = KzgBackend> {

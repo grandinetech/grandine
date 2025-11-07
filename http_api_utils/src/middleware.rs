@@ -1,15 +1,15 @@
 use core::{error::Error as StdError, net::SocketAddr};
 
 use axum::{
+    Extension,
     body::{Body, Bytes, HttpBody},
     extract::{ConnectInfo, MatchedPath, OriginalUri},
     http::{
-        header::{HeaderValue, CONTENT_TYPE},
         Request, Uri,
+        header::{CONTENT_TYPE, HeaderValue},
     },
     middleware::Next,
     response::{IntoResponse as _, Response},
-    Extension,
 };
 use http_body_util::BodyExt as _;
 use logging::info_with_peers;

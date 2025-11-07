@@ -1,6 +1,6 @@
 use core::ops::{Add as _, Index as _, Rem as _};
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},

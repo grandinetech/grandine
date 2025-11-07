@@ -1,4 +1,4 @@
-use anyhow::{bail, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, bail};
 use ssz::{ContiguousList, Ssz};
 use thiserror::Error;
 use typenum::U4294967296;

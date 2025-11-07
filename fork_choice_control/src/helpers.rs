@@ -24,7 +24,7 @@ use types::{
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
-        primitives::{Epoch, ExecutionBlockHash, Slot, UnixSeconds, ValidatorIndex, H256},
+        primitives::{Epoch, ExecutionBlockHash, H256, Slot, UnixSeconds, ValidatorIndex},
     },
     preset::{Minimal, Preset},
     traits::SignedBeaconBlock as _,
@@ -395,9 +395,11 @@ impl<P: Preset> Context<P> {
                     block_or_sidecar,
                     data_column_identifiers,
                 }) => {
-                    assert!(data_column_identifiers
-                        .iter()
-                        .all(|id| id.block_root == block_root));
+                    assert!(
+                        data_column_identifiers
+                            .iter()
+                            .all(|id| id.block_root == block_root)
+                    );
                     assert!(!data_column_identifiers.is_empty());
 
                     match block_or_sidecar {

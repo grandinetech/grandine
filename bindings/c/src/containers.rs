@@ -16,7 +16,7 @@ use types::{
 };
 
 use crate::{
-    arrays::{CH160, CH256, CH384, CH64},
+    arrays::{CH64, CH160, CH256, CH384},
     generic::{CErrorMessage, COption, CVec},
 };
 
@@ -543,7 +543,9 @@ impl TryInto<RawExecutionRequests<Mainnet>> for CExecutionRequests {
 
             if let Some(prev_request_type) = prev_request_type {
                 if prev_request_type >= ty {
-                    anyhow::bail!("Invalid execution request - requests need to have unique types and be in ascending order");
+                    anyhow::bail!(
+                        "Invalid execution request - requests need to have unique types and be in ascending order"
+                    );
                 }
             }
             prev_request_type = Some(ty);

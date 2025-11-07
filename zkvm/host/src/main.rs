@@ -14,7 +14,7 @@ use database::Database;
 use pubkey_cache::PubkeyCache;
 use reqwest::IntoUrl;
 use snap::raw::Decoder as SnappyDecoder;
-use ssz::{SszHash as _, SszRead as _, SszWrite as _, H256};
+use ssz::{H256, SszHash as _, SszRead as _, SszWrite as _};
 use transition_functions::combined::untrusted_state_transition as state_transition;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},

@@ -30,7 +30,7 @@ use static_assertions::assert_type_eq_all;
 use typenum::{Add1, Unsigned as _};
 
 use crate::{
-    consts::{Endianness, BYTES_PER_CHUNK},
+    consts::{BYTES_PER_CHUNK, Endianness},
     contiguous_vector::ContiguousVector,
     porcelain::{SszHash, SszWrite},
     type_level::{ContiguousVectorElements, MerkleElements, ProofSize},
@@ -399,11 +399,8 @@ mod tests {
         let expected_proof = [ff_hash_0, ff_hash_1, ff_hash_2, hash_of_length(capacity)].into();
         let expected_proofs = core::iter::repeat_n(expected_proof, capacity);
 
-        let actual_proofs = MerkleTree::<Depth>::default().extend_and_construct_proofs(
-            chunks,
-            chunk_indices,
-            proof_indices,
-        );
+        let mut tree = MerkleTree::<Depth>::default();
+        let actual_proofs = tree.extend_and_construct_proofs(chunks, chunk_indices, proof_indices);
 
         itertools::assert_equal(actual_proofs, expected_proofs);
     }

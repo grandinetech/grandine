@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fork_choice_control::{PoolMessage, Wait};
-use futures::{channel::mpsc::UnboundedReceiver, StreamExt as _};
+use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver};
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use types::preset::Preset;

@@ -6,7 +6,7 @@ use bitvec::vec::BitVec;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
-use futures::{channel::mpsc::UnboundedReceiver, select, StreamExt as _};
+use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, select};
 use helper_functions::{electra, misc, phase0};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, warn_with_peers};

@@ -13,7 +13,7 @@ pub use crate::{
 };
 
 #[cfg(feature = "embed")]
-pub use eth1_api::{set_adapter, EmbedAdapter, RawForkChoiceUpdatedResponse};
+pub use eth1_api::{EmbedAdapter, RawForkChoiceUpdatedResponse, set_adapter};
 
 mod auth;
 mod deposit_event;

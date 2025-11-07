@@ -1,5 +1,5 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use pico_sdk::{client::DefaultProverClient, init_logger};
 use pico_vm::{
     configs::stark_config::KoalaBearPoseidon2,

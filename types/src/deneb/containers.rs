@@ -23,8 +23,8 @@ use crate::{
             SignedBeaconBlockHeader, SignedVoluntaryExit,
         },
         primitives::{
-            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Slot, Uint256, UnixSeconds,
-            ValidatorIndex, H256,
+            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot, Uint256,
+            UnixSeconds, ValidatorIndex,
         },
     },
     preset::Preset,

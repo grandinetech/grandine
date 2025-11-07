@@ -15,11 +15,11 @@ use tokio::runtime::Runtime;
 use tracing::Level;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
+    EnvFilter, Registry,
     filter::LevelFilter,
     fmt::{self, format::Writer, time::FormatTime},
     prelude::*,
     reload::{self, Handle},
-    EnvFilter, Registry,
 };
 use types::redacting_url::RedactingUrl;
 

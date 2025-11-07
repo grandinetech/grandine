@@ -418,7 +418,8 @@ mod tests {
             .as_secs()
             .add(1);
 
-        let mut ticks = ticks(&Config::mainnet(), genesis_time)?;
+        let config = Config::mainnet();
+        let mut ticks = ticks(&config, genesis_time)?;
         let mut next_tick = || ticks.next().now_or_never().flatten().transpose();
 
         assert_eq!(next_tick()?, None);
@@ -491,7 +492,8 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs();
 
-        let mut ticks = ticks(&Config::mainnet(), genesis_time)?;
+        let config = Config::mainnet();
+        let mut ticks = ticks(&config, genesis_time)?;
         let mut next_tick = || ticks.next().now_or_never().flatten().transpose();
 
         assert_eq!(next_tick()?, None);

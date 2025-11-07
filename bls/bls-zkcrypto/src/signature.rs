@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use bls12_381::{
-    hash_to_curve::{ExpandMsgXmd, HashToCurve},
-    pairing, G1Affine, G1Projective, G2Affine, G2Projective, Scalar,
-};
 use bls_core::{consts::DOMAIN_SEPARATION_TAG, error::Error, traits::Signature as SignatureTrait};
+use bls12_381::{
+    G1Affine, G1Projective, G2Affine, G2Projective, Scalar,
+    hash_to_curve::{ExpandMsgXmd, HashToCurve},
+    pairing,
+};
 use derive_more::From;
 use ff::Field;
 use itertools::Itertools as _;

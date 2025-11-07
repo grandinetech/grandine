@@ -3,8 +3,8 @@ use core::fmt::{Debug, Formatter, Result as FmtResult};
 use derivative::Derivative;
 use derive_more::From;
 use ethereum_types::H256;
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
-use typenum::{Unsigned, U1};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
+use typenum::{U1, Unsigned};
 
 use crate::{
     contiguous_list::ContiguousList,

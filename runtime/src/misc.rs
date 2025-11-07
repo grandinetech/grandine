@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bytesize::ByteSize;
 use database::{Database, DatabaseMode, RestartMessage};
 use directories::Directories;

@@ -22,7 +22,7 @@ use types::{
     preset::Preset,
 };
 
-use crate::{error::KzgError, trusted_setup, KzgBackend};
+use crate::{KzgBackend, error::KzgError, trusted_setup};
 
 #[instrument(level = "debug", skip_all)]
 pub fn verify_cell_kzg_proof_batch<'a, P: Preset>(

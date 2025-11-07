@@ -1,6 +1,6 @@
 use std::{io::ErrorKind, path::Path};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use grandine_version::APPLICATION_NAME;
 use logging::info_with_peers;
 use semver::{Version, VersionReq};

@@ -1,7 +1,7 @@
 use blst::min_pk::{AggregatePublicKey as RawAggregatePublicKey, PublicKey as RawPublicKey};
 use derive_more::From;
 
-use bls_core::{error::Error, traits::PublicKey as PublicKeyTrait, DECOMPRESSED_SIZE};
+use bls_core::{DECOMPRESSED_SIZE, error::Error, traits::PublicKey as PublicKeyTrait};
 
 use super::public_key_bytes::PublicKeyBytes;
 

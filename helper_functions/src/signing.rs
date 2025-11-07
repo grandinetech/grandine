@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{traits::SecretKey as _, PublicKey, SecretKey, Signature, SignatureBytes};
+use bls::{PublicKey, SecretKey, Signature, SignatureBytes, traits::SecretKey as _};
 use derive_more::From;
 use ssz::{Ssz, SszHash};
 use types::{
@@ -38,7 +38,7 @@ use types::{
             AggregateAndProof as Phase0AggregateAndProof, AttestationData,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, DepositMessage, VoluntaryExit,
         },
-        primitives::{DomainType, Epoch, Slot, H256},
+        primitives::{DomainType, Epoch, H256, Slot},
     },
     preset::Preset,
     traits::{BeaconBlock, BeaconState},

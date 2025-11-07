@@ -12,7 +12,7 @@ use std::{
 };
 
 use allocator as _;
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
@@ -49,9 +49,9 @@ use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use logging::{
-    debug_with_peers, error_with_peers, info_with_peers, warn_with_peers, PEER_LOG_METRICS,
+    PEER_LOG_METRICS, debug_with_peers, error_with_peers, info_with_peers, warn_with_peers,
 };
-use metrics::{run_metrics_server, MetricsChannels, MetricsServerConfig, MetricsService};
+use metrics::{MetricsChannels, MetricsServerConfig, MetricsService, run_metrics_server};
 use operation_pools::{
     AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, Manager,
     SyncCommitteeAggPool,
@@ -65,7 +65,7 @@ use reqwest::{Client, ClientBuilder};
 use scc::HashMap as SccHashMap;
 use signer::{KeyOrigin, Signer};
 use slasher::{Databases, Slasher, SlasherConfig};
-use slashing_protection::{interchange_format::InterchangeData, SlashingProtector};
+use slashing_protection::{SlashingProtector, interchange_format::InterchangeData};
 use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -76,14 +76,14 @@ use types::{
     config::Config as ChainConfig,
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{ExecutionBlockNumber, Slot, H256},
+        primitives::{ExecutionBlockNumber, H256, Slot},
     },
     preset::{Preset, PresetName},
     redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
-    run_validator_api, Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig,
+    Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig, run_validator_api,
 };
 use validator_key_cache::ValidatorKeyCache;
 use validator_statistics::ValidatorStatistics;
@@ -1366,10 +1366,10 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         metrics.clone(),
     ));
 
-    if let Some(cache) = cache {
-        if let Err(error) = cache.save() {
-            warn_with_peers!("Unable to save validator key cache: {error:?}");
-        }
+    if let Some(cache) = cache
+        && let Err(error) = cache.save()
+    {
+        warn_with_peers!("Unable to save validator key cache: {error:?}");
     }
 
     let slasher_config = slashing_enabled.then_some(SlasherConfig {

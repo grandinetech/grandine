@@ -1,7 +1,7 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
 use anyhow::Result;
 use std::path::Path;
-use zkm_sdk::{include_elf, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{ProverClient, ZKMProofWithPublicValues, ZKMStdin, include_elf};
 
 const STATE_TRANSITION_ELF: &[u8] = include_elf!("zkvm_guest_ziren");
 

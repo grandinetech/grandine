@@ -6,7 +6,7 @@ use bytesize::ByteSize;
 use database::{Database, DatabaseMode};
 use derive_more::Display;
 use helper_functions::misc;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use types::{
     bellatrix::primitives::Gas,
     phase0::primitives::{ExecutionAddress, H256},

@@ -1,6 +1,6 @@
 use crossbeam_skiplist::{SkipMap, SkipSet};
 use helper_functions::misc;
-use ssz::{BitList, SszHash as _, H256};
+use ssz::{BitList, H256, SszHash as _};
 use types::{
     combined::Attestation,
     phase0::{containers::AttestationData, primitives::Epoch},
@@ -102,7 +102,9 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
                     .check(&data, &attestation.aggregation_bits)
             }
             Attestation::Single(_) => {
-                unreachable!("single attestations should not be validated with methods meant for aggregate and proofs only")
+                unreachable!(
+                    "single attestations should not be validated with methods meant for aggregate and proofs only"
+                )
             }
         }
     }

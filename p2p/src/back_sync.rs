@@ -5,7 +5,7 @@ use std::{
     thread::Builder,
 };
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use eth1_api::RealController;
@@ -34,7 +34,7 @@ use types::{
     nonstandard::{PayloadStatus, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{Slot, H256},
+        primitives::{H256, Slot},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -584,14 +584,13 @@ impl<P: Preset> Batch<P> {
                 if let Some(parent) = controller.block_by_root(parent_root)? {
                     let parent = parent.value;
 
-                    if let Some(body) = parent.message().body().with_blob_kzg_commitments() {
-                        if parent.message().slot() >= low_slot
-                            && body.blob_kzg_commitments().is_empty()
-                        {
-                            // Set earliest block without blobs as earliest block
-                            earliest_block = parent;
-                            continue;
-                        }
+                    if let Some(body) = parent.message().body().with_blob_kzg_commitments()
+                        && parent.message().slot() >= low_slot
+                        && body.blob_kzg_commitments().is_empty()
+                    {
+                        // Set earliest block without blobs as earliest block
+                        earliest_block = parent;
+                        continue;
                     }
                 }
 
@@ -768,9 +767,7 @@ pub enum Error<P: Preset> {
         expected: H256,
         slot: Slot,
     },
-    #[error(
-        "data column {index} for block {block_root:?} in slot {slot} not accepted: {action:?}"
-    )]
+    #[error("data column {index} for block {block_root:?} in slot {slot} not accepted: {action:?}")]
     DataColumnNotAccepted {
         action: DataColumnSidecarAction<P>,
         block_root: H256,

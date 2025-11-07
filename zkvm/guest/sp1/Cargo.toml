@@ -1,6 +1,6 @@
 [package]
 name = 'zkvm_guest_sp1'
-edition = '2021'
+edition = '2024'
 authors = ["Grandine <info@grandine.io>"]
 
 [workspace]

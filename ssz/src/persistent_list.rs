@@ -18,14 +18,14 @@ use derivative::Derivative;
 use ethereum_types::H256;
 use itertools::Itertools as _;
 use serde::{
-    de::{Error as _, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error as _, SeqAccess, Visitor},
 };
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use triomphe::Arc;
 use try_from_iterator::TryFromIterator;
-use typenum::{Unsigned, U1, U2, U4};
+use typenum::{U1, U2, U4, Unsigned};
 
 use crate::{
     bundle_size::BundleSize,
@@ -404,10 +404,10 @@ impl<T, N, B> PersistentList<T, N, B> {
         T: Clone + PartialEq,
         B: BundleSize<T>,
     {
-        if let Some(node) = self.root.as_mut() {
-            if let Some(new_node) = node.update(&mut updater) {
-                *node = new_node;
-            }
+        if let Some(node) = self.root.as_mut()
+            && let Some(new_node) = node.update(&mut updater)
+        {
+            *node = new_node;
         }
     }
 
@@ -756,13 +756,15 @@ impl<'list, T, B> Iterator for Leaves<'list, T, B> {
     type Item = &'list [T];
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.stack.pop().map(|mut node| loop {
-            match node {
-                Node::Internal { left, right, .. } => {
-                    self.stack.push(right);
-                    node = left;
+        self.stack.pop().map(|mut node| {
+            loop {
+                match node {
+                    Node::Internal { left, right, .. } => {
+                        self.stack.push(right);
+                        node = left;
+                    }
+                    Node::Leaf { bundle, .. } => break bundle.as_ref(),
                 }
-                Node::Leaf { bundle, .. } => break bundle.as_ref(),
             }
         })
     }
@@ -784,13 +786,15 @@ impl<'list, T: Clone, B> Iterator for LeavesMut<'list, T, B> {
     type Item = &'list mut [T];
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.stack.pop().map(|mut node| loop {
-            match node {
-                Node::Internal { left, right, .. } => {
-                    self.stack.push(right.make_mut());
-                    node = left.make_mut();
+        self.stack.pop().map(|mut node| {
+            loop {
+                match node {
+                    Node::Internal { left, right, .. } => {
+                        self.stack.push(right.make_mut());
+                        node = left.make_mut();
+                    }
+                    Node::Leaf { bundle, .. } => break bundle.as_mut(),
                 }
-                Node::Leaf { bundle, .. } => break bundle.as_mut(),
             }
         })
     }

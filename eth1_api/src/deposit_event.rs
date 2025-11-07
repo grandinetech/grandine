@@ -44,7 +44,7 @@
 // - <https://github.com/ethereum/consensus-specs/blob/fab27d17f0dd289a6abbb99acae39387ac2320cf/solidity_deposit_contract/deposit_contract.sol>
 // - <https://docs.soliditylang.org/en/v0.8.2/abi-spec.html>
 
-use anyhow::{ensure, Error as AnyhowError};
+use anyhow::{Error as AnyhowError, ensure};
 use bls::{PublicKeyBytes, SignatureBytes};
 use hex_literal::hex;
 use memoffset::span_of;

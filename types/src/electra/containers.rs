@@ -16,7 +16,7 @@ use crate::{
             AttestationData, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
             SignedVoluntaryExit,
         },
-        primitives::{CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, ValidatorIndex, H256},
+        primitives::{CommitteeIndex, Epoch, ExecutionAddress, Gwei, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
 };

@@ -1,7 +1,7 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
 use anyhow::Result;
 use borsh::BorshSerialize;
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt, SessionStats};
+use risc0_zkvm::{ExecutorEnv, Receipt, SessionStats, default_prover};
 use std::{fs::File, io::BufWriter};
 use zkvm_guest_risc0::{RISC0_GRANDINE_STATE_TRANSITION_ELF, RISC0_GRANDINE_STATE_TRANSITION_ID};
 

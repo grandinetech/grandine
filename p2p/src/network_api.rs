@@ -1,6 +1,6 @@
 use eth2_libp2p::{
-    types::EnrAttestationBitfield, ConnectionDirection, Enr, EnrExt as _, EnrSyncCommitteeBitfield,
-    Multiaddr, PeerConnectionStatus, PeerId, PeerInfo,
+    ConnectionDirection, Enr, EnrExt as _, EnrSyncCommitteeBitfield, Multiaddr,
+    PeerConnectionStatus, PeerId, PeerInfo, types::EnrAttestationBitfield,
 };
 use serde::{Deserialize, Serialize};
 use types::preset::Preset;

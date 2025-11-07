@@ -1,7 +1,7 @@
 use core::time::Duration;
 
 use anyhow::{Error as AnyhowError, Result};
-use axum::{error_handling::HandleErrorLayer, http::StatusCode, Router};
+use axum::{Router, error_handling::HandleErrorLayer, http::StatusCode};
 use features::Feature;
 use http::{HeaderMap, HeaderValue};
 use thiserror::Error;
@@ -12,7 +12,7 @@ use tower_http::{
 };
 use types::nonstandard::Phase;
 
-use crate::{logging, middleware, misc::ApiMetrics, ApiError, ETH_CONSENSUS_VERSION};
+use crate::{ApiError, ETH_CONSENSUS_VERSION, logging, middleware, misc::ApiMetrics};
 
 pub fn extend_router_with_middleware<E: ApiError + Send + Sync + 'static>(
     mut router: Router,

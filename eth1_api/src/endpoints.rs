@@ -189,10 +189,12 @@ mod tests {
             "https://example2.net".parse()?,
         ]);
 
-        assert!(endpoints
-            .endpoints_for_request(Some(ENGINE_GET_EL_BLOBS_V1))
-            .next()
-            .is_none());
+        assert!(
+            endpoints
+                .endpoints_for_request(Some(ENGINE_GET_EL_BLOBS_V1))
+                .next()
+                .is_none()
+        );
 
         let current_endpoint = endpoints
             .endpoints_for_request(None)

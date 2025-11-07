@@ -10,7 +10,7 @@ use typenum::U1;
 use types::{
     combined::{BeaconBlock, BlindedBeaconBlock},
     nonstandard::Phase,
-    phase0::primitives::{ExecutionAddress, ValidatorIndex, H256},
+    phase0::primitives::{ExecutionAddress, H256, ValidatorIndex},
     preset::Preset,
     traits::BeaconBlock as _,
 };
@@ -109,15 +109,13 @@ pub fn build_graffiti(
 ) -> H256 {
     let mut graffiti = graffiti.unwrap_or_default();
 
-    if let Some(client_versions) = client_versions {
-        if client_versions.len() == 1 {
-            if let Some(finger_print_graffiti) = client_versions
-                .first()
-                .map(ClientVersionV1::graffiti_string)
-            {
-                append_to_graffiti(&mut graffiti, &finger_print_graffiti);
-            }
-        }
+    if let Some(client_versions) = client_versions
+        && client_versions.len() == 1
+        && let Some(finger_print_graffiti) = client_versions
+            .first()
+            .map(ClientVersionV1::graffiti_string)
+    {
+        append_to_graffiti(&mut graffiti, &finger_print_graffiti);
     }
 
     if !append_to_graffiti(&mut graffiti, APPLICATION_NAME_WITH_VERSION_AND_COMMIT) {

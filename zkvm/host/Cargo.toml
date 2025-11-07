@@ -1,6 +1,6 @@
 [package]
 name = 'zkvm_host'
-edition = { workspace = true }
+edition = '2024'
 version = "0.1.0"
 authors = ["Grandine <info@grandine.io>"]
 

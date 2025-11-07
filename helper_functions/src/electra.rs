@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use ssz::ContiguousList;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;

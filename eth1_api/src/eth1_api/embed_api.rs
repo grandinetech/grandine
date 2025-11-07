@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use core::ops::RangeInclusive;
 use either::Either;
 use enum_iterator::Sequence as _;
@@ -35,6 +35,7 @@ use types::{
 use web3::types::{BlockId, BlockNumber, Filter, FilterBuilder, Log, U64};
 
 use crate::{
+    Eth1ApiToMetrics, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
     endpoints::Endpoint,
@@ -45,7 +46,6 @@ use crate::{
         ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
-    Eth1ApiToMetrics, WithClientVersions,
 };
 
 #[derive(Deserialize)]
@@ -100,15 +100,15 @@ pub trait EmbedAdapter: Send + Sync {
     ) -> Result<RawForkChoiceUpdatedResponse>;
 
     fn engine_get_payload_v1(&self, payload_id: H64)
-        -> Result<EngineGetPayloadV1Response<Mainnet>>;
+    -> Result<EngineGetPayloadV1Response<Mainnet>>;
     fn engine_get_payload_v2(&self, payload_id: H64)
-        -> Result<EngineGetPayloadV2Response<Mainnet>>;
+    -> Result<EngineGetPayloadV2Response<Mainnet>>;
     fn engine_get_payload_v3(&self, payload_id: H64)
-        -> Result<EngineGetPayloadV3Response<Mainnet>>;
+    -> Result<EngineGetPayloadV3Response<Mainnet>>;
     fn engine_get_payload_v4(&self, payload_id: H64)
-        -> Result<EngineGetPayloadV4Response<Mainnet>>;
+    -> Result<EngineGetPayloadV4Response<Mainnet>>;
     fn engine_get_payload_v5(&self, payload_id: H64)
-        -> Result<EngineGetPayloadV5Response<Mainnet>>;
+    -> Result<EngineGetPayloadV5Response<Mainnet>>;
 
     fn engine_get_blobs_v1(
         &self,

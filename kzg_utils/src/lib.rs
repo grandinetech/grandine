@@ -15,4 +15,4 @@ compile_error! {
      see kzg_utils/Cargo.toml for a list of features"
 }
 
-pub use bls::{KzgBackend, KzgBackendParseError, DEFAULT_KZG_BACKEND};
+pub use bls::{DEFAULT_KZG_BACKEND, KzgBackend, KzgBackendParseError};

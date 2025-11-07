@@ -3,11 +3,11 @@ use core::{
     ops::{Div as _, Range, Shr as _},
 };
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use arithmetic::{U64Ext as _, UsizeExt as _};
 use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
-use itertools::{izip, Itertools as _};
+use itertools::{Itertools as _, izip};
 use sha2::{Digest as _, Sha256};
 use ssz::{BitVector, ContiguousVector, MerkleTree, SszHash};
 use tap::{Pipe as _, TryConv as _};
@@ -35,8 +35,8 @@ use types::{
         },
         containers::{ForkData, SignedBeaconBlockHeader, SigningData, Validator},
         primitives::{
-            CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, NodeId,
-            Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version, H128, H256,
+            CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, H128,
+            H256, NodeId, Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},

@@ -1,8 +1,8 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
 use anyhow::Result;
 use sp1_sdk::{
-    include_elf, ExecutionReport, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin,
-    SP1VerifyingKey,
+    ExecutionReport, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1VerifyingKey,
+    include_elf,
 };
 use std::path::Path;
 

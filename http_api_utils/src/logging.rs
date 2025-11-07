@@ -11,7 +11,7 @@ use features::Feature;
 use logging::{info_with_peers, warn_with_peers};
 use tracing::Span;
 
-use crate::{misc::ApiMetrics, ApiError};
+use crate::{ApiError, misc::ApiMetrics};
 
 // `TraceLayer` already logs most of this out of the box, but we still use `log`.
 // We have to duplicate some of the information because `log` does not have spans.

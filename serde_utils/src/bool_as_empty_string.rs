@@ -1,4 +1,4 @@
-use serde::{de::Error as _, Deserialize as _, Deserializer};
+use serde::{Deserialize as _, Deserializer, de::Error as _};
 
 pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
     <&str>::deserialize(deserializer)?

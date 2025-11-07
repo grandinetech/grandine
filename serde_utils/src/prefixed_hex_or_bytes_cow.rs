@@ -2,8 +2,8 @@ use core::fmt::{Formatter, Result as FmtResult};
 use std::borrow::Cow;
 
 use serde::{
-    de::{Error, Visitor},
     Deserializer,
+    de::{Error, Visitor},
 };
 
 use crate::shared;

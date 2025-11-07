@@ -4,13 +4,13 @@ use core::{
 };
 use std::path::PathBuf;
 
-use anyhow::{ensure, Context as _, Result};
+use anyhow::{Context as _, Result, ensure};
 use jwt_simple::{
     algorithms::{HS256Key, MACLike},
     claims::Claims,
     prelude::Duration,
 };
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use ssz::{SszHash, SszWrite};
 use static_assertions::assert_not_impl_any;

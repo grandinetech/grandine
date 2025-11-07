@@ -14,14 +14,14 @@ use tracing::info;
 use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
-    phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Slot, H256},
+    phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, H256, Slot},
     redacting_url::RedactingUrl,
 };
 use validator::ValidatorApiConfig;
 
 use crate::{
-    commands::GrandineCommand, predefined_network::PredefinedNetwork, validators::Validators,
-    MetricsConfig, StorageConfig,
+    MetricsConfig, StorageConfig, commands::GrandineCommand, predefined_network::PredefinedNetwork,
+    validators::Validators,
 };
 
 #[expect(

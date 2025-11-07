@@ -19,7 +19,7 @@ use serde::Serialize;
 use sysinfo::{Disks, System};
 use types::{preset::Preset, traits::BeaconState};
 
-use crate::{helpers, MetricsService};
+use crate::{MetricsService, helpers};
 
 #[cfg(target_os = "linux")]
 use psutil::{cpu::os::linux::CpuTimesExt, memory::os::linux::VirtualMemoryExt};
@@ -360,7 +360,7 @@ fn metrics_os() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Result, Value};
+    use serde_json::{Result, Value, json};
 
     use super::*;
 

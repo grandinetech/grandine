@@ -1,4 +1,4 @@
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
@@ -10,7 +10,7 @@ use helper_functions::{
     verifier::{MultiVerifier, NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
 use pubkey_cache::PubkeyCache;
-use ssz::{SszHash as _, H256};
+use ssz::{H256, SszHash as _};
 use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{

@@ -8,7 +8,9 @@ use crate::phase0::{
 
 #[derive(Debug, Error)]
 pub enum AttestationConversionError {
-    #[error("{attester_index} not in committee (committee index: {committee_index}, attestation data: {attestation_data:?}, committee: {committee:?})")]
+    #[error(
+        "{attester_index} not in committee (committee index: {committee_index}, attestation data: {attestation_data:?}, committee: {committee:?})"
+    )]
     AttesterNotInCommittee {
         attester_index: ValidatorIndex,
         committee_index: CommitteeIndex,
