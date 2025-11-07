@@ -87,7 +87,7 @@ pub use crate::{
     segment::Segment,
     state_cache_processor::{Error as StateCacheError, StateCacheProcessor},
     store::Store,
-    store_config::{StoreConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS},
+    store_config::{DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig},
     validations::validate_merge_block,
 };
 

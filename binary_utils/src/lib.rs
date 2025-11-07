@@ -11,12 +11,12 @@ use std::{
 };
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
+    EnvFilter, Registry,
     filter::LevelFilter,
     fmt,
     fmt::{format::Writer, time::FormatTime},
     prelude::*,
     reload::{self, Handle},
-    EnvFilter, Registry,
 };
 
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();

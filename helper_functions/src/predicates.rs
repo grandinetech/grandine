@@ -3,7 +3,7 @@ use core::{
     ops::{Div as _, Index as _},
 };
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::SignatureBytes;
@@ -20,9 +20,9 @@ use types::{
     electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
     fulu::containers::DataColumnSidecar,
     phase0::{
-        consts::{TargetAggregatorsPerCommittee, ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH},
+        consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
         containers::{AttestationData, Validator},
-        primitives::{CommitteeIndex, Epoch, Slot, H256},
+        primitives::{CommitteeIndex, Epoch, H256, Slot},
     },
     preset::Preset,
     traits::{
@@ -685,8 +685,8 @@ mod spec_tests {
 #[cfg(test)]
 mod extra_tests {
     use bls::{
-        traits::{SecretKey as _, Signature as _},
         SecretKey, SecretKeyBytes,
+        traits::{SecretKey as _, Signature as _},
     };
     use std_ext::CopyExt as _;
     use tap::Conv as _;

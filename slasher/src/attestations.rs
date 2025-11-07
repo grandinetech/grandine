@@ -72,35 +72,33 @@ impl<P: Preset> Attestations<P> {
         if let Some(target_epoch) = self
             .targets
             .check_for_surrounding_entry(validator_index, attestation)?
+            && let Some(existing) = self.find_indexed_attestation(validator_index, target_epoch)?
         {
-            if let Some(existing) = self.find_indexed_attestation(validator_index, target_epoch)? {
-                let slashing = AttesterSlashing {
-                    attestation_1: existing,
-                    attestation_2: attestation.clone(),
-                };
+            let slashing = AttesterSlashing {
+                attestation_1: existing,
+                attestation_2: attestation.clone(),
+            };
 
-                return Ok(Some(ExplainedAttesterSlashing {
-                    slashing,
-                    reason: AttesterSlashingReason::Surrounding,
-                }));
-            }
+            return Ok(Some(ExplainedAttesterSlashing {
+                slashing,
+                reason: AttesterSlashingReason::Surrounding,
+            }));
         }
 
         if let Some(target_epoch) = self
             .targets
             .check_for_surrounded_entry(validator_index, attestation)?
+            && let Some(existing) = self.find_indexed_attestation(validator_index, target_epoch)?
         {
-            if let Some(existing) = self.find_indexed_attestation(validator_index, target_epoch)? {
-                let slashing = AttesterSlashing {
-                    attestation_1: existing,
-                    attestation_2: attestation.clone(),
-                };
+            let slashing = AttesterSlashing {
+                attestation_1: existing,
+                attestation_2: attestation.clone(),
+            };
 
-                return Ok(Some(ExplainedAttesterSlashing {
-                    slashing,
-                    reason: AttesterSlashingReason::Surrounded,
-                }));
-            }
+            return Ok(Some(ExplainedAttesterSlashing {
+                slashing,
+                reason: AttesterSlashingReason::Surrounded,
+            }));
         }
 
         Ok(None)
@@ -140,23 +138,21 @@ impl<P: Preset> Attestations<P> {
     ) -> Result<Option<ExplainedAttesterSlashing<P>>> {
         let target_epoch = attestation.data.target.epoch;
 
-        if let Some(existing_root) = self.attestation_votes.find(validator_index, target_epoch)? {
-            if existing_root != attestation.data.hash_tree_root() {
-                if let Some(existing) = self
-                    .indexed_attestations
-                    .find(existing_root, target_epoch)?
-                {
-                    let slashing = AttesterSlashing {
-                        attestation_1: existing,
-                        attestation_2: attestation.clone(),
-                    };
+        if let Some(existing_root) = self.attestation_votes.find(validator_index, target_epoch)?
+            && existing_root != attestation.data.hash_tree_root()
+            && let Some(existing) = self
+                .indexed_attestations
+                .find(existing_root, target_epoch)?
+        {
+            let slashing = AttesterSlashing {
+                attestation_1: existing,
+                attestation_2: attestation.clone(),
+            };
 
-                    return Ok(Some(ExplainedAttesterSlashing {
-                        slashing,
-                        reason: AttesterSlashingReason::DoubleVote,
-                    }));
-                }
-            }
+            return Ok(Some(ExplainedAttesterSlashing {
+                slashing,
+                reason: AttesterSlashingReason::DoubleVote,
+            }));
         }
 
         Ok(None)
@@ -203,10 +199,12 @@ mod tests {
             let indexed_attestation = build_attestation(source_epoch, target_epoch);
             attestations.update(1, &indexed_attestation, current_epoch)?;
 
-            assert!(attestations
-                .attestation_votes
-                .find(1, target_epoch)?
-                .is_some());
+            assert!(
+                attestations
+                    .attestation_votes
+                    .find(1, target_epoch)?
+                    .is_some()
+            );
         }
 
         attestations.cleanup(current_epoch)?;
@@ -231,10 +229,12 @@ mod tests {
 
             attestations.update(1, &attestation, current_epoch)?;
 
-            assert!(attestations
-                .indexed_attestations
-                .find(attestation.data.hash_tree_root(), target_epoch)?
-                .is_some());
+            assert!(
+                attestations
+                    .indexed_attestations
+                    .find(attestation.data.hash_tree_root(), target_epoch)?
+                    .is_some()
+            );
 
             Ok(attestation)
         };
@@ -257,20 +257,26 @@ mod tests {
             .find(at_2.data.hash_tree_root(), 7)?
             .unwrap_none();
 
-        assert!(attestations
-            .indexed_attestations
-            .find(at_3.data.hash_tree_root(), 11)?
-            .is_some());
+        assert!(
+            attestations
+                .indexed_attestations
+                .find(at_3.data.hash_tree_root(), 11)?
+                .is_some()
+        );
 
-        assert!(attestations
-            .indexed_attestations
-            .find(at_4.data.hash_tree_root(), 10)?
-            .is_some());
+        assert!(
+            attestations
+                .indexed_attestations
+                .find(at_4.data.hash_tree_root(), 10)?
+                .is_some()
+        );
 
-        assert!(attestations
-            .indexed_attestations
-            .find(at_5.data.hash_tree_root(), 14)?
-            .is_some());
+        assert!(
+            attestations
+                .indexed_attestations
+                .find(at_5.data.hash_tree_root(), 14)?
+                .is_some()
+        );
 
         Ok(())
     }

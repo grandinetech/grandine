@@ -1,14 +1,13 @@
-use darling::{ast::Data, FromDeriveInput};
+use darling::{FromDeriveInput, ast::Data};
 use easy_ext::ext;
 use itertools::Itertools as _;
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, ToTokens as _, TokenStreamExt as _};
+use quote::{ToTokens as _, TokenStreamExt as _, format_ident, quote};
 use syn::{
-    parse_quote,
+    Error, Expr, Generics, Ident, ImplGenerics, ImplItemFn, ImplItemType, Member, Path,
+    TypeGenerics, TypeParam, WhereClause, WherePredicate, parse_quote,
     punctuated::Punctuated,
     token::{Comma, Where},
-    Error, Expr, Generics, Ident, ImplGenerics, ImplItemFn, ImplItemType, Member, Path,
-    TypeGenerics, TypeParam, WhereClause, WherePredicate,
 };
 
 use crate::{crate_path, ssz_field::SszField};

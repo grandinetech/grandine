@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use kzg::eip_4844::{load_trusted_setup_rust, load_trusted_setup_string};
 
 fn load_trusted_setup() -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {

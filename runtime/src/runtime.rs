@@ -36,7 +36,7 @@ use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use logging::{info_with_peers, warn_with_peers};
-use metrics::{run_metrics_server, MetricsChannels, MetricsService};
+use metrics::{MetricsChannels, MetricsService, run_metrics_server};
 use operation_pools::{
     AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, Manager,
     SyncCommitteeAggPool,
@@ -57,7 +57,7 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
-    run_validator_api, Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig,
+    Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig, run_validator_api,
 };
 use validator_statistics::ValidatorStatistics;
 

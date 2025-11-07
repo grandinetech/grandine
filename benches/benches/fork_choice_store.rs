@@ -16,7 +16,7 @@ use database::Database;
 use easy_ext::ext;
 use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
-use fork_choice_control::{Storage, StorageMode, DEFAULT_ARCHIVAL_EPOCH_INTERVAL};
+use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage, StorageMode};
 use fork_choice_store::{
     ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
     BlockAction, DataAvailabilityPolicy, Store, StoreConfig, ValidAttestation,

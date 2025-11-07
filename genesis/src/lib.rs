@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use std::sync::Arc;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use deposit_tree::DepositTree;
 use helper_functions::{accessors, misc, mutators::increase_balance};
@@ -52,7 +52,7 @@ use types::{
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
             BeaconBlockHeader, DepositData, Fork,
         },
-        primitives::{DepositIndex, ExecutionBlockHash, UnixSeconds, H256},
+        primitives::{DepositIndex, ExecutionBlockHash, H256, UnixSeconds},
     },
     preset::Preset,
     traits::BeaconState as _,
@@ -482,7 +482,7 @@ mod spec_tests {
 
 #[cfg(test)]
 mod extra_tests {
-    use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
+    use bls::{SecretKey, SecretKeyBytes, traits::SecretKey as _};
     use helper_functions::signing::SignForAllForks;
     use std_ext::CopyExt as _;
     use tap::{Conv as _, TryConv as _};

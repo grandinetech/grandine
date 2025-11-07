@@ -135,11 +135,10 @@ impl<P: Preset> AttestationSubnets<P> {
                     | Persistent { expiration } => {
                         if let Some(active_discovery_expiration) =
                             self.active_discoveries[subnet_id]
+                            && slot < active_discovery_expiration
                         {
-                            if slot < active_discovery_expiration {
-                                // Avoid making a new discovery request in subnet while previous peer discovery is not expired
-                                return None;
-                            }
+                            // Avoid making a new discovery request in subnet while previous peer discovery is not expired
+                            return None;
                         }
 
                         self.active_discoveries[subnet_id] = Some(expiration);

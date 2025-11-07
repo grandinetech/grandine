@@ -9,8 +9,8 @@ use execution_engine::{
 };
 use fork_choice_control::Wait;
 use futures::{
-    channel::mpsc::{UnboundedReceiver, UnboundedSender},
     StreamExt as _,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use logging::warn_with_peers;
 use std_ext::ArcExt as _;
@@ -82,13 +82,13 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     self.controller
                         .on_notified_fork_choice_update(payload_status);
 
-                    if let Some(sender) = sender {
-                        if let Err(message) = sender.send(payload_id) {
-                            warn_with_peers!(
-                                "sending engine_forkchoiceUpdated result \
-                                 failed because the receiver was dropped: {message:?}"
-                            );
-                        }
+                    if let Some(sender) = sender
+                        && let Err(message) = sender.send(payload_id)
+                    {
+                        warn_with_peers!(
+                            "sending engine_forkchoiceUpdated result \
+                                failed because the receiver was dropped: {message:?}"
+                        );
                     }
                 }
                 ExecutionServiceMessage::NotifyNewPayload {
@@ -121,13 +121,13 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                         }
                     }
 
-                    if let Some(sender) = sender {
-                        if let Err(message) = sender.send(response) {
-                            warn_with_peers!(
-                                "sending engine_newPayload result \
+                    if let Some(sender) = sender
+                        && let Err(message) = sender.send(response)
+                    {
+                        warn_with_peers!(
+                            "sending engine_newPayload result \
                                 failed because the receiver was dropped: {message:?}"
-                            );
-                        }
+                        );
                     }
                 }
                 ExecutionServiceMessage::Stop => {

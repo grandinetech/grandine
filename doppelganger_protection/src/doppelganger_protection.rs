@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use arc_swap::{ArcSwap, Guard};
 use bls::PublicKeyBytes;
 use futures::channel::mpsc::UnboundedSender;

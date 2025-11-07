@@ -11,7 +11,7 @@ use helper_functions::{
     accessors, misc, predicates,
     slot_report::{Delta, SyncAggregateRewards},
 };
-use itertools::{chain, izip, Itertools as _};
+use itertools::{Itertools as _, chain, izip};
 use serde::{Deserialize, Serialize};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -36,7 +36,7 @@ use types::{
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::Validator,
-        primitives::{Epoch, Gwei, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, Gwei, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},

@@ -1,4 +1,4 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use clock::Tick;
 use execution_engine::PayloadStatusWithBlockHash;
 use fork_choice_control::{P2pMessage, SyncMessage};

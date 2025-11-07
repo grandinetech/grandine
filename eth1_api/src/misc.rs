@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use ethereum_types::H32;
 use fork_choice_control::{AttestationVerifierMessage, Controller};
 use futures::channel::mpsc::UnboundedSender;

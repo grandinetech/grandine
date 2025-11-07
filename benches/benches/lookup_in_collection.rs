@@ -27,7 +27,7 @@ use allocator as _;
 use std::collections::{BTreeMap, HashMap as StdHashMap, VecDeque};
 
 use criterion::{
-    measurement::Measurement, Bencher, BenchmarkGroup, BenchmarkId, Criterion, Throughput,
+    Bencher, BenchmarkGroup, BenchmarkId, Criterion, Throughput, measurement::Measurement,
 };
 use easy_ext::ext;
 use im::{HashMap as ImHashMap, OrdMap, Vector};
