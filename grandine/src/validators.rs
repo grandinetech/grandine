@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use anyhow::{bail, Error, Result};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
+use anyhow::{Error, Result, bail};
+use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use eip_2335::Keystore;
 use logging::{info_with_peers, warn_with_peers};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
@@ -120,13 +120,13 @@ impl Validators {
             .map(|(keystore, normalized_password)| (keystore.uuid(), normalized_password.clone()))
             .collect();
 
-        if let Some(cache) = validator_key_cache.as_mut() {
-            if let Err(error) = cache.load(passwords) {
-                warn_with_peers!(
-                    "Unable to load validator key cache: {error:?}; \
+        if let Some(cache) = validator_key_cache.as_mut()
+            && let Err(error) = cache.load(passwords)
+        {
+            warn_with_peers!(
+                "Unable to load validator key cache: {error:?}; \
                      Validator key cache will be reset",
-                );
-            }
+            );
         }
 
         let keypairs = keystores_with_passwords

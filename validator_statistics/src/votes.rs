@@ -7,7 +7,7 @@ use helper_functions::misc;
 use logging::{debug_with_peers, warn_with_peers};
 use types::{
     altair::containers::SyncCommitteeMessage,
-    phase0::primitives::{Epoch, Slot, ValidatorIndex, H256},
+    phase0::primitives::{Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };

@@ -4,7 +4,7 @@ use derive_more::Constructor;
 use ssz::SszHash as _;
 use types::phase0::{
     containers::AttestationData,
-    primitives::{Epoch, ValidatorIndex, H256},
+    primitives::{Epoch, H256, ValidatorIndex},
 };
 
 const EPOCH_SIZE: usize = size_of::<Epoch>();

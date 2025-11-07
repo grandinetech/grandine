@@ -11,7 +11,7 @@
 
 use darling::FromDeriveInput as _;
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, Error};
+use syn::{Error, parse_macro_input};
 
 use crate::ssz_type::SszType;
 

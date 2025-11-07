@@ -1,6 +1,6 @@
 use core::ops::{Add as _, Index as _, Rem as _};
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::PublicKeyBytes;
@@ -57,14 +57,14 @@ use types::{
             WithdrawalRequest,
         },
     },
-    nonstandard::{smallvec, AttestationEpoch, SlashingKind},
+    nonstandard::{AttestationEpoch, SlashingKind, smallvec},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{
             AttestationData, DepositData, DepositMessage, ProposerSlashing, SignedVoluntaryExit,
             Validator,
         },
-        primitives::{DepositIndex, ExecutionAddress, Gwei, ValidatorIndex, H256},
+        primitives::{DepositIndex, ExecutionAddress, Gwei, H256, ValidatorIndex},
     },
     preset::Preset,
     traits::{
@@ -872,25 +872,24 @@ pub fn process_deposit_data<P: Preset>(
     let deposit_message = DepositMessage::from(deposit_data);
 
     // > Fork-agnostic domain since deposits are valid across forks
-    if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey) {
-        if deposit_message
+    if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey)
+        && deposit_message
             .verify(config, signature, decompressed)
             .is_ok()
-        {
-            let validator_index = state.validators().len_u64();
+    {
+        let validator_index = state.validators().len_u64();
 
-            let combined_deposit = CombinedDeposit::NewValidator {
-                pubkey,
-                withdrawal_credentials: vec![withdrawal_credentials],
-                amounts: smallvec![amount],
-                signatures: vec![signature],
-                positions: smallvec![0],
-            };
+        let combined_deposit = CombinedDeposit::NewValidator {
+            pubkey,
+            withdrawal_credentials: vec![withdrawal_credentials],
+            amounts: smallvec![amount],
+            signatures: vec![signature],
+            positions: smallvec![0],
+        };
 
-            apply_deposits(state, core::iter::once(combined_deposit), NullSlotReport)?;
+        apply_deposits(state, core::iter::once(combined_deposit), NullSlotReport)?;
 
-            return Ok(Some(validator_index));
-        }
+        return Ok(Some(validator_index));
     }
 
     Ok(None)

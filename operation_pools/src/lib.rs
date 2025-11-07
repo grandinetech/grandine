@@ -1,7 +1,7 @@
 pub use crate::{
     attestation_agg_pool::{
-        convert_to_electra_attestation, try_convert_to_single_attestation, AttestationPacker,
-        Manager as AttestationAggPool,
+        AttestationPacker, Manager as AttestationAggPool, convert_to_electra_attestation,
+        try_convert_to_single_attestation,
     },
     blob_reconstruction_pool::Manager as BlobReconstructionPool,
     bls_to_execution_change_pool::{

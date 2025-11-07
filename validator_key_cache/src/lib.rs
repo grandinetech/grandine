@@ -6,8 +6,8 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{bail, Result};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, SecretKeyBytes};
+use anyhow::{Result, bail};
+use bls::{PublicKeyBytes, SecretKey, SecretKeyBytes, traits::SecretKey as _};
 use eip_2335::Crypto;
 use logging::info_with_peers;
 use sha2::{Digest as _, Sha256};

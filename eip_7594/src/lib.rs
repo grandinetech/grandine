@@ -3,12 +3,12 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use helper_functions::{misc, predicates::is_valid_merkle_branch};
 use itertools::Itertools as _;
 use kzg_utils::{
-    eip_7594::{compute_cells, recover_cells_and_kzg_proofs, verify_cell_kzg_proof_batch},
     KzgBackend,
+    eip_7594::{compute_cells, recover_cells_and_kzg_proofs, verify_cell_kzg_proof_batch},
 };
 use num_traits::One as _;
 use prometheus_metrics::Metrics;

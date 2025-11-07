@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{traits::PublicKey as _, PublicKey, PublicKeyBytes, COMPRESSED_SIZE, DECOMPRESSED_SIZE};
+use bls::{COMPRESSED_SIZE, DECOMPRESSED_SIZE, PublicKey, PublicKeyBytes, traits::PublicKey as _};
 use core::ops::RangeFrom;
 use dashmap::{DashMap, DashSet};
 use database::{Database, InMemoryMap, PrefixableKey};
@@ -140,10 +140,10 @@ impl PubkeyCache {
         // persist decompressed bytes to disk only for finalized validators,
         // avoiding storage of validator pubkeys from invalid deposits.
         for validator in state.validators() {
-            if let Some(pubkey) = self.unpersisted.remove(&validator.pubkey) {
-                if let Some(decompressed) = self.keys.get(&pubkey) {
-                    batch.push(serialize(&PublicKeyDbKey(pubkey), &decompressed));
-                }
+            if let Some(pubkey) = self.unpersisted.remove(&validator.pubkey)
+                && let Some(decompressed) = self.keys.get(&pubkey)
+            {
+                batch.push(serialize(&PublicKeyDbKey(pubkey), &decompressed));
             }
         }
 

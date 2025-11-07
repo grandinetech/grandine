@@ -5,11 +5,11 @@ use derive_more::Deref;
 use serde::{Serialize, Serializer};
 
 use crate::{
+    SszReadDefault,
     error::{ReadError, WriteError},
     porcelain::{SszRead, SszSize, SszWrite},
     shared,
     size::Size,
-    SszReadDefault,
 };
 
 #[derive(Deref, Derivative)]

@@ -1,16 +1,16 @@
 use core::{cmp::min, marker::PhantomData};
 use std::{
-    collections::{btree_map::BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet, btree_map::BTreeMap},
     sync::Arc,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use bit_field::BitField as _;
 use clock::Tick;
 use conv::ValueFrom as _;
 use good_lp::{
-    solvers::highs::highs, solvers::highs::HighsParallelType, variable, variables, Expression,
-    Solution, SolverModel,
+    Expression, Solution, SolverModel, solvers::highs::HighsParallelType, solvers::highs::highs,
+    variable, variables,
 };
 use helper_functions::{
     accessors::{self, get_base_reward, get_base_reward_per_increment},
@@ -33,7 +33,7 @@ use types::{
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         containers::{Attestation, PendingAttestation},
-        primitives::{ValidatorIndex, H256},
+        primitives::{H256, ValidatorIndex},
     },
     preset::Preset,
     traits::BeaconState as _,

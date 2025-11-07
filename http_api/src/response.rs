@@ -1,8 +1,8 @@
 use anyhow::Result;
 use axum::{
-    http::{header::ACCEPT, HeaderMap, HeaderValue},
-    response::{IntoResponse, Response},
     Json,
+    http::{HeaderMap, HeaderValue, header::ACCEPT},
+    response::{IntoResponse, Response},
 };
 use http_api_utils::ETH_CONSENSUS_VERSION;
 use mediatype::{MediaType, MediaTypeList};

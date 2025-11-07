@@ -15,10 +15,10 @@ use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
 use dashmap::DashMap;
 use eth1_api::RealController;
-use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, NetworkGlobals, PeerId};
+use eth2_libp2p::{NetworkGlobals, PeerId, rpc::StatusMessage, service::api_types::AppRequestId};
 use helper_functions::misc;
 use itertools::Itertools as _;
-use log::{log, Level};
+use log::{Level, log};
 use lru::LruCache;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
@@ -34,7 +34,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    phase0::primitives::{Epoch, Slot, H256},
+    phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
 };
 
@@ -624,18 +624,18 @@ impl<P: Preset> SyncManager<P> {
 
                 let start_slot = sync_start_slot + slots_per_request * batch_index;
 
-                if let Some(earliest_slot) = self.peer_earliest_available_slot(&block_peer_id) {
-                    if earliest_slot > start_slot {
-                        self.log(
-                            Level::Debug,
-                            format_args!(
-                                "not syncing from peer due to earliest_available_slot: \
+                if let Some(earliest_slot) = self.peer_earliest_available_slot(&block_peer_id)
+                    && earliest_slot > start_slot
+                {
+                    self.log(
+                        Level::Debug,
+                        format_args!(
+                            "not syncing from peer due to earliest_available_slot: \
                                 {earliest_slot} > {start_slot}"
-                            ),
-                        );
+                        ),
+                    );
 
-                        continue 'outer;
-                    }
+                    continue 'outer;
                 }
 
                 let count = remote_head_slot.saturating_sub(start_slot) + 1;
@@ -1121,7 +1121,7 @@ impl<P: Preset> SyncManager<P> {
     }
 
     fn peers(&self, use_black_list: bool) -> impl Iterator<Item = (&PeerId, &StatusMessage)> {
-        self.peers.iter().filter(move |(&peer_id, _)| {
+        self.peers.iter().filter(move |&(&peer_id, _)| {
             if use_black_list {
                 !self.back_sync_black_list.contains(&peer_id)
             } else {
@@ -1433,8 +1433,8 @@ impl<P: Preset> SyncManager<P> {
 #[cfg(test)]
 mod tests {
     use eth2_libp2p::{
-        rpc::{StatusMessageV1, StatusMessageV2},
         NetworkConfig,
+        rpc::{StatusMessageV1, StatusMessageV2},
     };
     use std::sync::Arc;
     use std_ext::ArcExt;
@@ -2173,7 +2173,7 @@ mod tests {
 
         // peer1: light load, overlapping custody
         peers_custodial.insert(peer1, HashSet::from([0, 1])); // 2 columns
-                                                              // peer2: heavy load, overlapping custody
+        // peer2: heavy load, overlapping custody
         peers_custodial.insert(peer2, HashSet::from([0, 1, 2, 3, 4, 5])); // 6 columns
 
         let sync_manager = create_test_sync_manager_with_custody(peers_custodial, peer_statuses);

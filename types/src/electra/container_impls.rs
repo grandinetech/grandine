@@ -1,4 +1,4 @@
-use anyhow::{ensure, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, ensure};
 use ssz::{BitList, BitVector, ContiguousList, ReadError};
 use thiserror::Error;
 use typenum::Unsigned as _;

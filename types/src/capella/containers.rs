@@ -23,8 +23,8 @@ use crate::{
             SignedVoluntaryExit,
         },
         primitives::{
-            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, UnixSeconds,
-            ValidatorIndex, H256,
+            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
+            UnixSeconds, ValidatorIndex,
         },
     },
     preset::Preset,

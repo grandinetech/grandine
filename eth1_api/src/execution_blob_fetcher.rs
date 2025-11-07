@@ -9,8 +9,8 @@ use execution_engine::{
 };
 use fork_choice_control::Wait;
 use futures::{
-    channel::mpsc::{UnboundedReceiver, UnboundedSender},
     StreamExt as _,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use helper_functions::misc;
 use logging::{debug_with_peers, warn_with_peers};
@@ -30,8 +30,8 @@ use types::{
 };
 
 use crate::{
-    messages::{BlobFetcherToP2p, Eth1ApiToBlobFetcher},
     ApiController, Eth1Api,
+    messages::{BlobFetcherToP2p, Eth1ApiToBlobFetcher},
 };
 
 pub struct ExecutionBlobFetcher<P: Preset, W: Wait> {
@@ -367,7 +367,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     }
                                 }
                                 Err(error) => {
-                                    warn_with_peers!("failed to reconstruct data columns from EL response: {error:?}")
+                                    warn_with_peers!(
+                                        "failed to reconstruct data columns from EL response: {error:?}"
+                                    )
                                 }
                             }
                         } else {

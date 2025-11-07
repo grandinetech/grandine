@@ -4,8 +4,8 @@ use duplicate::duplicate_item;
 use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
-    BitVector, ContiguousList, Hc, Offset, ReadError, Size, SszHash, SszRead, SszReadDefault,
-    SszSize, SszWrite, WriteError, H256,
+    BitVector, ContiguousList, H256, Hc, Offset, ReadError, Size, SszHash, SszRead, SszReadDefault,
+    SszSize, SszWrite, WriteError,
 };
 use static_assertions::{assert_not_impl_any, const_assert_eq};
 use thiserror::Error;
@@ -2171,7 +2171,7 @@ mod spec_tests {
 
 #[cfg(test)]
 mod extra_tests {
-    use serde_json::{json, Result, Value};
+    use serde_json::{Result, Value, json};
     use test_case::test_case;
 
     use crate::preset::Mainnet;

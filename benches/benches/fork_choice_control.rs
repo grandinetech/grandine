@@ -11,7 +11,7 @@ use allocator as _;
 use anyhow::Result;
 use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
-use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState};
+use eth2_cache_utils::{LazyBeaconBlocks, LazyBeaconState, goerli, mainnet, medalla};
 use eth2_libp2p::GossipId;
 use fork_choice_control::BenchController;
 use pubkey_cache::PubkeyCache;

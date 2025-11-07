@@ -12,7 +12,7 @@ use anyhow::Result;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
-use log::{log, Level};
+use log::{Level, log};
 use logging::{debug_with_peers, info_with_peers, trace_with_peers, warn_with_peers};
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
@@ -31,8 +31,8 @@ use types::{
 
 use crate::{
     attestations::{
-        attestation_performance_slot_report, epoch_attestation_assignments, AttestationPerformance,
-        AttestationVotes,
+        AttestationPerformance, AttestationVotes, attestation_performance_slot_report,
+        epoch_attestation_assignments,
     },
     sync_committees,
     votes::{self, ValidatorVote, ValidatorVotes, VoteReport},

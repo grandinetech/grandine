@@ -27,7 +27,7 @@ use types::{
             AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
             VoluntaryExit,
         },
-        primitives::{Epoch, Slot, H256},
+        primitives::{Epoch, H256, Slot},
     },
     preset::Preset,
     traits::{BeaconBlock as _, BeaconState},

@@ -69,13 +69,13 @@ members = [
     'zkvm/guest/risc0',
     'zkvm/host',
 ]
-# Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
+# Feature resolver version 3 is the default starting with Rust 2024, but that does not apply in
 # virtual workspaces. Starting with Rust 1.72.0, Cargo warns if a Rust 2021 virtual workspace does
 # not explicitly specify a feature resolver. See <https://github.com/rust-lang/cargo/pull/10910>.
-resolver = '2'
+resolver = '3'
 
 [workspace.package]
-edition = '2021'
+edition = '2024'
 
 [workspace.lints.rust]
 unsafe_code = 'forbid'
@@ -85,12 +85,6 @@ unsafe_code = 'forbid'
 #
 # - `elided_lifetimes_in_paths`
 #   It hurts readability and doesn't provide a clear benefit.
-#
-# - `keyword_idents_2024`
-#   Starting with Rust 1.79.0, uses of `rand::Rng::gen` trigger `keyword_idents_2024`.
-#   `rand` has renamed the method to `random`, but the change has not been released. See:
-#   - <https://github.com/rust-random/rand/issues/1435>
-#   - <https://github.com/rust-random/rand/pull/1438>
 #
 # - `missing_copy_implementations`
 #   This would be more useful if it only triggered for types that are `Clone` but not `Copy`.
@@ -104,7 +98,6 @@ absolute_paths_not_starting_with_crate = 'warn'
 anonymous_parameters                   = 'warn'
 deprecated_in_future                   = 'warn'
 deprecated_safe                        = 'warn'
-keyword_idents_2018                    = 'warn'
 let_underscore_drop                    = 'warn'
 macro_use_extern_crate                 = 'warn'
 meta_variable_misuse                   = 'warn'

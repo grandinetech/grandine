@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use either::Either;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use thiserror::Error;
@@ -15,8 +15,8 @@ use types::{
 };
 
 use crate::{
-    types::{PayloadAttributes, PayloadId, PayloadStatusV1},
     EngineGetBlobsParams, ExecutionServiceMessage,
+    types::{PayloadAttributes, PayloadId, PayloadStatusV1},
 };
 
 pub trait ExecutionEngine<P: Preset> {

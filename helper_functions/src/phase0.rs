@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use ssz::{BitList, ContiguousList};
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;

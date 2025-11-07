@@ -26,7 +26,7 @@ use crate::{
     },
     electra::containers::ExecutionRequests,
     fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
-    phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
+    phase0::primitives::{Gwei, H256, Uint256, UnixSeconds, ValidatorIndex},
     preset::Preset,
 };
 
@@ -611,10 +611,12 @@ mod tests {
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);
 
-        assert!(expected_order
-            .into_iter()
-            .tuple_windows()
-            .all(|(earlier, later)| earlier < later));
+        assert!(
+            expected_order
+                .into_iter()
+                .tuple_windows()
+                .all(|(earlier, later)| earlier < later)
+        );
     }
 
     #[test_case(

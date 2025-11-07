@@ -11,9 +11,9 @@ use bitvec::{order::Lsb0, view::BitView as _};
 use derivative::Derivative;
 use ethereum_types::H256;
 use generic_array::GenericArray;
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use tap::TryConv as _;
-use typenum::{NonZero, Unsigned as _, U1};
+use typenum::{NonZero, U1, Unsigned as _};
 
 use crate::{
     consts::BITS_PER_BYTE,
@@ -56,11 +56,7 @@ impl<N: BitVectorBits> Index<usize> for BitVector<N> {
             panic!("index out of bounds (length: {}, index: {index})", N::USIZE)
         });
 
-        if bit {
-            &true
-        } else {
-            &false
-        }
+        if bit { &true } else { &false }
     }
 }
 

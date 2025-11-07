@@ -159,12 +159,16 @@ mod spec_tests {
 
     // We do not honor `bls_setting` in epoch processing tests because none of them customize it.
 
-    #[test_resources("consensus-spec-tests/tests/mainnet/capella/epoch_processing/justification_and_finalization/*/*")]
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/capella/epoch_processing/justification_and_finalization/*/*"
+    )]
     fn mainnet_justification_and_finalization(case: Case) {
         run_justification_and_finalization_case::<Mainnet>(case);
     }
 
-    #[test_resources("consensus-spec-tests/tests/minimal/capella/epoch_processing/justification_and_finalization/*/*")]
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/capella/epoch_processing/justification_and_finalization/*/*"
+    )]
     fn minimal_justification_and_finalization(case: Case) {
         run_justification_and_finalization_case::<Minimal>(case);
     }
@@ -291,12 +295,16 @@ mod spec_tests {
         run_historical_summaries_update_case::<Minimal>(case);
     }
 
-    #[test_resources("consensus-spec-tests/tests/mainnet/capella/epoch_processing/participation_flag_updates/*/*")]
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/capella/epoch_processing/participation_flag_updates/*/*"
+    )]
     fn mainnet_participation_flag_updates(case: Case) {
         run_participation_flag_updates_case::<Mainnet>(case);
     }
 
-    #[test_resources("consensus-spec-tests/tests/minimal/capella/epoch_processing/participation_flag_updates/*/*")]
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/capella/epoch_processing/participation_flag_updates/*/*"
+    )]
     fn minimal_participation_flag_updates(case: Case) {
         run_participation_flag_updates_case::<Minimal>(case);
     }

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
 use axum::{
+    Extension,
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
-    Extension,
 };
 use thiserror::Error;
 

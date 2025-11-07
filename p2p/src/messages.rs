@@ -6,11 +6,11 @@ use std::{
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use eth2_libp2p::{
+    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PubsubMessage,
+    ReportSource, Response, Subnet, SubnetDiscovery,
     rpc::{GoodbyeReason, InboundRequestId, RequestType, RpcErrorResponse, StatusMessage},
     service::api_types::AppRequestId,
     types::{EnrForkId, GossipKind},
-    GossipId, GossipTopic, MessageAcceptance, NetworkEvent, PeerAction, PeerId, PubsubMessage,
-    ReportSource, Response, Subnet, SubnetDiscovery,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use logging::debug_with_peers;
@@ -28,7 +28,7 @@ use types::{
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, ForkDigest, Slot, SubnetId, ValidatorIndex, H256},
+        primitives::{Epoch, ForkDigest, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
 };

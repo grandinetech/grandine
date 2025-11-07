@@ -4,7 +4,7 @@ use core::{
 };
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 #[cfg(not(target_os = "zkvm"))]
 use im::{HashMap, OrdMap};
 use logging::{info_with_peers, warn_with_peers};
@@ -17,7 +17,7 @@ use thiserror::Error;
 use types::{
     combined::BeaconState,
     nonstandard::BlockRewards,
-    phase0::primitives::{Slot, H256},
+    phase0::primitives::{H256, Slot},
     preset::Preset,
     traits::BeaconState as _,
 };
@@ -107,17 +107,17 @@ impl<P: Preset> StateCache<P> {
             .get_prev(&slot)
             .map(|(_, state_with_rewards)| state_with_rewards);
 
-        if let Some((state, rewards)) = pre_state {
-            if state.slot() >= slot {
-                if rewards.is_some() || options.ignore_missing_rewards {
-                    return Ok((state.clone_arc(), *rewards));
-                }
-
-                info_with_peers!(
-                    "recomputing state cache entry for block {block_root:?} at slot {slot} \
-                     because block rewards are missing",
-                );
+        if let Some((state, rewards)) = pre_state
+            && state.slot() >= slot
+        {
+            if rewards.is_some() || options.ignore_missing_rewards {
+                return Ok((state.clone_arc(), *rewards));
             }
+
+            info_with_peers!(
+                "recomputing state cache entry for block {block_root:?} at slot {slot} \
+                    because block rewards are missing",
+            );
         }
 
         let (post_state, rewards) = f()?;
@@ -162,17 +162,17 @@ impl<P: Preset> StateCache<P> {
             .get_prev(&slot)
             .map(|(_, state_with_rewards)| state_with_rewards);
 
-        if let Some((state, rewards)) = pre_state {
-            if state.slot() >= slot {
-                if rewards.is_some() || options.ignore_missing_rewards {
-                    return Ok(Some((state.clone_arc(), *rewards)));
-                }
-
-                info_with_peers!(
-                    "recomputing state cache entry for block {block_root:?} at slot {slot} \
-                     because block rewards are missing",
-                );
+        if let Some((state, rewards)) = pre_state
+            && state.slot() >= slot
+        {
+            if rewards.is_some() || options.ignore_missing_rewards {
+                return Ok(Some((state.clone_arc(), *rewards)));
             }
+
+            info_with_peers!(
+                "recomputing state cache entry for block {block_root:?} at slot {slot} \
+                because block rewards are missing",
+            );
         }
 
         match f(pre_state)? {

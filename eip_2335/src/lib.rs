@@ -3,11 +3,11 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use aes::Aes128;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bls::{PublicKeyBytes, SecretKeyBytes};
 use ctr::{
-    cipher::{KeyIvInit as _, StreamCipher as _},
     Ctr32BE,
+    cipher::{KeyIvInit as _, StreamCipher as _},
 };
 use derive_more::AsRef;
 use hex::{FromHex, ToHex};
@@ -15,8 +15,8 @@ use hmac::Hmac;
 use rand::Rng as _;
 use scrypt::Params;
 use serde::{
-    de::{Error as DeserializeError, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error as DeserializeError, Visitor},
 };
 use serde_utils::FromHexTrait;
 use serde_with::As;
@@ -141,8 +141,8 @@ impl<T> Crypto<T> {
         // `ThreadRng` is cryptographically secure.
         let mut rng = rand::thread_rng();
 
-        let salt = rng.gen();
-        let iv = rng.gen();
+        let salt = rng.r#gen();
+        let iv = rng.r#gen();
 
         Self {
             kdf: Module {

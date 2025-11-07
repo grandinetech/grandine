@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
+use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use clock::Tick;
 use dashmap::DashMap;
 use database::Database;
@@ -17,8 +17,8 @@ use eth1_api::{Eth1Api, Eth1ExecutionEngine, ExecutionService};
 use eth2_cache_utils::mainnet;
 use features::Feature;
 use fork_choice_control::{
-    Controller, EventChannels, StateLoadStrategy, Storage, StorageMode,
-    DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, StateLoadStrategy, Storage,
+    StorageMode,
 };
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
@@ -31,7 +31,7 @@ use p2p::{NetworkConfig, SubnetService, SyncToApi};
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
 use signer::{KeyOrigin, Signer, Web3SignerConfig};
-use slashing_protection::{SlashingProtector, DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT};
+use slashing_protection::{DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT, SlashingProtector};
 use snapshot_test_utils::Case;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -40,7 +40,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::{FinalizedCheckpoint, Phase},
-    phase0::primitives::{NodeId, H256},
+    phase0::primitives::{H256, NodeId},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };

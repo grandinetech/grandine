@@ -10,7 +10,7 @@ pub enum Error {
         proofs_length: usize,
     },
     #[error(
-        "custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}", 
+        "custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}"
     )]
     InvalidCustodyGroupCount {
         custody_group_count: u64,

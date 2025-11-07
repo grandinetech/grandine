@@ -11,7 +11,7 @@ use allocator as _;
 use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{
-    goerli, mainnet, medalla, LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars,
+    LazyBeaconBlocks, LazyBeaconState, LazyBlobSidecars, goerli, mainnet, medalla,
 };
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};

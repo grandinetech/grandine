@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use helper_functions::{
@@ -32,7 +32,7 @@ use types::{
         },
     },
     config::Config,
-    nonstandard::{smallvec, AttestationEpoch, SlashingKind},
+    nonstandard::{AttestationEpoch, SlashingKind, smallvec},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
@@ -417,25 +417,24 @@ pub fn process_deposit_data<P: Preset>(
     let deposit_message = DepositMessage::from(deposit_data);
 
     // > Fork-agnostic domain since deposits are valid across forks
-    if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey) {
-        if deposit_message
+    if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey)
+        && deposit_message
             .verify(config, signature, decompressed)
             .is_ok()
-        {
-            let validator_index = state.validators().len_u64();
+    {
+        let validator_index = state.validators().len_u64();
 
-            let combined_deposit = CombinedDeposit::NewValidator {
-                pubkey,
-                withdrawal_credentials: vec![withdrawal_credentials],
-                amounts: smallvec![amount],
-                signatures: vec![signature],
-                positions: smallvec![0],
-            };
+        let combined_deposit = CombinedDeposit::NewValidator {
+            pubkey,
+            withdrawal_credentials: vec![withdrawal_credentials],
+            amounts: smallvec![amount],
+            signatures: vec![signature],
+            positions: smallvec![0],
+        };
 
-            apply_deposits(state, 1, core::iter::once(combined_deposit), NullSlotReport)?;
+        apply_deposits(state, 1, core::iter::once(combined_deposit), NullSlotReport)?;
 
-            return Ok(Some(validator_index));
-        }
+        return Ok(Some(validator_index));
     }
 
     apply_deposits(state, 1, core::iter::empty(), NullSlotReport)?;

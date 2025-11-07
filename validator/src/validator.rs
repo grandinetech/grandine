@@ -12,9 +12,9 @@ use anyhow::{Error as AnyhowError, Result};
 use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
+    BuilderApi,
     consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},
-    BuilderApi,
 };
 use clock::{Tick, TickKind};
 use debug_info::HealthCheck;
@@ -77,7 +77,7 @@ use types::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
         },
-        primitives::{Epoch, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
@@ -515,12 +515,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
-        if let Some(metrics) = self.metrics.as_ref() {
-            if tick.is_start_of_interval() {
-                let tick_delay = tick.delay(&self.chain_config, self.controller.genesis_time())?;
-                debug_with_peers!("tick_delay: {tick_delay:?} for {tick:?}");
-                metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
-            }
+        if let Some(metrics) = self.metrics.as_ref()
+            && tick.is_start_of_interval()
+        {
+            let tick_delay = tick.delay(&self.chain_config, self.controller.genesis_time())?;
+            debug_with_peers!("tick_delay: {tick_delay:?} for {tick:?}");
+            metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
         }
 
         let Tick { slot, kind } = tick;
@@ -604,19 +604,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
-        if tick.is_start_of_slot() {
-            if let Some(doppelganger_protection) = &self.doppelganger_protection {
-                let doppelganger_protection = doppelganger_protection.clone_arc();
-                let internal_tx = self.internal_tx.clone();
+        if tick.is_start_of_slot()
+            && let Some(doppelganger_protection) = &self.doppelganger_protection
+        {
+            let doppelganger_protection = doppelganger_protection.clone_arc();
+            let internal_tx = self.internal_tx.clone();
 
-                tokio::spawn(async move {
-                    let result = doppelganger_protection
-                        .detect_doppelgangers::<P>(slot)
-                        .await;
+            tokio::spawn(async move {
+                let result = doppelganger_protection
+                    .detect_doppelgangers::<P>(slot)
+                    .await;
 
-                    InternalMessage::DoppelgangerProtectionResult(result).send(&internal_tx);
-                });
-            }
+                InternalMessage::DoppelgangerProtectionResult(result).send(&internal_tx);
+            });
         }
 
         self.attestation_agg_pool
@@ -787,18 +787,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_deref()
             .map(DoppelgangerProtection::load);
 
-        if let Some(doppelganger_protection) = &doppelganger_protection {
-            if !doppelganger_protection.is_validator_active(*public_key) {
-                info_with_peers!(
-                    "Validator {public_key:?} skipping proposer duty in slot {} \
+        if let Some(doppelganger_protection) = &doppelganger_protection
+            && !doppelganger_protection.is_validator_active(*public_key)
+        {
+            info_with_peers!(
+                "Validator {public_key:?} skipping proposer duty in slot {} \
                      since not enough time has passed to ensure there are \
                      no doppelganger validators participating on network. \
                      Validator will start performing duties on slot {}.",
-                    slot_head.slot(),
-                    doppelganger_protection.tracking_end_slot::<P>(*public_key),
-                );
-                return Ok(());
-            }
+                slot_head.slot(),
+                doppelganger_protection.tracking_end_slot::<P>(*public_key),
+            );
+
+            return Ok(());
         }
 
         let _propose_timer = self
@@ -942,7 +943,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     // because builder should publish the block anyway, just cannot respond in a timely
                                     // manner. We cannot do anything else here either, but exit early from propose, due
                                     // to the risk of slashing.
-                                    debug_with_peers!("failed to post blinded block to the builder node: {error:?}");
+                                    debug_with_peers!(
+                                        "failed to post blinded block to the builder node: {error:?}"
+                                    );
                                 }
 
                                 return Ok(());
@@ -1010,72 +1013,68 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let block = Arc::new(*beacon_block);
 
-                if let Some(blobs) = block_blobs {
-                    if !blobs.is_empty() {
-                        if self
-                            .chain_config
-                            .phase_at_slot::<P>(slot_head.slot())
-                            .is_peerdas_activated()
-                        {
-                            let timer = self.metrics.as_ref().map(|metrics| {
-                                metrics.data_column_sidecar_computation.start_timer()
-                            });
+                if let Some(blobs) = block_blobs
+                    && !blobs.is_empty()
+                {
+                    if self
+                        .chain_config
+                        .phase_at_slot::<P>(slot_head.slot())
+                        .is_peerdas_activated()
+                    {
+                        let timer = self
+                            .metrics
+                            .as_ref()
+                            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
-                            let block = block.clone_arc();
-                            let kzg_backend = self.controller.store_config().kzg_backend;
+                        let block = block.clone_arc();
+                        let kzg_backend = self.controller.store_config().kzg_backend;
 
-                            let data_column_sidecars = tokio::task::spawn_blocking(move || {
-                                let cells_and_kzg_proofs =
-                                    eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                                        blobs.as_ref(),
-                                        block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-                                        kzg_backend,
-                                    )?;
+                        let data_column_sidecars = tokio::task::spawn_blocking(move || {
+                            let cells_and_kzg_proofs =
+                                eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                    blobs.as_ref(),
+                                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
+                                    kzg_backend,
+                                )?;
 
-                                eip_7594::construct_data_column_sidecars(
-                                    &block,
-                                    &cells_and_kzg_proofs,
-                                )
-                            })
-                            .await??;
+                            eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)
+                        })
+                        .await??;
 
-                            prometheus_metrics::stop_and_record(timer);
+                        prometheus_metrics::stop_and_record(timer);
 
-                            for data_column_sidecar in data_column_sidecars {
-                                if self
-                                    .controller
-                                    .sampling_columns()
-                                    .into_iter()
-                                    .contains(&data_column_sidecar.index)
-                                {
-                                    self.controller.on_own_data_column_sidecar(
-                                        wait_group.clone(),
-                                        data_column_sidecar.clone_arc(),
-                                    );
-                                }
-
-                                if !self.validator_config.withhold_data_columns_publishing {
-                                    ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
-                                        .send(&self.p2p_tx);
-                                }
-                            }
-                        } else {
-                            for blob_sidecar in misc::construct_blob_sidecars(
-                                &block,
-                                blobs.into_iter(),
-                                block_proofs
-                                    .unwrap_or_else(KzgProofs::empty_deneb)
-                                    .into_iter(),
-                            )? {
-                                let blob_sidecar = Arc::new(blob_sidecar);
-
-                                self.controller.on_own_blob_sidecar(
+                        for data_column_sidecar in data_column_sidecars {
+                            if self
+                                .controller
+                                .sampling_columns()
+                                .into_iter()
+                                .contains(&data_column_sidecar.index)
+                            {
+                                self.controller.on_own_data_column_sidecar(
                                     wait_group.clone(),
-                                    blob_sidecar.clone_arc(),
+                                    data_column_sidecar.clone_arc(),
                                 );
-
-                                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
                             }
+
+                            if !self.validator_config.withhold_data_columns_publishing {
+                                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                                    .send(&self.p2p_tx);
+                            }
+                        }
+                    } else {
+                        for blob_sidecar in misc::construct_blob_sidecars(
+                            &block,
+                            blobs.into_iter(),
+                            block_proofs
+                                .unwrap_or_else(KzgProofs::empty_deneb)
+                                .into_iter(),
+                        )? {
+                            let blob_sidecar = Arc::new(blob_sidecar);
+
+                            self.controller
+                                .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+
+                            ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
                         }
                     }
                 }
@@ -1340,9 +1339,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .flatten()
             .unzip();
 
-        let sign_result = self
-            .signer
-            .load()
+        let signer_snapshot = self.signer.load();
+
+        let sign_result = signer_snapshot
             .sign_triples_without_slashing_protection(
                 triples,
                 Some(slot_head.beacon_state.as_ref().into()),
@@ -1574,27 +1573,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // Publish attestations late by default.
         // This noticeably improves rewards in Goerli.
         // This is a deviation from the Honest Validator specification.
-        if Feature::PublishAttestationsEarly.is_enabled() {
-            if let Err(error) = self
+        if Feature::PublishAttestationsEarly.is_enabled()
+            && let Err(error) = self
                 .attest_and_start_aggregating(wait_group, &slot_head)
                 .await
-            {
-                error_with_peers!("failed to produce and publish own attestations: {error:?}");
-            }
+        {
+            error_with_peers!("failed to produce and publish own attestations: {error:?}");
         }
 
         // Publish sync committee messages late by default.
         // This noticeably improves rewards in Goerli.
         // This is a deviation from the Honest Validator specification.
-        if Feature::PublishSyncCommitteeMessagesEarly.is_enabled() {
-            if let Err(error) = self
+        if Feature::PublishSyncCommitteeMessagesEarly.is_enabled()
+            && let Err(error) = self
                 .publish_sync_committee_messages(wait_group, slot_head)
                 .await
-            {
-                error_with_peers!(
-                    "failed to produce and publish own sync_committee messages: {error:?}"
-                );
-            }
+        {
+            error_with_peers!(
+                "failed to produce and publish own sync_committee messages: {error:?}"
+            );
         }
     }
 
@@ -1650,19 +1647,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_members
                 .iter()
                 .filter_map(|member| {
-                    if let Some(doppelganger_protection) = &doppelganger_protection {
-                        if !doppelganger_protection.is_validator_active(member.public_key) {
-                            info_with_peers!(
-                                "Validator {:?} skipping attesting duty in slot {} \
+                    if let Some(doppelganger_protection) = &doppelganger_protection
+                        && !doppelganger_protection.is_validator_active(member.public_key)
+                    {
+                        info_with_peers!(
+                            "Validator {:?} skipping attesting duty in slot {} \
                                  since not enough time has passed to ensure there are \
                                  no doppelganger validators participating on network. \
                                  Validator will start performing duties on slot {}.",
-                                member.public_key,
-                                slot_head.slot(),
-                                doppelganger_protection.tracking_end_slot::<P>(member.public_key),
-                            );
-                            return None;
-                        }
+                            member.public_key,
+                            slot_head.slot(),
+                            doppelganger_protection.tracking_end_slot::<P>(member.public_key),
+                        );
+                        return None;
                     }
 
                     let mut data = AttestationData {
@@ -1824,6 +1821,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         Ok(messages
+            .into_iter()
             .zip(self.own_sync_committee_members())
             .flat_map(|(message, member)| {
                 core::iter::zip(member.subnets, 0..)
@@ -1880,9 +1878,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .unzip()
             .await;
 
-        let result = self
-            .signer
-            .load()
+        let signer_snapshot = self.signer.load();
+
+        let result = signer_snapshot
             .sign_triples_without_slashing_protection(
                 triples,
                 Some(slot_head.beacon_state.as_ref().into()),
@@ -1996,23 +1994,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     {
                         Ok(with_status) => with_status.value,
                         Err(error) => {
-                            warn_with_peers!("failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}");
+                            warn_with_peers!(
+                                "failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}"
+                            );
                             break;
                         }
                     }
                 }
 
-                if own_members.needs_to_compute_members_at_slot(slot).await {
-                    if let Some(members) =
+                if own_members.needs_to_compute_members_at_slot(slot).await
+                    && let Some(members) =
                         own_members.get_or_init_at_slot(&beacon_state, slot).await
-                    {
-                        update_beacon_committee_subscriptions(
-                            current_slot,
-                            &members,
-                            &subnet_service_tx,
-                        )
-                        .await;
-                    }
+                {
+                    update_beacon_committee_subscriptions(
+                        current_slot,
+                        &members,
+                        &subnet_service_tx,
+                    )
+                    .await;
                 }
             }
 

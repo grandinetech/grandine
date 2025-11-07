@@ -1,19 +1,20 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     sync::Arc,
 };
 
 use anyhow::Result;
 use arc_swap::{ArcSwap, Guard};
-use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, Signature};
+use bls::{PublicKeyBytes, SecretKey, Signature, traits::SecretKey as _};
 use doppelganger_protection::DoppelgangerProtection;
 use futures::{
+    TryFutureExt as _,
     lock::Mutex,
     stream::{FuturesUnordered, TryStreamExt as _},
-    try_join, TryFutureExt as _,
+    try_join,
 };
 use helper_functions::misc;
-use itertools::{izip, Itertools as _};
+use itertools::{Itertools as _, izip};
 use logging::{info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
@@ -23,15 +24,15 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
     combined::BeaconState,
-    phase0::primitives::{Slot, H256},
+    phase0::primitives::{H256, Slot},
     preset::Preset,
     redacting_url::RedactingUrl,
 };
 
 use crate::{
+    Web3SignerConfig,
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::{FetchedKeys, Web3Signer},
-    Web3SignerConfig,
 };
 
 #[derive(Debug, Error)]
@@ -299,14 +300,14 @@ impl Snapshot {
                 public_key,
             } = triple;
 
-            if let Some(doppelganger_protection) = &doppelganger_protection {
-                if !doppelganger_protection.is_validator_active(public_key) {
-                    warn_with_peers!(
-                        "Doppelganger protection prevented validator {public_key:?} from signing a message \
+            if let Some(doppelganger_protection) = &doppelganger_protection
+                && !doppelganger_protection.is_validator_active(public_key)
+            {
+                warn_with_peers!(
+                    "Doppelganger protection prevented validator {public_key:?} from signing a message \
                          since not enough time has passed to ensure there are no duplicate validators participating on network",
-                    );
-                    continue;
-                }
+                );
+                continue;
             }
 
             match message {

@@ -3,17 +3,17 @@ use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
 use axum::{
+    Extension, Json,
     extract::rejection::{BytesRejection, JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Extension, Json,
 };
 use axum_extra::{extract::QueryRejection, typed_header::TypedHeaderRejection};
-use bls::{traits::SignatureBytes as _, SignatureBytes};
+use bls::{SignatureBytes, traits::SignatureBytes as _};
 use futures::channel::oneshot::Canceled;
 use http_api_utils::{ApiError, PhaseHeaderError};
 use serde::{Serialize, Serializer};
-use ssz::{ReadError, H256};
+use ssz::{H256, ReadError};
 use thiserror::Error;
 use tokio::task::JoinError;
 use types::{
@@ -322,7 +322,7 @@ struct EthErrorResponse<'error> {
 mod tests {
     use axum::extract::rejection::MissingJsonContentType;
     use itertools::Itertools as _;
-    use serde_json::{json, Result, Value};
+    use serde_json::{Result, Value, json};
     use test_case::test_case;
 
     use super::*;

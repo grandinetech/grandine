@@ -1,5 +1,5 @@
 use hex_literal::hex;
-use typenum::{assert_type_eq, U11, U25, U9};
+use typenum::{U9, U11, U25, assert_type_eq};
 
 use crate::{
     phase0::primitives::{DomainType, H32},

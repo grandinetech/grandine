@@ -4,8 +4,8 @@ use anyhow::Result;
 use derive_more::Constructor;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
-    validate_merge_block, BlockAction, DataAvailabilityPolicy, PartialBlockAction,
-    StateCacheProcessor, Store,
+    BlockAction, DataAvailabilityPolicy, PartialBlockAction, StateCacheProcessor, Store,
+    validate_merge_block,
 };
 use helper_functions::{
     predicates,
@@ -245,7 +245,7 @@ impl<P: Preset> BlockProcessor<P> {
                         )? {
                             PartialBlockAction::Accept => {}
                             PartialBlockAction::Ignore => {
-                                return Ok((state, Some(BlockAction::Ignore(false))))
+                                return Ok((state, Some(BlockAction::Ignore(false))));
                             }
                         }
                     }

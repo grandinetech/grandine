@@ -1,16 +1,16 @@
-use bls12_381::{
-    hash_to_curve::{ExpandMsgXmd, HashToCurve},
-    G1Projective, G2Projective, Scalar,
-};
 use bls_core::{
     consts::DOMAIN_SEPARATION_TAG, error::Error, impl_secret_key,
     traits::SecretKey as SecretKeyTrait,
+};
+use bls12_381::{
+    G1Projective, G2Projective, Scalar,
+    hash_to_curve::{ExpandMsgXmd, HashToCurve},
 };
 use sha2::Sha256;
 
 use super::{
     public_key::PublicKey,
-    secret_key_bytes::{SecretKeyBytes, SIZE},
+    secret_key_bytes::{SIZE, SecretKeyBytes},
     signature::Signature,
 };
 

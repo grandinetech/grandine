@@ -5,16 +5,16 @@ use anyhow::Result;
 use dedicated_executor::DedicatedExecutor;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use web3::{
+    Error, Transport as _,
     api::{Eth, Namespace as _},
     helpers::CallFuture,
     transports::Http,
-    Error, Transport as _,
 };
 
 use crate::{
+    ClientVersionV1, Eth1Api,
     endpoints::Endpoint,
     eth1_api::{CAPABILITIES, ENGINE_GET_CLIENT_VERSION_V1},
-    ClientVersionV1, Eth1Api,
 };
 
 const ENGINE_EXCHANGE_CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(1);

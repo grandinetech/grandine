@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    sync::{mpsc::Sender, Arc},
+    sync::{Arc, mpsc::Sender},
     time::Instant,
 };
 
@@ -24,7 +24,7 @@ use types::{
     },
     phase0::{
         containers::Checkpoint,
-        primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
+        primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
 };

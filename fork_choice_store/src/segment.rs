@@ -7,8 +7,8 @@ use anyhow::Result;
 use derive_more::Debug;
 #[cfg(not(target_os = "zkvm"))]
 use im::{
-    vector::{Iter, IterMut},
     Vector,
+    vector::{Iter, IterMut},
 };
 #[cfg(target_os = "zkvm")]
 use std::vec::Vec as Vector;
