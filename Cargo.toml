@@ -404,8 +404,8 @@ refinery = { version = '0.9',  features = ['rusqlite'] }
 regex = '1'
 replace_with = '0.1'
 reqwest = { version = '0.12', features = ['json', 'native-tls-vendored'] }
-risc0-build = { version = '2.3.1', features = ['unstable'] }
-risc0-zkvm = { version = '2.3.1', features = ['unstable', 'heap-embedded-alloc'] }
+risc0-build = { version = '3.0.3', features = ['unstable'] }
+risc0-zkvm = { version = '3.0.3', features = ['unstable', 'heap-embedded-alloc'] }
 rusqlite = { version = '0.37', features = ['bundled'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git' }
