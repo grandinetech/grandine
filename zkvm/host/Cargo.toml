@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+bincode = { workspace = true }
 bls = { workspace = true, features = ['zkcrypto'] }
 bls-zkcrypto = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true }
@@ -18,6 +19,7 @@ enum-iterator = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 risc0-zkvm = { workspace = true, optional = true, features = ['unstable', 'heap-embedded-alloc'] }
+serde = { workspace = true }
 serde_json = { workspace = true, optional = true  }
 snap = { workspace = true }
 sp1-sdk = { workspace = true, optional = true }
@@ -27,6 +29,9 @@ transition_functions = { workspace = true }
 types = { workspace = true }
 xz2 = { workspace = true }
 zkvm_guest_risc0 = { workspace = true, optional = true }
+
+# For Zisk
+ziskos = { workspace = true, optional = true }
 
 # For pico zkvm
 pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" , optional = true }
@@ -42,7 +47,7 @@ risc0 = [
     "dep:risc0-zkvm",
     "dep:tracing-subscriber",
     "dep:zkvm_guest_risc0",
-    "bls-zkcrypto/zkvm-risc0",
+    # "bls-zkcrypto/zkvm-risc0",
 ]
 sp1 = [
     "dep:sp1-helper",
@@ -53,5 +58,8 @@ pico = [
     "dep:pico-sdk",
     "dep:pico-vm",
     "dep:anyhow",
-    "bls-zkcrypto/zkvm-pico",
+    # "bls-zkcrypto/zkvm-pico",
+]
+zisk = [
+    "dep:ziskos",
 ]

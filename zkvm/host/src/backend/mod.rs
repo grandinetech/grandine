@@ -1,5 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
+use serde::Serialize;
+
 
 #[cfg(feature = "risc0")]
 mod risc0;
@@ -16,7 +18,12 @@ mod pico;
 #[cfg(feature = "pico")]
 pub use pico::*;
 
-#[derive(Clone, Copy, Debug)]
+#[cfg(feature = "zisk")]
+mod zisk;
+#[cfg(feature = "zisk")]
+pub use zisk::*;
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub enum ConfigKind {
     Mainnet = 0,
     PectraDevnet6 = 1,
