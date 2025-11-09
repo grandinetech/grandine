@@ -45,9 +45,6 @@ impl VmBackend for Vm {
         cache_ssz: Vec<u8>,
         phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Report)> {
-
-        println!("entering execute");
-
         let serialized_data =
             bincode::serialize(&(config, state_ssz, block_ssz, cache_ssz, phase_bytes)).unwrap();
 
@@ -62,10 +59,11 @@ impl VmBackend for Vm {
 
         let zisk_guest_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk");
 
-        println!("building the guest program");
+        println!("Building the guest program");
 
         // First, build the guest program ELF file.
         let build_output = Command::new("cargo-zisk")
+            .env("RUSTFLAGS", "-C target-cpu=generic-rv64")
             .arg("build")
             .arg("--release")
             .current_dir(&zisk_guest_dir)
@@ -83,14 +81,22 @@ impl VmBackend for Vm {
 
         // Second, execute the ELF file using ziskemu with a high step count.
         let elf_path = zisk_guest_dir
-            .join("../../../target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk");
+            .join("target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk");
+        let input_path = zisk_guest_dir
+            .join("build/input.bin");
+
         let output = Command::new("ziskemu")
+            .env("RUSTFLAGS", "-C target-cpu=generic-rv64")
+            .env("RUST_BACKTRACE", "full")
             .arg("-e")
             .arg(elf_path)
             .arg("-i")
             .arg(input_path)
             .arg("--max-steps")
             .arg("100000000000000")
+            .arg("-v")
+            .arg("-X")
+            .arg("-S")
             .current_dir(&zisk_guest_dir)
             .output()?;
 

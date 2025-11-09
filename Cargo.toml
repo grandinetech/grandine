@@ -66,13 +66,13 @@ members = [
     'validator_key_cache',
     'validator_statistics',
     'zkvm/guest/risc0',
-    # 'zkvm/guest/zisk',
     'zkvm/host',
 ]
 exclude = [
     # Excluding the zkvm guest library will make the compiled guest code size a lot smaller, from
     # ~200 MB -> 2.3 MB.
-    'zkvm/guest/pico'
+    'zkvm/guest/pico',
+    'zkvm/guest/zisk',
 ]
 # Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
 # virtual workspaces. Starting with Rust 1.72.0, Cargo warns if a Rust 2021 virtual workspace does
@@ -547,7 +547,6 @@ validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
 validator_statistics = { path = 'validator_statistics' }
 zkvm_guest_risc0 = { path = 'zkvm/guest/risc0' }
-# zkvm_guest_zisk = { path = 'zkvm/guest/zisk' }
 zkvm_host = { path = 'zkvm/host' }
 
 # Banned crates

@@ -5,6 +5,7 @@
 
 # Omit zkvm guest compiled artifacts
 /zkvm/guest/elf
+/zkvm/guest/zisk/build
 
 book/book
 book/deploy
