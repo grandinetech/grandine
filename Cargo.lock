@@ -6930,6 +6930,7 @@ dependencies = [
  "bitvec",
  "eth1_api",
  "fork_choice_control",
+ "fork_choice_store",
  "futures",
  "helper_functions",
  "itertools 0.14.0",
