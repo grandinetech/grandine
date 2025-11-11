@@ -1,9 +1,9 @@
 #![no_main]
 
 use anyhow::Result;
-use pico_sdk::io::{commit, read_vec, read_as};
+use pico_sdk::io::{commit, read_as, read_vec};
 use pubkey_cache::PubkeyCache;
-use ssz::{SszRead as _, SszHash as _};
+use ssz::{SszHash as _, SszRead as _};
 use transition_functions::combined::untrusted_state_transition as state_transition;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -26,7 +26,8 @@ pub fn main() {
     commit(&state.hash_tree_root().0);
 }
 
-fn read_block_and_state<P: Preset>() -> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
+fn read_block_and_state<P: Preset>()
+-> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
     let config_kind: u8 = read_as::<u8>();
     let config = match config_kind {
         0 => Config::mainnet(),
