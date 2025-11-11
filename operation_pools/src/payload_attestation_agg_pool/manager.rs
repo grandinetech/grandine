@@ -4,17 +4,25 @@ use crate::{
     misc::PoolTask,
     payload_attestation_agg_pool::{
         pool::Pool,
-        tasks::{AggregateOwnMessagesTask, HandleSlotTask, InsertPayloadAttestationTask},
+        tasks::{
+            AggregateOwnMessagesTask, AggregatePayloadAttestationsTask, HandleSlotTask,
+            InsertPayloadAttestationTask,
+        },
     },
 };
+use anyhow::{Context, Error, Result};
 use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
+use ssz::ContiguousList;
 use std_ext::ArcExt;
 use types::{
-    combined::BeaconState, config::Config, gloas::containers::PayloadAttestationMessage,
-    phase0::primitives::Slot, preset::Preset,
+    combined::BeaconState,
+    config::Config,
+    gloas::containers::{PayloadAttestation, PayloadAttestationMessage},
+    phase0::primitives::Slot,
+    preset::Preset,
 };
 
 pub struct Manager<P: Preset, W: Wait = ()> {
@@ -52,6 +60,16 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
+    pub async fn aggregate_payload_attestations(
+        &self,
+    ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
+        self.spawn_task(AggregatePayloadAttestationsTask {
+            controller: self.controller.clone_arc(),
+            pool: self.pool.clone_arc(),
+        })
+        .await
+    }
+
     pub fn insert_payload_attestation(
         &self,
         wait_group: W,
@@ -84,6 +102,14 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             beacon_state,
             metrics: self.metrics.clone(),
         });
+    }
+
+    async fn spawn_task<T: PoolTask>(&self, task: T) -> Result<T::Output> {
+        self.dedicated_executor
+            .spawn(task.run())
+            .await
+            .map_err(Error::msg)
+            .context("payload attestation aggregation pool task failed")?
     }
 
     fn spawn_detached<T: PoolTask>(&self, task: T) {

@@ -302,6 +302,7 @@ impl<P: Preset> Context<P> {
             attestation_agg_pool.clone_arc(),
             bls_to_execution_change_pool.clone_arc(),
             sync_committee_agg_pool.clone_arc(),
+            payload_attestation_agg_pool.clone_arc(),
             None,
             Some(BlockProducerOptions {
                 fake_execution_payloads: true,
