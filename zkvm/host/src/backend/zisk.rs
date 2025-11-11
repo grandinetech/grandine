@@ -1,5 +1,5 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use std::env;
@@ -59,8 +59,7 @@ impl VmBackend for Vm {
             block_ssz,
             cache_ssz,
             phase_bytes,
-        })
-        .unwrap();
+        })?;
 
         // Generating the zkVM guest input data
         let output_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk/build");
@@ -72,7 +71,7 @@ impl VmBackend for Vm {
 
         let zisk_guest_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk");
 
-        println!("Building the guest program");
+        println!("Building the zkVM guest program");
 
         // First, build the guest program ELF file.
         let build_output = Command::new("cargo-zisk")
@@ -89,7 +88,7 @@ impl VmBackend for Vm {
             ));
         }
 
-        println!("Using ziskemu to execute the guest program");
+        println!("Executing the zkVM guest program with ziskemu");
 
         // Second, execute the ELF file using ziskemu with a high step count.
         let elf_path =
@@ -110,7 +109,7 @@ impl VmBackend for Vm {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!(
+            return Err(anyhow!(
                 "Failed to execute ziskemu command. Stderr:\n{}",
                 stderr
             ));
@@ -130,7 +129,7 @@ impl VmBackend for Vm {
                     .parse::<u64>()
                     .expect("Couldn't parse the execution cycle.")
             )
-            .expect("Expect having a line starting with STEPS from Zisk output.");
+            .ok_or(anyhow!("Expect having a line starting with STEPS from Zisk output."))?;
 
         // Gather the last set_output() from the VM guest output back
         let state_root_str = stdout
@@ -139,7 +138,7 @@ impl VmBackend for Vm {
             .filter(|trimmed| trimmed.len() == 8)
             .fold(String::new(), |acc, line| acc + line);
 
-        let state_root = hex::decode(state_root_str).expect("Invalid state root");
+        let state_root = hex::decode(state_root_str)?;
 
         if state_root.len() != 32 {
             return Err(anyhow::anyhow!(
