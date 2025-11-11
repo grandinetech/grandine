@@ -41,10 +41,7 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{
-        containers::{DataColumnSidecar, MatrixEntry},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
     nonstandard::ValidationOutcome,
     phase0::{
         containers::BeaconBlockHeader,
@@ -117,7 +114,7 @@ where
         metrics: Option<Arc<Metrics>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
-        pool_tx: impl UnboundedSink<PoolMessage<W>>,
+        pool_tx: impl UnboundedSink<PoolMessage<P, W>>,
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
@@ -659,12 +656,14 @@ where
         &self,
         wait_group: W,
         block_root: H256,
-        full_matrix: Vec<MatrixEntry<P>>,
+        block: Arc<SignedBeaconBlock<P>>,
+        data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     ) {
         MutatorMessage::ReconstructedMissingColumns {
             wait_group,
             block_root,
-            full_matrix,
+            block,
+            data_column_sidecars,
         }
         .send(&self.mutator_tx)
     }

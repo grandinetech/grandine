@@ -4563,7 +4563,6 @@ dependencies = [
  "derivative",
  "derive_more 2.0.1",
  "duplicate",
- "eip_7594",
  "eth2_cache_utils",
  "eth2_libp2p",
  "execution_engine",

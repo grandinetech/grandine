@@ -19,7 +19,7 @@ use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        containers::{DataColumnIdentifier, DataColumnSidecar},
         primitives::ColumnIndex,
     },
     phase0::{
@@ -179,7 +179,8 @@ pub enum MutatorMessage<P: Preset, W> {
     ReconstructedMissingColumns {
         wait_group: W,
         block_root: H256,
-        full_matrix: Vec<MatrixEntry<P>>,
+        block: Arc<SignedBeaconBlock<P>>,
+        data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     },
 }
 
@@ -220,18 +221,19 @@ impl<P: Preset> P2pMessage<P> {
     }
 }
 
-pub enum PoolMessage<W> {
+pub enum PoolMessage<P: Preset, W> {
     Slot(Slot),
     Tick(Tick),
     Stop,
     ReconstructDataColumns {
         wait_group: W,
         block_root: H256,
+        block: Arc<SignedBeaconBlock<P>>,
         slot: Slot,
     },
 }
 
-impl<W> PoolMessage<W> {
+impl<P: Preset, W> PoolMessage<P, W> {
     pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug_with_peers!("send to operation pools failed because the receiver was dropped");
