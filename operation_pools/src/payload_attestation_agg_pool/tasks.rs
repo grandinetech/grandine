@@ -5,9 +5,10 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
+use ssz::ContiguousList;
 use types::{
     combined::BeaconState,
-    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
+    gloas::containers::{PayloadAttestation, PayloadAttestationData, PayloadAttestationMessage},
     phase0::primitives::Slot,
     preset::Preset,
 };
@@ -133,5 +134,22 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
         drop(wait_group);
 
         Ok(())
+    }
+}
+
+pub struct AggregatePayloadAttestationsTask<P: Preset, W: Wait> {
+    pub controller: ApiController<P, W>,
+    pub pool: Arc<Pool<P>>,
+}
+
+impl<P: Preset, W: Wait> PoolTask for AggregatePayloadAttestationsTask<P, W> {
+    type Output = ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>;
+
+    async fn run(self) -> Result<Self::Output> {
+        let Self { controller, pool } = self;
+
+        let slot = controller.slot();
+
+        pool.aggregate_payload_attestations(slot).await
     }
 }

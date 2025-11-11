@@ -576,6 +576,7 @@ pub async fn run_after_genesis<P: Preset>(
         attestation_agg_pool.clone_arc(),
         bls_to_execution_change_pool.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
+        payload_attestation_agg_pool.clone_arc(),
         metrics.clone(),
         None,
     ));

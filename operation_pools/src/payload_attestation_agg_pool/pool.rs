@@ -1,28 +1,33 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use bls::traits::Signature as _;
+use futures::stream::{FuturesUnordered, StreamExt as _};
 use helper_functions::accessors;
 use itertools::Itertools as _;
 use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
+use ssz::{ContiguousList, ContiguousVector};
 use std_ext::ArcExt as _;
+use tap::Pipe as _;
 use tokio::sync::RwLock;
+use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     combined::BeaconState,
-    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
+    gloas::containers::{PayloadAttestation, PayloadAttestationData, PayloadAttestationMessage},
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
 };
 
 use crate::payload_attestation_agg_pool::types::{
-    Aggregate, AggregateMap, PayloadAttestationMap, PayloadAttestationSet, PtcMembersMap,
+    Aggregate, AggregateMap, PayloadAttestationMap, PayloadAttestationSet,
 };
 
 pub struct Pool<P: Preset> {
     aggregates: RwLock<AggregateMap<P>>,
-    ptc_members: RwLock<PtcMembersMap>,
+    ptc_members: RwLock<BTreeMap<Slot, ContiguousVector<ValidatorIndex, P::PtcSize>>>,
     payload_attestation_messages: RwLock<PayloadAttestationMap>,
 }
 
@@ -30,9 +35,9 @@ impl<P: Preset> Pool<P> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            aggregates: RwLock::new(AggregateMap::new()),
-            ptc_members: RwLock::new(PtcMembersMap::new()),
-            payload_attestation_messages: RwLock::new(PayloadAttestationMap::new()),
+            aggregates: RwLock::default(),
+            ptc_members: RwLock::default(),
+            payload_attestation_messages: RwLock::default(),
         }
     }
 
@@ -131,34 +136,54 @@ impl<P: Preset> Pool<P> {
         Ok(())
     }
 
+    pub async fn aggregate_payload_attestations(
+        &self,
+        slot: Slot,
+    ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
+        self.aggregates
+            .read()
+            .await
+            .iter()
+            .map(|(data, aggregate)| async {
+                if data.slot == slot {
+                    let Aggregate {
+                        aggregation_bits,
+                        signature,
+                    } = *aggregate.read().await;
+
+                    Some(PayloadAttestation {
+                        aggregation_bits,
+                        data: *data,
+                        signature: signature.into(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<FuturesUnordered<_>>()
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .flatten()
+            .take(P::MaxPayloadAttestation::USIZE)
+            .pipe(ContiguousList::try_from_iter)
+            .map_err(Into::into)
+    }
+
     async fn get_or_init_ptc_at_slot(
         &self,
         beacon_state: &BeaconState<P>,
         slot: Slot,
-    ) -> Result<Vec<ValidatorIndex>> {
+    ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
         if let Some(members) = self.ptc_members.read().await.get(&slot) {
-            return Ok(members.read().await.to_vec());
+            return Ok(members.clone());
         }
 
-        let ptc_members = self
-            .ptc_members
-            .write()
-            .await
-            .entry(slot)
-            .or_default()
-            .clone_arc();
-        let mut ptc_members = ptc_members.write().await;
+        let mut ptc_members_map = self.ptc_members.write().await;
+        let ptc_members = accessors::ptc_for_slot(beacon_state, slot)?;
+        ptc_members_map.insert(slot, ptc_members.clone());
 
-        *ptc_members = match accessors::ptc_for_slot(beacon_state, slot) {
-            Ok(members) => members.into_iter().collect_vec(),
-            Err(error) => {
-                return Err(anyhow!(
-                    "failed to get PTC members at slot: {slot}: {error:?}"
-                ));
-            }
-        };
-
-        Ok(ptc_members.to_vec())
+        Ok(ptc_members)
     }
 
     async fn pool_aggregate(&self, data: PayloadAttestationData) -> Arc<RwLock<Aggregate<P>>> {

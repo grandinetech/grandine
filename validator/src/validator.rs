@@ -2549,6 +2549,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .unwrap_or(0),
             );
 
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "own_payload_attestations",
+                self.own_payload_attestations
+                    .get()
+                    .map(Vec::len)
+                    .unwrap_or(0),
+            );
+
             self.block_producer.track_collection_metrics().await;
         }
 
