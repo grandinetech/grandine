@@ -6,11 +6,11 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-pub struct Report;
+pub struct Report(u64);
 
 impl ReportTrait for Report {
     fn cycles(&self) -> u64 {
-        1
+        self.0
     }
 }
 
@@ -119,6 +119,19 @@ impl VmBackend for Vm {
         let stdout = String::from_utf8(output.stdout)?;
         println!("VM guest stdout:\n{stdout}");
 
+        let cycles: u64 = stdout
+            .lines()
+            .find(|line| line.starts_with("STEPS")) // the cycle line starts with `STEPS`
+            .map(|line|
+                line
+                    .chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .expect("Couldn't parse the execution cycle.")
+            )
+            .expect("Expect having a line starting with STEPS from Zisk output.");
+
         // Gather the last set_output() from the VM guest output back
         let state_root_str = stdout
             .lines()
@@ -135,7 +148,7 @@ impl VmBackend for Vm {
             ));
         }
 
-        Ok((state_root, Report))
+        Ok((state_root, Report(cycles)))
     }
 
     fn prove(
