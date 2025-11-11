@@ -55,10 +55,9 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                 PoolMessage::ReconstructDataColumns {
                     wait_group,
                     block_root,
-                    slot,
                 } => {
                     self.blob_reconstruction_pool
-                        .spawn_reconstruction(wait_group, block_root, slot);
+                        .spawn_reconstruction(wait_group, block_root);
                 }
             }
         }
