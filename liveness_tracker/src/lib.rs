@@ -1,9 +1,11 @@
-use std::{collections::BTreeMap, sync::Arc};
+use core::time::Duration;
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use bitvec::vec::BitVec;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
+use fork_choice_store::StateCacheError;
 use futures::{channel::mpsc::UnboundedReceiver, select, StreamExt as _};
 use helper_functions::{electra, misc, phase0};
 use itertools::Itertools as _;
@@ -24,11 +26,13 @@ pub use crate::messages::{ApiToLiveness, ValidatorToLiveness};
 mod messages;
 
 const EPOCHS_TO_KEEP_LIVE_VALIDATORS: u64 = 2;
+const TOO_MANY_EMPTY_SLOTS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(3);
 
 pub struct LivenessTracker<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     live_validators: BTreeMap<Epoch, BitVec>,
     metrics: Option<Arc<Metrics>>,
+    too_many_empty_slots_message_shown_at: Option<Instant>,
     api_to_liveness_rx: UnboundedReceiver<ApiToLiveness>,
     pool_to_liveness_rx: UnboundedReceiver<PoolToLivenessMessage>,
     validator_to_liveness_rx: UnboundedReceiver<ValidatorToLiveness<P>>,
@@ -47,6 +51,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
             controller,
             live_validators: BTreeMap::new(),
             metrics,
+            too_many_empty_slots_message_shown_at: None,
             api_to_liveness_rx,
             pool_to_liveness_rx,
             validator_to_liveness_rx,
@@ -104,7 +109,18 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                                 .map(|state| self.process_attestation(&attestation, &state));
 
                             if let Err(error) = result {
-                                warn_with_peers!("Error while tracking liveness from attestation: {error:?}");
+                                if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {
+                                    if self
+                                        .too_many_empty_slots_message_shown_at
+                                        .map(|instant| instant.elapsed() > TOO_MANY_EMPTY_SLOTS_MESSAGE_COOLDOWN)
+                                        .unwrap_or(true)
+                                    {
+                                        warn_with_peers!("Error while tracking liveness from attestation: {error:?}");
+                                        self.too_many_empty_slots_message_shown_at = Some(Instant::now());
+                                    }
+                                } else {
+                                     warn_with_peers!("Error while tracking liveness from attestation: {error:?}");
+                                }
                             }
                         }
                         ValidatorToLiveness::Stop => break Ok(()),

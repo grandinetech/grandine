@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 bitvec = { workspace = true }
 eth1_api = { workspace = true }
 fork_choice_control = { workspace = true }
+fork_choice_store = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
