@@ -106,6 +106,10 @@ pub struct Metrics {
     pub validator_attest_times: Histogram,
     pub validator_attest_slashing_protector_times: Histogram,
 
+    // Payload Attestations
+    pub validator_own_payload_attestations_init_times: Histogram,
+    pub validator_attest_payload_times: Histogram,
+
     // eth/v1/validator/attestation_data
     pub validator_api_attestation_data_times: Histogram,
 
@@ -502,6 +506,17 @@ impl Metrics {
             validator_attest_slashing_protector_times: Histogram::with_opts(histogram_opts!(
                 "VALIDATOR_ATTEST_SLASHING_PROTECTOR_TIMES",
                 "Slashing protection times when attesting",
+            ))?,
+
+            // Payload Attestations
+            validator_own_payload_attestations_init_times: Histogram::with_opts(histogram_opts!(
+                "VALIDATOR_OWN_PAYLOAD_ATTESTATIONS_INIT_TIMES",
+                "Validator own_payload_attestations init times",
+            ))?,
+
+            validator_attest_payload_times: Histogram::with_opts(histogram_opts!(
+                "VALIDATOR_ATTEST_PAYLOAD_TIMES",
+                "Validator attest payload duty times",
             ))?,
 
             // eth/v1/validator/attestation_data
@@ -989,6 +1004,10 @@ impl Metrics {
         default_registry.register(Box::new(
             self.validator_attest_slashing_protector_times.clone(),
         ))?;
+        default_registry.register(Box::new(
+            self.validator_own_payload_attestations_init_times.clone(),
+        ))?;
+        default_registry.register(Box::new(self.validator_attest_payload_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_attestation_data_times.clone()))?;
         default_registry.register(Box::new(self.validator_propose_times.clone()))?;
         default_registry.register(Box::new(self.validator_propose_successes.clone()))?;

@@ -1631,6 +1631,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
+        let _timer = self
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.validator_attest_payload_times.start_timer());
+
         let needs_to_compute_members = self
             .own_ptc_members
             .needs_to_compute_members_at_slot(slot_head.slot())
@@ -2119,6 +2124,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         self.own_payload_attestations
             .get_or_try_init(|| {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    metrics
+                        .validator_own_payload_attestations_init_times
+                        .start_timer()
+                });
+
                 let own_payload_attestations = signatures
                     .zip(other_data)
                     .filter_map(|(signature, (data, member))| {

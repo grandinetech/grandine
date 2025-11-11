@@ -40,10 +40,7 @@ use logging::{
     debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
     PEER_LOG_METRICS,
 };
-use operation_pools::{
-    BlsToExecutionChangePool, Origin, PayloadAttestationAggPool, PoolToP2pMessage,
-    SyncCommitteeAggPool,
-};
+use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
@@ -129,7 +126,6 @@ pub struct Network<P: Preset> {
     dedicated_executor: Arc<DedicatedExecutor>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P>>,
     bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
-    payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P>>,
     // TODO(Grandine Team): Is there a good reason to keep the `ForkContext` around?
     //                      The current fork can be determined from `Network.controller`
     //                      (or whatever replaces it). Fork digests can easily be computed from a
@@ -162,7 +158,6 @@ impl<P: Preset> Network<P> {
         dedicated_executor: Arc<DedicatedExecutor>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P>>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
-        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P>>,
         metrics: Option<Arc<Metrics>>,
         libp2p_registry: Option<&mut Registry>,
         data_dumper: Arc<DataDumper>,
@@ -275,7 +270,6 @@ impl<P: Preset> Network<P> {
             dedicated_executor,
             sync_committee_agg_pool,
             bls_to_execution_change_pool,
-            payload_attestation_agg_pool,
             fork_context,
             metrics,
             network_to_service_tx,
