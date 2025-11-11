@@ -284,7 +284,7 @@ fn main() -> Result<()> {
         .tempdir()?
         .keep();
 
-    binary_utils::initialize_tracing_logger(module_path!(), &data_dir, false)?;
+    binary_utils::initialize_tracing_logger(module_path!(), Some(&data_dir), None, false)?;
     binary_utils::initialize_rayon()?;
     #[cfg(not(target_os = "windows"))]
     print_jemalloc_stats()?;

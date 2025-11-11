@@ -340,6 +340,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
 }
 
 /// [`process_bls_to_execution_change`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#new-process_bls_to_execution_change)
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_bls_to_execution_change<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

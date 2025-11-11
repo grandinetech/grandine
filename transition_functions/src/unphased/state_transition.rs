@@ -13,6 +13,7 @@ pub enum StateRootPolicy {
 }
 
 impl StateRootPolicy {
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
     pub fn verify<P: Preset>(
         self,
         state: &Hc<impl BeaconState<P>>,

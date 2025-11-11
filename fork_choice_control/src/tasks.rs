@@ -22,6 +22,7 @@ use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
+use tracing::{instrument, Span};
 use types::{
     combined::{
         AttesterSlashing, BeaconState as CombinedBeaconState, SignedAggregateAndProof,
@@ -73,9 +74,19 @@ pub struct BlockTask<P: Preset, E, W> {
     pub origin: BlockOrigin,
     pub processing_timings: ProcessingTimings,
     pub metrics: Option<Arc<Metrics>>,
+    pub tracing_span: Span,
 }
 
 impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
+    #[instrument(
+        skip_all,
+        name = "BlockTask::run",
+        parent = &self.tracing_span,
+        fields(
+            origin = ?&self.origin,
+            slot = self.block.message().slot()
+        ),
+    )]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -87,6 +98,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             origin,
             processing_timings,
             metrics,
+            tracing_span,
         } = self;
 
         let _timer = metrics.as_ref().map(|metrics| {
@@ -145,6 +157,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             origin,
             processing_timings,
             block_root,
+            tracing_span,
         }
         .send(&mutator_tx);
     }
