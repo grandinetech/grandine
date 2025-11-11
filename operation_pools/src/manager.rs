@@ -14,7 +14,7 @@ pub struct Manager<P: Preset, W: Wait> {
     pub blob_reconstruction_pool: BlobReconstructionPool<P, W>,
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
     pub sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
-    pub fork_choice_to_pool_rx: UnboundedReceiver<PoolMessage<W>>,
+    pub fork_choice_to_pool_rx: UnboundedReceiver<PoolMessage<P, W>>,
 }
 
 impl<P: Preset, W: Wait> Manager<P, W> {
@@ -24,7 +24,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         blob_reconstruction_pool: BlobReconstructionPool<P, W>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
-        fork_choice_to_pool_rx: UnboundedReceiver<PoolMessage<W>>,
+        fork_choice_to_pool_rx: UnboundedReceiver<PoolMessage<P, W>>,
     ) -> Self {
         Self {
             attestation_agg_pool,
@@ -55,10 +55,11 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                 PoolMessage::ReconstructDataColumns {
                     wait_group,
                     block_root,
+                    block,
                     slot,
                 } => {
                     self.blob_reconstruction_pool
-                        .spawn_reconstruction(wait_group, block_root, slot);
+                        .spawn_reconstruction(wait_group, block_root, block, slot);
                 }
             }
         }

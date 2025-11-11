@@ -56,7 +56,7 @@ use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        containers::{DataColumnIdentifier, DataColumnSidecar},
         primitives::ColumnIndex,
     },
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
@@ -148,7 +148,7 @@ where
     W: Wait,
     TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
-    LS: UnboundedSink<PoolMessage<W>>,
+    LS: UnboundedSink<PoolMessage<P, W>>,
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
@@ -326,10 +326,14 @@ where
                 MutatorMessage::ReconstructedMissingColumns {
                     wait_group,
                     block_root,
-                    full_matrix,
-                } => {
-                    self.handle_reconstructed_missing_columns(&wait_group, block_root, full_matrix)?
-                }
+                    block,
+                    data_column_sidecars,
+                } => self.handle_reconstructed_missing_columns(
+                    &wait_group,
+                    block_root,
+                    &block,
+                    data_column_sidecars,
+                ),
             }
         }
     }
@@ -733,6 +737,7 @@ where
                                     self.send_to_pool(PoolMessage::ReconstructDataColumns {
                                         wait_group,
                                         block_root,
+                                        block: pending_block.block.clone_arc(),
                                         slot: pending_block.block.message().slot(),
                                     })
                                 }
@@ -1837,28 +1842,14 @@ where
         &mut self,
         wait_group: &W,
         block_root: H256,
-        full_matrix: Vec<MatrixEntry<P>>,
-    ) -> Result<()> {
-        let Some(pending) = self.delayed_until_blobs.get(&block_root) else {
-            return Ok(());
-        };
+        block: &SignedBeaconBlock<P>,
+        mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+    ) {
+        let missing_indices = self.store.indices_of_missing_data_columns(block);
 
-        let missing_indices = self.store.indices_of_missing_data_columns(&pending.block);
         if missing_indices.is_empty() {
-            return Ok(());
+            return;
         }
-
-        let timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-        let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
-
-        let mut data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&pending.block, &cells_and_kzg_proofs)?;
-
-        prometheus_metrics::stop_and_record(timer);
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
         data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
@@ -1880,8 +1871,6 @@ where
                 self.send_to_p2p(P2pMessage::PublishDataColumnSidecar(data_column_sidecar));
             }
         }
-
-        Ok(())
     }
 
     fn handle_notified_forkchoice_update_result(
@@ -2497,8 +2486,8 @@ where
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
         if should_retry_block {
-            if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
-                self.retry_block(wait_group.clone(), pending_block.clone());
+            if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
+                self.retry_block(wait_group.clone(), pending_block);
             }
         }
 
@@ -2956,7 +2945,10 @@ where
     }
 
     fn retry_block(&self, wait_group: W, pending_block: PendingBlock<P>) {
-        trace_with_peers!("retrying delayed block: {pending_block:?}");
+        debug_with_peers!(
+            "retrying delayed block: {:?}",
+            pending_block.block.message().hash_tree_root(),
+        );
 
         let PendingBlock {
             block,
@@ -3530,7 +3522,7 @@ where
         }
     }
 
-    fn send_to_pool(&self, message: PoolMessage<W>) {
+    fn send_to_pool(&self, message: PoolMessage<P, W>) {
         if self.finished_loading_from_storage {
             message.send(&self.pool_tx);
         }
