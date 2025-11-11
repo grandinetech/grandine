@@ -7045,9 +7045,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.31.0"
+version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8935b44e7c13394a179a438e0cebba0fe08fe01b54f152e29a93b5cf993fd4"
+checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
 dependencies = [
  "cc",
  "pkg-config",
@@ -7086,6 +7086,7 @@ dependencies = [
  "bitvec",
  "eth1_api",
  "fork_choice_control",
+ "fork_choice_store",
  "futures",
  "helper_functions",
  "itertools 0.14.0",
@@ -10117,9 +10118,9 @@ dependencies = [
 
 [[package]]
 name = "risc0-build"
-version = "3.0.1"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b042a8a6fdd02793c0acb526fbd3f0d92abe664f1158be38d45a92def57385b2"
+checksum = "1bbb512d728e011d03ce0958ca7954624ee13a215bcafd859623b3c63b2a3f60"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.19.2",
@@ -10257,9 +10258,9 @@ dependencies = [
 
 [[package]]
 name = "risc0-zkvm"
-version = "3.0.1"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdf8d11f9e61cfd3e577fb6e6e11cc34ca247831c2555ee0a6a53deba9702d2"
+checksum = "3fcce11648a9ff60b8e7af2f0ce7fbf8d25275ab6d414cc91b9da69ee75bc978"
 dependencies = [
  "anyhow",
  "bincode",
@@ -10481,9 +10482,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.33.0"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c6d5e5acb6f6129fe3f7ba0a7fc77bca1942cb568535e18e7bc40262baf3110"
+checksum = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f"
 dependencies = [
  "bitflags 2.10.0",
  "fallible-iterator",
