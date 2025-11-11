@@ -1,11 +1,10 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
 use anyhow::Result;
-use ssz::{SszHash as _, SszRead as _, SszWrite as _, H256};
+use serde::{Deserialize, Serialize};
 
 use std::env;
 use std::path::Path;
 use std::process::Command;
-use std::str::FromStr;
 
 pub struct Report;
 
@@ -27,6 +26,15 @@ impl ProofTrait for Proof {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VMGuestInput {
+    config: u8,
+    state_ssz: Vec<u8>,
+    block_ssz: Vec<u8>,
+    cache_ssz: Vec<u8>,
+    phase_bytes: Vec<u8>,
+}
+
 pub struct Vm;
 
 impl VmBackend for Vm {
@@ -45,15 +53,20 @@ impl VmBackend for Vm {
         cache_ssz: Vec<u8>,
         phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Report)> {
-        let serialized_data =
-            bincode::serialize(&(config, state_ssz, block_ssz, cache_ssz, phase_bytes)).unwrap();
+        let serialized_data = bincode::serialize(&VMGuestInput {
+            config: config as u8,
+            state_ssz,
+            block_ssz,
+            cache_ssz,
+            phase_bytes,
+        })
+        .unwrap();
 
-        let output_dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk/build");
+        // Generating the zkVM guest input data
+        let output_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk/build");
         if !output_dir.exists() {
             std::fs::create_dir_all(&output_dir)?;
         }
-
         let input_path = output_dir.join("input.bin");
         std::fs::write(&input_path, &serialized_data)?;
 
@@ -63,7 +76,6 @@ impl VmBackend for Vm {
 
         // First, build the guest program ELF file.
         let build_output = Command::new("cargo-zisk")
-            .env("RUSTFLAGS", "-C target-cpu=generic-rv64")
             .arg("build")
             .arg("--release")
             .current_dir(&zisk_guest_dir)
@@ -80,13 +92,11 @@ impl VmBackend for Vm {
         println!("Using ziskemu to execute the guest program");
 
         // Second, execute the ELF file using ziskemu with a high step count.
-        let elf_path = zisk_guest_dir
-            .join("target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk");
-        let input_path = zisk_guest_dir
-            .join("build/input.bin");
+        let elf_path =
+            zisk_guest_dir.join("target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk");
+        let input_path = zisk_guest_dir.join("build/input.bin");
 
         let output = Command::new("ziskemu")
-            .env("RUSTFLAGS", "-C target-cpu=generic-rv64")
             .env("RUST_BACKTRACE", "full")
             .arg("-e")
             .arg(elf_path)
@@ -94,47 +104,38 @@ impl VmBackend for Vm {
             .arg(input_path)
             .arg("--max-steps")
             .arg("100000000000000")
-            .arg("-v")
             .arg("-X")
-            .arg("-S")
             .current_dir(&zisk_guest_dir)
             .output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow::anyhow!(
-                "Failed to execute ziskemu command. Stderr: {}",
+                "Failed to execute ziskemu command. Stderr:\n{}",
                 stderr
             ));
         }
 
         let stdout = String::from_utf8(output.stdout)?;
-        let mut big_endian_hex = String::with_capacity(64);
+        println!("VM guest stdout:\n{stdout}");
 
-        // Process only the lines that are valid 8-character hex strings,
-        // ignoring any other output like compiler messages.
-        for line in stdout.lines() {
-            let trimmed = line.trim();
-            if trimmed.len() == 8 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-                // This is a valid hex chunk, process it.
-                // Reverse bytes to convert from little-endian hex to big-endian hex.
-                for byte in trimmed.as_bytes().chunks(2).rev() {
-                    big_endian_hex.push_str(std::str::from_utf8(byte)?);
-                }
-            }
-        }
+        // Gather the last set_output() from the VM guest output back
+        let state_root_str = stdout
+            .lines()
+            .map(|line| line.trim())
+            .filter(|trimmed| trimmed.len() == 8)
+            .fold(String::new(), |acc, line| acc + line);
 
-        if big_endian_hex.len() != 64 {
+        let state_root = hex::decode(state_root_str).expect("Invalid state root");
+
+        if state_root.len() != 32 {
             return Err(anyhow::anyhow!(
-                "Expected 64 hex characters from guest output, but got {}. Full output:\n{}",
-                big_endian_hex.len(),
-                stdout
+                "Expect 32 bytes state root from guest output, but got {:?}",
+                state_root
             ));
         }
 
-        let state_root = H256::from_str(&big_endian_hex)
-            .map_err(|e| anyhow::anyhow!("Failed to parse combined hex string: {}", e))?;
-        Ok((state_root.as_bytes().to_vec(), Report))
+        Ok((state_root, Report))
     }
 
     fn prove(

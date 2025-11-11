@@ -16,6 +16,7 @@ borsh = { workspace = true, optional = true }
 clap = { workspace = true, features = ['derive'] }
 database = { workspace = true }
 enum-iterator = { workspace = true }
+hex = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 risc0-zkvm = { workspace = true, optional = true, features = ['unstable', 'heap-embedded-alloc'] }

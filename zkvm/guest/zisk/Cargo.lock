@@ -3226,6 +3226,7 @@ dependencies = [
  "byteorder",
  "enum-iterator",
  "pubkey_cache",
+ "serde",
  "snap",
  "ssz",
  "transition_functions",

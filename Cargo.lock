@@ -14607,6 +14607,7 @@ dependencies = [
  "clap",
  "database",
  "enum-iterator",
+ "hex",
  "pico-sdk",
  "pico-vm",
  "pubkey_cache",

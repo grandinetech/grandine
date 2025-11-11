@@ -59,6 +59,7 @@ impl ReportTrait for Report {
 const ZKVM_GUEST_PICO_SUFFIX: &str = "elf/zkvm-guest-pico.elf";
 
 pub struct Vm;
+
 impl VmBackend for Vm {
     type Proof = Proof;
     type Report = Report;

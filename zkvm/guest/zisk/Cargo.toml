@@ -17,6 +17,7 @@ ssz = { path = "../../../ssz" }
 transition_functions = { path = "../../../transition_functions" }
 types = { path = "../../../types" }
 ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
+serde = { version = '1', features = ['derive', 'rc'] }
 
 [build-dependencies]
 snap = '1'
