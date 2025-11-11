@@ -241,11 +241,11 @@ impl<T: SszSize, N, B> SszSize for PersistentList<T, N, B> {
 
 impl<C, T: SszRead<C>, N: Unsigned, B: BundleSize<T>> SszRead<C> for PersistentList<T, N, B> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
-        // TODO(32-bit support): remove saturating_usize, in favor of using u64 for max length checks. 
-        // 
-        // this saturating_usize is setting hard limit on 32-bit architectures, where maximum length 
-        // doesn't fit in 4-byte usize. On 32-bit architectures (for instance zkvms), maximum overflows 
-        // and becomes 0, failing to deserialize valid structures - BeaconState for example, as it has 
+        // TODO(32-bit support): remove saturating_usize, in favor of using u64 for max length checks.
+        //
+        // this saturating_usize is setting hard limit on 32-bit architectures, where maximum length
+        // doesn't fit in 4-byte usize. On 32-bit architectures (for instance zkvms), maximum overflows
+        // and becomes 0, failing to deserialize valid structures - BeaconState for example, as it has
         // `validators` field, which upper limit is set to 1099511627776 (2^40).
         shared::read_list(shared::saturating_usize::<N>(), context, bytes)
     }
