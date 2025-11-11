@@ -14623,6 +14623,5 @@ dependencies = [
  "transition_functions",
  "types",
  "xz2",
- "ziskos 0.13.0",
  "zkvm_guest_risc0",
 ]
