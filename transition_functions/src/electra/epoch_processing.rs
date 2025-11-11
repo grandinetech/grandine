@@ -45,6 +45,7 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_epoch(
     config: &Config,
     pubkey_cache: &PubkeyCache,

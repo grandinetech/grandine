@@ -16,6 +16,7 @@ use pubkey_cache::PubkeyCache;
 use ssz::SszHash;
 use state_cache::StateWithRewards;
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use transition_functions::{
     combined,
     unphased::{ProcessSlots, StateRootPolicy},
@@ -136,6 +137,7 @@ impl<P: Preset> BlockProcessor<P> {
     }
 
     #[expect(clippy::too_many_arguments)]
+    #[instrument(level = "debug", skip_all)]
     pub fn perform_state_transition(
         &self,
         mut state: Arc<BeaconState<P>>,
@@ -196,6 +198,7 @@ impl<P: Preset> BlockProcessor<P> {
         })
     }
 
+    #[instrument(ret(level = "debug"), level = "debug", skip_all)]
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
         store: &Store<P, Storage<P>>,

@@ -50,7 +50,7 @@ use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
-use tracing::instrument;
+use tracing::{instrument, Span};
 use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
@@ -221,9 +221,15 @@ where
                     origin,
                     processing_timings,
                     block_root,
-                } => {
-                    self.handle_block(wait_group, result, origin, processing_timings, block_root)?
-                }
+                    tracing_span,
+                } => self.handle_block(
+                    wait_group,
+                    result,
+                    origin,
+                    processing_timings,
+                    block_root,
+                    tracing_span,
+                )?,
                 MutatorMessage::AggregateAndProof { wait_group, result } => {
                     self.handle_aggregate_and_proof(&wait_group, result)?
                 }
@@ -384,6 +390,7 @@ where
                 origin,
                 processing_timings,
                 block_root,
+                tracing::debug_span!("handle_unfinalized_block"),
             )?;
         }
 
@@ -393,15 +400,6 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
@@ -594,13 +592,12 @@ where
     #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     #[instrument(
-        parent = None,
-        level = "trace",
+        skip_all,
+        parent = &tracing_span,
+        level = "debug",
         fields(
-            service = "fork_choice"
+            block_root = ?block_root,
         ),
-        name = "fork_choice_control",
-        skip_all
     )]
     fn handle_block(
         &mut self,
@@ -609,6 +606,7 @@ where
         origin: BlockOrigin,
         processing_timings: ProcessingTimings,
         block_root: H256,
+        tracing_span: Span,
     ) -> Result<()> {
         match *result {
             Ok(BlockAction::Accept(mut chain_link, attester_slashing_results)) => {
@@ -679,6 +677,7 @@ where
                     block,
                     origin,
                     processing_timings,
+                    tracing_span,
                 };
 
                 if pending_block.block.phase().is_peerdas_activated() {
@@ -864,6 +863,7 @@ where
                     block,
                     origin,
                     processing_timings,
+                    tracing_span,
                 };
 
                 if self.store.contains_block(parent_root) {
@@ -892,6 +892,7 @@ where
                     block,
                     origin,
                     processing_timings,
+                    tracing_span,
                 };
 
                 if slot <= self.store.slot() {
@@ -2049,15 +2050,7 @@ where
 
     #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     fn accept_block(
         &mut self,
         wait_group: &W,
@@ -2948,6 +2941,7 @@ where
         }
     }
 
+    #[instrument(skip_all, level = "debug", parent = &pending_block.tracing_span)]
     fn retry_block(&self, wait_group: W, pending_block: PendingBlock<P>) {
         debug_with_peers!(
             "retrying delayed block: {:?}",
@@ -2958,6 +2952,7 @@ where
             block,
             origin,
             processing_timings,
+            tracing_span,
         } = pending_block;
 
         let processing_timings = processing_timings.processing();
@@ -2972,6 +2967,7 @@ where
             origin,
             processing_timings,
             metrics: self.metrics.clone(),
+            tracing_span,
         });
     }
 
@@ -3807,6 +3803,7 @@ fn reply_delayed_block_validation_result<P: Preset>(
         block,
         origin,
         processing_timings,
+        tracing_span,
     } = pending_block;
 
     if let BlockOrigin::Api(Some(sender)) = origin {
@@ -3816,12 +3813,14 @@ fn reply_delayed_block_validation_result<P: Preset>(
             block,
             origin: BlockOrigin::Api(None),
             processing_timings,
+            tracing_span,
         }
     } else {
         PendingBlock {
             block,
             origin,
             processing_timings,
+            tracing_span,
         }
     }
 }

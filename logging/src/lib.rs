@@ -114,8 +114,10 @@ mod tests {
         let data_dir = TempDir::new().expect("should create a temp data dir");
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
-            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
-                .expect("Failed to initialize tracing logger");
+            let handle =
+                initialize_tracing_logger(module_path!(), Some(data_dir.path()), None, false)
+                    .expect("Failed to initialize tracing logger");
+
             *lock = Some(LoggerWithTempDir {
                 handle: handle.clone(),
                 _temp_dir: data_dir,
@@ -138,7 +140,7 @@ mod tests {
         let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
 
         let handle = init_logger_once();
-        handle.modify(|env_filter| {
+        handle.modify_log(|env_filter| {
             let new_filter = env_filter
                 .clone()
                 .add_directive("exception".parse().expect("Failed to parse"));

@@ -32,6 +32,7 @@ use pubkey_cache::PubkeyCache;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
+use tracing::instrument;
 use transition_functions::{
     combined,
     unphased::{self, ProcessSlots, StateRootPolicy},
@@ -536,6 +537,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             })
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn state_by_block_root(&self, block_root: H256) -> Option<Arc<BeaconState<P>>> {
         self.chain_link(block_root)
             .map(|chain_link| chain_link.state(self))
@@ -1069,6 +1071,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         })
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn validate_gossip_rules(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
@@ -1136,6 +1139,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_transition_for_gossip(parent)
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_block_with_custom_state_transition(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,

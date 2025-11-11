@@ -30,11 +30,28 @@ macro_rules! into_par_iter {
     }};
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn join<T1: Send, T2: Send, F1: FnOnce() -> T1 + Send, F2: FnOnce() -> T2 + Send>(
     f1: F1,
     f2: F2,
 ) -> (T1, T2) {
-    #[cfg(not(target_os = "zkvm"))]
+    #[cfg(all(feature = "tracing", not(target_os = "zkvm")))]
+    {
+        let span = tracing::debug_span!("helper_functions::join");
+
+        return rayon::join(
+            || {
+                let _entered = span.enter();
+                f1()
+            },
+            || {
+                let _entered = span.enter();
+                f2()
+            },
+        );
+    }
+
+    #[cfg(all(not(feature = "tracing"), not(target_os = "zkvm")))]
     return rayon::join(f1, f2);
 
     #[cfg(target_os = "zkvm")]
