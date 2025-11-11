@@ -3,12 +3,15 @@ use chrono::{Local, SecondsFormat};
 use fs_err as fs;
 use logging::{debug_with_peers, exception};
 use logroller::{Compression, LogRollerBuilder, Rotation, RotationSize};
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::{ExporterBuildError, WithExportConfig as _};
 use rayon::ThreadPoolBuilder;
 use std::{
     io::{self, IsTerminal},
     path::Path,
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
 };
+use tokio::runtime::Runtime;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     filter::LevelFilter,
@@ -18,18 +21,32 @@ use tracing_subscriber::{
     reload::{self, Handle},
     EnvFilter, Registry,
 };
+use types::redacting_url::RedactingUrl;
 
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
+#[derive(Debug)]
+pub struct TelemetryConfig {
+    pub url: RedactingUrl,
+    pub service_name: String,
+}
+
 #[derive(Clone)]
-pub struct TracingHandle(Handle<EnvFilter, Registry>);
+pub struct TracingHandle {
+    handle: Handle<EnvFilter, Registry>,
+    #[expect(
+        dead_code,
+        reason = "telemetry runtime must exist for telemetry data exporter thread to function"
+    )]
+    telemetry_runtime: Option<Arc<Runtime>>,
+}
 
 impl TracingHandle {
     pub fn modify<F>(&self, f: F) -> Result<(), reload::Error>
     where
         F: FnOnce(&mut EnvFilter),
     {
-        self.0.modify(f)
+        self.handle.modify(f)
     }
 }
 
@@ -45,9 +62,11 @@ impl FormatTime for LocalTimer {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 pub fn initialize_tracing_logger(
     module_path: &str,
     data_dir: &Path,
+    telemetry_config: Option<TelemetryConfig>,
     always_write_style: bool,
 ) -> Result<TracingHandle> {
     let mut filter = EnvFilter::default()
@@ -95,7 +114,7 @@ pub fn initialize_tracing_logger(
         }
     }
 
-    let (filter_layer, handle) = reload::Layer::new(filter);
+    let (filter_layer, handle) = reload::Layer::new(filter.clone());
 
     let enable_ansi = always_write_style || io::stdout().is_terminal();
 
@@ -108,7 +127,52 @@ pub fn initialize_tracing_logger(
         .with_timer(LocalTimer)
         .with_ansi(enable_ansi);
 
-    let registry = tracing_subscriber::registry().with(stdout_layer.with_filter(filter_layer));
+    let mut layers = vec![stdout_layer.with_filter(filter_layer).boxed()];
+    let mut telemetry_runtime = None;
+
+    if let Some(telemetry_config) = telemetry_config {
+        let TelemetryConfig { url, service_name } = telemetry_config;
+
+        // A Tokio runtime is required for the gRPC exporter’s async operations.
+        // This runtime persists across app restarts (since the logger isn’t reinitialized),
+        // while the main Tokio runtime is recreated on each restart.
+        // See `grandine::block_on` for details.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .thread_name("grandine-telemetry-exporter")
+            .worker_threads(2)
+            .max_blocking_threads(32)
+            .enable_all()
+            .build()?;
+
+        runtime.block_on(async {
+            let exporter = opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .with_endpoint(url.into_url())
+                .build()?;
+
+            let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                .with_batch_exporter(exporter)
+                .with_resource(
+                    opentelemetry_sdk::Resource::builder()
+                        .with_service_name(service_name)
+                        .build(),
+                )
+                .build();
+
+            let tracer = provider.tracer("grandine");
+            let telemetry_layer = tracing_opentelemetry::layer()
+                .with_tracer(tracer)
+                .with_filter(filter);
+
+            layers.push(telemetry_layer.boxed());
+
+            Ok::<(), ExporterBuildError>(())
+        })?;
+
+        telemetry_runtime = Some(Arc::new(runtime))
+    }
+
+    let registry = tracing_subscriber::registry().with(layers);
 
     match initialize_rotating_writer(data_dir) {
         Ok(non_blocking) => {
@@ -130,13 +194,17 @@ pub fn initialize_tracing_logger(
         }
         Err(e) => {
             registry.init();
-            tracing::error!("Failed to initialize rotating exception log in {data_dir:?}: {e}");
+            tracing::error!("failed to initialize rotating exception log in {data_dir:?}: {e}");
         }
     }
 
     debug_with_peers!("tracing started!");
     exception!("exception macro is enabled");
-    Ok(TracingHandle(handle))
+
+    Ok(TracingHandle {
+        handle,
+        telemetry_runtime,
+    })
 }
 
 fn initialize_rotating_writer(
@@ -186,7 +254,7 @@ mod tests {
         let data_dir = TempDir::new().expect("should create a temp data dir");
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
-            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
+            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), None, false)
                 .expect("Failed to initialize tracing logger");
             *lock = Some(LoggerWithTempDir {
                 handle: handle.clone(),

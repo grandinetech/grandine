@@ -114,7 +114,7 @@ mod tests {
         let data_dir = TempDir::new().expect("should create a temp data dir");
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
-            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), false)
+            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), None, false)
                 .expect("Failed to initialize tracing logger");
             *lock = Some(LoggerWithTempDir {
                 handle: handle.clone(),
