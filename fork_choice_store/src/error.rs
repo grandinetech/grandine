@@ -162,10 +162,6 @@ pub enum Error<P: Preset> {
         validator_index: ValidatorIndex,
         slot: Slot,
     },
-    #[error("payload attestation validation error: {payload_attestation:?}")]
-    PayloadAttestationValidationError {
-        payload_attestation: Arc<PayloadAttestationMessage>,
-    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

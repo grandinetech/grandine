@@ -54,7 +54,7 @@ use types::{
     },
     gloas::containers::{
         DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
-        IndexedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
+        PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -2506,29 +2506,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         if !skip_signatures_verification && origin.verify_signatures() {
-            let attesting_indices = ContiguousList::try_from(vec![validator_index])
-                .expect("a validator index should fit in list of PTC size");
-
-            let indexed_payload_attestation = IndexedPayloadAttestation {
-                attesting_indices,
-                data,
-                signature: payload_attestation.signature,
-            };
-
-            // [REJECT] payload_attestation_message.signature is valid with respect to the validator's public key.
-            ensure!(
-                predicates::validate_constructed_indexed_payload_attestation(
-                    &self.chain_config,
-                    &self.pubkey_cache,
-                    state,
-                    &indexed_payload_attestation,
-                    SingleVerifier,
-                )
-                .is_ok(),
-                Error::<P>::PayloadAttestationValidationError {
-                    payload_attestation
-                }
-            );
+            SingleVerifier.verify_singular(
+                data.signing_root(&self.chain_config, state),
+                payload_attestation.signature,
+                self.pubkey_cache
+                    .get_or_insert(*accessors::public_key(state, validator_index)?)?,
+                SignatureKind::PayloadAttestation,
+            )?;
         }
 
         Ok(PayloadAttestationAction::Accept(payload_attestation))
