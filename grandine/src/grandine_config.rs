@@ -1,16 +1,17 @@
 use core::{net::SocketAddr, time::Duration};
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
+use binary_utils::TelemetryConfig;
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
-use logging::info_with_peers;
 use p2p::NetworkConfig;
 use runtime::{MetricsConfig, StorageConfig};
 use signer::Web3SignerConfig;
 use ssz::Uint256;
+use tracing::info;
 use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
@@ -63,6 +64,7 @@ pub struct GrandineConfig {
     pub http_api_config: Option<HttpApiConfig>,
     pub max_events: usize,
     pub metrics_config: MetricsConfig,
+    pub telemetry_config: Option<TelemetryConfig>,
     pub track_liveness: bool,
     pub detect_doppelgangers: bool,
     pub use_validator_key_cache: bool,
@@ -101,6 +103,7 @@ impl GrandineConfig {
             web3signer_config,
             http_api_config,
             metrics_config,
+            telemetry_config,
             checkpoint_sync_url,
             use_validator_key_cache,
             validator_api_config,
@@ -116,108 +119,112 @@ impl GrandineConfig {
         } = storage_config;
 
         match predefined_network {
-            Some(network) => info_with_peers!("network: {network}"),
-            None => info_with_peers!(
+            Some(network) => info!("network: {network}"),
+            None => info!(
                 "network: custom with {} preset and {} configuration",
-                chain_config.preset_base,
-                chain_config.config_name,
+                chain_config.preset_base, chain_config.config_name,
             ),
         }
 
-        info_with_peers!("storage mode: {:?}", storage_config.storage_mode);
-        info_with_peers!("data directory: {}", data_dir.display());
+        info!("storage mode: {:?}", storage_config.storage_mode);
+        info!("data directory: {}", data_dir.display());
 
         self.storage_config.print_db_sizes();
 
-        info_with_peers!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
-        info_with_peers!("graffiti: {graffiti:?}");
+        info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
+        info!("graffiti: {graffiti:?}");
 
         if *disable_blockprint_graffiti {
-            info_with_peers!("blockprint graffiti disabled");
+            info!("blockprint graffiti disabled");
         }
 
         if let Some(http_api_config) = http_api_config {
-            info_with_peers!("HTTP API address: {}", http_api_config.address);
+            info!("HTTP API address: {}", http_api_config.address);
         } else {
-            info_with_peers!("HTTP API disabled");
+            info!("HTTP API disabled");
         }
 
         if let Some(metrics_server_config) = &metrics_config.metrics_server_config {
-            info_with_peers!(
+            info!(
                 "metrics server address: {}",
                 SocketAddr::from(metrics_server_config),
             );
         }
 
         if let Some(metrics_service_config) = &metrics_config.metrics_service_config {
-            info_with_peers!(
+            info!(
                 "metrics service configured with {:?} update interval",
                 metrics_service_config.metrics_update_interval,
             );
         }
 
-        if let Some(validator_api_config) = validator_api_config.as_ref() {
-            info_with_peers!("validator API address: {}", validator_api_config.address);
+        if let Some(config) = telemetry_config {
+            info!("telemetry export configured with: {config:?}");
         } else {
-            info_with_peers!("validator API disabled");
+            info!("telemetry metrics data export disabled");
         }
 
-        info_with_peers!("archival interval: {archival_epoch_interval} epochs");
-        info_with_peers!("slasher enabled: {slashing_enabled}");
+        if let Some(validator_api_config) = validator_api_config.as_ref() {
+            info!("validator API address: {}", validator_api_config.address);
+        } else {
+            info!("validator API disabled");
+        }
+
+        info!("archival interval: {archival_epoch_interval} epochs");
+        info!("slasher enabled: {slashing_enabled}");
 
         if let Some(client_version) = &network_config.identify_agent_version {
-            info_with_peers!("client version: {client_version}");
+            info!("client version: {client_version}");
         }
 
         if !network_config.trusted_peers.is_empty() {
-            info_with_peers!("trusted peers: {:?}", network_config.trusted_peers);
+            info!("trusted peers: {:?}", network_config.trusted_peers);
         }
 
         if let Some(slot) = state_slot {
-            info_with_peers!("force state slot: {slot}");
+            info!("force state slot: {slot}");
         }
 
         if let Some(builder_config) = builder_config {
-            info_with_peers!(
+            info!(
                 "using external block builder (API URL: {}, format: {}, \
                 default_builder_boost_factor: {default_builder_boost_factor})",
-                builder_config.builder_api_url,
-                builder_config.builder_api_format,
+                builder_config.builder_api_url, builder_config.builder_api_format,
             );
         }
 
         if let Some(checkpoint_sync_url) = checkpoint_sync_url {
-            info_with_peers!("checkpoint sync url: {checkpoint_sync_url}");
+            info!("checkpoint sync url: {checkpoint_sync_url}");
         }
 
         if !web3signer_config.urls.is_empty() {
-            info_with_peers!(
+            info!(
                 "using Web3Signer API to sign validator messages (API URLs: [{}])",
                 web3signer_config.urls.iter().format(", "),
             );
         }
 
         if *slashing_enabled {
-            info_with_peers!("slasher history limit: {slashing_history_limit}");
+            info!("slasher history limit: {slashing_history_limit}");
         }
 
-        info_with_peers!("suggested fee recipient: {suggested_fee_recipient}");
-        info_with_peers!("back-sync enabled: {back_sync_enabled}");
+        info!("suggested fee recipient: {suggested_fee_recipient}");
+        info!("back-sync enabled: {back_sync_enabled}");
 
         if *use_validator_key_cache {
-            info_with_peers!("using validator key cache");
+            info!("using validator key cache");
         }
 
         if *withhold_data_columns_publishing {
-            info_with_peers!("withholding data column sidecars publishing");
+            info!("withholding data column sidecars publishing");
         }
 
         if *disable_engine_getblobs {
-            info_with_peers!("running without engine_getBlobs integration");
+            info!("running without engine_getBlobs integration");
         }
 
         if *sync_without_reconstruction {
-            info_with_peers!("sync with reconstruction disabled");
+            info!("sync with reconstruction disabled");
         }
     }
 }

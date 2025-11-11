@@ -36,7 +36,7 @@ use crate::{
         node_peer_count, node_peers, node_syncing_status, node_version, pool_attestations,
         pool_attestations_v2, pool_attester_slashings, pool_attester_slashings_v2,
         pool_bls_to_execution_changes, pool_proposer_slashings, pool_voluntary_exits,
-        post_log_level, post_state_validator_balances, post_state_validators,
+        post_log_level, post_state_validator_balances, post_state_validators, post_trace_level,
         publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
         state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
@@ -499,6 +499,7 @@ fn eth_v2_debug_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route("/eth/v2/debug/beacon/states/{state_id}", get(beacon_state))
         .route("/eth/v2/debug/beacon/heads", get(beacon_heads))
         .route("/eth/v2/debug/tracing/log_level", post(post_log_level))
+        .route("/eth/v2/debug/tracing/trace_level", post(post_trace_level))
 }
 
 fn eth_v1_node_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {

@@ -15,6 +15,7 @@ use fork_choice_store::{
 };
 use logging::debug_with_peers;
 use serde::Serialize;
+use tracing::Span;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
@@ -87,6 +88,7 @@ pub enum MutatorMessage<P: Preset, W> {
         origin: BlockOrigin,
         processing_timings: ProcessingTimings,
         block_root: H256,
+        tracing_span: Span,
     },
     AggregateAndProof {
         wait_group: W,

@@ -253,6 +253,12 @@ pub struct LogLevelRequest {
     level: String,
 }
 
+#[derive(Deserialize)]
+pub struct TraceLevelRequest {
+    target: Option<String>,
+    level: String,
+}
+
 #[expect(clippy::struct_field_names)]
 #[derive(Serialize)]
 pub struct GetGenesisResponse {
@@ -3406,7 +3412,7 @@ pub async fn post_log_level(
     match directive_str.parse() {
         Ok(directive) => {
             if let Some(handle) = handle {
-                if let Err(e) = handle.modify(|filter| {
+                if let Err(e) = handle.modify_log(|filter| {
                     let old = core::mem::take(filter);
                     *filter = old.add_directive(directive);
                 }) {
@@ -3416,6 +3422,45 @@ pub async fn post_log_level(
                     );
                 }
                 (StatusCode::OK, "log level updated".to_owned())
+            } else {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "tracing not available".to_owned(),
+                )
+            }
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, format!("invalid directive: {e}")),
+    }
+}
+
+/// `POST /eth/v2/debug/tracing/trace_level`
+pub async fn post_trace_level(
+    State(handle): State<Option<TracingHandle>>,
+    Json(req): Json<TraceLevelRequest>,
+) -> impl IntoResponse {
+    let TraceLevelRequest { target, level } = req;
+
+    let directive_str = target
+        .map(|target| format!("{target}={level}"))
+        .unwrap_or(level);
+
+    match directive_str.parse() {
+        Ok(directive) => {
+            if let Some(handle) = handle {
+                match handle.modify_trace(|filter| {
+                    let old = core::mem::take(filter);
+                    *filter = old.add_directive(directive);
+                }) {
+                    Ok(Some(())) => (StatusCode::OK, "trace level updated".to_owned()),
+                    Ok(None) => (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "telemetry not available".to_owned(),
+                    ),
+                    Err(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("failed to reload filter: {e}"),
+                    ),
+                }
             } else {
                 (
                     StatusCode::SERVICE_UNAVAILABLE,

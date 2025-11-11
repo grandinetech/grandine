@@ -118,6 +118,7 @@ pub fn process_block_header_for_gossip<P: Preset>(
     Ok(())
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_block_header<P: Preset>(
     config: &Config,
     state: &mut impl BeaconState<P>,
@@ -144,6 +145,7 @@ pub fn process_block_header<P: Preset>(
     Ok(())
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_randao<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -180,6 +182,7 @@ pub fn process_randao<P: Preset>(
     Ok(())
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_eth1_data<P: Preset>(
     state: &mut impl BeaconState<P>,
     body: &impl BeaconBlockBody<P>,
@@ -422,6 +425,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
 }
 
 #[expect(clippy::too_many_lines)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn validate_deposits<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

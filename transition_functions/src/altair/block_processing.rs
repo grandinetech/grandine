@@ -523,6 +523,7 @@ pub fn apply_deposits<P: Preset>(
     Ok(())
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_sync_aggregate<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

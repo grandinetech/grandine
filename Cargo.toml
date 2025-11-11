@@ -383,6 +383,9 @@ num_cpus = '1'
 num_threads = '0.1'
 once_cell = '1'
 openssl = '0.10'
+opentelemetry = '0.31'
+opentelemetry_sdk = '0.31'
+opentelemetry-otlp = { version = '0.31', features = ['grpc-tonic' ] }
 parking_lot = '0.12'
 parse-display = '0.10'
 pathdiff = '0.2'
@@ -452,6 +455,7 @@ tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
 tracing-appender = '0.2'
+tracing-opentelemetry = '0.32'
 tracing-subscriber = { version = '0.3', features = ['env-filter', 'fmt', 'registry', 'chrono'] }
 tracing-test = '0.2'
 triomphe = '0.1'

@@ -14,6 +14,7 @@ use std::collections::{BTreeMap as OrdMap, HashMap};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use thiserror::Error;
+use tracing::instrument;
 use types::{
     combined::BeaconState,
     nonstandard::BlockRewards,
@@ -129,6 +130,7 @@ impl<P: Preset> StateCache<P> {
         Ok((post_state, rewards))
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn get_or_try_process_with(
         &self,
         block_root: H256,
@@ -266,6 +268,7 @@ impl<P: Preset> StateCache<P> {
             .pipe(Ok)
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn get_or_init_by_root(&self, block_root: H256) -> Result<StateMapLock<P>> {
         self.try_lock_cache()?
             .entry(block_root)
@@ -278,6 +281,7 @@ impl<P: Preset> StateCache<P> {
         self.try_lock_cache()?.get(&block_root).cloned().pipe(Ok)
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn try_lock_cache(&self) -> Result<MutexGuard<'_, HashMap<H256, StateMapLock<P>>>> {
         let timeout = self.try_lock_timeout;
 
@@ -292,6 +296,7 @@ impl<P: Preset> StateCache<P> {
         })
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn try_lock_map<'map>(
         &self,
         state_map_lock: &'map StateMapLock<P>,

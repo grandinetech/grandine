@@ -3,6 +3,7 @@
 exec cargo build                \
     --bin      grandine         \
     --features default-networks \
+    --features tracing          \
     --profile  compact          \
     --workspace                 \
     --exclude zkvm_host         \

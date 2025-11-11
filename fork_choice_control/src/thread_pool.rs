@@ -20,7 +20,6 @@ use execution_engine::ExecutionEngine;
 use logging::trace_with_peers;
 use parking_lot::{Condvar, Mutex};
 use std_ext::ArcExt as _;
-use tracing::instrument;
 use types::preset::Preset;
 
 use crate::{
@@ -66,15 +65,6 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
         Ok(Self { shared })
     }
 
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
     pub fn spawn(&self, task: impl Spawn<P, E, W>) {
         task.spawn(&mut self.shared.critical.lock());
         self.shared.condvar.notify_one();

@@ -26,6 +26,7 @@ static_assertions = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true, optional = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
@@ -40,4 +41,5 @@ spec_test_utils = { workspace = true }
 test-generator = { workspace = true }
 
 [features]
-metrics = ['helper_functions/metrics', 'prometheus_metrics']
+metrics = ['helper_functions/metrics', 'dep:prometheus_metrics']
+tracing = ['helper_functions/tracing', 'dep:tracing']

@@ -30,6 +30,7 @@ use crate::{
 };
 
 #[expect(clippy::too_many_arguments)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn state_transition<P: Preset, V: Verifier + Send>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -85,6 +86,7 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
 }
 
 #[expect(clippy::too_many_lines)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn verify_signatures<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
