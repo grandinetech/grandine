@@ -708,6 +708,22 @@ impl<P: Preset> SyncManager<P> {
                     data_columns: None,
                 };
 
+                // Request execution payload envelopes for Gloas-activated slots
+                // Note: Similar to blocks, envelopes are needed for all Gloas slots (not just serve range)
+                // This must be checked before serve range checks to ensure envelopes are always requested
+                if config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::ExecutionPayloadEnvelope,
+                        direction: SyncDirection::Forward,
+                        peer_id: block_peer_id,
+                        start_slot,
+                        count,
+                        response_received: false,
+                        retry_count: 0,
+                        data_columns: None,
+                    });
+                }
+
                 if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
                     && data_column_serve_range_slot < max_slot
                 {
@@ -790,21 +806,6 @@ impl<P: Preset> SyncManager<P> {
                 }
 
                 sync_batches.push(block_batch);
-
-                // Request execution payload envelopes for Gloas-activated slots
-                // Note: Similar to blocks, envelopes are needed for all Gloas slots (not just serve range)
-                if config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
-                    sync_batches.push(SyncBatch {
-                        target: SyncTarget::ExecutionPayloadEnvelope,
-                        direction: SyncDirection::Forward,
-                        peer_id: block_peer_id,
-                        start_slot,
-                        count,
-                        response_received: false,
-                        retry_count: 0,
-                        data_columns: None,
-                    });
-                }
 
                 batch_index += 1;
             }
