@@ -1485,7 +1485,7 @@ impl<P: Preset> Network<P> {
                     .send(&network_to_service_tx);
                 }
 
-                debug_with_peers!("terminating ExecutionPayloadEnvelopesByRoot response stream (TODO stub)");
+                debug_with_peers!("terminating ExecutionPayloadEnvelopesByRoot response stream");
 
                 // Send stream termination
                 ServiceInboundMessage::SendResponse(
