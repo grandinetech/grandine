@@ -21,10 +21,49 @@ pub struct Proof;
 
 impl ProofTrait for Proof {
     fn verify(&self) -> bool {
-        true
+        // Verify proof, run the command:
+        //   cargo-zisk verify -p ./proofs/vadcop_final_proof.bin
+        let zisk_guest_dir = Vm::get_guest_dir();
+        let proofs_path = Vm::get_guest_dir()
+            .join("proofs")
+            .join("vadcop_final_proof.bin");
+
+        let verify_output = run_cmd(
+            Command::new("cargo-zisk")
+                .arg("verify")
+                .arg("-p")
+                .arg(&proofs_path)
+                .current_dir(&zisk_guest_dir),
+        );
+
+        let Ok((exit_status, _)) = verify_output else {
+            return false;
+        };
+
+        exit_status.success()
     }
 
     fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        let zisk_guest_dir = Vm::get_guest_dir();
+        let proofs_path = Vm::get_guest_dir()
+            .join("proofs")
+            .join("vadcop_final_proof.bin");
+
+        let output = run_cmd(
+            Command::new("cp")
+                .arg(&proofs_path)  // src
+                .arg(path.as_ref())  // destination
+                .current_dir(&zisk_guest_dir),
+        )?;
+
+        let (exit_status, output_bytes) = output;
+        if !exit_status.success() {
+            return Err(anyhow!(
+                "Copy file failed. stderr:\n{}",
+                String::from_utf8_lossy(&output_bytes)
+            ));
+        }
+
         Ok(())
     }
 }
@@ -190,8 +229,6 @@ impl VmBackend for Vm {
         // 2. Generate proof
         //   LIB_EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
         //   cargo-zisk prove -e target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk -i build/input.bin -o ./ -a
-        // 3. Verify proof
-        //   cargo-zisk verify -p ./proofs/vadcop_final_proof.bin
         let zisk_guest_dir = Self::get_guest_dir();
         let input_path =
             Self::generate_input_file(config, state_ssz, block_ssz, cache_ssz, phase_bytes)?;
@@ -205,7 +242,7 @@ impl VmBackend for Vm {
                 .arg("rom-setup")
                 .arg("-e")
                 .arg(&elf_path)
-                .current_dir(&zisk_guest_dir)
+                .current_dir(&zisk_guest_dir),
         )?;
 
         if !setup_output.0.success() {
@@ -228,7 +265,7 @@ impl VmBackend for Vm {
                 .arg("-o")
                 .arg(&zisk_guest_dir)
                 .arg("-a") // aggregation, indicates that a final aggregated proof should be produced
-                .current_dir(&zisk_guest_dir)
+                .current_dir(&zisk_guest_dir),
         )?;
 
         let (exit_status, output_bytes) = prove_output;
