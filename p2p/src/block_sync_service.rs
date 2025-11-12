@@ -619,10 +619,6 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready();
                         }
-                        P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(_peer_id, request_id) => {
-                            self.sync_manager
-                                .execution_payload_envelopes_by_root_request_finished(request_id);
-                        }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
                                 finalized_checkpoint.epoch);

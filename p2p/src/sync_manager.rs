@@ -1188,21 +1188,6 @@ impl<P: Preset> SyncManager<P> {
         }
     }
 
-    pub fn execution_payload_envelopes_by_root_request_finished(
-        &mut self,
-        app_request_id: AppRequestId,
-    ) {
-        self.log(
-            Level::Debug,
-            format_args!(
-                "request execution payload envelopes by root finished (app_request_id: {app_request_id:?})"
-            ),
-        );
-
-        // Note: ByRoot requests use TimedSizedCache and auto-expire after timeout
-        // No explicit cleanup needed (follows blob pattern)
-    }
-
     /// Log a message with peer count information.
     fn log(&self, level: Level, message: impl Display) {
         log!(

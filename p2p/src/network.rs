@@ -2078,13 +2078,10 @@ impl<P: Preset> Network<P> {
                 .send(&self.channels.p2p_to_sync_tx);
             }
             Response::ExecutionPayloadEnvelopesByRoot(None) => {
-                debug!(
+                debug_with_peers!(
                     "peer {peer_id} terminated ExecutionPayloadEnvelopesByRoot response stream \
                     (app_request_id: {app_request_id:?})"
                 );
-
-                P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(peer_id, app_request_id)
-                    .send(&self.channels.p2p_to_sync_tx);
             }
             Response::LightClientBootstrap(_) => {
                 // TODO(Altair Light Client Sync Protocol)

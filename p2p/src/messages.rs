@@ -75,7 +75,6 @@ pub enum P2pToSync<P: Preset> {
     BlobsByRangeRequestFinished(AppRequestId),
     BlocksByRangeRequestFinished(PeerId, AppRequestId),
     DataColumnsByRangeRequestFinished(AppRequestId),
-    ExecutionPayloadEnvelopesByRootRequestFinished(PeerId, AppRequestId),
     ExecutionPayloadEnvelopesByRangeRequestFinished(PeerId, AppRequestId),
     RequestFailed(PeerId),
     FinalizedCheckpoint(Checkpoint),
