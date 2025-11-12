@@ -226,9 +226,10 @@ impl Tick {
         let slot = GENESIS_SLOT + slots_since_genesis;
 
         // Then, determine which tick within that slot
-        let nanos_since_slot_start = nanos_since_genesis % nanos_per_slot;
         let nanos_per_tick = tick_duration_at_slot::<P>(config, slot).as_nanos();
-        let ticks_since_slot = usize::try_from(nanos_since_slot_start / nanos_per_tick)?;
+        let ticks_per_slot = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))?;
+        let ticks_since_genesis = nanos_since_genesis / nanos_per_tick;
+        let ticks_since_slot = usize::try_from(ticks_since_genesis % ticks_per_slot)?;
 
         let kind = TickKind::from_index_at_slot::<P>(config, slot, ticks_since_slot)
             .expect("more ticks would add up to additional slots");
@@ -248,7 +249,7 @@ impl Tick {
             None => slot.checked_add(1).ok_or(ClockError::RanOutOfSlots)?,
         };
 
-        let next_kind = kind.next_cycle_at_slot::<P>(config, slot, next_slot);
+        let next_kind = kind.next_cycle_at_slot::<P>(config, slot);
 
         Ok(Self::new(next_slot, next_kind))
     }
@@ -283,45 +284,26 @@ impl TickKind {
         }
     }
 
-    fn index_at_slot<P: Preset>(self, config: &Config, slot: Slot) -> Option<usize> {
-        if config.phase_at_slot::<P>(slot) >= Phase::Gloas {
-            enum_iterator::all::<Self>().position(|k| k == self)
-        } else {
-            Self::pre_gloas_ticks().position(|k| k == self)
-        }
-    }
-
     fn next_at_slot<P: Preset>(self, config: &Config, slot: Slot) -> Option<Self> {
-        let current_idx = self.index_at_slot::<P>(config, slot)?;
-        let next_idx = current_idx + 1;
-
-        if next_idx < Self::cardinality_at_slot::<P>(config, slot) {
-            Self::from_index_at_slot::<P>(config, slot, next_idx)
+        if config.phase_at_slot::<P>(slot) >= Phase::Gloas {
+            self.next()
         } else {
-            None
+            let current_idx = Self::pre_gloas_ticks().position(|k| k == self)?;
+            let next_idx = current_idx + 1;
+
+            Self::pre_gloas_ticks().nth(next_idx)
         }
     }
 
-    fn next_cycle_at_slot<P: Preset>(
-        self,
-        config: &Config,
-        current_slot: Slot,
-        next_slot: Slot,
-    ) -> Self {
-        if current_slot == next_slot {
-            // Same slot, just get next tick
-            self.next_at_slot::<P>(config, current_slot)
-                .unwrap_or(Self::Propose)
-        } else {
-            // Crossed slot boundary, always start with Propose
-            Self::Propose
-        }
+    fn next_cycle_at_slot<P: Preset>(self, config: &Config, slot: Slot) -> Self {
+        self.next_at_slot::<P>(config, slot)
+            .unwrap_or(Self::Propose)
     }
 
     /// Returns the number of tick variants in use for a given slot.
     /// Pre-Gloas: 12 ticks (3 intervals * 4 ticks each)
     /// Post-Gloas: 16 ticks (4 intervals * 4 ticks each)
-    fn cardinality_at_slot<P: Preset>(config: &Config, slot: Slot) -> usize {
+    fn ticks_per_slot<P: Preset>(config: &Config, slot: Slot) -> usize {
         if config.phase_at_slot::<P>(slot) >= Phase::Gloas {
             Self::CARDINALITY // 4 intervals of 4 ticks each
         } else {
@@ -449,34 +431,18 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
             Duration::from_secs(slots_since_genesis * config.slot_duration_ms.as_secs());
         let current_slot_to_now = genesis_to_now - genesis_to_current_slot;
 
-        let current_slot = GENESIS_SLOT + slots_since_genesis;
-        let tick_duration = tick_duration_at_slot::<P>(config, current_slot);
-
-        // Recalculate tick duration if we crossed into a new slot with different phase
-        let new_tick_duration = |next_tick: Tick, prev_slot: Slot| {
-            if next_tick.slot == prev_slot {
-                tick_duration
-            } else {
-                tick_duration_at_slot::<P>(config, next_tick.slot)
-            }
-        };
-
-        next_tick = Tick::start_of_slot(current_slot);
+        next_tick = Tick::start_of_slot(GENESIS_SLOT + slots_since_genesis);
         now_to_next_tick = Duration::ZERO;
 
         while now_to_next_tick < current_slot_to_now {
-            let prev_slot = next_tick.slot;
             next_tick = next_tick.next::<P>(config)?;
-
-            now_to_next_tick += new_tick_duration(next_tick, prev_slot);
+            now_to_next_tick += tick_duration_at_slot::<P>(config, next_tick.slot);
         }
 
         if only_interval_ticks {
             while !next_tick.is_start_of_interval() {
-                let prev_slot = next_tick.slot;
                 next_tick = next_tick.next::<P>(config)?;
-
-                now_to_next_tick += new_tick_duration(next_tick, prev_slot);
+                now_to_next_tick += tick_duration_at_slot::<P>(config, next_tick.slot);
             }
         }
 
@@ -493,10 +459,17 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
 fn tick_duration_at_slot<P: Preset>(config: &Config, slot: Slot) -> Duration {
     let slot_duration = slot_duration(config);
 
-    let ticks_per_slot_u32 = u32::try_from(TickKind::cardinality_at_slot::<P>(config, slot))
-        .expect("number of ticks per slot fits in u32");
+    let ticks_per_slot_u128 = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))
+        .expect("number of ticks per slot fits in u128");
 
-    slot_duration / ticks_per_slot_u32
+    let tick_duration_in_millis = u64::try_from(
+        slot_duration
+            .as_millis()
+            .saturating_div(ticks_per_slot_u128),
+    )
+    .expect("tick duration in ms should fit in u64");
+
+    Duration::from_millis(tick_duration_in_millis)
 }
 
 // TODO: Remove this function and update all usages throughout the app to work with slot duration
@@ -535,7 +508,7 @@ mod tests {
     fn tick_count_is_a_multiple_of_interval_count_pre_gloas() {
         let config = Config::mainnet();
         let slot = GENESIS_SLOT;
-        assert!(TickKind::cardinality_at_slot::<Mainnet>(&config, slot)
+        assert!(TickKind::ticks_per_slot::<Mainnet>(&config, slot)
             .is_multiple_of(INTERVALS_PER_SLOT.into()));
     }
 
@@ -543,7 +516,7 @@ mod tests {
     fn tick_count_is_a_multiple_of_interval_count_post_gloas() {
         let config = Config::mainnet().start_and_stay_in(Phase::Gloas);
         let slot = GENESIS_SLOT;
-        assert!(TickKind::cardinality_at_slot::<Mainnet>(&config, slot)
+        assert!(TickKind::ticks_per_slot::<Mainnet>(&config, slot)
             .is_multiple_of(INTERVALS_PER_SLOT_GLOAS.into()));
     }
 
@@ -556,14 +529,14 @@ mod tests {
         // slot before Gloas fork
         let pre_gloas_slot = 32;
         assert_eq!(
-            TickKind::cardinality_at_slot::<Mainnet>(&config, pre_gloas_slot),
+            TickKind::ticks_per_slot::<Mainnet>(&config, pre_gloas_slot),
             12
         );
 
         // first slot at Gloas fork
         let first_gloas_slot = 64;
         assert_eq!(
-            TickKind::cardinality_at_slot::<Mainnet>(&config, first_gloas_slot),
+            TickKind::ticks_per_slot::<Mainnet>(&config, first_gloas_slot),
             16
         );
     }
@@ -644,7 +617,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn ticks_with_mainnet_config_produces_a_tick_every_second_post_gloas() -> Result<()> {
+    async fn ticks_with_mainnet_config_iterate_through_every_tick_post_gloas() -> Result<()> {
         let genesis_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs()
