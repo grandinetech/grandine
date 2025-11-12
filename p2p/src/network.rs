@@ -1376,11 +1376,6 @@ impl<P: Preset> Network<P> {
 
         let ExecutionPayloadEnvelopesByRangeRequest { start_slot, count } = request;
 
-        // Validate Gloas fork activation
-        let gloas_fork_slot =
-            misc::compute_start_slot_at_epoch::<P>(self.controller.chain_config().gloas_fork_epoch);
-
-        let start_slot = start_slot.max(gloas_fork_slot);
         let max_request_payloads = self.controller.chain_config().max_request_payloads;
         let difference = count.min(max_request_payloads).min(MAX_FOR_DOS_PREVENTION);
 
