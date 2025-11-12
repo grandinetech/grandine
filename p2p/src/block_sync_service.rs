@@ -583,7 +583,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     if self.controller.contains_block(block_root)
                                         && self.register_new_received_envelope(block_root, envelope_slot)
                                     {
-                                        // TODO(CEPBS-ONTROLLER): Add controller.on_requested_execution_payload_envelope()
+                                        self.controller.on_requested_execution_payload_envelope(envelope, peer_id);
 
                                         debug_with_peers!(
                                             "received execution payload envelope (block_root: {block_root:?}, \
@@ -593,8 +593,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                                 SyncDirection::Back => {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
-                                        // TODO(BACK_SYNC): Add push_execution_payload_envelope method
-                                        // back_sync.push_execution_payload_envelope(envelope);
+                                        back_sync.push_execution_payload_envelope(envelope);
                                         debug_with_peers!(
                                             "received execution payload envelope for back sync (block_root: {block_root:?}, \
                                              peer_id: {peer_id})"
