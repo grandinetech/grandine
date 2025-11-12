@@ -1391,11 +1391,6 @@ impl<P: Preset> Network<P> {
 
         self.dedicated_executor
             .spawn(async move {
-                // TODO(EIP-7732): Call controller.execution_payload_envelopes_by_range(start_slot..end_slot)
-                // This will likely follow a pattern :
-                // 1. Validate request parameters (count, start_slot)
-                // 4. Stream responses back to peer
-                // then send each envelope via ServiceInboundMessage to network_to_service_tx
                 let envelopes =
                     controller.execution_payload_envelopes_by_range(start_slot..end_slot)?;
 

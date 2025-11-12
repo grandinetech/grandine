@@ -581,6 +581,26 @@ impl<P: Preset> Storage<P> {
         Ok(persisted_data_column_ids)
     }
 
+    pub(crate) fn append_execution_payload_envelopes(
+        &self,
+        envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<Vec<H256>> {
+        let mut batch = vec![];
+        let mut persisted_block_roots = vec![];
+
+        for envelope in envelopes {
+            let block_root = envelope.message.beacon_block_root;
+
+            batch.push(serialize(EnvelopeByBlockRoot(block_root), envelope)?);
+
+            persisted_block_roots.push(block_root);
+        }
+
+        self.database.put_batch(batch)?;
+
+        Ok(persisted_block_roots)
+    }
+
     pub(crate) fn data_column_sidecar_by_id(
         &self,
         data_column_id: DataColumnIdentifier,
@@ -592,10 +612,9 @@ impl<P: Preset> Storage<P> {
 
     pub(crate) fn execution_payload_envelope_by_root(
         &self,
-        _block_root: H256,
+        block_root: H256,
     ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        // TODO(EPBS): Implement database query for execution payload envelopes
-        Ok(None)
+        self.get(EnvelopeByBlockRoot(block_root))
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
@@ -627,6 +646,33 @@ impl<P: Preset> Storage<P> {
         }
 
         for key in keys_to_remove {
+            self.database.delete(key)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn prune_old_execution_payload_envelopes(&self, up_to_slot: Slot) -> Result<()> {
+        let mut envelopes_to_remove: Vec<H256> = vec![];
+
+        // Use BlockRootBySlot to find envelopes to prune (follows block pattern)
+        let results = self
+            .database
+            .iterator_descending(..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string())?;
+
+        for result in results {
+            let (key_bytes, value_bytes) = result?;
+
+            if !BlockRootBySlot::has_prefix(&key_bytes) {
+                break;
+            }
+
+            let block_root = H256::from_ssz_default(value_bytes)?;
+            envelopes_to_remove.push(block_root);
+        }
+
+        for block_root in envelopes_to_remove {
+            let key = EnvelopeByBlockRoot(block_root).to_string();
             self.database.delete(key)?;
         }
 
@@ -1229,6 +1275,19 @@ pub struct SlotColumnId(pub Slot, pub H256, pub ColumnIndex);
 
 impl PrefixableKey for SlotColumnId {
     const PREFIX: &'static str = "c";
+}
+
+#[derive(Display)]
+#[display("{}{_0:x}", Self::PREFIX)]
+pub struct EnvelopeByBlockRoot(pub H256);
+
+impl PrefixableKey for EnvelopeByBlockRoot {
+    const PREFIX: &'static str = "e";
+
+    #[cfg(test)]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
 }
 
 #[derive(Debug, Error)]
