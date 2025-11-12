@@ -1163,7 +1163,6 @@ impl<P: Preset> SyncManager<P> {
             ),
         );
 
-        // Following blob pattern (no blacklist logic)
         if let Some((sync_batch, _)) = self
             .execution_payload_envelope_requests
             .request_by_range_finished(app_request_id)
@@ -1178,6 +1177,12 @@ impl<P: Preset> SyncManager<P> {
             );
 
             if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+                if misc::compute_epoch_at_slot::<P>(sync_batch.start_slot + sync_batch.count)
+                    < controller.min_checked_block_availability_epoch()
+                {
+                    self.add_peer_to_back_sync_black_list(peer_id);
+                }
+
                 self.retry_batch(app_request_id, sync_batch, self.random_peer(true));
             }
         }
