@@ -3962,6 +3962,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.blob_cache.unpersisted_blob_sidecars()
     }
 
+    pub fn has_unpersisted_envelopes(&self) -> bool {
+        self.execution_payload_envelope_cache.has_unpersisted_envelopes()
+    }
+
+    pub fn mark_persisted_envelopes(&mut self, persisted_block_roots: Vec<H256>) {
+        self.execution_payload_envelope_cache.mark_persisted_envelopes(persisted_block_roots);
+    }
+
+    pub fn unpersisted_envelopes(&self) -> impl Iterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>> + '_ {
+        self.execution_payload_envelope_cache
+            .unpersisted_envelopes()
+            .map(|(_, envelope)| envelope)
+    }
+
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {
         self.tick
             .epoch::<P>()

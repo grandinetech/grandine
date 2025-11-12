@@ -43,6 +43,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{containers::MatrixEntry, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::ValidationOutcome,
     phase0::primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
     preset::Preset,
@@ -614,6 +615,21 @@ where
             submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
+    }
+
+    pub fn on_requested_execution_payload_envelope(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        peer_id: PeerId,
+    ) {
+        // TODO(Phase 2): Spawn ExecutionPayloadEnvelopeTask when merging ad16f5c4a
+        // For now, just log receipt
+        debug_with_peers!(
+            "received execution payload envelope (block_root: {:?}, slot: {}, peer_id: {:?})",
+            envelope.message.beacon_block_root,
+            envelope.message.slot,
+            peer_id
+        );
     }
 
     pub fn on_requested_data_column_sidecar(
