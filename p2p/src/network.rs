@@ -1443,24 +1443,26 @@ impl<P: Preset> Network<P> {
         );
 
         let block_roots = request.block_roots;
+
+        if block_roots.is_empty() {
+            debug_with_peers!("ExecutionPayloadEnvelopesByRoot request with empty block_roots");
+
+            ServiceInboundMessage::SendResponse(
+                peer_id,
+                inbound_request_id,
+                Box::new(Response::ExecutionPayloadEnvelopesByRoot(None)),
+            )
+            .send(&self.network_to_service_tx);
+
+            return;
+        }
+
         let max_request_payloads = self.controller.chain_config().max_request_payloads;
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
 
         self.dedicated_executor
             .spawn(async move {
-                if block_roots.is_empty() {
-                    debug_with_peers!("ExecutionPayloadEnvelopesByRoot request with empty block_roots");
-
-                    ServiceInboundMessage::SendResponse(
-                        peer_id,
-                        inbound_request_id,
-                        Box::new(Response::ExecutionPayloadEnvelopesByRoot(None)),
-                    )
-                    .send(&network_to_service_tx);
-
-                    return Ok(());
-                }
 
                 let block_roots = block_roots
                     .into_iter()
