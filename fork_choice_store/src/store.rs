@@ -71,6 +71,7 @@ use crate::{
     blob_cache::BlobCache,
     data_column_cache::DataColumnCache,
     error::Error,
+    execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
@@ -236,8 +237,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
     data_column_cache: DataColumnCache<P>,
-    //Stores validated execution payload envelopes
-    execution_payload_envelopes: HashMap<H256, Arc<SignedExecutionPayloadEnvelope<P>>>,
+    execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache<P>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
@@ -329,7 +329,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             )),
             storage,
             data_column_cache: DataColumnCache::default(),
-            execution_payload_envelopes: HashMap::default(),
+            execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
@@ -402,7 +402,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block_root: H256,
     ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
-        self.execution_payload_envelopes.get(&block_root).cloned()
+        self.execution_payload_envelope_cache.get(block_root)
     }
 
     #[must_use]
@@ -3168,6 +3168,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let finalized_slot = self.finalized_slot();
 
+        self.execution_payload_envelope_cache
+            .prune_finalized(finalized_slot);
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
