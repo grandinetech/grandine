@@ -1369,7 +1369,7 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: ExecutionPayloadEnvelopesByRangeRequest,
     ) -> Result<()> {
-        debug!(
+        debug_with_peers!(
             "received ExecutionPayloadEnvelopesByRange request (peer_id: {peer_id}, \
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
@@ -1405,7 +1405,7 @@ impl<P: Preset> Network<P> {
                     controller.execution_payload_envelopes_by_range(start_slot..end_slot)?;
 
                 for envelope in envelopes {
-                    debug!(
+                    debug_with_peers!(
                         "sending ExecutionPayloadEnvelopesByRange response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {})",
@@ -1419,7 +1419,7 @@ impl<P: Preset> Network<P> {
                     )
                     .send(&network_to_service_tx);
                 }
-                debug!("terminating ExecutionPayloadEnvelopesByRange response stream");
+                debug_with_peers!("terminating ExecutionPayloadEnvelopesByRange response stream");
 
                 // Send stream termination
                 ServiceInboundMessage::SendResponse(
@@ -1442,7 +1442,7 @@ impl<P: Preset> Network<P> {
         inbound_request_id: InboundRequestId,
         request: ExecutionPayloadEnvelopesByRootRequest,
     ) {
-        debug!(
+        debug_with_peers!(
             "received ExecutionPayloadEnvelopesByRoot request (peer_id: {peer_id}, \
             inbound_request_id: {inbound_request_id:?}, request: {request:?})",
         );
@@ -1455,7 +1455,7 @@ impl<P: Preset> Network<P> {
         self.dedicated_executor
             .spawn(async move {
                 if block_roots.is_empty() {
-                    debug!("ExecutionPayloadEnvelopesByRoot request with empty block_roots");
+                    debug_with_peers!("ExecutionPayloadEnvelopesByRoot request with empty block_roots");
 
                     ServiceInboundMessage::SendResponse(
                         peer_id,
@@ -1473,7 +1473,7 @@ impl<P: Preset> Network<P> {
                 let envelopes = controller.execution_payload_envelopes_by_roots(block_roots)?;
 
                 for envelope in envelopes {
-                    debug!(
+                    debug_with_peers!(
                         "sending ExecutionPayloadEnvelopesByRoot response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         block_root: {:?})",
@@ -1488,7 +1488,7 @@ impl<P: Preset> Network<P> {
                     .send(&network_to_service_tx);
                 }
 
-                debug!("terminating ExecutionPayloadEnvelopesByRoot response stream (TODO stub)");
+                debug_with_peers!("terminating ExecutionPayloadEnvelopesByRoot response stream (TODO stub)");
 
                 // Send stream termination
                 ServiceInboundMessage::SendResponse(
@@ -2039,7 +2039,7 @@ impl<P: Preset> Network<P> {
                 );
             }
             Response::ExecutionPayloadEnvelopesByRange(Some(envelope)) => {
-                debug!(
+                debug_with_peers!(
                     "received ExecutionPayloadEnvelopesByRange response \
                     (peer_id: {peer_id}, slot: {})",
                     envelope.message.slot,
@@ -2062,7 +2062,7 @@ impl<P: Preset> Network<P> {
                     .send(&self.channels.p2p_to_sync_tx);
             }
             Response::ExecutionPayloadEnvelopesByRoot(Some(envelope)) => {
-                debug!(
+                debug_with_peers!(
                     "received ExecutionPayloadEnvelopesByRoot response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
                     block_root: {:?})",
@@ -2541,7 +2541,7 @@ impl<P: Preset> Network<P> {
     ) {
         let request = ExecutionPayloadEnvelopesByRangeRequest { start_slot, count };
 
-        debug!(
+        debug_with_peers!(
             "sending ExecutionPayloadEnvelopesByRange request (app_request_id: {app_request_id:?}, \
             peer_id: {peer_id}, request: {request:?})",
         );
@@ -2564,7 +2564,7 @@ impl<P: Preset> Network<P> {
             block_roots.into_iter(),
         );
 
-        debug!(
+        debug_with_peers!(
             "sending ExecutionPayloadEnvelopesByRoot request (app_request_id: {app_request_id:?}, \
             peer_id: {peer_id}, request: {request:?})",
         );

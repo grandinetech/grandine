@@ -585,7 +585,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     {
                                         // TODO(CEPBS-ONTROLLER): Add controller.on_requested_execution_payload_envelope()
 
-                                        debug!(
+                                        debug_with_peers!(
                                             "received execution payload envelope (block_root: {block_root:?}, \
                                              slot: {envelope_slot}, peer_id: {peer_id}, request_id: {request_id:?})"
                                         );
@@ -595,7 +595,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
                                         // TODO(BACK_SYNC): Add push_execution_payload_envelope method
                                         // back_sync.push_execution_payload_envelope(envelope);
-                                        debug!(
+                                        debug_with_peers!(
                                             "received execution payload envelope for back sync (block_root: {block_root:?}, \
                                              peer_id: {peer_id})"
                                         );
@@ -1268,7 +1268,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
 
         if self.received_envelope_roots.contains_key(&block_root) {
-            debug!(
+            debug_with_peers!(
                 "cannot request ExecutionPayloadEnvelopesByRoot: requested envelope has been received: \
                  {block_root:?}"
             );
