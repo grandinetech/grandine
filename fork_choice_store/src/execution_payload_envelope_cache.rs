@@ -8,8 +8,6 @@ use types::{
     preset::Preset,
 };
 
-const ENVELOPE_RETAIN_DURATION_IN_SLOTS: Slot = 2;
-
 #[derive(Clone, Default)]
 pub struct ExecutionPayloadEnvelopeCache<P: Preset> {
     envelopes: HashMap<H256, (Arc<SignedExecutionPayloadEnvelope<P>>, Slot, bool)>,
