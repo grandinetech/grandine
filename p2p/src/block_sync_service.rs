@@ -603,11 +603,21 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                             }
                         }
-                        P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(_peer_id, request_id) => {
+                        P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(peer_id, request_id) => {
                             let request_direction = self.sync_manager.request_direction(request_id);
 
-                            self.sync_manager
-                                .execution_payload_envelopes_by_range_request_finished(request_id, request_direction);
+                            self.sync_manager.execution_payload_envelopes_by_range_request_finished(
+                                &self.controller,
+                                peer_id,
+                                request_id,
+                                request_direction,
+                            );
+
+                            if request_direction == Some(SyncDirection::Back) {
+                                self.check_back_sync_progress()?;
+                            }
+
+                            self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::ExecutionPayloadEnvelopesByRootRequestFinished(_peer_id, request_id) => {
                             self.sync_manager

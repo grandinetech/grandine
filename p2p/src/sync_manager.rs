@@ -1151,6 +1151,8 @@ impl<P: Preset> SyncManager<P> {
 
     pub fn execution_payload_envelopes_by_range_request_finished(
         &mut self,
+        controller: &RealController<P>,
+        peer_id: PeerId,
         app_request_id: AppRequestId,
         request_direction: Option<SyncDirection>,
     ) {
