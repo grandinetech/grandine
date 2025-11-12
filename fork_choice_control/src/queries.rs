@@ -536,20 +536,13 @@ where
         &self,
         range: Range<Slot>,
     ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        // 1. Get canonical chain blocks first
         let canonical_chain_blocks = self.blocks_by_range(range)?;
 
-        // 2. Get envelope for each block_root (if exists)
-        let envelopes = canonical_chain_blocks
-            .iter()
-            .filter_map(|BlockWithRoot { root, .. }| {
-                self.execution_payload_envelope_by_root(*root)
-                    .ok()
-                    .flatten()
-            })
-            .collect();
+        let block_roots = canonical_chain_blocks
+            .into_iter()
+            .map(|BlockWithRoot { root, .. }| root);
 
-        Ok(envelopes)
+        self.execution_payload_envelopes_by_roots(block_roots)
     }
 
     pub fn execution_payload_envelopes_by_roots(
