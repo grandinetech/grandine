@@ -1381,7 +1381,8 @@ impl<P: Preset> Network<P> {
             misc::compute_start_slot_at_epoch::<P>(self.controller.chain_config().gloas_fork_epoch);
 
         let start_slot = start_slot.max(gloas_fork_slot);
-        let difference = count.min(MAX_FOR_DOS_PREVENTION);
+        let max_request_payloads = self.controller.chain_config().max_request_payloads;
+        let difference = count.min(max_request_payloads).min(MAX_FOR_DOS_PREVENTION);
 
         let end_slot = start_slot
             .checked_add(difference)
@@ -1447,6 +1448,7 @@ impl<P: Preset> Network<P> {
         );
 
         let block_roots = request.block_roots;
+        let max_request_payloads = self.controller.chain_config().max_request_payloads;
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
 
@@ -1467,7 +1469,7 @@ impl<P: Preset> Network<P> {
 
                 let block_roots = block_roots
                     .into_iter()
-                    .take(MAX_FOR_DOS_PREVENTION.try_into()?);
+                    .take(MAX_FOR_DOS_PREVENTION.min(max_request_payloads).try_into()?);
                 let envelopes = controller.execution_payload_envelopes_by_roots(block_roots)?;
 
                 for envelope in envelopes {
