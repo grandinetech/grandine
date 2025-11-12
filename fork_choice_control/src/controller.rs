@@ -34,7 +34,7 @@ use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{instrument, Span};
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
@@ -792,17 +792,14 @@ where
 
     #[instrument(
         parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
         skip_all
+        fields(origin = ?origin)
     )]
     fn spawn_block_task(&self, block: Arc<SignedBeaconBlock<P>>, origin: BlockOrigin) {
         self.spawn_block_task_with_wait_group(self.owned_wait_group(), block, origin)
     }
 
+    #[instrument(skip_all)]
     fn spawn_block_task_with_wait_group(
         &self,
         wait_group: W,
@@ -819,6 +816,7 @@ where
             origin,
             processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),
+            tracing_span: Span::current(),
         })
     }
 
