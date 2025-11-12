@@ -3,8 +3,11 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use std::env;
-use std::path::Path;
-use std::process::Command;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+
+const ELF_PATH_SUFFIX: &str = "target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk";
 
 pub struct Report(u64);
 
@@ -38,8 +41,13 @@ pub struct VMGuestInput {
 pub struct Vm;
 
 impl Vm {
-    fn generate_input(&self, config: ConfigKind, state_ssz: Vec<u8>, block_ssz: Vec<u8>, cache_ssz: Vec<u8>, phase_bytes: Vec<u8>) -> Result<String>
-    {
+    fn generate_input_file(
+        config: ConfigKind,
+        state_ssz: Vec<u8>,
+        block_ssz: Vec<u8>,
+        cache_ssz: Vec<u8>,
+        phase_bytes: Vec<u8>,
+    ) -> Result<PathBuf> {
         let serialized_data = bincode::serialize(&VMGuestInput {
             config: config as u8,
             state_ssz,
@@ -49,7 +57,7 @@ impl Vm {
         })?;
 
         // Generating the zkVM guest input data
-        let output_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk/build");
+        let output_dir = Self::get_guest_dir().join("build");
         if !output_dir.exists() {
             std::fs::create_dir_all(&output_dir)?;
         }
@@ -57,6 +65,43 @@ impl Vm {
         std::fs::write(&input_path, &serialized_data)?;
 
         Ok(input_path)
+    }
+
+    fn get_guest_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk")
+    }
+
+    fn extract_cycles(stdout: &str) -> Result<u64> {
+        stdout
+            .lines()
+            .find(|line| line.starts_with("STEPS")) // the cycle line starts with `STEPS`
+            .map(|line| line
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .expect("Couldn't parse the execution cycle.")
+            )
+            .ok_or(anyhow!("Expect having a line starting with STEPS from Zisk output."))
+    }
+
+    fn collect_result(stdout: &str) -> Result<Vec<u8>> {
+        let state_root_str = stdout
+            .lines()
+            .map(|line| line.trim())
+            .filter(|trimmed| trimmed.len() == 8)
+            .fold(String::new(), |acc, line| acc + line);
+
+        let state_root = hex::decode(state_root_str)?;
+
+        if state_root.len() != 32 {
+            return Err(anyhow!(
+                "Expect 32 bytes state root from guest output, but got {:?}",
+                state_root
+            ));
+        }
+
+        Ok(state_root)
     }
 }
 
@@ -76,91 +121,68 @@ impl VmBackend for Vm {
         cache_ssz: Vec<u8>,
         phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Report)> {
-        let input_path = self.generate_input(config, state_ssz, block_ssz, cache_ssz, phase_bytes)?;
-        let zisk_guest_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk");
+        let input_path =
+            Vm::generate_input_file(config, state_ssz, block_ssz, cache_ssz, phase_bytes)?;
+        let zisk_guest_dir = Vm::get_guest_dir();
 
-        println!("Building the zkVM guest program");
+        println!("🛠️ Building the zkVM guest program...");
 
         // First, build the guest program ELF file.
-        let build_output = Command::new("cargo-zisk")
-            .arg("build")
-            .arg("--release")
-            .current_dir(&zisk_guest_dir)
-            .output()?;
+        let build_output = run_cmd(
+            Command::new("cargo-zisk")
+                .arg("build")
+                .arg("--release")
+                .current_dir(&zisk_guest_dir),
+        )?;
 
-        if !build_output.status.success() {
-            let stderr = String::from_utf8_lossy(&build_output.stderr);
-            return Err(anyhow!("Failed to build zisk guest program. Stderr:\n{}", stderr));
+        if !build_output.0.success() {
+            return Err(anyhow!(
+                "Failed to build zisk guest program. Stderr:\n{}",
+                String::from_utf8_lossy(&build_output.1)
+            ));
         }
 
-        println!("Executing the zkVM guest program with ziskemu");
+        println!("🛠️ Executing the zkVM guest program with ziskemu...");
 
         // Second, execute the ELF file using ziskemu with a high step count.
-        let elf_path =
-            zisk_guest_dir.join("target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk");
+        let elf_path = zisk_guest_dir.join(ELF_PATH_SUFFIX);
+        let execute_output = run_cmd(
+            Command::new("ziskemu")
+                .env("RUST_BACKTRACE", "full")
+                .arg("-e")
+                .arg(elf_path)
+                .arg("-i")
+                .arg(input_path)
+                .arg("--max-steps")
+                .arg("100000000000000")
+                .arg("-X")
+                .current_dir(&zisk_guest_dir),
+        )?;
 
-        let output = Command::new("ziskemu")
-            .env("RUST_BACKTRACE", "full")
-            .arg("-e")
-            .arg(elf_path)
-            .arg("-i")
-            .arg(input_path)
-            .arg("--max-steps")
-            .arg("100000000000000")
-            .arg("-X")
-            .current_dir(&zisk_guest_dir)
-            .output()?;
+        let (exit_status, output_bytes) = execute_output;
+        let output = String::from_utf8_lossy(&output_bytes);
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        if !exit_status.success() {
             return Err(anyhow!(
-                "Failed to execute ziskemu command. Stderr:\n{}",
-                stderr
+                "Failed to execute ziskemu command. Stderr:\n{output}"
             ));
         }
 
-        let stdout = String::from_utf8(output.stdout)?;
-        println!("VM guest stdout:\n{stdout}");
+        // Extract the execution cycle from the output.
+        let cycles: u64 = Self::extract_cycles(&output)?;
 
-        let cycles: u64 = stdout
-            .lines()
-            .find(|line| line.starts_with("STEPS")) // the cycle line starts with `STEPS`
-            .map(|line|
-                line
-                    .chars()
-                    .filter(|c| c.is_ascii_digit())
-                    .collect::<String>()
-                    .parse::<u64>()
-                    .expect("Couldn't parse the execution cycle.")
-            )
-            .ok_or(anyhow!("Expect having a line starting with STEPS from Zisk output."))?;
-
-        // Gather the last set_output() from the VM guest output back
-        let state_root_str = stdout
-            .lines()
-            .map(|line| line.trim())
-            .filter(|trimmed| trimmed.len() == 8)
-            .fold(String::new(), |acc, line| acc + line);
-
-        let state_root = hex::decode(state_root_str)?;
-
-        if state_root.len() != 32 {
-            return Err(anyhow::anyhow!(
-                "Expect 32 bytes state root from guest output, but got {:?}",
-                state_root
-            ));
-        }
-
+        // Gather back the last set_output() from the VM guest output.
+        let state_root = Self::collect_result(&output)?;
         Ok((state_root, Report(cycles)))
     }
 
     fn prove(
         &self,
-        _config: ConfigKind,
-        _state_ssz: Vec<u8>,
-        _block_ssz: Vec<u8>,
-        _cache_ssz: Vec<u8>,
-        _phase_bytes: Vec<u8>,
+        config: ConfigKind,
+        state_ssz: Vec<u8>,
+        block_ssz: Vec<u8>,
+        cache_ssz: Vec<u8>,
+        phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Proof)> {
         // Refer to https://0xpolygonhermez.github.io/zisk/getting_started/writing_programs.html#prove
         // 1. Run cmd for program setup
@@ -170,24 +192,81 @@ impl VmBackend for Vm {
         //   cargo-zisk prove -e target/riscv64ima-zisk-zkvm-elf/release/zkvm_guest_zisk -i build/input.bin -o ./ -a
         // 3. Verify proof
         //   cargo-zisk verify -p ./proofs/vadcop_final_proof.bin
-        let input_path = self.generate_input(config, state_ssz, block_ssz, cache_ssz, phase_bytes)?;
-        let zisk_guest_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guest/zisk");
-        let zisk_elf_path = zisk_guest_dir
+        let zisk_guest_dir = Self::get_guest_dir();
+        let input_path =
+            Self::generate_input_file(config, state_ssz, block_ssz, cache_ssz, phase_bytes)?;
+        let elf_path = zisk_guest_dir.join(ELF_PATH_SUFFIX);
 
-        let setup_output = Command::new("cargo-zisk")
-            .arg("rom-setup")
-            .arg("-e")
-            .arg(zisk_elf_path)
-            .current_dir(&zisk_guest_dir)
-            .output()?;
+        println!("🛠️ Running program setup `cargo-zisk rom-setup`...");
 
-        if !build_output.status.success() {
-            let stderr = String::from_utf8_lossy(&build_output.stderr);
-            return Err(anyhow!("Failed to build zisk guest program. Stderr:\n{}", stderr));
+        // 1. Run cmd for program setup
+        let setup_output = run_cmd(
+            Command::new("cargo-zisk")
+                .arg("rom-setup")
+                .arg("-e")
+                .arg(&elf_path)
+                .current_dir(&zisk_guest_dir)
+        )?;
+
+        if !setup_output.0.success() {
+            return Err(anyhow!(
+                "Failed to setup zisk proving. Stderr:\n{}",
+                String::from_utf8_lossy(&setup_output.1)
+            ));
         }
 
+        // 2. Generate proof
+        println!("🛠️ Proving `cargo-zisk prove`...");
 
+        let prove_output = run_cmd(
+            Command::new("cargo-zisk")
+                .arg("prove")
+                .arg("-e")
+                .arg(&elf_path)
+                .arg("-i")
+                .arg(&input_path)
+                .arg("-o")
+                .arg(&zisk_guest_dir)
+                .arg("-a") // aggregation, indicates that a final aggregated proof should be produced
+                .current_dir(&zisk_guest_dir)
+        )?;
 
-        Ok((vec![], Proof))
+        let (exit_status, output_bytes) = prove_output;
+        let output = String::from_utf8_lossy(&output_bytes);
+
+        if !exit_status.success() {
+            return Err(anyhow!("Failed to generate proof. Stderr:\n{output}"));
+        }
+
+        // Gather back the last set_output() from the VM guest output.
+        let state_root = Self::collect_result(&output)?;
+        Ok((state_root, Proof))
     }
+}
+
+// This function runs the command, streaming the output to screen immediately while capuring the
+// output and return it in a buffer.
+fn run_cmd(cmd: &mut Command) -> Result<(ExitStatus, Vec<u8>)> {
+    let mut child = cmd.stdout(Stdio::piped()).spawn()?;
+
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or(anyhow!("Failed to retrieve cmd stdout field"))?;
+    let mut handle = io::stdout();
+
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = stdout.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        handle.write_all(&chunk[..n])?; // stream to screen
+        buffer.extend_from_slice(&chunk[..n]); // capture in buffer
+    }
+
+    let status = child.wait()?;
+
+    Ok((status, buffer))
 }
