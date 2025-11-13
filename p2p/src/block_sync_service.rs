@@ -580,9 +580,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 SyncDirection::Forward => {
                                     let envelope_slot = envelope.message.slot;
 
-                                    if self.controller.contains_block(block_root)
-                                        && self.register_new_received_envelope(block_root, envelope_slot)
-                                    {
+                                    if self.register_new_received_envelope(block_root, envelope_slot) {
                                         self.controller.on_requested_execution_payload_envelope(envelope, peer_id);
 
                                         debug_with_peers!(
