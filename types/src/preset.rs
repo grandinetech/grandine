@@ -214,7 +214,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Eq;
 
     // Maximum possible number of cell proofs per blocks:
-    // FieldElementsPerExtBlob * MaxBlobCommitmentsPerBlock
+    // CellsPerExtBlob * MaxBlobCommitmentsPerBlock
     type MaxCellProofsPerBlock: MerkleElements<KzgProof> + Unsigned + Eq + Debug + Send + Sync;
 
     // Meta
@@ -336,7 +336,7 @@ impl Preset for Mainnet {
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
     type MaxCellProofsPerBlock =
-        Prod<Self::FieldElementsPerExtBlob, Self::MaxBlobCommitmentsPerBlock>;
+        Prod<Self::MaxBlobCommitmentsPerBlock, Self::CellsPerExtBlob>;
     type CellsPerExtBlob = Quot<Self::FieldElementsPerExtBlob, Self::FieldElementsPerCell>;
 
     // Meta
@@ -432,7 +432,7 @@ impl Preset for Minimal {
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
     type MaxCellProofsPerBlock =
-        Prod<Self::FieldElementsPerExtBlob, Self::MaxBlobCommitmentsPerBlock>;
+        Prod<Self::MaxBlobCommitmentsPerBlock, Self::CellsPerExtBlob>;
     type CellsPerExtBlob = Quot<Self::FieldElementsPerExtBlob, Self::FieldElementsPerCell>;
 
     // Meta
