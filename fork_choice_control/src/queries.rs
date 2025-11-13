@@ -516,22 +516,6 @@ where
         self.blob_sidecars_by_ids(blob_ids)
     }
 
-    pub fn execution_payload_envelope_by_root(
-        &self,
-        block_root: H256,
-    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        let snapshot = self.snapshot();
-        let storage = self.storage();
-
-        // 1. Check unfinalized
-        if let Some(envelope) = snapshot.cached_execution_payload_envelope(block_root) {
-            return Ok(Some(envelope));
-        }
-
-        // 2. Fallback to database (stub for now)
-        storage.execution_payload_envelope_by_root(block_root)
-    }
-
     pub fn execution_payload_envelopes_by_range(
         &self,
         range: Range<Slot>,
