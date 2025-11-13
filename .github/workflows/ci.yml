@@ -25,10 +25,7 @@ jobs:
     steps:
       - name: Maximize build space
         if: runner.os == 'Linux'
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 2048
-          swap-size-mb: 1024
+        uses: jlumbroso/free-disk-space@main
       - name: Disable autocrlf (Windows)
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
