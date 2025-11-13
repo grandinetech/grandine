@@ -32,13 +32,11 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
-use tracing::debug;
 use try_from_iterator::TryFromIterator as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
-    nonstandard::Phase,
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Slot, H256},
@@ -1249,52 +1247,6 @@ impl<P: Preset> BlockSyncService<P> {
         {
             SyncToP2p::RequestBlockByRoot(request_id, peer_id, block_root)
                 .send(&self.sync_to_p2p_tx);
-        }
-
-        Ok(())
-    }
-
-    fn request_needed_execution_payload_envelope(
-        &mut self,
-        block_root: H256,
-        peer_id: Option<PeerId>,
-    ) -> Result<()> {
-        if !self.is_forward_synced {
-            return Ok(());
-        }
-
-        if !self
-            .sync_manager
-            .ready_to_request_execution_payload_envelope_by_root(block_root, peer_id)
-        {
-            return Ok(());
-        }
-
-        if self.received_envelope_roots.contains_key(&block_root) {
-            debug_with_peers!(
-                "cannot request ExecutionPayloadEnvelopesByRoot: requested envelope has been received: \
-                 {block_root:?}"
-            );
-            return Ok(());
-        }
-
-        let request_id = self.request_id()?;
-        let peer_id = self.ensure_peer_connected(peer_id);
-
-        let Some(peer_id) = peer_id.or_else(|| self.sync_manager.random_peer(false)) else {
-            return Ok(());
-        };
-
-        if self
-            .sync_manager
-            .add_execution_payload_envelope_request_by_root(block_root, peer_id)
-        {
-            SyncToP2p::RequestExecutionPayloadEnvelopesByRoot(
-                request_id,
-                peer_id,
-                vec![block_root],
-            )
-            .send(&self.sync_to_p2p_tx);
         }
 
         Ok(())

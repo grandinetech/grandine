@@ -570,10 +570,9 @@ impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
             metrics,
         } = self;
 
-        // TODO: Add metrics field fc_execution_payload_envelope_persist_task_times to prometheus_metrics::Metrics
-        // let _timer = metrics
-        //     .as_ref()
-        //     .map(|metrics| metrics.fc_execution_payload_envelope_persist_task_times.start_timer());
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_execution_payload_envelope_persist_task_times.start_timer());
 
         let envelopes = store_snapshot.unpersisted_envelopes();
 
