@@ -1614,6 +1614,10 @@ where
                     }
 
                     reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+                } else {
+                    let (_, sender) = origin.split();
+
+                    reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
                 }
             }
             Ok(DataColumnSidecarAction::Ignore(publishable)) => {
