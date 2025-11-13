@@ -1564,10 +1564,14 @@ where
                     ));
                 }
 
-                if !self.store.accepted_data_column_sidecar(
+                if self.store.accepted_data_column_sidecar(
                     data_column_sidecar.signed_block_header.message,
                     data_column_sidecar.index,
                 ) {
+                    let (_, sender) = origin.split();
+
+                    reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+                } else {
                     let block_root = data_column_sidecar
                         .signed_block_header
                         .message
@@ -1612,10 +1616,6 @@ where
                     if let Some(gossip_id) = gossip_id {
                         self.send_to_p2p(P2pMessage::Accept(gossip_id));
                     }
-
-                    reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
-                } else {
-                    let (_, sender) = origin.split();
 
                     reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
                 }
