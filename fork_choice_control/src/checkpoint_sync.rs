@@ -13,20 +13,28 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
     nonstandard::FinalizedCheckpoint,
-    phase0::{consts::GENESIS_EPOCH, primitives::H256},
+    phase0::{
+        consts::GENESIS_EPOCH,
+        primitives::{Slot, H256},
+    },
     preset::Preset,
     redacting_url::RedactingUrl,
     traits::SignedBeaconBlock as _,
 };
 
-pub async fn load_finalized_from_remote<P: Preset>(
+pub async fn load_from_remote<P: Preset>(
     config: &Config,
     client: &Client,
     url: &RedactingUrl,
+    checkpoint_slot: Option<Slot>,
 ) -> Result<FinalizedCheckpoint<P>> {
     info_with_peers!("performing checkpoint sync from {url}…");
 
-    let mut block = fetch_block(config, client, url, BlockId::Finalized)
+    let block_id = checkpoint_slot
+        .map(BlockId::Slot)
+        .unwrap_or(BlockId::Finalized);
+
+    let mut block = fetch_block(config, client, url, block_id)
         .await?
         .ok_or(Error::NoFinalizedBlock)?;
 
