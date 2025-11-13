@@ -27,7 +27,7 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{containers::{DataColumnIdentifier}, primitives::ColumnIndex},
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{PayloadStatus, WithStatus},
     phase0::{
