@@ -15,7 +15,7 @@ use im::OrdMap;
 #[cfg(not(target_os = "zkvm"))]
 use itertools::Either;
 #[cfg(not(target_os = "zkvm"))]
-use libmdbx::{DatabaseFlags, Environment, Geometry, ObjectLength, Stat, WriteFlags};
+use libmdbx::{DatabaseFlags, Environment, Geometry, Info, ObjectLength, Stat, WriteFlags};
 #[cfg(not(target_os = "zkvm"))]
 use logging::{debug_with_peers, error_with_peers};
 use snap::raw::{Decoder, Encoder};
@@ -306,6 +306,20 @@ impl Database {
         .pipe(Ok)
     }
 
+    #[cfg(not(target_os = "zkvm"))]
+    pub fn env_info(&self) -> Result<Option<Info>> {
+        match self.kind() {
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database_name: _,
+                environment,
+                restart_tx: _,
+            } => Some(environment.info()?),
+            DatabaseKind::InMemory { map: _ } => None,
+        }
+        .pipe(Ok)
+    }
+
     pub fn iterate_all_keys_with_lengths(
         &self,
     ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, usize)>>> {
@@ -425,8 +439,17 @@ impl Database {
 
                 let mut cursor = transaction.cursor(&database)?;
 
-                cursor
-                    .set_key(end)
+                let first = if let Some((is_next, key, value)) = cursor.set_lowerbound(end)? {
+                    if is_next {
+                        cursor.prev()
+                    } else {
+                        Ok(Some((key, value)))
+                    }
+                } else {
+                    cursor.last()
+                };
+
+                first
                     .transpose()
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.prev().transpose()))
@@ -529,12 +552,17 @@ impl Database {
 
                 let mut cursor = transaction.cursor(&database)?;
 
-                cursor
-                    .set_key(key.as_ref())
-                    .transpose()
-                    .or_else(|| cursor.prev().transpose())
-                    .transpose()?
-                    .map(decompress_pair)
+                if let Some((is_next, key, value)) =
+                    cursor.set_lowerbound::<Vec<u8>, Cow<[u8]>>(key.as_ref())?
+                {
+                    if is_next {
+                        cursor.prev()?.map(decompress_pair)
+                    } else {
+                        Some(Ok((key, decompress(&value)?)))
+                    }
+                } else {
+                    cursor.last()?.map(decompress_pair)
+                }
             }
             DatabaseKind::InMemory { map } => map
                 .lock()
