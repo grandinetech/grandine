@@ -696,6 +696,14 @@ where
             .store_back_sync_data_column_sidecars(data_column_sidecars)
     }
 
+    pub fn store_back_sync_execution_payload_envelopes(
+        &self,
+        execution_payload_envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<()> {
+        self.storage
+            .store_back_sync_execution_payload_envelopes(execution_payload_envelopes)
+    }
+
     pub fn store_back_sync_blocks(
         &self,
         blocks: impl IntoIterator<Item = Arc<SignedBeaconBlock<P>>>,

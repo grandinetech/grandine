@@ -29,7 +29,7 @@ use types::{
     },
     fulu::{containers::{DataColumnIdentifier}, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadEnvelope,
-    nonstandard::{PayloadStatus, WithStatus},
+    nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Slot, H256},
@@ -219,21 +219,23 @@ impl<P: Preset> BackSync<P> {
     ) -> Result<()> {
         let last_block_checkpoint = self.data.current;
 
-        let (checkpoint, blocks, blob_sidecars, data_column_sidecars) = match &self.sync_mode {
-            SyncMode::Default => {
-                self.batch
-                    .verify_from_checkpoint(config, controller, last_block_checkpoint)?
-            }
-            SyncMode::DataColumnsOnly { column_indices, .. } => {
-                self.batch.verify_extra_data_columns_from_checkpoint(
+        let (checkpoint, blocks, blob_sidecars, data_column_sidecars, execution_payload_envelopes) =
+            match &self.sync_mode {
+                SyncMode::Default => self.batch.verify_from_checkpoint(
                     config,
                     controller,
                     last_block_checkpoint,
-                    column_indices,
-                    self.low_slot(),
-                )?
-            }
-        };
+                )?,
+                SyncMode::DataColumnsOnly { column_indices, .. } => {
+                    self.batch.verify_extra_data_columns_from_checkpoint(
+                        config,
+                        controller,
+                        last_block_checkpoint,
+                        column_indices,
+                        self.low_slot(),
+                    )?
+                }
+            };
 
         info_with_peers!("back-synced to {} slot", checkpoint.slot);
 
@@ -253,6 +255,7 @@ impl<P: Preset> BackSync<P> {
         controller.store_back_sync_blocks(blocks)?;
         controller.store_back_sync_blob_sidecars(blob_sidecars)?;
         controller.store_back_sync_data_column_sidecars(data_column_sidecars)?;
+        controller.store_back_sync_execution_payload_envelopes(execution_payload_envelopes)?;
 
         // Update back-sync progress in sync database.
         self.data.current = checkpoint;
@@ -433,6 +436,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<SignedBeaconBlock<P>>>,
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedExecutionPayloadEnvelope<P>>>,
     )> {
         debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
@@ -440,6 +444,7 @@ impl<P: Preset> Batch<P> {
         let mut verified_blob_sidecars = vec![];
         let mut verified_blocks = vec![];
         let mut verified_data_column_sidecars = vec![];
+        let mut verified_execution_payload_envelopes = vec![];
         let head_state = controller.head_state().value();
 
         let mut blocks = self
@@ -500,6 +505,14 @@ impl<P: Preset> Batch<P> {
 
                 verified_blocks.push(block.clone_arc());
 
+                // Collect execution payload envelope if present for Gloas phase
+                if config.phase_at_slot::<P>(message.slot()) >= Phase::Gloas {
+                    let block_root = message.hash_tree_root();
+                    if let Some(envelope) = self.execution_payload_envelopes.get(&block_root) {
+                        verified_execution_payload_envelopes.push(envelope.clone_arc());
+                    }
+                }
+
                 next_parent_root = message.parent_root();
             }
         }
@@ -515,6 +528,7 @@ impl<P: Preset> Batch<P> {
             verified_blocks,
             verified_blob_sidecars,
             verified_data_column_sidecars,
+            verified_execution_payload_envelopes,
         ))
     }
 
@@ -531,6 +545,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<SignedBeaconBlock<P>>>,
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedExecutionPayloadEnvelope<P>>>,
     )> {
         debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
@@ -618,7 +633,13 @@ impl<P: Preset> Batch<P> {
 
         debug_with_peers!("next batch checkpoint: {checkpoint:?}");
 
-        Ok((checkpoint, vec![], vec![], verified_data_column_sidecars))
+        Ok((
+            checkpoint,
+            vec![],
+            vec![],
+            verified_data_column_sidecars,
+            vec![],
+        ))
     }
 }
 
