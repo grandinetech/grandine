@@ -16,8 +16,7 @@ use tracing::Level;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     filter::LevelFilter,
-    fmt,
-    fmt::{format::Writer, time::FormatTime},
+    fmt::{self, format::Writer, time::FormatTime},
     prelude::*,
     reload::{self, Handle},
     EnvFilter, Registry,
@@ -35,7 +34,8 @@ pub struct TelemetryConfig {
 
 #[derive(Clone)]
 pub struct TracingHandle {
-    handle: Handle<EnvFilter, Registry>,
+    log_handle: Handle<EnvFilter, Registry>,
+    telemetry_handle: Option<Handle<EnvFilter, Registry>>,
     #[expect(
         dead_code,
         reason = "telemetry runtime must exist for telemetry data exporter thread to function"
@@ -44,11 +44,21 @@ pub struct TracingHandle {
 }
 
 impl TracingHandle {
-    pub fn modify<F>(&self, f: F) -> Result<(), reload::Error>
+    pub fn modify_log<F>(&self, f: F) -> Result<(), reload::Error>
     where
         F: FnOnce(&mut EnvFilter),
     {
-        self.handle.modify(f)
+        self.log_handle.modify(f)
+    }
+
+    pub fn modify_trace<F>(&self, f: F) -> Result<Option<()>, reload::Error>
+    where
+        F: FnOnce(&mut EnvFilter),
+    {
+        self.telemetry_handle
+            .as_ref()
+            .map(|telemetry_handle| telemetry_handle.modify(f))
+            .transpose()
     }
 }
 
@@ -67,7 +77,7 @@ impl FormatTime for LocalTimer {
 #[expect(clippy::too_many_lines)]
 pub fn initialize_tracing_logger(
     module_path: &str,
-    data_dir: &Path,
+    data_dir: Option<&Path>,
     telemetry_config: Option<TelemetryConfig>,
     always_write_style: bool,
 ) -> Result<TracingHandle> {
@@ -116,8 +126,7 @@ pub fn initialize_tracing_logger(
         }
     }
 
-    let (filter_layer, handle) = reload::Layer::new(filter);
-
+    let (filter_layer, log_handle) = reload::Layer::new(filter);
     let enable_ansi = always_write_style || io::stdout().is_terminal();
 
     let stdout_layer = fmt::layer::<Registry>()
@@ -131,6 +140,7 @@ pub fn initialize_tracing_logger(
 
     let mut layers = vec![stdout_layer.with_filter(filter_layer).boxed()];
     let mut telemetry_runtime = None;
+    let mut telemetry_handle = None;
 
     if let Some(telemetry_config) = telemetry_config {
         let TelemetryConfig {
@@ -191,6 +201,10 @@ pub fn initialize_tracing_logger(
             }
         }
 
+        let (telemetry_filter_layer, handle) = reload::Layer::new(telemetry_filter);
+
+        telemetry_handle = Some(handle);
+
         // A Tokio runtime is required for the gRPC exporter’s async operations.
         // This runtime persists across app restarts (since the logger isn’t reinitialized),
         // while the main Tokio runtime is recreated on each restart.
@@ -220,7 +234,7 @@ pub fn initialize_tracing_logger(
             let tracer = provider.tracer("grandine");
             let telemetry_layer = tracing_opentelemetry::layer()
                 .with_tracer(tracer)
-                .with_filter(telemetry_filter);
+                .with_filter(telemetry_filter_layer);
 
             layers.push(telemetry_layer.boxed());
 
@@ -232,35 +246,40 @@ pub fn initialize_tracing_logger(
 
     let registry = tracing_subscriber::registry().with(layers);
 
-    match initialize_rotating_writer(data_dir) {
-        Ok(non_blocking) => {
-            let exception_filter = EnvFilter::default()
-                .add_directive(LevelFilter::OFF.into())
-                .add_directive("exception=error".parse()?);
+    if let Some(data_dir) = data_dir {
+        match initialize_rotating_writer(data_dir) {
+            Ok(non_blocking) => {
+                let exception_filter = EnvFilter::default()
+                    .add_directive(LevelFilter::OFF.into())
+                    .add_directive("exception=error".parse()?);
 
-            let file_layer = fmt::layer()
-                .compact()
-                .with_ansi(false)
-                .with_writer(non_blocking)
-                .with_timer(LocalTimer)
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_filter(exception_filter);
+                let file_layer = fmt::layer()
+                    .compact()
+                    .with_ansi(false)
+                    .with_writer(non_blocking)
+                    .with_timer(LocalTimer)
+                    .with_target(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_filter(exception_filter);
 
-            registry.with(file_layer).init();
+                registry.with(file_layer).init();
+            }
+            Err(e) => {
+                registry.init();
+                tracing::error!("failed to initialize rotating exception log in {data_dir:?}: {e}");
+            }
         }
-        Err(e) => {
-            registry.init();
-            tracing::error!("failed to initialize rotating exception log in {data_dir:?}: {e}");
-        }
+    } else {
+        registry.init();
     }
 
     debug_with_peers!("tracing started!");
     exception!("exception macro is enabled");
 
     Ok(TracingHandle {
-        handle,
+        log_handle,
+        telemetry_handle,
         telemetry_runtime,
     })
 }
@@ -312,12 +331,15 @@ mod tests {
         let data_dir = TempDir::new().expect("should create a temp data dir");
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
-            let handle = initialize_tracing_logger(module_path!(), data_dir.path(), None, false)
-                .expect("Failed to initialize tracing logger");
+            let handle =
+                initialize_tracing_logger(module_path!(), Some(data_dir.path()), None, false)
+                    .expect("Failed to initialize tracing logger");
+
             *lock = Some(LoggerWithTempDir {
                 handle: handle.clone(),
                 _temp_dir: data_dir,
             });
+
             handle
         } else {
             lock.as_ref()
@@ -387,7 +409,7 @@ mod tests {
         let mut buf = BufferRedirect::stdout().expect("failed to redirect stdout");
 
         let handle = init_logger_once();
-        handle.modify(|env_filter| {
+        handle.modify_log(|env_filter| {
             let new_filter = env_filter
                 .clone()
                 .add_directive("exception".parse().expect("Failed to parse"));
@@ -422,7 +444,7 @@ mod tests {
         // NOTE: This turn off of the "exception" directive is necessary because the global
         // tracing subscriber persists across tests. Without this cleanup, other tests
         // could be affected by the leftover directive, breaking their expected behavior.
-        handle.modify(|env_filter| {
+        handle.modify_log(|env_filter| {
             let new_filter = env_filter
                 .clone()
                 .add_directive("exception=off".parse().expect("Failed to parse"));
@@ -443,7 +465,7 @@ mod tests {
 
         let handle = init_logger_once();
 
-        handle.modify(|env_filter| {
+        handle.modify_log(|env_filter| {
             let new_filter = env_filter.clone().add_directive(
                 format!("{}=debug", module_path!())
                     .parse()
@@ -493,7 +515,7 @@ mod tests {
 
         let handle = init_logger_once();
 
-        handle.modify(|env_filter| {
+        handle.modify_log(|env_filter| {
             let new_filter = env_filter.clone().add_directive(
                 format!("{}=trace", module_path!())
                     .parse()

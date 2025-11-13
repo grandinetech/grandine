@@ -1458,8 +1458,9 @@ impl GrandineArgs {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
 
-    pub fn data_dir(&self) -> PathBuf {
-        directories::data_directory(self.beacon_node_options.data_dir.as_ref())
+    pub fn data_dir(&self) -> Option<PathBuf> {
+        (!self.beacon_node_options.in_memory)
+            .then(|| directories::data_directory(self.beacon_node_options.data_dir.as_ref()))
     }
 
     pub fn telemetry_config(&self) -> Option<TelemetryConfig> {

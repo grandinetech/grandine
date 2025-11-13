@@ -7,7 +7,7 @@ ifeq ($(METRICS),1)
 	FEATURES := $(FEATURES) --features metrics
 endif
 
-# build with tracing support for core crates (transition_functions, helper_functions)
+# build without tracing support for core crates (transition_functions, helper_functions)
 # e.g. make DISABLE_TRACING=1
 DISABLE_TRACING ?= 0
 

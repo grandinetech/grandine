@@ -358,7 +358,7 @@ fn try_main() -> Result<()> {
 
     let log_handle = binary_utils::initialize_tracing_logger(
         module_path!(),
-        &data_dir,
+        data_dir.as_deref(),
         parsed_args.telemetry_config(),
         cfg!(feature = "logger-always-write-style"),
     )?;
