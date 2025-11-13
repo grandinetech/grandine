@@ -771,9 +771,48 @@ pub fn get_attestation_participation_flags<P: Preset>(
         participation_flags.set_bit(TIMELY_SOURCE_FLAG_INDEX, true);
     }
 
-    // TODO(feature/deneb): Consider duplicating `get_attestation_participation_flags` for Deneb
-    //                      instead of checking the the phase of the state.
-    if is_matching_target && (state.is_post_deneb() || inclusion_delay <= P::SlotsPerEpoch::U64) {
+    // Call the Deneb-specific function if in the Deneb phase
+    if state.is_post_deneb() {
+        participation_flags |= get_attestation_participation_flags_deneb(state, data, inclusion_delay)?;
+    } else {
+        if is_matching_target && inclusion_delay <= P::SlotsPerEpoch::U64 {
+            participation_flags.set_bit(TIMELY_TARGET_FLAG_INDEX, true);
+        }
+
+        if is_matching_head && inclusion_delay <= P::MIN_ATTESTATION_INCLUSION_DELAY.get() {
+            participation_flags.set_bit(TIMELY_HEAD_FLAG_INDEX, true);
+        }
+    }
+
+    Ok(participation_flags)
+}
+
+pub fn get_attestation_participation_flags_deneb<P: Preset>(
+    state: &impl BeaconState<P>,
+    data: AttestationData,
+    inclusion_delay: u64,
+) -> Result<ParticipationFlags> {
+    let attestation_epoch = attestation_epoch(state, data.target.epoch)?;
+
+    let justified_checkpoint = match attestation_epoch {
+        AttestationEpoch::Previous => state.previous_justified_checkpoint(),
+        AttestationEpoch::Current => state.current_justified_checkpoint(),
+    };
+
+    let expected_target = get_block_root(state, attestation_epoch)?;
+    let expected_head = get_block_root_at_slot(state, data.slot)?;
+
+    // > Matching roots
+    let is_matching_source = data.source == justified_checkpoint;
+    let is_matching_target = is_matching_source && data.target.root == expected_target;
+    let is_matching_head = is_matching_target && data.beacon_block_root == expected_head;
+
+    ensure!(is_matching_source, Error::AttestationSourceMismatch);
+
+    let mut participation_flags = 0;
+
+    // Flags for Deneb phase
+    if is_matching_target && inclusion_delay <= P::SlotsPerEpoch::U64 {
         participation_flags.set_bit(TIMELY_TARGET_FLAG_INDEX, true);
     }
 
@@ -914,6 +953,20 @@ pub fn get_consolidation_churn_limit<P: Preset>(
     state: &impl BeaconState<P>,
 ) -> Gwei {
     get_balance_churn_limit(config, state) - get_activation_exit_churn_limit(config, state)
+}
+
+pub fn get_active_balance<P: Preset>(
+    state: &impl BeaconState<P>,
+    validator_index: ValidatorIndex,
+) -> Result<Gwei> {
+    let max_effective_balance =
+        misc::get_max_effective_balance::<P>(state.validators().get(validator_index)?);
+
+    core::cmp::min(
+        state.balances().get(validator_index).copied()?,
+        max_effective_balance,
+    )
+    .pipe(Ok)
 }
 
 #[must_use]
