@@ -29,7 +29,7 @@ use types::{
     },
     fulu::{containers::{DataColumnIdentifier}, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadEnvelope,
-    nonstandard::{PayloadStatus, Phase, WithStatus},
+    nonstandard::{PayloadStatus, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Slot, H256},
@@ -505,12 +505,10 @@ impl<P: Preset> Batch<P> {
 
                 verified_blocks.push(block.clone_arc());
 
-                // Collect execution payload envelope if present for Gloas phase
-                if config.phase_at_slot::<P>(message.slot()) >= Phase::Gloas {
-                    let block_root = message.hash_tree_root();
-                    if let Some(envelope) = self.execution_payload_envelopes.get(&block_root) {
-                        verified_execution_payload_envelopes.push(envelope.clone_arc());
-                    }
+                // Collect execution payload envelope if present (already filtered for Gloas at request level)
+                let block_root = message.hash_tree_root();
+                if let Some(envelope) = self.execution_payload_envelopes.get(&block_root) {
+                    verified_execution_payload_envelopes.push(envelope.clone_arc());
                 }
 
                 next_parent_root = message.parent_root();
