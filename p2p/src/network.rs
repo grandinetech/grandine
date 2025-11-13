@@ -1376,8 +1376,8 @@ impl<P: Preset> Network<P> {
 
         let ExecutionPayloadEnvelopesByRangeRequest { start_slot, count } = request;
 
-        let max_request_payloads = self.controller.chain_config().max_request_payloads;
-        let difference = count.min(max_request_payloads).min(MAX_FOR_DOS_PREVENTION);
+        let max_request_blocks = self.controller.chain_config().max_request_blocks_deneb;
+        let difference = count.min(max_request_blocks).min(MAX_FOR_DOS_PREVENTION);
 
         let end_slot = start_slot
             .checked_add(difference)
